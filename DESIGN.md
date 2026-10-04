@@ -458,7 +458,7 @@ A look with nothing worth saying leaves it quiet, so what it says is always abou
 
 ## Install
 
-The [README](README.md#get-it) has the commands. This repository is its own plugin marketplace, and its manifests validate, but installing from it has not been tried yet. The dependable way today is to load the working copy, as described under [Repository layout](#repository-layout).
+The [README](README.md#how-to-use-it) has the commands. This repository is its own plugin marketplace, and its manifests validate, but installing from it has not been tried yet. The dependable way today is to load the working copy, as described under [Repository layout](#repository-layout).
 
 Mods need Claude Code 2.1.287 or later. The design targets the mod API as of 2.1.289.
 
