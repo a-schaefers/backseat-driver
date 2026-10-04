@@ -14,6 +14,8 @@
 
 A [Claude Code](https://claude.com/claude-code) plugin that turns Claude into a coding tutor. You write the code, and it watches, comments and answers.
 
+Inspired by the ideas discussed in the [Enchant Games Journal](https://enchant.games/?slug=journal).
+
 ## Why
 
 AI can write most of the code now. But skills you don't use fade, and an engineer who only reviews generated code slowly loses the ability to write it, or to tell when it's wrong. We don't want to find out what the industry looks like when that happens to everyone.
