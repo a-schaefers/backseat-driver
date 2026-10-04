@@ -36,7 +36,7 @@ A language you only touch later, such as the one shell script in a Python projec
 
 ```text
 ┌─ conversation ─────────────────────────┬─ Backseat ────────────────────────────────────┐
-│                                        │ 1: Play-by-play   2: Deep review   3: Profile │
+│                                        │ 1: Play  2: Review  3: Explain  4: Profile    │
 │ > /backseat-driver                     │ On. Watching for your next save.              │
 │   Backseat Driver is on. You drive.    │                                               │
 │                                        │ src/cache.rs                                  │
@@ -53,6 +53,41 @@ A language you only touch later, such as the one shell script in a Python projec
 │ >                                      │                                               │
 └────────────────────────────────────────┴───────────────────────────────────────────────┘
 ```
+
+### While you read
+
+The play-by-play is for when you write. The third tab, Explain, is for when you read. It shows what the tutor knows about the spot you are on: what the function or class does, how, why it is there, what to watch for and what it relies on, with an outline of the file beneath it.
+
+```text
+3: Explain
+stats.py · variance
+function, lines 10 to 12
+What  How spread out the values are: the mean squared distance from the mean.
+How   It calls mean(xs), sums the squared differences, and divides by the count.
+Why   The standard deviation would be built on it.
+Watch An empty list raises ZeroDivisionError, inside mean.
+Relies on  mean
+
+In this file
+  mean      The average of a list.
+  median    The middle value of a sorted copy.
+> variance  How spread out the values are.
+
+n: next   p: previous   e: ask about this
+```
+
+"The spot you are on" is whichever of these moved last:
+
+- an editor that reports its cursor to the tutor. No such plugin exists yet: see [The editor side](#the-editor-side).
+- `/bsd explain src/app.py:42`, or `:42-60` for a selection.
+- `n` and `p` in the pane, which step through the file's symbols.
+- the file you last saved.
+
+Answers come from a cache on your machine. In a real session a cached explanation was on screen 40 to 80 milliseconds after the key. What is not cached is fetched in the background while you keep reading: a file is mapped in one request, and each function is explained in another when you get to it or when you have just changed it. A first lookup in a file the tutor had never seen took about seven seconds.
+
+**It is never stale.** Every explanation records a fingerprint of the exact lines it explains, and of the other functions it says it relies on. Nothing is shown unless those fingerprints match the file as it is on disk at that moment. Edit a function and its explanation is gone from the screen within a tenth of a second. The file is mapped again once it has stopped changing for a few seconds, and an answer that arrives for text that has changed in the meantime is thrown away. An edit elsewhere in the file costs an unchanged function nothing. Where freshness and speed pull apart, freshness wins.
+
+The tutor in the conversation uses the same cache. Ask it what a function does and it looks it up first, so what it tells you and what the tab shows agree. A question you type is sent along with what the tab is showing, so "why is this here?" means something.
 
 In a narrow terminal the pane sits above the prompt instead of beside the conversation. The keys in the pane work once it has the keyboard: press Ctrl+X Tab or click it, and Esc to go back to the prompt. The pane says so while it does not have it.
 
@@ -188,6 +223,8 @@ The watcher asks git what changed every couple of seconds, and stretches that in
 | Noticing saves and commits | A `$.clock.every` timer runs `git status` through `$.process.run` for saves. For commits it checks the reflog file's size and modification time, and runs `git reflog` only when that changes. |
 | Finding the project's languages | `git ls-files` and a table of file extensions. A language counts as a main one when it holds at least 15% of the source files, and the biggest always counts. |
 | First-run questions | `$.ui.ask`, the same question dialog Claude uses. |
+| Explain | `$.model.complete` on the explain model, with an abort signal so that a lookup overtaken by a save is cut short. What it learns is one JSON file per source file in the project's cache. While the tab or an editor is watching, the file in focus is checked for changes ten times a second with `$.fs.stat`. |
+| Looking code up in conversation | A `lookup` tool the mod registers. It answers from the same cache and turns the tab to the spot. |
 | Profiles | One JSON file per language in the tutor's data folder, written with `$.fs.write`. Forgetting deletes with `rm`, because the mod API has no delete. |
 | Play-by-play review | `$.model.complete` with the chosen model and thinking level: one request, no tools, no conversation history. |
 | Deep review | A read-only subagent (`Read`, `Grep`, `Glob`) that the mod registers with `$.agent.register` on the chosen model and thinking level, and starts with `$.agent.spawn`. A `turn.complete` hook takes its answer to the pane, not into the conversation. |
@@ -201,15 +238,16 @@ Why a mod and not a skill alone? A skill could carry the contract, and a plugin 
 
 ## Models and settings
 
-There are three jobs, and each runs on its own model:
+There are four jobs, and each runs on its own model:
 
 | Job | Model | How it runs |
 | --- | --- | --- |
 | **Play-by-play**: running commentary on each settled change | Your choice. Sonnet by default | Background request that sees the change and the code around it |
 | **Deep review**: a longer review of your commits, and second opinions | Your choice. Opus by default | Read-only subagent that can explore the codebase |
+| **Explain**: what the code you are reading does | Your choice. Sonnet at low thinking by default | Background requests, one per file and one per function, kept in a cache |
 | **Talk**: your questions, and "explain" on a note | The session's model and thinking level, set with `/model` and `/effort` | Normal conversation turn under the tutor contract |
 
-Everything is configured in `/config`, and the two background jobs have separate settings. A change applies at once, without restarting the session.
+Everything is configured in `/config`, and the three background jobs have separate settings. A change applies at once, without restarting the session.
 
 | Setting | Choices | Default |
 | --- | --- | --- |
@@ -224,10 +262,15 @@ Everything is configured in `/config`, and the two background jobs have separate
 | Deep review every | none, 5, 15, 30, 45, 60, 90 or 180 minutes | none |
 | Deep review model | `haiku`, `sonnet`, `opus`, `fable` | `opus` |
 | Deep review thinking level | `low`, `medium`, `high`, `xhigh`, `max` | `high` |
+| Explain | `automatic`, `on request`, `off` | `automatic` |
+| Explain model | `haiku`, `sonnet`, `opus`, `fable` | `sonnet` |
+| Explain thinking level | `low`, `medium`, `high`, `xhigh`, `max` | `low` |
 
 The quiet time is how long the working tree must be still before the play-by-play looks, and the minimum gap is the shortest time between two looks. Lower both for commentary that keeps closer to your typing, or raise them for fewer interruptions and less usage. Set the play-by-play to "on request" and it looks only when you ask for a look from the pane.
 
 How often the watcher polls, what counts as a real change, and the slow-down near your plan's limits are not settings. They adapt by themselves.
+
+With Explain on `automatic`, the tutor looks up what your cursor is on and what you save. On `on request` it shows what it already has and fetches only what you ask for: `f` in the tab, `/bsd explain`, or a question in the conversation. Near your plan's limits it behaves as `on request` by itself, first for saves and then for everything.
 
 The two deep review triggers are independent, so reviews can run after commits, on a timer, on both, or on neither. With both off, a deep review runs only when you ask for one from the pane.
 
@@ -272,6 +315,7 @@ Neither half changes the ground rules. The personas named after people are in th
 
 - **It sees saves, not keystrokes.** The plugin reads files on disk, not your editor's unsaved buffer. With autosave on, that is close to live.
 - **It needs git.** Changes are found by diffing the working tree, and files that git ignores are never sent.
+- **Explain is only as good as its model's reading.** It is told to say only what the code shown supports, and line numbers it gets wrong are caught, because every symbol has to quote its own first line. What it says about a function can still be mistaken. It knows the file it is in, and other files only once they have been mapped.
 - **It spends usage in the background.** Every play-by-play look and every deep review is a model call on your plan. The play-by-play waits for a pause, sends only the change and its surroundings, runs one look at a time, slows down as your plan's usage runs out, and can be paused. A deep review costs more, because it runs a stronger model at a higher thinking level, so how often it runs is yours to set.
 - **Mods are new.** The mod API is early access and can change between Claude Code releases. Panes are drawn by the terminal CLI and by the Code tab of the desktop app. The VS Code extension's chat panel runs mods but does not draw them, so use `claude` in the editor's integrated terminal there.
 - **A mod is code that runs with your permissions.** This one is meant to stay small and auditable: it runs `git`, reads files inside the repository and its own plugin folder, calls models, keeps what it remembers in its own data folder and draws a pane. The only other program it runs is `rm`, only when you tell it to forget something, and only on paths inside that folder, which it marks as its own before it will delete anything there. It makes no network requests of its own, installs no git hooks and never writes to your working tree. `claude plugin validate` lists every event a mod hooks and every call it makes, so you can check that before installing.
@@ -331,7 +375,7 @@ To use the working copy in a project of your own, start Claude Code there with `
 
 Everything above this heading exists. What is under it is decided and is being built in the order the [roadmap](#roadmap) gives. A feature here does not exist until its line in the roadmap is checked.
 
-### Three jobs, three questions
+### One cache for all three jobs
 
 | Job | The question it answers | When it speaks |
 | --- | --- | --- |
@@ -339,17 +383,11 @@ Everything above this heading exists. What is under it is decided and is being b
 | Deep review | How was the work I just finished? | After a commit |
 | Explain | What is this code I am looking at? | While you read |
 
-**Explain** is for browsing. It shows what the tutor knows about the spot you are on: what a function does, how, why it is there, what to watch for, what it relies on, and what the last deep review said about it. It gets a tab of its own in the pane, and its own model and thinking level. Answers come from a local cache and appear at once. What is missing is fetched in the background while you keep reading.
+Explain keeps a cache per project, unlike your profile, which is per language. Today only Explain writes to it and reads from it. The other two jobs are to share it:
 
-The cache is kept per project, unlike your profile, which is per language. All three jobs share it:
-
-- The deep review writes into it: an overview of the project, what each file is for, and insights on specific functions. A new project gets one survey by the deep review model to start it off.
-- The play-by-play reads from it, so the faster model can keep to the detail of what you just typed with the bigger picture in front of it.
-- Explain reads and writes it, one file and one function at a time.
-
-**It is never stale.** Every explanation records a fingerprint of the exact text it explains and of the things it says it relies on. Nothing is shown unless the fingerprint matches the file as it is on disk at that moment. When it does not match, the old text is hidden, the spot says it is updating, and a fresh answer is fetched first in the queue. An answer that arrives for text that has since changed is thrown away. Where freshness and speed pull apart, freshness wins.
-
-**Editors come later.** Plugins for vim and emacs are not part of this. What is built now is the side they will talk to: an editor writes where the cursor is to a small file, and the tutor writes what it knows about that spot to another. Until then, Explain follows the file you last saved, or the place you name with `/bsd explain`.
+- The deep review will write into it: an overview of the project, what each file is for, and insights on specific functions. A new project will get one survey by the deep review model to start it off.
+- The play-by-play will read from it, so that the faster model can keep to the detail of what you just typed with the bigger picture in front of it.
+- Explain will show what the last deep review said about the function you are on.
 
 ### Progress
 
@@ -389,6 +427,47 @@ The data folder that holds your profiles today will also hold the progress recor
   view.json                     written by the tutor: what it knows about that spot
 ```
 
+## The editor side
+
+Plugins for vim and emacs are planned and not written. This is the whole of what one has to do, and it works today with anything that can write a file.
+
+Both files live in the tutor's data folder, `~/.local/share/backseat-driver/`.
+
+**The editor writes `focus.json`** whenever the cursor or the selection moves:
+
+```json
+{ "file": "/home/you/project/src/stats.py", "line": 12, "endLine": 15 }
+```
+
+- `file` is an absolute path. A file outside the repository the tutor is running in is ignored, so several sessions can share the one focus file.
+- `line` is 1-based. `endLine` is there only while lines are selected.
+- Write it to a temporary name and rename it into place, so that it is never read half-written.
+
+**The tutor writes `view.json`** in answer, and again whenever what it knows about that spot changes:
+
+```json
+{
+  "v": 1,
+  "at": 1791142331000,
+  "root": "/home/you/project",
+  "source": "editor",
+  "spot": { "path": "src/stats.py", "line": 12 },
+  "status": "fresh",
+  "fileSummary": "Small statistics helpers.",
+  "outline": [{ "name": "mean", "kind": "function", "startLine": 1, "endLine": 2, "summary": "The average of a list." }],
+  "isOutlineCurrent": true,
+  "isMappable": true,
+  "target": { "name": "variance", "kind": "function", "startLine": 10, "endLine": 12, "summary": "How spread out the values are." },
+  "detail": { "what": "...", "how": "...", "why": "...", "watch": "...", "uses": ["mean"] }
+}
+```
+
+- `status` is `fresh` when everything about the spot is there, `updating` while something is being fetched, `waiting` or `held` when it is not being fetched until asked for, `failed`, `no-file` or `off`.
+- Everything in the file has already been checked against the source file on disk. An editor shows what is there and nothing else.
+- `target` is null between symbols, and `detail` is null until the explanation has arrived.
+
+Once the tutor has seen a focus file it checks it ten times a second. With a hand-written script standing in for an editor, `view.json` answered 40 to 80 milliseconds after the cursor moved.
+
 ## Roadmap
 
 - [x] **Scaffold.** Plugin manifest, marketplace entry, settings, the `/backseat-driver` and `/bsd` commands, validation, tests and type checking.
@@ -404,7 +483,7 @@ Part two:
 - [x] **Usability, first pass.** `/bsd` answers at once and sets up in the background, `/bsd help`, `/bsd questions` and the `q` key, and a line in the pane on how to give it the keyboard.
 - [x] **Data home and forgetting.** State in `~/.local/share/backseat-driver/`, profiles moved out of the plugin store, and `/bsd forget`.
 - [x] **Persona in two halves.** The voice and the engineering persona as separate settings, so that how the tutor talks and whose judgment it reviews with are chosen apart.
-- [ ] **Explain.** The lookup engine and its queue, the never-stale rule, the Explain tab, `/bsd explain`, the files an editor will read and write, and a lookup tool for the tutor.
+- [x] **Explain.** The lookup engine and its queue, the never-stale rule, the Explain tab, `/bsd explain`, the files an editor reads and writes, and a lookup tool for the tutor.
 - [ ] **One cache for all three jobs.** Deep reviews write overviews and insights into the cache, a survey for each new project, and both reviewers read from it.
 - [ ] **Progress.** Whose work it is, the evidence ledger, the rules for moving a level, the Progress tab and a first placement from past commits.
 - [ ] **Updates and uninstall.** Release tags, the update notice, `/bsd update` and `/bsd uninstall`.

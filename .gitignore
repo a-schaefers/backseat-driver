@@ -3,3 +3,6 @@ node_modules/
 
 # Written by Claude Code each time it loads the plugin from this folder
 plugin/.claude-plugin/types/
+
+# Worktrees that other Claude Code sessions make in this repository.
+.claude/worktrees/

@@ -1,9 +1,10 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Note } from '../types'
-import { currentNote, KEYBOARD_HINT, personaLine, statusLine } from '../hooks/pane'
+import { NO_VIEW } from '../hooks/explainer'
+import { currentNote, detailMarkdown, explainNotice, KEYBOARD_HINT, personaLine, statusLine } from '../hooks/pane'
 import type { PaneView } from '../hooks/pane'
-import { PANE, SESSION, stubSession, typed } from './kit'
+import { PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const VIEW: PaneView = {
   mode: 'on',
@@ -16,7 +17,9 @@ const VIEW: PaneView = {
   review: { state: 'none', subject: '', text: '', isUnseen: false },
   reviewSchedule: 'after each commit',
   profiles: { languages: [], subjects: {} },
+  explain: NO_VIEW,
   isFocused: true,
+  columns: 76,
 }
 
 const note = (id: number, overrides: Partial<Note> = {}): Note => ({
@@ -60,7 +63,7 @@ test('currentNote is the selected note while it is open, otherwise the most impo
   expect(currentNote({ notes: [], selected: 1 })).toBeUndefined()
 })
 
-test('the pane opens on the play-by-play and switches tabs, on every surface that draws panes', async ($, on) => {
+sessionTest('the pane opens on the play-by-play and switches tabs, on every surface that draws panes', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -82,7 +85,7 @@ test('the pane opens on the play-by-play and switches tabs, on every surface tha
   }
 })
 
-test('the pane shows a pause', async ($, on) => {
+sessionTest('the pane shows a pause', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -94,7 +97,7 @@ test('the pane shows a pause', async ($, on) => {
   await ui.unmount()
 })
 
-test('the pane says how to give it the keyboard, until it has it', async ($, on) => {
+sessionTest('the pane says how to give it the keyboard, until it has it', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))

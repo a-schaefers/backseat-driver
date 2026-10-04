@@ -18,7 +18,7 @@ import {
   withoutHush,
 } from '../hooks/profiles'
 import { firstRunQuestions, groupAnswers, MAX_QUESTIONS } from '../hooks/questions'
-import { COMPOSE, PANE, SESSION, stubSession, typed } from './kit'
+import { COMPOSE, PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const MEAN = 'def mean(xs):\n    return sum(xs) / len(xs)\n'
 
@@ -145,7 +145,7 @@ test('groupAnswers keeps a skipped subject, with no answers', async () => {
   expect(groupAnswers(questions, [])).toEqual({ general: {}, python: {} })
 })
 
-test('the first time in a project, the questions are asked and the answers are stored by language', async ($, on) => {
+sessionTest('the first time in a project, the questions are asked and the answers are stored by language', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   session.answers.push('JavaScript or TypeScript', 'A little: tutorials and small scripts', 'Write idiomatic code without looking things up', 'Bugs and risky code')
   await $.session.start(SESSION)
@@ -168,7 +168,7 @@ test('the first time in a project, the questions are asked and the answers are s
   expect(session.agents[session.agents.length - 1]?.prompt).toMatch('- Knows best: JavaScript or TypeScript')
 })
 
-test('dismissing the questions skips them for good, and the tutor works without them', async ($, on) => {
+sessionTest('dismissing the questions skips them for good, and the tutor works without them', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
   const started = await $.command.run(typed('bsd'))
@@ -184,7 +184,7 @@ test('dismissing the questions skips them for good, and the tutor works without 
   expect(session.asked.length).toBe(1)
 })
 
-test('a language already on record is not asked about again, in any project', async ($, on) => {
+sessionTest('a language already on record is not asked about again, in any project', async ($, on) => {
   const known = withAnswers(emptyProfile(), { level: 'For years: I know it well' })
   const session = stubSession(on, {
     head: { 'stats.py': MEAN },
@@ -199,7 +199,7 @@ test('a language already on record is not asked about again, in any project', as
   expect(sections[sections.length - 1]?.text).toMatch('- Has written: For years: I know it well')
 })
 
-test('while the tutor is off, starting a session touches nothing', async ($, on) => {
+sessionTest('while the tutor is off, starting a session touches nothing', async ($, on) => {
   const session = stubSession(on, { data: { 'profiles/python.json': emptyProfile() } })
   await $.session.start(SESSION)
 
@@ -211,14 +211,14 @@ test('while the tutor is off, starting a session touches nothing', async ($, on)
   expect(session.agents).toEqual([])
 })
 
-test('the hush tool stops a topic at once, for good, and removes its notes', async ($, on) => {
+sessionTest('the hush tool stops a topic at once, for good, and removes its notes', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   session.reply({ resolved: [], notes: [{ file: 'stats.py', line: 1, kind: 'idiom', topic: 'type-hints', note: 'No type hints.' }] })
   session.reply({ resolved: [], notes: [{ file: 'stats.py', line: 1, kind: 'idiom', topic: 'type-hints', note: 'Still no type hints.' }] })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
   await session.clock.settle()
-  expect(session.tools.map(tool => tool.name)).toEqual(['hush', 'unhush', 'record', 'profile'])
+  expect(session.tools.map(tool => tool.name)).toEqual(['hush', 'unhush', 'record', 'lookup', 'profile'])
 
   session.write('stats.py', `${MEAN}\ndef total(xs):\n    return sum(xs)\n`)
   await session.clock.advance(14_000)
@@ -244,7 +244,7 @@ test('the hush tool stops a topic at once, for good, and removes its notes', asy
   await ui.unmount()
 })
 
-test('a hush that names a note uses the note\'s own topic, whatever the model calls it', async ($, on) => {
+sessionTest('a hush that names a note uses the note\'s own topic, whatever the model calls it', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   session.reply({ resolved: [], notes: [{ file: 'stats.py', line: 5, kind: 'tip', topic: 'builtin-sum', note: 'A built-in does this.' }] })
   await $.session.start(SESSION)
@@ -272,7 +272,7 @@ test('a hush that names a note uses the note\'s own topic, whatever the model ca
   expect(String((other as { result: unknown }).result)).toMatch('No open note matched, so the pane is unchanged.')
 })
 
-test('"m" on a note hushes its topic, and the Profile tab can undo it', async ($, on) => {
+sessionTest('"m" on a note hushes its topic, and the Profile tab can undo it', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   session.reply({ resolved: [], notes: [{ file: 'stats.py', line: 1, kind: 'idiom', topic: 'type-hints', note: 'No type hints.' }] })
   await $.session.start(SESSION)
@@ -292,7 +292,7 @@ test('"m" on a note hushes its topic, and the Profile tab can undo it', async ($
   await ui.unmount()
 })
 
-test('what the play-by-play raises and what gets explained goes into the lesson memory', async ($, on) => {
+sessionTest('what the play-by-play raises and what gets explained goes into the lesson memory', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   session.reply({ resolved: [], notes: [{ file: 'stats.py', line: 2, kind: 'bug', topic: 'empty-input', note: 'Empty list?' }] })
   await $.session.start(SESSION)
@@ -310,7 +310,7 @@ test('what the play-by-play raises and what gets explained goes into the lesson 
   await ui.unmount()
 })
 
-test('a language first met mid-session comes into play without questions', async ($, on) => {
+sessionTest('a language first met mid-session comes into play without questions', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -331,7 +331,7 @@ test('a language first met mid-session comes into play without questions', async
   await ui.unmount()
 })
 
-test('the profile tool reads a language that is not in play', async ($, on) => {
+sessionTest('the profile tool reads a language that is not in play', async ($, on) => {
   const rust = withHush(withAnswers(emptyProfile(), { level: 'None yet' }), { topic: 'lifetimes', text: 'lifetime elision' })
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { 'profiles/rust.json': rust } })
   await $.session.start(SESSION)
@@ -345,7 +345,7 @@ test('the profile tool reads a language that is not in play', async ($, on) => {
   })
 })
 
-test('while the tutor is off, its tools change nothing', async ($, on) => {
+sessionTest('while the tutor is off, its tools change nothing', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -357,7 +357,7 @@ test('while the tutor is off, its tools change nothing', async ($, on) => {
   expect(session.data('profiles/python.json')).toBeUndefined()
 })
 
-test('a note the reviewer repeats while it is still open is counted once in the lesson memory', { timeoutMs: 20_000 }, async ($, on) => {
+sessionTest('a note the reviewer repeats while it is still open is counted once in the lesson memory', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   const sameNote = { resolved: [], notes: [{ file: 'stats.py', line: 2, kind: 'bug', topic: 'empty-input', note: 'Empty list?' }] }
   session.reply(sameNote)
@@ -375,7 +375,7 @@ test('a note the reviewer repeats while it is still open is counted once in the 
   expect(parseProfile(session.data('profiles/python.json')).topics).toEqual({ 'empty-input': { flagged: 1, explained: 0 } })
 })
 
-test('the record tool keeps what the user says about themselves', async ($, on) => {
+sessionTest('the record tool keeps what the user says about themselves', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -398,7 +398,7 @@ test('the record tool keeps what the user says about themselves', async ($, on) 
   expect(session.agents[session.agents.length - 1]?.prompt).toMatch('- Knows best: Go')
 })
 
-test('the record tool does not count as the first-run questions, and refuses what it cannot file', async ($, on) => {
+sessionTest('the record tool does not count as the first-run questions, and refuses what it cannot file', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -421,7 +421,7 @@ test('the record tool does not count as the first-run questions, and refuses wha
   expect(JSON.stringify([...session.disk.entries()])).toBe(before)
 })
 
-test('the questions can be answered again from the Profile tab', async ($, on) => {
+sessionTest('the questions can be answered again from the Profile tab', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   session.answers.push('Python', 'None yet', 'Understand what happens underneath', 'Idioms and style')
   await $.session.start(SESSION)

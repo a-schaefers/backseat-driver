@@ -1,6 +1,6 @@
 import type { Elements } from 'claude-code'
 
-import type { Mode, Note, Profile, Profiles, Review, Tab, Watch } from '../types'
+import type { ExplainView, Mode, Note, OutlineRow, Profile, Profiles, Review, Tab, Watch } from '../types'
 import { languageName } from './languages'
 import { sortNotes } from './notes'
 import { ANSWER_LABELS, explained, GENERAL, recurring } from './profiles'
@@ -25,8 +25,11 @@ export type PaneView = {
   /** When a deep review runs without being asked, in a few words: "after each commit". */
   reviewSchedule: string
   profiles: Profiles
+  explain: ExplainView
   /** True while the pane has the keyboard, which is when its keys work. */
   isFocused: boolean
+  /** How wide the pane's body is, in columns. */
+  columns: number
 }
 
 /** What the pane's controls do. The closures come from register.tsx. */
@@ -42,13 +45,36 @@ export type PaneActions = {
   onUnhush: (subject: string, topic: string) => void
   /** Ask the first-run questions again, for everything in play. */
   onQuestions: () => void
+  /** Move the Explain tab's focus to the next symbol of the file, or the previous one. */
+  onExplainMove: (step: 1 | -1) => void
+  /** Look up what is in focus now, whatever the Explain setting says. */
+  onExplainFetch: () => void
+  /** Take what is in focus to the conversation. */
+  onExplainAsk: () => void
 }
 
-const TABS: readonly { tab: Tab; label: string; hotkey: string }[] = [
-  { tab: 'play', label: 'Play-by-play', hotkey: '1' },
-  { tab: 'review', label: 'Deep review', hotkey: '2' },
-  { tab: 'profile', label: 'Profile', hotkey: '3' },
+const TABS: readonly { tab: Tab; label: string; short: string; hotkey: string }[] = [
+  { tab: 'play', label: 'Play-by-play', short: 'Play', hotkey: '1' },
+  { tab: 'review', label: 'Deep review', short: 'Review', hotkey: '2' },
+  { tab: 'explain', label: 'Explain', short: 'Explain', hotkey: '3' },
+  { tab: 'profile', label: 'Profile', short: 'Profile', hotkey: '4' },
 ]
+
+const NEW = ' (new)'
+
+/**
+ * The tabs' labels and the gap between them. The full names are used when
+ * the row fits the pane, and the short ones when it does not, so that the
+ * tabs never wrap onto a second line.
+ */
+export function tabRow(view: Pick<PaneView, 'columns' | 'review'>): { labels: string[]; gap: number } {
+  const name = (tab: Tab, label: string): string => (tab === 'review' && view.review.isUnseen ? `${label}${NEW}` : label)
+  const full = TABS.map(({ tab, label }) => name(tab, label))
+  // A button draws as its key, a colon, a space and its label.
+  const width = full.reduce((sum, label) => sum + label.length + 3, 0) + 3 * (TABS.length - 1)
+
+  return width <= view.columns ? { labels: full, gap: 3 } : { labels: TABS.map(({ tab, short }) => name(tab, short)), gap: 2 }
+}
 
 /** Shown while the pane does not have the keyboard: its keys do nothing until it does. */
 export const KEYBOARD_HINT = 'Ctrl+X Tab or a click to use these keys. Esc to go back.'
@@ -103,8 +129,91 @@ export function reviewSchedule(isAfterCommit: boolean, everyMs: number): string 
   return everyMs > 0 ? timer : 'only when you ask'
 }
 
-function tabLabel(tab: Tab, label: string, view: PaneView): string {
-  return tab === 'review' && view.review.isUnseen ? `${label} (new)` : label
+/** What the Explain tab says while what it shows is not the whole story. Empty when it is. */
+export function explainNotice(explain: ExplainView): string {
+  switch (explain.status) {
+    case 'fresh':
+      return ''
+    case 'updating':
+      return explain.isOutlineCurrent || !explain.isMappable ? 'Looking this up.' : 'Mapping this file.'
+    case 'waiting':
+      return 'Not looked up yet. Lookups are on request: f fetches this.'
+    case 'held':
+      return 'Not looked up: you are close to your plan limit. f fetches this anyway.'
+    case 'failed':
+      return 'The last lookup failed. It is tried again in a minute, or press f.'
+    case 'no-file':
+      return 'There is no such file in this project.'
+    case 'off':
+      return 'Explain is switched off. Its setting is in /config.'
+  }
+}
+
+/** One symbol of the outline on one line: its name, and as much of its summary as fits the pane. */
+export function outlineLine(row: OutlineRow, isCurrent: boolean, columns: number): string {
+  const start = `${isCurrent ? '>' : ' '} ${row.name}`
+  const room = columns - start.length - 2
+  if (row.summary === '' || room < 12) return start
+  const summary = row.summary.length <= room ? row.summary : `${row.summary.slice(0, room - 1).trimEnd()}…`
+
+  return `${start}  ${summary}`
+}
+
+/** An explanation as Markdown: one short paragraph per question it answers. */
+export function detailMarkdown(detail: NonNullable<ExplainView['detail']>): string {
+  const parts = [`**What** ${detail.what}`]
+  if (detail.how !== '') parts.push(`**How** ${detail.how}`)
+  if (detail.why !== '') parts.push(`**Why** ${detail.why}`)
+  if (detail.watch !== '') parts.push(`**Watch** ${detail.watch}`)
+  if (detail.uses.length > 0) parts.push(`**Relies on** ${detail.uses.join(', ')}`)
+
+  return parts.join('\n\n')
+}
+
+function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, actions: PaneActions) {
+  const { explain } = view
+  if (explain.spot === null) {
+    return (
+      <Box flexDirection="column">
+        <Text dimColor>Nothing in focus yet.</Text>
+        <Text dimColor>Save a file, or run /bsd explain with a file and a line.</Text>
+      </Box>
+    )
+  }
+
+  const { target, detail } = explain
+  const notice = explainNotice(explain)
+  const canFetch = explain.status === 'waiting' || explain.status === 'held' || explain.status === 'failed'
+
+  return (
+    <Box flexDirection="column">
+      <Text bold>{target === null ? explain.spot.path : `${explain.spot.path} · ${target.name}`}</Text>
+      {target !== null && (
+        <Text dimColor>
+          {target.kind}, lines {target.startLine} to {target.endLine}
+        </Text>
+      )}
+      {target === null && explain.fileSummary !== '' && <Text>{explain.fileSummary}</Text>}
+      {target !== null && detail === null && target.summary !== '' && <Text>{target.summary}</Text>}
+      {detail !== null && <Markdown key="explanation" text={detailMarkdown(detail)} />}
+      {notice !== '' && <Text dimColor>{notice}</Text>}
+      {!explain.isMappable && <Text dimColor>This file is too large to map, so only the lines around the cursor are explained.</Text>}
+      {explain.outline.length > 0 && <Text> </Text>}
+      {explain.outline.length > 0 && <Text bold>In this file</Text>}
+      {explain.outline.map(row => {
+        const isCurrent = target !== null && row.startLine === target.startLine && row.endLine === target.endLine
+
+        return <Text dimColor={!isCurrent}>{outlineLine(row, isCurrent, view.columns)}</Text>
+      })}
+      <Text> </Text>
+      <Box flexDirection="row" columnGap={3}>
+        {explain.outline.length > 1 && <Button key="explain-next" label="next" hotkey="n" plain onPress={() => actions.onExplainMove(1)} />}
+        {explain.outline.length > 1 && <Button key="explain-previous" label="previous" hotkey="p" plain onPress={() => actions.onExplainMove(-1)} />}
+        {target !== null && <Button key="explain-ask" label="ask about this" hotkey="e" plain onPress={() => actions.onExplainAsk()} />}
+        {canFetch && <Button key="explain-fetch" label="fetch" hotkey="f" plain onPress={() => actions.onExplainFetch()} />}
+      </Box>
+    </Box>
+  )
 }
 
 function deepReview({ Box, Text, Button, Markdown }: Kit, view: PaneView, actions: PaneActions) {
@@ -235,14 +344,15 @@ function profileTab({ Box, Text, Button }: Kit, view: PaneView, actions: PaneAct
 
 export function renderPane(kit: Kit, view: PaneView, actions: PaneActions) {
   const { Box, Text, Button } = kit
+  const row = tabRow(view)
 
   return (
     <Box flexDirection="column">
-      <Box flexDirection="row" columnGap={3}>
-        {TABS.map(({ tab, label, hotkey }) => (
+      <Box flexDirection="row" columnGap={row.gap}>
+        {TABS.map(({ tab, hotkey }, index) => (
           <Button
             key={`tab-${tab}`}
-            label={tabLabel(tab, label, view)}
+            label={row.labels[index] ?? ''}
             hotkey={hotkey}
             plain
             dimColor={view.tab !== tab}
@@ -254,6 +364,7 @@ export function renderPane(kit: Kit, view: PaneView, actions: PaneActions) {
       <Text> </Text>
       {view.tab === 'play' && playByPlay(kit, view, actions)}
       {view.tab === 'review' && deepReview(kit, view, actions)}
+      {view.tab === 'explain' && explainTab(kit, view, actions)}
       {view.tab === 'profile' && profileTab(kit, view, actions)}
       {!view.isFocused && <Text dimColor>{KEYBOARD_HINT}</Text>}
     </Box>

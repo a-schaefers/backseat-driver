@@ -3,7 +3,23 @@
  * stub here answers in Claude Code's place.
  */
 import type { AgentSpec, ModelCompleteRequest, On, ToolSpec } from 'claude-code'
-import { mock } from 'claude-code/testing'
+import { mock, test } from 'claude-code/testing'
+import type { TestBody, TestOptions, TestRest } from 'claude-code/testing'
+
+/**
+ * A test gets five seconds unless it asks for more. One that starts a session
+ * loads the whole mod first, and every test file runs at once, so on a busy
+ * machine five seconds is not always enough.
+ */
+const SESSION_TEST_MS = 30_000
+
+/** `test`, for a test that starts a session: the same, with more time. */
+export function sessionTest(name: string, ...rest: TestRest): void {
+  const [first, second] = rest
+  const options: TestOptions = typeof first === 'function' ? {} : first
+  const body = (typeof first === 'function' ? first : second) as TestBody
+  test(name, { timeoutMs: SESSION_TEST_MS, ...options }, body)
+}
 
 /** A `/name args` typed at the prompt of a wide fullscreen terminal. */
 export function typed(command: string, args = '') {
@@ -116,6 +132,10 @@ export function stubSession(on: On, options: StubOptions = {}) {
     requests: [] as ModelCompleteRequest[],
     /** Queued replies; with none queued the model has nothing to add. */
     replies: [] as string[],
+    /** The same for the Explain tab's lookups, which are kept apart from the play-by-play's. */
+    lookups: [] as ModelCompleteRequest[],
+    lookupReplies: [] as string[],
+    lookupAnswers: [] as { when: string; reply: string }[],
     clock: mock.clock(on),
     /** Saves a file in the working tree, as the user's editor would. */
     write(path: string, text: string) {
@@ -187,6 +207,22 @@ export function stubSession(on: On, options: StubOptions = {}) {
     reply(reply: unknown) {
       session.replies.push(typeof reply === 'string' ? reply : JSON.stringify(reply))
     },
+    /** Moves the cursor in an editor that reports to the tutor: it writes the focus file. */
+    editor(file: string, line: number, endLine?: number) {
+      writes += 1
+      session.disk.set(`${DATA_HOME}/focus.json`, JSON.stringify({ file, line, ...(endLine === undefined ? {} : { endLine }) }))
+      mtimes.set(`${DATA_HOME}/focus.json`, writes)
+    },
+    /**
+     * What the explain model answers. With `when`, every request whose prompt
+     * contains that text gets this reply: lookups run side by side, so their
+     * order is not something a test can count on. Without it, the next request does.
+     */
+    explain(reply: unknown, when?: string) {
+      const text = typeof reply === 'string' ? reply : JSON.stringify(reply)
+      if (when === undefined) session.lookupReplies.push(text)
+      else session.lookupAnswers.push({ when, reply: text })
+    },
   }
 
   on('session.start', () => ({ cwd: ROOT }))
@@ -215,6 +251,7 @@ export function stubSession(on: On, options: StubOptions = {}) {
     if (e.path.endsWith('/skills/tutor/SKILL.md')) return { value: SKILL_FILE }
     if (e.path.endsWith('/prompts/play-by-play.md')) return { value: 'PLAY-BY-PLAY INSTRUCTIONS\n' }
     if (e.path.endsWith('/prompts/deep-review.md')) return { value: 'DEEP REVIEW INSTRUCTIONS\n' }
+    if (e.path.endsWith('/prompts/explain.md')) return { value: 'EXPLAIN INSTRUCTIONS\n' }
     for (const [suffix, text] of Object.entries(options.pluginFiles ?? {})) {
       if (e.path.endsWith(suffix)) return { value: text }
     }
@@ -331,6 +368,15 @@ export function stubSession(on: On, options: StubOptions = {}) {
   })
 
   on('model.complete', ($, e) => {
+    if (e.system?.startsWith('EXPLAIN INSTRUCTIONS') === true) {
+      session.lookups.push(e)
+      const text =
+        session.lookupAnswers.find(answer => e.prompt.includes(answer.when))?.reply ??
+        session.lookupReplies.shift() ??
+        '{"summary": "", "symbols": []}'
+
+      return { value: { isAnswered: true, text, usage: USAGE } }
+    }
     session.requests.push(e)
 
     return { value: { isAnswered: true, text: session.replies.shift() ?? '{"resolved": [], "notes": []}', usage: USAGE } }

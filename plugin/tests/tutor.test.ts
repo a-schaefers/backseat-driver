@@ -1,12 +1,12 @@
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 
 import { CONTRACT_ID, INSTRUCTIONS_PREAMBLE, SESSION_NOTES, TUTOR_TASKS } from '../hooks/contract'
 import { DENIAL } from '../hooks/guard'
-import { COMPOSE, ENGINE_SECTIONS, HOME, SESSION, STOCK_CLAUDE_MD, stubSession, typed } from './kit'
+import { COMPOSE, ENGINE_SECTIONS, HOME, SESSION, sessionTest, STOCK_CLAUDE_MD, stubSession, typed } from './kit'
 
 const EDIT = { tool: 'Edit', file_path: '/work/src/a.py', old_string: 'a', new_string: 'b' } as const
 
-test('while the tutor is off, the plugin changes nothing', async ($, on) => {
+sessionTest('while the tutor is off, the plugin changes nothing', async ($, on) => {
   const calls = stubSession(on)
   await $.session.start(SESSION)
 
@@ -17,7 +17,7 @@ test('while the tutor is off, the plugin changes nothing', async ($, on) => {
   expect(calls.opened).toEqual([])
 })
 
-test('while the tutor is on, the system prompt carries the contract', async ($, on) => {
+sessionTest('while the tutor is on, the system prompt carries the contract', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -38,7 +38,7 @@ const PERSONA_FILES = {
   '/personas/engineering/knuth.md': '# Engineering: knuth\n\nThe edges, every time.\n',
 }
 
-test('the persona follows the contract: its engineering half, then its voice', { options: { voice: 'eli5-tldr-kiss-terse', engineering: 'knuth' } }, async ($, on) => {
+sessionTest('the persona follows the contract: its engineering half, then its voice', { options: { voice: 'eli5-tldr-kiss-terse', engineering: 'knuth' } }, async ($, on) => {
   const session = stubSession(on, { pluginFiles: PERSONA_FILES })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -52,7 +52,7 @@ test('the persona follows the contract: its engineering half, then its voice', {
   expect(status.text).toBe('Backseat Driver is on. Voice: eli5-tldr-kiss-terse. Engineering: knuth.')
 })
 
-test("a voice alone leaves the engineering judgment Claude's own", { options: { voice: 'knuth' } }, async ($, on) => {
+sessionTest("a voice alone leaves the engineering judgment Claude's own", { options: { voice: 'knuth' } }, async ($, on) => {
   const session = stubSession(on, { pluginFiles: PERSONA_FILES })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -64,7 +64,7 @@ test("a voice alone leaves the engineering judgment Claude's own", { options: { 
   )
 })
 
-test('a persona half whose file is missing is left out, and the debug log says so', { options: { voice: 'torvalds', engineering: 'knuth' } }, async ($, on) => {
+sessionTest('a persona half whose file is missing is left out, and the debug log says so', { options: { voice: 'torvalds', engineering: 'knuth' } }, async ($, on) => {
   const session = stubSession(on, { pluginFiles: PERSONA_FILES })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -77,7 +77,7 @@ test('a persona half whose file is missing is left out, and the debug log says s
   expect(session.logs).toContain('no voice persona called "torvalds"')
 })
 
-test('while the tutor is on, instruction files yield to the contract', async ($, on) => {
+sessionTest('while the tutor is on, instruction files yield to the contract', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -89,7 +89,7 @@ test('while the tutor is on, instruction files yield to the contract', async ($,
   expect(blocks[1]).toEqual({ name: 'currentDate', text: "Today's date is 2026-10-04." })
 })
 
-test("while the tutor is on, Claude cannot edit the user's files", async ($, on) => {
+sessionTest("while the tutor is on, Claude cannot edit the user's files", async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -106,7 +106,7 @@ test("while the tutor is on, Claude cannot edit the user's files", async ($, on)
   expect(await $.tool.call({ tool: 'Write', file_path: memory, content: 'x' })).toEqual({ result: 'edited' })
 })
 
-test('a paused tutor still does not edit, and switching off restores everything', async ($, on) => {
+sessionTest('a paused tutor still does not edit, and switching off restores everything', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))

@@ -4,9 +4,9 @@ import type { Mode } from '../types'
 export type ModeRequest = 'on' | 'off' | 'pause' | 'resume' | 'status'
 
 /** Everything `/bsd <word>` can ask for. */
-export type Request = ModeRequest | 'questions' | 'forget' | 'help'
+export type Request = ModeRequest | 'explain' | 'questions' | 'forget' | 'help'
 
-const WORDS: readonly Request[] = ['on', 'off', 'pause', 'resume', 'status', 'questions', 'forget', 'help']
+const WORDS: readonly Request[] = ['on', 'off', 'pause', 'resume', 'status', 'explain', 'questions', 'forget', 'help']
 
 export type Parsed = {
   request: Request
@@ -28,7 +28,7 @@ export function parseRequest(args: string): Parsed {
 }
 
 export function isModeRequest(request: Request): request is ModeRequest {
-  return request !== 'questions' && request !== 'forget' && request !== 'help'
+  return request !== 'explain' && request !== 'questions' && request !== 'forget' && request !== 'help'
 }
 
 /** Every command and key, as `/bsd help` prints it. */
@@ -40,16 +40,18 @@ export const HELP = [
   '  /bsd pause       stop the background commentary and keep the pane',
   '  /bsd resume      carry on',
   '  /bsd status      whether it is on, its voice and its engineering persona',
+  '  /bsd explain     explain a spot in the code: /bsd explain src/app.py:42',
   '  /bsd questions   answer the first-run questions again',
   '  /bsd forget      erase what it remembers: this project, one language, or everything',
   '  /bsd help        this list',
   '',
   'In the pane. Ctrl+X Tab or a click gives it the keyboard, and Esc gives it back:',
-  '  1 2 3   switch tabs',
-  '  e d m   explain, dismiss or mute the selected note',
-  '  l       look at your changes now',
-  '  r       run a deep review now',
-  '  q       answer the questions again',
+  '  1 2 3 4   switch tabs',
+  '  e d m     explain, dismiss or mute the selected note',
+  '  l         look at your changes now',
+  '  r         run a deep review now',
+  '  n p e     in Explain: next symbol, previous symbol, ask about this one',
+  '  q         answer the questions again',
   '',
   'Models, thinking levels, pacing, the voice and the engineering persona are in /config: search for "backseat".',
 ].join('\n')

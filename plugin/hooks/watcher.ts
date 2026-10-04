@@ -38,6 +38,7 @@ function sameMap(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>)
  */
 export function createWatcher(ports: WatcherPorts) {
   let seen = new Map<string, string>()
+  let changed: string[] = []
   const looked = new Map<string, string>()
   /** What each changed file contained at the last look. A file not listed was clean then, so its baseline is HEAD. */
   const baseline = new Map<string, string>()
@@ -89,9 +90,15 @@ export function createWatcher(ports: WatcherPorts) {
       const prints = await fingerprints()
       if (prints === null) return false
       const hasChanged = !sameMap(prints, seen)
+      changed = [...prints].filter(([path, print]) => seen.get(path) !== print).map(([path]) => path)
       seen = prints
 
       return hasChanged
+    },
+
+    /** The files that were saved between the last two polls. */
+    changed(): string[] {
+      return changed
     },
 
     /** Whether any file differs from what the previous look saw. */

@@ -31,6 +31,7 @@ test('readSettings applies the documented defaults to empty options', async () =
       model: 'opus',
       thinking: 'high',
     },
+    explain: { mode: 'automatic', model: 'sonnet', thinking: 'low' },
   })
 })
 

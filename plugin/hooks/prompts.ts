@@ -1,6 +1,7 @@
-import type { Note, Review } from '../types'
+import type { ExplainView, Note, Review } from '../types'
 import { formatHunks, splitLines } from './diff'
 import type { Hunk } from './diff'
+import { describeSpot, viewText } from './focus'
 import { languageName, languageOf } from './languages'
 import { listDismissed, listNotes } from './notes'
 
@@ -129,4 +130,20 @@ export function paneContext(notes: readonly Note[], review: Review): string {
  */
 export function explainRequest(note: Note): string {
   return `Explain play-by-play note ${note.id} (${note.file} line ${note.line}): "${note.text}" I have read the nudge. Give me the concept behind it.`
+}
+
+/** What the conversation is told about the Explain tab, or '' when it shows nothing worth telling. */
+export function explainContext(view: ExplainView): string {
+  const shown = viewText(view)
+  if (view.spot === null || shown === '') return ''
+
+  return `The pane's Explain tab is on ${describeSpot(view.spot)}. It shows:\n${shown}`
+}
+
+/** What "ask about this" in the Explain tab sends into the conversation. */
+export function explainAsk(view: ExplainView): string {
+  if (view.spot === null) return ''
+  if (view.target === null) return `Tell me more about ${view.spot.path}.`
+
+  return `Tell me more about ${view.target.name} in ${view.spot.path} (lines ${view.target.startLine} to ${view.target.endLine}).`
 }

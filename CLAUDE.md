@@ -92,6 +92,7 @@ Claude Code refuses a hooks module that passes `$` (the engine interface) to a f
 - When logic in another file needs an effect, `register.tsx` hands it a capability: a closure such as `args => $.process.run(['git', ...args])`. Passing a closure over `$` across an import is allowed. Passing `$` is not.
 - `atom(...)` definitions live in `register.tsx` too, with literal `plugin` and `key` strings, and every state key is declared in `plugin/types/index.d.ts`.
 - Register each event once per matcher. Two `on('session.start', ...)` calls without a matcher stop the module from loading.
+- A function that takes `$` must have a name no other declaration in the file shares, a local variable included. A `const [skill, look] = …` inside another function stopped the module loading, because `look` is also the function that makes a look.
 - Write matchers as literals (`{ command: ['backseat-driver', 'bsd'] }`), not spreads or variables. The validator prints `command=?` for anything it cannot read, and that line is what a user audits.
 
 Current files:
@@ -112,6 +113,10 @@ Current files:
 | `hash.ts` | Fingerprints of text, for cache keys and folder names |
 | `datahome.ts`, `storage.ts` | Every path in the data folder and what may be deleted there. JSON files through a `Disk` port |
 | `forget.ts` | What `/bsd forget` can erase, the wording of its dialogs, and the paths each scope deletes |
+| `knowledge.ts` | What is known about one source file, and the freshness rule: fingerprints, finding unchanged symbols after an edit, checking a model's outline against the file |
+| `explain-prompts.ts` | The two requests Explain makes (map a file, explain a symbol or region) and reading their replies |
+| `explainer.ts` | The lookup engine, with its effects as ports: the queue, what may be fetched when, and never storing an answer for text that has changed |
+| `focus.ts` | The spot in focus, the two files an editor shares with the tutor, and what the conversation is told about the spot |
 | `questions.ts` | The first-run questions |
 | `pane.tsx` | The pane's tree from plain data, with the handlers passed in |
 
@@ -189,6 +194,39 @@ A subject is in play when it is one of the project's main languages (from `git l
 
 Seen in real sessions: the four questions appeared with Python detected, and the answers were saved (in the plugin's store at the time, in `profiles/` now). Told "stop telling me to use built-ins instead of my own loops", the tutor called `hush` at once with no permission prompt. In a second project the questions were not asked, and code whose only possible note was that topic got none, while two real bugs beside it were flagged. A contested note went to the deep reviewer, whose verdict came back into the chat 32 seconds later. Esc on the first question skipped all of them and left the tutor running. One chat message ("I have written Python for about six years... what I want most now is performance") produced two `record` calls with no permission prompt, and the Profile tab showed both. A note dismissed with `d` stayed away at the next look, while a new bug in the same file got its own note. With the timer at 5 minutes and the after-commit trigger off, a review of the uncommitted work started five minutes after switching on and was in the tab ten seconds later, with nothing in the conversation.
 
+### Explain
+
+README, "While you read" and "The editor side". The third background job: it explains the code the user is reading, from a cache that is per project.
+
+**The never-stale rule** is the owner's hardest requirement for it, and it is enforced in `knowledge.ts` and `explainer.ts`, not left to callers:
+
+- A symbol stores a fingerprint of the exact lines it covers, and its first line. `freshSymbols` finds each symbol again in the file as it is now, wherever its lines moved, and leaves out any whose text changed at all. A view is built only from those.
+- An explanation stores the fingerprints of the symbols it said it relies on. `trusted()` drops it when any of them is no longer what it was. Names are resolved in the same file, or in another mapped file when exactly one has a symbol of that name.
+- A model's outline is checked by `placeSymbols`: each symbol must quote its first line, which has to be found at the line it names or within five lines of it. An entry that fails is dropped.
+- A lookup reads the file before and after the model call. An answer for text that changed in between is not stored (`stale`, or `again` for a mapping, which is then redone).
+- The file summary and the outline's one-line summaries are shown only while the file's fingerprint is the one they were written for.
+
+**The engine** (`createExplainer(ports)`) never makes a read wait on a model. `view(spot, intent)` answers from memory and disk and queues what is missing. The intent decides how eagerly:
+
+| Intent | Who | Priority | Waits for the file to settle | Stops near the plan limit |
+| --- | --- | --- | --- | --- |
+| `asked` | `/bsd explain`, `n`, `p`, `f`, the lookup tool | first | no | never |
+| `browsing` | an editor's cursor, a refresh of a spot already shown | first | yes | at 95% |
+| `following` | a save | after those | yes | at 80% |
+| (ahead) | two unexplained symbols after a file is mapped | last | n/a | at 80% |
+
+- Settling: a file that changed on disk is not mapped for `SETTLE_MS` (2.5 s) after its last change, so that typing with frequent saves costs one mapping. Explaining a symbol never waits, because it is of text that is in the file right now.
+- Two lookups run at once, plus one more for a spot someone is looking at.
+- Lookups for one file land side by side, so `commit()` applies each change to the latest state with nothing awaited in between, and writes the file one write at a time. Before that, two explanations landing together lost one of them.
+- A lookup checks again, right before it calls the model, whether its answer is already there. Two things that noticed the same gap cost one request.
+- A failed lookup is not retried for a minute (`RETRY_MS`).
+
+**In `register.tsx`**: `startExplaining` builds the ports and is part of `engage`. `refreshView` makes the view for the spot in focus, puts it in `$.state` for the tab and writes `view.json`. The focus moves with whatever moved last: the editor's `focus.json`, `/bsd explain`, the pane's keys, the lookup tool, or a save (which goes to the first symbol that changed, and does not pull the focus away from an editor that reported its cursor in the last ten minutes).
+
+While the tab is open or an editor is live, `fastPoll` runs every 100 ms: it stats the focused file and the focus file, and refreshes the view when either changed. That is what takes an old explanation off the screen within a tenth of a second of an edit, instead of at the watcher's next two-second poll. With nobody watching, it stops.
+
+Seen in a real session, on Sonnet at low thinking: `/bsd explain stats.py:11` in a file never seen before showed the full explanation 6.6 seconds later. Stepping through cached symbols with `n` and `p` took 40 to 80 ms each. Editing the function on screen took its explanation off after about 60 ms, and the new one arrived 9 seconds later. A script writing `focus.json` got its answer in `view.json` in 40 to 80 ms. In a fresh conversation, asked what a function does, the tutor called `lookup` with no permission prompt. In a conversation where it had already read the file, it answered from that instead, which is fine.
+
 ### The data folder
 
 Everything the tutor keeps between sessions is a JSON file under one folder: `$BACKSEAT_DRIVER_HOME`, else `$XDG_DATA_HOME/backseat-driver`, else `~/.local/share/backseat-driver`. `datahome.ts` builds every path in it. `scripts/dev-session.sh` sets `BACKSEAT_DRIVER_HOME` to a scratch folder (`BSD_DATA_DIR`), so a live check never touches the owner's real data.
@@ -230,14 +268,19 @@ Easy to get wrong:
 - `$.store` holds 4 MiB of JSON in total, is per install, and is cleared after `cleanupPeriodDays` without use, which is why nothing is kept there any more. It has `get`, `set`, `delete` and `keys`.
 - `$.fs` has `read` (4 MiB at most), `write` (creates folders), `list`, `exists`, `stat` and `ancestors`. It has no delete and no rename. `list` rejects on a missing folder, and `read` on a missing file. Paths may be absolute and outside the project, and no permission prompt appears.
 - `$.env.get` takes the variable's name as a string literal, and the validator lists the names.
+- A hook has ten seconds of its own time per dispatch. Time spent inside a `$` call does not count, except `$.clock.sleep`, and awaiting a plain promise does. The `lookup` tool therefore waits at most six seconds for an answer and then says what it has.
+- A call a mod makes on `$` goes through every other plugin's hooks and skips its own. A prompt the mod submits with `$.prompt.submit` does not pass its own `prompt.submit` hook, so nothing that hook attaches goes with it. Put what the model needs in the prompt's text, or give it a tool.
+- `$.model.complete(request, { signal })` can be cut short. An aborted call resolves, it does not reject.
 
 In tests:
 
 - `stubSession(on, options)` in `plugin/tests/kit.ts` is the whole fake world: the session, a git repository under `/work` with `write()`, `commit()` and `checkout()`, a clock (`session.clock.advance(ms)`), a model that answers from `session.reply(...)`, and subagents that finish when the test fires `$.turn.complete(session.finish(n, answer))`. `advance` resolves after the timers it fired and the work they started have settled, so an assertion can follow it directly.
 - A plugin's `$.agent.spawn` behaves differently in the kit than in a session. The `agent.spawn` stub receives the Agent tool's spelling (`subagent_type`, not `subagentType`), has to return `{ model }`, and whatever `agentId` it returns is dropped: the plugin gets `{ model: 'inherit' }`. Claude Code sets the id itself in a real session. So `register.tsx` falls back to `$.agent.list()` to find its reviewer by type, which is also what it needs when another mod answers the spawn, and the kit stubs `agent.list`.
 - `session.logs` holds what the plugin wrote with `$.ui.log`. A swallowed error shows up there.
+- Engines that take ports are tested without the kit. `explain.test.ts` has a `world()` whose model is answered by hand (`w.answer(request, reply)`), which is how a test changes a file while the model is still "thinking".
+- In the kit, Explain's requests are kept apart from the play-by-play's: `session.lookups`, answered with `session.explain(reply, 'text the prompt contains')`. Lookups run side by side, so a test cannot count on their order. With no answer set, a file maps to no symbols. `session.editor(file, line)` writes the focus file as an editor would.
 - The kit has a second disk for everything outside the fake repository: `session.disk` (absolute path to text), seeded with `stubSession(on, { data: { 'profiles/python.json': profile } })` and read back with `session.data('profiles/python.json')`. `session.removed` lists what the plugin deleted with `rm`. Forgetting needs the marker, so a test that expects a deletion sets `session.disk.set(MARKER_PATH, …)` or makes the plugin write something first.
-- Each test has 5 seconds. Advancing the clock by minutes runs every 2-second tick in between, so a test that advances far needs `timeoutMs` in its options.
+- A test that starts a session is written with `sessionTest` from `kit.ts`, not `test`. It is the same function with a 30-second limit in place of the default five. Every test file runs at once, each in its own process, and each test loads the whole mod first, so on a busy machine a session test can take four seconds before it has done anything. Tests of pure functions keep `test`.
 - A stub can be registered only once per event. To see inside a failing test, add what you need to `stubSession` rather than registering a second `ui.log` or `tool.call`.
 - Take temporary debug lines out by hand. `git checkout <file>` also throws away every other uncommitted change in that file.
 

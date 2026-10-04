@@ -30,6 +30,12 @@ export type Settings = {
     model: string
     thinking: Thinking
   }
+  explain: {
+    /** `automatic` looks up what is in focus and what is saved. `on request` waits to be asked. */
+    mode: 'automatic' | 'on request' | 'off'
+    model: string
+    thinking: Thinking
+  }
 }
 
 const THINKING: readonly Thinking[] = ['low', 'medium', 'high', 'xhigh', 'max']
@@ -78,6 +84,11 @@ export function readSettings(options: PluginOptions): Settings {
       everyMs: durationMs(options.deep_review_every, 0),
       model: text(options.deep_review_model, 'opus'),
       thinking: thinking(options.deep_review_thinking, 'high'),
+    },
+    explain: {
+      mode: options.explain === 'off' ? 'off' : options.explain === 'on request' ? 'on request' : 'automatic',
+      model: text(options.explain_model, 'sonnet'),
+      thinking: thinking(options.explain_thinking, 'low'),
     },
   }
 }

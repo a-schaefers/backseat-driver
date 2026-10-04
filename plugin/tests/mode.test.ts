@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { HELP, helpText, isModeRequest, parseRequest, transition } from '../hooks/mode'
 import { parseProfile, subjectKey } from '../hooks/profiles'
-import { SESSION, stubSession, typed } from './kit'
+import { SESSION, sessionTest, stubSession, typed } from './kit'
 
 test('parseRequest: no argument means on, an unknown word means help', async () => {
   expect(parseRequest('')).toEqual({ request: 'on', rest: '' })
@@ -35,7 +35,7 @@ test('transition: status never changes the mode', async () => {
   expect(transition('paused', 'status')).toEqual({ to: 'paused', text: 'Backseat Driver is paused.' })
 })
 
-test('/bsd and /backseat-driver switch the same tutor', async ($, on) => {
+sessionTest('/bsd and /backseat-driver switch the same tutor', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
 
@@ -57,7 +57,7 @@ test('/bsd and /backseat-driver switch the same tutor', async ($, on) => {
   expect(stopped.text).toBe('Backseat Driver is off. Claude Code is back to normal.')
 })
 
-test('the pane opens with the tutor, closes with it, and stays through a pause', async ($, on) => {
+sessionTest('the pane opens with the tutor, closes with it, and stays through a pause', async ($, on) => {
   const calls = stubSession(on)
   await $.session.start(SESSION)
   expect(calls.opened).toEqual([])
@@ -80,7 +80,7 @@ test('the pane opens with the tutor, closes with it, and stays through a pause',
   expect(calls.closed).toEqual(['backseat-driver'])
 })
 
-test('the tutor is still on after /clear', async ($, on) => {
+sessionTest('the tutor is still on after /clear', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -91,7 +91,7 @@ test('the tutor is still on after /clear', async ($, on) => {
   expect(status.text).toBe('Backseat Driver is on. Voice: default. Engineering: default.')
 })
 
-test('/bsd answers before its setup has finished', async ($, on) => {
+sessionTest('/bsd answers before its setup has finished', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': 'x = 1\n' } })
   await $.session.start(SESSION)
 
@@ -106,7 +106,7 @@ test('/bsd answers before its setup has finished', async ($, on) => {
   expect(session.tools.length > 0).toBe(true)
 })
 
-test('switching off while the tutor is still starting leaves nothing running', async ($, on) => {
+sessionTest('switching off while the tutor is still starting leaves nothing running', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
 
@@ -120,7 +120,7 @@ test('switching off while the tutor is still starting leaves nothing running', a
   expect(session.asked).toEqual([])
 })
 
-test('/bsd help and an unknown word print the commands, and change nothing', async ($, on) => {
+sessionTest('/bsd help and an unknown word print the commands, and change nothing', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
 
@@ -129,7 +129,7 @@ test('/bsd help and an unknown word print the commands, and change nothing', asy
   expect(session.opened).toEqual([])
 })
 
-test('/bsd questions asks again, about everything in play', async ($, on) => {
+sessionTest('/bsd questions asks again, about everything in play', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': 'x = 1\n' } })
   expect((await $.command.run(typed('bsd', 'questions'))).text).toBe('Backseat Driver is off. Run /bsd to start it.')
 

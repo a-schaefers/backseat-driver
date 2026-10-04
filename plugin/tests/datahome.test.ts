@@ -18,7 +18,7 @@ import {
 import { fingerprint, shortHash } from '../hooks/hash'
 import { emptyProfile, parseProfile, withAnswers, withHush } from '../hooks/profiles'
 import { memoryDisk, readJson, writeJson } from '../hooks/storage'
-import { DATA_HOME, ROOT, SESSION, stubSession, typed } from './kit'
+import { DATA_HOME, ROOT, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const MEAN = 'def mean(xs):\n    return sum(xs) / len(xs)\n'
 const MARKER_PATH = `${DATA_HOME}/${MARKER}`
@@ -130,7 +130,7 @@ test('forget: what a word names, and what each scope deletes', async () => {
   )
 })
 
-test('profiles left in the plugin store move into files, once', async ($, on) => {
+sessionTest('profiles left in the plugin store move into files, once', async ($, on) => {
   const stored = withHush(withAnswers(emptyProfile(), { level: 'None yet' }), { topic: 'type-hints', text: 'type hints' })
   const session = stubSession(on, {
     head: { 'stats.py': MEAN },
@@ -149,7 +149,7 @@ test('profiles left in the plugin store move into files, once', async ($, on) =>
   expect(session.asked).toEqual([])
 })
 
-test('a profile already in a file is not overwritten by an older one in the store', async ($, on) => {
+sessionTest('a profile already in a file is not overwritten by an older one in the store', async ($, on) => {
   const session = stubSession(on, {
     head: { 'stats.py': MEAN },
     store: { 'subject/python': withAnswers(emptyProfile(), { level: 'None yet' }) },
@@ -163,7 +163,7 @@ test('a profile already in a file is not overwritten by an older one in the stor
   expect([...session.store.keys()]).toEqual([])
 })
 
-test('BACKSEAT_DRIVER_HOME moves the data folder', async ($, on) => {
+sessionTest('BACKSEAT_DRIVER_HOME moves the data folder', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN }, env: { BACKSEAT_DRIVER_HOME: '/elsewhere' } })
   session.answers.push('Python', 'None yet')
   await $.session.start(SESSION)
@@ -175,7 +175,7 @@ test('BACKSEAT_DRIVER_HOME moves the data folder', async ($, on) => {
   expect([...session.disk.keys()].some(path => path.startsWith(DATA_HOME))).toBe(false)
 })
 
-test('/bsd forget python deletes that language only after an explicit yes', { timeoutMs: 20_000 }, async ($, on) => {
+sessionTest('/bsd forget python deletes that language only after an explicit yes', async ($, on) => {
   const session = stubSession(on, {
     head: { 'stats.py': MEAN },
     data: {
@@ -212,7 +212,7 @@ test('/bsd forget python deletes that language only after an explicit yes', { ti
   expect(session.logs).toContain('Forgot your Python profile and progress.')
 })
 
-test('/bsd forget asks what, and forgetting everything takes the words typed out', { timeoutMs: 20_000 }, async ($, on) => {
+sessionTest('/bsd forget asks what, and forgetting everything takes the words typed out', async ($, on) => {
   const session = stubSession(on, {
     head: { 'stats.py': MEAN },
     data: {
@@ -238,7 +238,7 @@ test('/bsd forget asks what, and forgetting everything takes the words typed out
   expect(session.logs).toContain("Forgot every profile, every progress record and every project's cache.")
 })
 
-test('/bsd forget project clears this project and leaves the languages alone', { timeoutMs: 20_000 }, async ($, on) => {
+sessionTest('/bsd forget project clears this project and leaves the languages alone', async ($, on) => {
   const session = stubSession(on, {
     head: { 'stats.py': MEAN },
     data: {
@@ -268,7 +268,7 @@ test('/bsd forget project clears this project and leaves the languages alone', {
   await ui.unmount()
 })
 
-test('nothing is deleted from a folder that does not carry the tutor\'s marker', async ($, on) => {
+sessionTest('nothing is deleted from a folder that does not carry the tutor\'s marker', async ($, on) => {
   const session = stubSession(on, {
     head: { 'stats.py': MEAN },
     env: { BACKSEAT_DRIVER_HOME: '/home/me/Documents' },

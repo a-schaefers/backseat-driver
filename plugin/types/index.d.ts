@@ -2,7 +2,7 @@
 export type Mode = 'off' | 'on' | 'paused'
 
 /** The pane's tabs. `play` is the play-by-play and the default view. */
-export type Tab = 'play' | 'review' | 'profile'
+export type Tab = 'play' | 'review' | 'explain' | 'profile'
 
 /** How much a note matters, most first: `bug` will break, `risk` may, `idiom` and `tip` teach. */
 export type NoteKind = 'bug' | 'risk' | 'idiom' | 'tip'
@@ -78,6 +78,45 @@ export type Profiles = {
   subjects: Record<string, Profile>
 }
 
+/** Where the person is looking: a path from the repository root and a 1-based line. `endLine` past `line` means a selection. */
+export type Spot = { path: string; line: number; endLine?: number }
+
+export type ExplainStatus =
+  /** Everything about the spot is on screen and current. */
+  | 'fresh'
+  /** Something is being fetched. What is shown is current, and more is coming. */
+  | 'updating'
+  /** There are gaps that nobody has asked to fill: lookups are on request. */
+  | 'waiting'
+  /** There are gaps, and they are left alone because the plan's usage limit is close. */
+  | 'held'
+  /** The last attempt to fetch it failed. It is tried again after a pause. */
+  | 'failed'
+  | 'no-file'
+  | 'off'
+
+/** One symbol of a file, as the Explain tab lists it. */
+export type OutlineRow = { name: string; kind: string; startLine: number; endLine: number; summary: string }
+
+/**
+ * Everything the Explain tab shows about one spot. Nothing in it is stale:
+ * every part was checked against the file on disk when the view was made.
+ */
+export type ExplainView = {
+  spot: Spot | null
+  status: ExplainStatus
+  fileSummary: string
+  /** The symbols that are current, in file order. One that changed is missing until the file is mapped again. */
+  outline: OutlineRow[]
+  /** False while the file has changed since it was mapped. */
+  isOutlineCurrent: boolean
+  /** False for a file too large to map: only what is asked about is explained. */
+  isMappable: boolean
+  /** What is in focus: a symbol, a selection, or nothing when the line is between symbols. */
+  target: OutlineRow | null
+  detail: { what: string; how: string; why: string; watch: string; uses: string[] } | null
+}
+
 declare module 'claude-code' {
   /** The tools this plugin registers for the tutor, so that a `tool.call` hook on one is typed. */
   interface McpToolInputs {
@@ -85,6 +124,7 @@ declare module 'claude-code' {
     'mcp__backseat-driver__unhush': { topic: string; language: string }
     'mcp__backseat-driver__profile': { language: string }
     'mcp__backseat-driver__record': { about: string; language: string; answer: string }
+    'mcp__backseat-driver__lookup': { file: string; line?: number }
   }
 
   interface PluginState {
@@ -99,6 +139,8 @@ declare module 'claude-code' {
       watch: Watch
       review: Review
       profiles: Profiles
+      /** What the Explain tab shows about the spot in focus. */
+      explain: ExplainView
     }
   }
 }

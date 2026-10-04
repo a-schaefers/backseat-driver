@@ -10,9 +10,13 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteResult, Register, Timer } from 'claude-code'
 
-import type { Hush, Mode, Note, Profile, Profiles, Review, Tab, Watch } from '../types'
+import type { Hush, Mode, Note, Profile, Profiles, Review, Spot, Tab, Watch } from '../types'
 import { personaPrompt, reframeInstructions, SESSION_NOTES, stripFrontmatter, tutorSections } from './contract'
-import { dataHome, isRemovable, MARKER, MARKER_TEXT, profilePath, projectId } from './datahome'
+import { dataHome, fileEntryPath, isRemovable, MARKER, MARKER_TEXT, profilePath, projectId } from './datahome'
+import { createExplainer, NO_VIEW } from './explainer'
+import type { Explainer, Intent } from './explainer'
+import { describeSpot, parseFocusFile, parseTarget, relativeTo, viewFile, viewText } from './focus'
+import type { Focus } from './focus'
 import {
   confirmQuestion,
   describeScope,
@@ -57,7 +61,7 @@ import {
   withHush,
   withoutHush,
 } from './profiles'
-import { explainRequest, paneContext, playByPlayPrompt, reviewerSystem } from './prompts'
+import { explainAsk, explainContext, explainRequest, paneContext, playByPlayPrompt, reviewerSystem } from './prompts'
 import { firstRunQuestions, groupAnswers } from './questions'
 import type { Question } from './questions'
 import {
@@ -102,6 +106,7 @@ const selectedAtom = atom({ plugin: 'backseat-driver', key: 'selected' } as cons
 const watchAtom = atom({ plugin: 'backseat-driver', key: 'watch' } as const, IDLE)
 const reviewAtom = atom({ plugin: 'backseat-driver', key: 'review' } as const, NO_REVIEW)
 const profilesAtom = atom({ plugin: 'backseat-driver', key: 'profiles' } as const, NO_PROFILES)
+const explainAtom = atom({ plugin: 'backseat-driver', key: 'explain' } as const, NO_VIEW)
 
 /**
  * The mode is kept twice, because each copy is lost by a different event.
@@ -123,6 +128,7 @@ let contract = ''
 let persona = ''
 let lookInstructions = ''
 let reviewInstructions = ''
+let explainInstructions = ''
 /** The user's home directory, for telling their files from Claude Code's own. */
 let home = ''
 /** The folder the tutor keeps its own files in. '' until first needed, and when there is no home directory. */
@@ -149,6 +155,31 @@ let profiles: Profiles = NO_PROFILES
 /** The model's tools are registered the first time the tutor is switched on, and only then. */
 let areToolsRegistered = false
 
+/**
+ * Explain: the lookup engine, where the person is looking, and the timer
+ * that watches the file an editor writes its cursor to.
+ */
+let explainer: Explainer | null = null
+let focus: Focus | null = null
+/** When an editor last moved the focus, in clock milliseconds. A save does not move the focus away from a live editor. */
+let editorFocusAt = 0
+let focusTimer: Timer | null = null
+let focusStamp = ''
+/** Counts refreshes of the Explain view, so that a slower, older one does not overwrite a newer one. */
+let viewRun = 0
+/** The focused file's stamp when the view was last made. A different stamp now means the view may describe code that is gone. */
+let viewedStamp = ''
+let isFastPolling = false
+let writtenView = ''
+/**
+ * How often the focused file and the editor's focus file are checked while
+ * someone is watching the Explain view. A stat takes about a millisecond.
+ * This is the longest the pane can show an explanation of code that was
+ * just edited, and the longest an editor waits for its cursor to be noticed.
+ */
+const FOCUS_POLL_MS = 100
+const EDITOR_LIVE_MS = 600_000
+
 /** How close the plan's usage limit is, read at most twice a minute. */
 let slowdown: Throttle = { gapFactor: 1, isHeld: false }
 let slowdownReadAt = 0
@@ -173,14 +204,22 @@ let reviewTimer: Timer | null = null
 
 async function loadTutor($: EngineInterface, chosen: Persona): Promise<void> {
   const root = $.plugin.root
-  contract = stripFrontmatter(await $.fs.read(`${root}/skills/tutor/SKILL.md`))
-  lookInstructions = (await $.fs.read(`${root}/prompts/play-by-play.md`)).trim()
-  reviewInstructions = (await $.fs.read(`${root}/prompts/deep-review.md`)).trim()
-  persona = personaPrompt({
-    engineering: await readPersona($, 'engineering', chosen.engineering),
-    voice: await readPersona($, 'voice', chosen.voice),
-  })
-  await resolveHome($)
+  const file = (path: string): Promise<string> => $.fs.read(`${root}/${path}`)
+  // Read side by side: `/bsd` waits for these, and nothing else.
+  const [skill, lookText, reviewText, explainText, engineering, voice] = await Promise.all([
+    file('skills/tutor/SKILL.md'),
+    file('prompts/play-by-play.md'),
+    file('prompts/deep-review.md'),
+    file('prompts/explain.md'),
+    readPersona($, 'engineering', chosen.engineering),
+    readPersona($, 'voice', chosen.voice),
+    resolveHome($),
+  ])
+  contract = stripFrontmatter(skill)
+  lookInstructions = lookText.trim()
+  reviewInstructions = reviewText.trim()
+  explainInstructions = explainText.trim()
+  persona = personaPrompt({ engineering, voice })
 }
 
 /** One half of the persona, from `personas/<half>/<name>.md`, or '' for the default. */
@@ -198,12 +237,14 @@ async function readPersona($: EngineInterface, half: 'voice' | 'engineering', na
 /** Works out the user's home directory and the tutor's data folder. */
 async function resolveHome($: EngineInterface): Promise<void> {
   if (dataRoot !== '') return
-  home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE')) ?? ''
-  dataRoot = dataHome({
-    override: await $.env.get('BACKSEAT_DRIVER_HOME'),
-    xdg: await $.env.get('XDG_DATA_HOME'),
-    home,
-  })
+  const [own, profile, override, xdg] = await Promise.all([
+    $.env.get('HOME'),
+    $.env.get('USERPROFILE'),
+    $.env.get('BACKSEAT_DRIVER_HOME'),
+    $.env.get('XDG_DATA_HOME'),
+  ])
+  home = own ?? profile ?? ''
+  dataRoot = dataHome({ override, xdg, home })
 }
 
 /**
@@ -470,6 +511,19 @@ async function registerTools($: EngineInterface): Promise<void> {
     },
   })
   await $.tool.register({
+    name: 'lookup',
+    description:
+      "Backseat Driver: what a function, class or file of this project does. Call this FIRST, before Read, whenever the user asks what a piece of this codebase does, how it works or why it is there. It answers at once from the tutor's cache, which is checked against the file on disk: what the code at that line does, how, why it is there, what to watch for and what it relies on. It also turns the pane's Explain tab to that spot, so the user sees what you are talking about.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'The file: its path from the repository root, or an absolute path.' },
+        line: { type: 'number', description: 'A line inside the function or class in question. Leave it out for the file as a whole.' },
+      },
+      required: ['file'],
+    },
+  })
+  await $.tool.register({
     name: 'profile',
     description:
       'Backseat Driver: read what is on record about the user for a language that is not in play in this project, for example to explain an idea by comparison with a language they know.',
@@ -716,7 +770,12 @@ async function tick($: EngineInterface, settings: Settings): Promise<void> {
 
     const hasPendingChange = active.hasPending()
     // Usage is only looked up when there is something to look at.
-    const held = hasPendingChange ? await readSlowdown($, now) : slowdown
+    // Read before a save is followed, so that what the save sets going knows how close the limit is.
+    const held = hasPendingChange || hasChanged || (explainer?.pending() ?? 0) > 0 ? await readSlowdown($, now) : slowdown
+    if (hasChanged) await followSaves($, active.changed(), now)
+    await explainer?.tick()
+    // Until an editor has written its focus file, looking for it this often is enough.
+    if (focusTimer === null) await pollFocus($)
     const isDue = shouldLook({
       now,
       lastChangeAt,
@@ -743,6 +802,14 @@ async function tick($: EngineInterface, settings: Settings): Promise<void> {
 function stopWatching(): void {
   timer?.cancel()
   timer = null
+  focusTimer?.cancel()
+  focusTimer = null
+  explainer?.stop()
+  explainer = null
+  focus = null
+  focusStamp = ''
+  writtenView = ''
+  viewedStamp = ''
   reviewTimer?.cancel()
   reviewTimer = null
   watcher = null
@@ -820,6 +887,216 @@ async function startWatching($: EngineInterface, settings: Settings, run: number
 }
 
 /**
+ * Shows what is known about the spot in focus, and writes it where an editor
+ * can read it. `isAsked` is true when the person named the spot just now,
+ * which fetches what is missing at once. Every other refresh is the tutor
+ * keeping up: with a save, or with whatever else moved the focus there.
+ */
+async function refreshView($: EngineInterface, isAsked = false): Promise<void> {
+  const engine = explainer
+  const spot = focus
+  if (engine === null || spot === null) return
+  viewRun += 1
+  const run = viewRun
+  try {
+    const intent: Intent = isAsked ? 'asked' : spot.source === 'save' ? 'following' : 'browsing'
+    const stamp = await fileStamp($, `${repoRoot}/${spot.path}`)
+    const view = await engine.view(spot, intent)
+    // A newer refresh started while this one was reading the file: its answer is the one to show.
+    if (run !== viewRun || engine !== explainer) return
+    viewedStamp = stamp
+    await update($, explainAtom, () => view)
+    const text = JSON.stringify(view)
+    if (text !== writtenView && dataRoot !== '') {
+      writtenView = text
+      await $.fs.write(`${dataRoot}/view.json`, viewFile(view, repoRoot, spot.source, await $.clock.now()))
+    }
+  } catch (error) {
+    $.ui.log(`explain failed: ${String(error)}`, { to: 'debug' })
+  }
+}
+
+async function setFocus($: EngineInterface, next: Focus, isAsked: boolean): Promise<void> {
+  focus = next
+  await refreshView($, isAsked)
+}
+
+/** Reads the file an editor writes its cursor to, when that file has changed. */
+async function pollFocus($: EngineInterface): Promise<void> {
+  if (explainer === null || dataRoot === '' || mode === 'off') return
+  const stamp = await fileStamp($, `${dataRoot}/focus.json`)
+  if (stamp === focusStamp) return
+  focusStamp = stamp
+  if (stamp === '') return
+  try {
+    const spot = parseFocusFile(await $.fs.read(`${dataRoot}/focus.json`), repoRoot)
+    if (spot === null) return
+    editorFocusAt = await $.clock.now()
+    // An editor is reporting its cursor: from now on its file is checked four times a second.
+    watchClosely($)
+    await setFocus($, { ...spot, source: 'editor' }, false)
+  } catch {
+    // Caught half-written. The next poll reads it whole.
+  }
+}
+
+/** Whether anyone can see the Explain view: the tab is open, or an editor is showing it. */
+async function isWatched($: EngineInterface): Promise<boolean> {
+  if ((await read($, tabAtom)) === 'explain') return true
+
+  return focus?.source === 'editor' && (await $.clock.now()) - editorFocusAt < EDITOR_LIVE_MS
+}
+
+/**
+ * While the Explain view is being watched, the file in focus is checked for
+ * changes far more often than the two-second poll does, so that an edit takes
+ * the old explanation off the screen in a tenth of a second, and a file that
+ * has settled is mapped without waiting for the next slow poll.
+ */
+async function fastPoll($: EngineInterface): Promise<void> {
+  if (isFastPolling || explainer === null) return
+  isFastPolling = true
+  try {
+    await pollFocus($)
+    const spot = focus
+    if (spot !== null && (await fileStamp($, `${repoRoot}/${spot.path}`)) !== viewedStamp) await refreshView($)
+    await explainer?.tick()
+    if (!(await isWatched($))) {
+      focusTimer?.cancel()
+      focusTimer = null
+    }
+  } catch (error) {
+    $.ui.log(`focus poll failed: ${String(error)}`, { to: 'debug' })
+  } finally {
+    isFastPolling = false
+  }
+}
+
+function watchClosely($: EngineInterface): void {
+  if (explainer === null) return
+  focusTimer ??= $.clock.every(FOCUS_POLL_MS, () => {
+    void fastPoll($)
+  })
+}
+
+/** Saved files are mapped again, and the focus follows the save unless an editor is reporting its cursor. */
+async function followSaves($: EngineInterface, saved: readonly string[], now: number): Promise<void> {
+  const engine = explainer
+  if (engine === null || saved.length === 0) return
+  for (const path of saved) await engine.touch(path)
+  const first = saved[0]
+  const isEditorLive = focus?.source === 'editor' && now - editorFocusAt < EDITOR_LIVE_MS
+  if (first === undefined || isEditorLive) {
+    await refreshView($)
+
+    return
+  }
+  await setFocus($, { path: first, line: await engine.where(first), source: 'save' }, false)
+}
+
+/** Starts the lookup engine for this repository. `run` is the switch-on this belongs to. */
+async function startExplaining($: EngineInterface, settings: Settings, run: number): Promise<void> {
+  if (repoRoot === '' || dataRoot === '') return
+  if (settings.explain.mode === 'off') {
+    await update($, explainAtom, (): typeof NO_VIEW => ({ ...NO_VIEW, status: 'off' }))
+
+    return
+  }
+  const root = repoRoot
+  await markHome($)
+  if (run !== engagement) return
+
+  explainer = createExplainer({
+    read: async path => {
+      try {
+        return await $.fs.read(`${root}/${path}`)
+      } catch {
+        return null
+      }
+    },
+    stamp: path => fileStamp($, `${root}/${path}`),
+    disk: diskOf($),
+    entryPath: path => fileEntryPath(dataRoot, root, path),
+    complete: async (prompt, maxTokens, signal) => {
+      const result = await $.model.complete(
+        {
+          model: settings.explain.model,
+          effort: settings.explain.thinking,
+          system: reviewerSystem(explainInstructions, [personText(profiles)], persona),
+          prompt,
+          maxTokens,
+          timeoutMs: 90_000,
+        },
+        { signal },
+      )
+
+      return result.isAnswered ? result.text : null
+    },
+    now: () => $.clock.now(),
+    project: () => ({ name: projectId(root).replace(/-[0-9a-f]{8}$/, ''), overview: '' }),
+    insights: () => [],
+    // Paused, nothing is fetched unless it is asked for.
+    mode: () => (mode === 'off' ? 'off' : mode === 'paused' ? 'on request' : settings.explain.mode),
+    pressure: () => (slowdown.isHeld ? 'held' : slowdown.gapFactor === 1 ? 'none' : 'slowed'),
+    model: settings.explain.model,
+    onChange: () => {
+      void refreshView($)
+    },
+    log: line => $.ui.log(line, { to: 'debug' }),
+  })
+  // After a reload, the pane still holds the spot it was showing. The view is made again from the file as it is now.
+  const shown = (await read($, explainAtom)).spot
+  if (shown !== null) focus = { ...shown, source: 'pane' }
+  else await update($, explainAtom, () => NO_VIEW)
+  await refreshView($)
+  await pollFocus($)
+  if (await isWatched($)) watchClosely($)
+}
+
+/** Moves the Explain tab's focus through the file's symbols. */
+async function moveFocus($: EngineInterface, step: 1 | -1): Promise<void> {
+  const view = await read($, explainAtom)
+  if (view.spot === null || view.outline.length === 0) return
+  const { target, outline } = view
+  const at = target === null ? -1 : outline.findIndex(row => row.startLine === target.startLine && row.endLine === target.endLine)
+  // From between symbols, "next" is the first one below the line and "previous" the last one above it.
+  const line = view.spot.line
+  const below = outline.findIndex(row => row.startLine > line)
+  const next =
+    at !== -1
+      ? Math.max(0, Math.min(outline.length - 1, at + step))
+      : step === 1
+        ? (below === -1 ? outline.length - 1 : below)
+        : Math.max(0, (below === -1 ? outline.length : below) - 1)
+  const row = outline[next]
+  if (row !== undefined) await setFocus($, { path: view.spot.path, line: row.startLine, source: 'pane' }, true)
+}
+
+/** What the lookup tool and `/bsd explain` share: move the focus to a spot and say what is known about it. */
+async function lookUp($: EngineInterface, spot: Spot): Promise<string> {
+  const engine = explainer
+  if (engine === null) return ''
+  await setFocus($, { ...spot, source: 'command' }, true)
+  let view = await engine.view(spot, 'asked')
+  // A lookup takes the model a few seconds, and a hook has ten of its own. This waits for some of them.
+  for (let turn = 0; turn < 12 && view.status === 'updating'; turn += 1) {
+    await $.clock.sleep(500)
+    view = await engine.view(spot, 'asked')
+  }
+  const known = viewText(view)
+  const more =
+    view.status === 'updating'
+      ? 'More is being looked up and will be in the Explain tab shortly. Read the code itself for what is not covered here.'
+      : view.status === 'failed'
+        ? 'The lookup failed, so read the code itself.'
+        : view.status === 'no-file'
+          ? 'There is no such file in this project.'
+          : ''
+
+  return [known === '' && more === '' ? `Nothing is known about ${describeSpot(spot)} yet.` : known, more].filter(part => part !== '').join('\n\n')
+}
+
+/**
  * Everything the tutor needs once it is on: the watcher, the profiles, the
  * reviewer and the tools. `/bsd` does not wait for this, so that it answers
  * at once however slow git is. `isFresh` is false when the tutor was already
@@ -833,6 +1110,7 @@ async function engage($: EngineInterface, settings: Settings, run: number, isFre
     const main = await setUpProfiles($)
     await registerReviewer($, settings)
     await registerTools($)
+    await startExplaining($, settings, run)
     // Last, so that everything already works if the questions are dismissed.
     if (isFresh && run === engagement) await ask($, settings, unasked(main))
   } catch (error) {
@@ -864,6 +1142,7 @@ async function switchTo($: EngineInterface, next: Mode, settings: Settings): Pro
     await update($, dismissedAtom, () => [])
     await update($, selectedAtom, () => null)
     await update($, reviewAtom, () => NO_REVIEW)
+    await update($, explainAtom, () => NO_VIEW)
     profiles = NO_PROFILES
     await update($, profilesAtom, () => NO_PROFILES)
     await $.ui.close({ id: 'backseat-driver' })
@@ -937,6 +1216,9 @@ async function forget($: EngineInterface, settings: Settings, named: Scope | nul
 
     // What this session holds in memory goes too, so that the blank slate starts now.
     if (scope.kind !== 'language') {
+      explainer?.reset()
+      writtenView = ''
+      await update($, explainAtom, () => NO_VIEW)
       await update($, notesAtom, () => [])
       await update($, dismissedAtom, () => [])
       await update($, selectedAtom, () => null)
@@ -1006,6 +1288,21 @@ export const register: Register = (on, options) => {
 
       return { text: 'Here are the questions again. Esc stops at any point, and the answers so far are kept.' }
     }
+    if (request === 'explain') {
+      if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
+      if (settings.explain.mode === 'off') return { text: 'Explain is switched off. Its setting is in /config.' }
+      if (explainer === null) return { text: 'Explain needs a git repository, and a moment after /bsd to get ready.' }
+      await update($, tabAtom, () => 'explain')
+      watchClosely($)
+      const spot = rest.trim() === '' ? focus : parseTarget(rest, repoRoot)
+      if (spot === null) {
+        return { text: rest.trim() === '' ? 'Name a file and a line: /bsd explain src/app.py:42' : `That is not a file in this project: ${rest.trim()}` }
+      }
+      // Not awaited: the answer goes to the pane as it arrives.
+      void setFocus($, { path: spot.path, line: spot.line, ...(spot.endLine === undefined ? {} : { endLine: spot.endLine }), source: 'command' }, true)
+
+      return { text: `Explaining ${describeSpot(spot)} in the pane.` }
+    }
     if (request === 'forget') {
       // Not awaited: the dialogs stay open for as long as the person takes.
       void forget($, settings, parseScope(rest))
@@ -1046,10 +1343,12 @@ export const register: Register = (on, options) => {
   // The conversation is told what the pane shows, so "explain note 2" means something.
   on('prompt.submit', async ($, e, next) => {
     if (mode === 'off') return next(e)
-    const shown = paneContext(await read($, notesAtom), await read($, reviewAtom))
-    if (shown === '') return next(e)
+    const shown = [paneContext(await read($, notesAtom), await read($, reviewAtom)), explainContext(await read($, explainAtom))].filter(
+      part => part !== '',
+    )
+    if (shown.length === 0) return next(e)
 
-    return next({ ...e, context: [...(e.context ?? []), shown] })
+    return next({ ...e, context: [...(e.context ?? []), ...shown] })
   })
 
   // The deep reviewer's answer. It goes to the pane, never into the conversation.
@@ -1125,6 +1424,15 @@ export const register: Register = (on, options) => {
     return { result: `Recorded${where}: "${ANSWER_LABELS[about]}: ${answer}". It is kept across sessions and projects.` }
   })
 
+  on('tool.call', { tool: 'mcp__backseat-driver__lookup' }, async ($, e) => {
+    if (mode === 'off' || explainer === null) return { result: 'Nothing is cached, because Explain is not running. Read the file instead.' }
+    const path = relativeTo(repoRoot, String(e.file ?? ''))
+    if (path === null) return { result: 'That file is not in this project.' }
+    const line = Math.floor(Number(e.line ?? 1))
+
+    return { result: await lookUp($, { path, line: Number.isFinite(line) && line >= 1 ? line : 1 }) }
+  })
+
   on('tool.call', { tool: 'mcp__backseat-driver__profile' }, async ($, e) => {
     if (mode === 'off') return { result: 'Backseat Driver is off.' }
     const subject = String(e.language ?? GENERAL).trim().toLowerCase() || GENERAL
@@ -1153,13 +1461,16 @@ export const register: Register = (on, options) => {
       review: await read($, reviewAtom),
       reviewSchedule: reviewSchedule(settings.deepReview.isAfterCommit, settings.deepReview.everyMs),
       profiles: await read($, profilesAtom),
+      explain: await read($, explainAtom),
       isFocused: e.props.isFocused,
+      columns: e.props.bodyColumns,
     }
 
     return renderPane($.ui.resolve(e), view, {
       onTab: (tab: Tab) => {
         void update($, tabAtom, () => tab)
         if (tab === 'review') void setReview($, { isUnseen: false })
+        if (tab === 'explain') watchClosely($)
       },
       onSelect: (id: number) => {
         void update($, selectedAtom, () => id)
@@ -1178,6 +1489,20 @@ export const register: Register = (on, options) => {
       },
       onQuestions: () => {
         void ask($, settings, firstRunQuestions(profiles.languages, false))
+      },
+      onExplainMove: (step: 1 | -1) => {
+        void moveFocus($, step)
+      },
+      onExplainFetch: () => {
+        void refreshView($, true)
+      },
+      onExplainAsk: () => {
+        void read($, explainAtom).then(view => {
+          const text = explainAsk(view)
+          // A prompt the mod submits skips the mod's own `prompt.submit` hook. The text
+          // names the file and the lines, and the tutor's lookup tool has the rest.
+          if (text !== '') void $.prompt.submit({ text, asUser: true })
+        })
       },
       onDismiss: (note: Note) => {
         void update($, notesAtom, open => open.filter(other => other.id !== note.id))
