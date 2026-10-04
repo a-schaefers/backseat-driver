@@ -119,6 +119,12 @@
       "title": "Progress report",
       "description": "Keep an honest record of your level in each language, judged only on commits that are yours. Each commit of yours costs one request on the deep review model.",
       "default": true
+    },
+    "update_check": {
+      "type": "boolean",
+      "title": "Check for updates",
+      "description": "Ask the plugin's GitHub repository for a newer release, at most every six hours while the tutor is on, and say so in the pane. /bsd update fetches it.",
+      "default": true
     }
   }
 }

@@ -240,6 +240,8 @@ declare module 'claude-code' {
       /** What the Explain tab shows about the spot in focus. */
       explain: ExplainView
       progress: ProgressView
+      /** What the pane says about a newer release, or ''. */
+      update: string
       /** The animated persona's line, while the animation is on. */
       speech: Speech
       /** What they are working on, for the line under the status line. */

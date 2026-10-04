@@ -42,6 +42,7 @@ import {
   dataHome,
   fileEntryPath,
   focusPath,
+  isOwnFolder,
   isRemovable,
   journalPath,
   MARKER,
@@ -81,6 +82,27 @@ import { NO_ACTIVITY } from './glance'
 import { DENIAL, isUsersFile } from './guard'
 import { languageName, languageOf, mainLanguages } from './languages'
 import { sourcePrint } from './knowledge'
+import {
+  isCheckDue,
+  installedEntry,
+  manifestRepository,
+  manifestVersion,
+  marketplaceLocation,
+  newestRelease,
+  parseUpdateRecord,
+  parseVersion,
+  shellLine,
+  tagsArgs,
+  UNINSTALL_ERASE,
+  UNINSTALL_KEEP,
+  UNINSTALL_ONLY,
+  UNINSTALL_QUESTION,
+  uninstallCommand,
+  updateCommands,
+  updateNotice,
+  versionText,
+} from './update'
+import type { Install } from './update'
 import { assessmentRequest, emptyRecord, parseAssessment, parseRecord, progressText, recordText, withAssessment } from './progress'
 import type { AssessedCommit, CommitForAssessment } from './progress'
 import { helpText, isModeRequest, parseRequest, transition } from './mode'
@@ -171,6 +193,7 @@ const profilesAtom = atom({ plugin: 'backseat-driver', key: 'profiles' } as cons
 const explainAtom = atom({ plugin: 'backseat-driver', key: 'explain' } as const, NO_VIEW)
 const NO_PROGRESS: ProgressView = { isOn: true, identity: [], records: [], busy: '', skipped: '' }
 const progressAtom = atom({ plugin: 'backseat-driver', key: 'progress' } as const, NO_PROGRESS)
+const updateAtom = atom({ plugin: 'backseat-driver', key: 'update' } as const, '')
 const speechAtom = atom({ plugin: 'backseat-driver', key: 'speech' } as const, SILENT)
 const workingAtom = atom({ plugin: 'backseat-driver', key: 'working' } as const, NO_WORKING)
 
@@ -479,14 +502,217 @@ async function git(
   $: EngineInterface,
   cwd: string | undefined,
   args: readonly string[],
-): Promise<{ exitCode: number; stdout: string }> {
+  isNetwork = false,
+): Promise<{ exitCode: number; stdout: string; stderr?: string }> {
   try {
-    return await $.process.run(['git', '--no-optional-locks', ...args], { cwd, timeoutMs: 15_000 })
+    // Over the network git must never ask for a password or a passphrase: there is nobody at its terminal.
+    const env = isNetwork ? { GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes' } : undefined
+    return await $.process.run(['git', '--no-optional-locks', ...args], { cwd, timeoutMs: isNetwork ? 30_000 : 15_000, env })
   } catch {
     // Git is missing, or took too long.
     return { exitCode: 1, stdout: '' }
   }
 }
+
+/** `claude plugin ...`, for updating or removing an installed copy. Resolves to what it printed, or why it failed. */
+async function claudeCli($: EngineInterface, argv: readonly string[]): Promise<{ ok: boolean; output: string }> {
+  try {
+    const result = await $.process.run(['claude', ...argv.slice(1)], { timeoutMs: 180_000 })
+
+    return { ok: result.exitCode === 0, output: `${result.stdout}${result.stderr}`.trim() }
+  } catch (error) {
+    return { ok: false, output: String(error) }
+  }
+}
+
+/**
+ * How this copy was installed. A clone counts only when its top folder is
+ * this repository's own layout, so that a dotfiles repository around
+ * ~/.claude is never mistaken for one and pulled.
+ */
+async function detectInstall($: EngineInterface): Promise<Install> {
+  await resolveHome($)
+  const root = $.plugin.root
+  const top = (await git($, root, ['rev-parse', '--show-toplevel'])).stdout.trim()
+  if (top !== '' && root === `${top}/plugin` && (await $.fs.exists(`${top}/.claude-plugin/marketplace.json`))) {
+    return { kind: 'clone', top }
+  }
+  const config = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${home}/.claude`
+  if (root.startsWith(`${config}/plugins/synced/`)) return { kind: 'synced' }
+  try {
+    const entry = installedEntry(await $.fs.read(`${config}/plugins/installed_plugins.json`), root)
+    if (entry !== null && entry.marketplace !== '') return { kind: 'installed', ...entry }
+  } catch {
+    // No such file: nothing is installed through a marketplace.
+  }
+
+  return { kind: 'unknown' }
+}
+
+/** Claude Code's own clone of a marketplace, or '' when it keeps none. */
+async function marketplaceClone($: EngineInterface, name: string): Promise<string> {
+  const config = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${home}/.claude`
+  try {
+    return marketplaceLocation(await $.fs.read(`${config}/plugins/known_marketplaces.json`), name)
+  } catch {
+    return ''
+  }
+}
+
+/** This copy's version, from its own manifest. */
+async function ownVersion($: EngineInterface): Promise<{ version: ReturnType<typeof manifestVersion>; repository: string }> {
+  try {
+    const manifest = await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`)
+
+    return { version: manifestVersion(manifest), repository: manifestRepository(manifest) }
+  } catch {
+    return { version: null, repository: '' }
+  }
+}
+
+/**
+ * Asks upstream for a newer release, at most every six hours, and says so in
+ * the pane. The answer is kept in `update.json`, so that the notice shows at
+ * once in a new session without asking again.
+ */
+async function checkForUpdate($: EngineInterface, settings: Settings): Promise<void> {
+  if (!settings.isUpdateCheckOn || dataRoot === '') return
+  // The setting Claude Code itself uses to keep everything inessential off the network.
+  if ((await $.env.get('CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC')) !== undefined) return
+  try {
+    const { version, repository } = await ownVersion($)
+    if (version === null) return
+    const disk = diskOf($)
+    const stored = parseUpdateRecord(await readJson(disk, `${dataRoot}/update.json`))
+    const now = await $.clock.now()
+    let latest = stored.latest
+    if (isCheckDue(stored, now)) {
+      // Releases come from where this copy came from: the clone's origin, or the marketplace's.
+      const install = await detectInstall($)
+      const from = install.kind === 'clone' ? install.top : install.kind === 'installed' ? await marketplaceClone($, install.marketplace) : ''
+      const origin = from === '' ? '' : (await git($, from, ['remote', 'get-url', 'origin'])).stdout.trim()
+      const url = origin === '' ? repository : origin
+      if (url === '') return
+      const listed = await git($, from === '' ? undefined : from, tagsArgs(url), true)
+      const newest = listed.exitCode === 0 ? newestRelease(listed.stdout) : null
+      // Offline, or no access: try again at the next switch-on, not in six hours.
+      if (listed.exitCode !== 0) return
+      latest = newest === null ? '' : versionText(newest)
+      await markHome($)
+      await writeJson(disk, `${dataRoot}/update.json`, { checkedAt: now, latest })
+    }
+    await update($, updateAtom, () => updateNotice(version, parseVersion(latest)))
+  } catch (error) {
+    $.ui.log(`update check failed: ${String(error)}`, { to: 'debug' })
+  }
+}
+
+/** `/bsd update`: fetches the newest release the way this copy was installed. */
+async function runUpdate($: EngineInterface): Promise<void> {
+  const install = await detectInstall($)
+  if (install.kind === 'clone') {
+    const changed = (await git($, install.top, ['status', '--porcelain', '--untracked-files=no'])).stdout.trim()
+    if (changed !== '') {
+      $.ui.log(`This copy, in ${install.top}, has changes of its own, so it was not updated. Commit or stash them, then run /bsd update again.`)
+
+      return
+    }
+    const pulled = await git($, install.top, ['pull', '--ff-only'], true)
+    if (pulled.exitCode !== 0) {
+      $.ui.log(`git pull in ${install.top} did not work: ${(pulled.stderr ?? pulled.stdout).trim().split('\n')[0] ?? 'no reason given'}. Nothing was changed.`)
+
+      return
+    }
+    await update($, updateAtom, () => '')
+    $.ui.log('Updated. The plugin reloads by itself in a moment, and the tutor stays as it is.')
+
+    return
+  }
+  if (install.kind === 'installed') {
+    for (const argv of updateCommands(install)) {
+      const result = await claudeCli($, argv)
+      if (!result.ok) {
+        $.ui.log(`${shellLine(argv)} did not work: ${result.output.split('\n')[0] ?? ''}. Run it in a terminal to see why.`)
+
+        return
+      }
+    }
+    await update($, updateAtom, () => '')
+    $.ui.log('Updated. Reloading plugins: the tutor stays as it is.')
+    try {
+      await $.command.run({ command: 'reload-plugins', args: '' })
+    } catch {
+      $.ui.log('Run /reload-plugins to start using the new version.')
+    }
+
+    return
+  }
+  if (install.kind === 'synced') {
+    $.ui.log('This copy comes from your claude.ai organization, which sends updates by itself. Run /reload-plugins to start using one that has arrived.')
+
+    return
+  }
+  $.ui.log('This copy was not installed from a marketplace or cloned with git, so it cannot update itself. Install it as the README says to get updates.')
+}
+
+/** Deletes the data folder itself, only when everything in it is the tutor's own. */
+async function removeHome($: EngineInterface): Promise<boolean> {
+  if (dataRoot === '') return true
+  let names: string[]
+  try {
+    names = (await $.fs.list(dataRoot)).map(entry => entry.name)
+  } catch {
+    // Already gone.
+    return true
+  }
+  if (!isOwnFolder(names)) return false
+  try {
+    return (await $.process.run(['rm', '-rf', '--', dataRoot], { timeoutMs: 15_000 })).exitCode === 0
+  } catch {
+    return false
+  }
+}
+
+/** `/bsd uninstall`: removes the plugin after asking, and erases what it remembers when told to. */
+async function runUninstall($: EngineInterface, settings: Settings): Promise<void> {
+  await resolveHome($)
+  const answer = await choose($, UNINSTALL_QUESTION, [UNINSTALL_KEEP, UNINSTALL_ERASE, UNINSTALL_ONLY])
+  if (answer !== UNINSTALL_ERASE && answer !== UNINSTALL_ONLY) {
+    $.ui.log('Nothing was removed.')
+
+    return
+  }
+  if (answer === UNINSTALL_ERASE && !isPhrase((await choose($, PHRASE_QUESTION, PHRASE_OPTIONS)) ?? '')) {
+    $.ui.log('Nothing was removed.')
+
+    return
+  }
+  if (mode !== 'off') await switchTo($, 'off', settings)
+
+  const said: string[] = []
+  if (answer === UNINSTALL_ERASE) {
+    said.push((await removeHome($)) ? 'Everything it remembered is erased.' : `Its data folder, ${dataRoot}, holds files it did not make, so it was left alone. Delete it by hand.`)
+  } else if (dataRoot !== '') {
+    said.push(`What it remembers is kept in ${dataRoot}. Delete that folder to erase it.`)
+  }
+  const install = await detectInstall($)
+  if (install.kind === 'installed') {
+    const argv = uninstallCommand(install)
+    const result = await claudeCli($, argv)
+    said.push(result.ok ? 'The plugin is uninstalled. It is gone from the next session on.' : `${shellLine(argv)} did not work. Run it in a terminal.`)
+    said.push(`Its marketplace is still added. ${shellLine(['claude', 'plugin', 'marketplace', 'remove', install.marketplace])} removes it.`)
+  } else if (install.kind === 'clone') {
+    said.push(`This copy is loaded from ${install.top} with --plugin-dir. Stop passing that flag, and delete the folder if you no longer want it.`)
+  } else if (install.kind === 'synced') {
+    said.push('This copy comes from your claude.ai organization. Remove it there, under the organization plugin settings.')
+  } else {
+    said.push('This copy was not installed from a marketplace, so remove it the way you added it.')
+  }
+  said.push('Its settings, if you changed any, stay under pluginConfigs in your Claude Code settings.json.')
+  $.ui.log(said.join(' '))
+}
+
+
 
 /** Tells the pane what they are working on, when that has changed since it was last told. */
 async function showWorking($: EngineInterface, now: number): Promise<void> {
@@ -1726,6 +1952,7 @@ async function engage($: EngineInterface, settings: Settings, run: number, isFre
     await startExplaining($, settings, run)
     if (isFresh) void maybeSurvey($, settings, run)
     if (isFresh) queueProgress($, () => placeFirst($, settings, run))
+    if (isFresh) void checkForUpdate($, settings)
     // Last, so that everything already works if the questions are dismissed.
     if (isFresh && run === engagement) await ask($, settings, unasked(main))
   } catch (error) {
@@ -1882,12 +2109,17 @@ export const register: Register = (on, options) => {
       await engage($, settings, engagement, false)
     }
 
+    try {
+      await $.command.register({ name: 'backseat-driver-update', description: 'Fetch the newest release of Backseat Driver', immediate: true })
+    } catch (error) {
+      $.ui.log(`could not register /backseat-driver-update: ${String(error)}`, { to: 'debug' })
+    }
     for (const name of COMMANDS) {
       try {
         await $.command.register({
           name,
           description: 'Turn the Backseat Driver tutor on. /bsd help lists the rest',
-          argumentHint: '[off | pause | resume | status | questions | working | help]',
+          argumentHint: '[off | pause | resume | status | explain | questions | working | forget | update | uninstall | help]',
           immediate: true,
         })
       } catch (error) {
@@ -1912,6 +2144,12 @@ export const register: Register = (on, options) => {
   })
 
   // Spelled out so that `claude plugin validate` can print which commands this answers.
+  on('command.run', { command: 'backseat-driver-update' }, $ => {
+    void runUpdate($)
+
+    return { text: 'Looking for a newer release.' }
+  })
+
   on('command.run', { command: ['backseat-driver', 'bsd'] }, async ($, e) => {
     const { request, rest, unknown } = parseRequest(e.args)
     if (request === 'help') return { text: helpText(unknown) }
@@ -1952,6 +2190,16 @@ export const register: Register = (on, options) => {
       void sayWorking($, said)
 
       return { text: said === '' ? 'Cleared. The tutor goes by your activity again.' : `Noted. Working on: ${said}` }
+    }
+    if (request === 'update') {
+      void runUpdate($)
+
+      return { text: 'Looking for a newer release.' }
+    }
+    if (request === 'uninstall') {
+      void runUninstall($, settings)
+
+      return { text: 'Nothing is removed until you confirm it. Esc keeps everything.' }
     }
     if (request === 'forget') {
       // Not awaited: the dialogs stay open for as long as the person takes.
@@ -2168,6 +2416,7 @@ export const register: Register = (on, options) => {
       explain: await read($, explainAtom),
       working: await read($, workingAtom),
       progress: await read($, progressAtom),
+      update: await read($, updateAtom),
       isFocused: e.props.isFocused,
       columns: e.props.bodyColumns,
       character: settings.isAnimated

@@ -155,6 +155,20 @@ The tutor keeps a growing record of you, so there are deliberate ways to erase i
 
 It works whether the tutor is on or off.
 
+### Update
+
+While the tutor is on, it asks the plugin's GitHub repository for its release tags, at most every six hours, and says in the pane when a newer release is out. `/bsd update`, or `/backseat-driver-update`, fetches it the way this copy was installed:
+
+- **Installed from the marketplace:** it runs `claude plugin marketplace update` and `claude plugin update`, then `/reload-plugins`. The tutor stays on through the reload. You can also have Claude Code do this by itself: `/plugin`, Marketplaces, enable auto-update. It is off by default for marketplaces other than Anthropic's.
+- **A clone loaded with `--plugin-dir`:** it runs `git pull --ff-only` in the clone, and the plugin reloads by itself. A clone with changes of its own is never pulled.
+- **Sent by your claude.ai organization:** updates arrive by themselves, and `/reload-plugins` starts using one.
+
+An installed copy is pinned to the version in its `plugin.json`, so only a release reaches it. A release is a tag named `backseat-driver--v0.3.0`, the name `claude plugin tag` gives it, on a commit whose `plugin.json` says `0.3.0`. `scripts/release.sh` cuts one. The check sends nothing but the request for the tags, never asks for a password, stays quiet when you are offline, and does not run at all when the setting is off or `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is set.
+
+### Uninstall
+
+`/bsd uninstall` asks first. "Keep it" is the answer Enter gives. Then it switches the tutor off and removes the plugin with `claude plugin uninstall`. You choose whether it also erases what it remembers. Erasing takes the words "forget everything", typed out, and deletes the data folder only when everything in it is the tutor's own. It ends by saying what is left: the marketplace entry, and any settings you changed. A clone loaded with `--plugin-dir` cannot remove itself, so it tells you how.
+
 ### Stop
 
 `/bsd pause` silences it without closing anything. `/bsd off` ends the ride, and Claude Code behaves normally again. Each new session starts with it off. Clearing the conversation with `/clear` does not switch it off.
@@ -373,6 +387,7 @@ Everything is configured in `/config`, and the three background jobs have separa
 | Explain | `automatic`, `on request`, `off` | `automatic` |
 | Explain model | `haiku`, `sonnet`, `opus`, `fable` | `sonnet` |
 | Explain thinking level | `low`, `medium`, `high`, `xhigh`, `max` | `low` |
+| Check for updates | on, off | on |
 | Progress report | on, off | on |
 
 The quiet time is how long the working tree must be still before the play-by-play looks, and the minimum gap is the shortest time between two looks. Lower both for commentary that keeps closer to your typing, or raise them for fewer interruptions and less usage. Set the play-by-play to "on request" and it looks only when you ask for a look from the pane.
@@ -438,7 +453,7 @@ A look with nothing worth saying leaves it quiet, so what it says is always abou
 - **Explain is only as good as its model's reading.** It is told to say only what the code shown supports, and line numbers it gets wrong are caught, because every symbol has to quote its own first line. What it says about a function can still be mistaken. It knows the file it is in, and other files only once they have been mapped.
 - **It spends usage in the background.** Every play-by-play look and every deep review is a model call on your plan. The play-by-play waits for a pause, sends only the change and its surroundings, runs one look at a time, slows down as your plan's usage runs out, and can be paused. A deep review costs more, because it runs a stronger model at a higher thinking level, so how often it runs is yours to set.
 - **Mods are new.** The mod API is early access and can change between Claude Code releases. Panes are drawn by the terminal CLI and by the Code tab of the desktop app. The VS Code extension's chat panel runs mods but does not draw them.
-- **A mod is code that runs with your permissions.** This one is meant to stay small and auditable: it runs `git`, reads files inside the repository and its own plugin folder, calls models, keeps what it remembers in its own data folder and draws a pane. The only other program it runs is `rm`, only when you tell it to forget something, and only on paths inside that folder, which it marks as its own before it will delete anything there. It makes no network requests of its own, installs no git hooks and never writes to your working tree. `claude plugin validate` lists every event a mod hooks and every call it makes, so you can check that before installing.
+- **A mod is code that runs with your permissions.** This one is meant to stay small and auditable: it runs `git`, reads files inside the repository and its own plugin folder, calls models, keeps what it remembers in its own data folder and draws a pane. It runs two other programs, each only when you ask: `rm` when you tell it to forget something, only on paths inside that folder, which it marks as its own before it will delete anything there, and `claude plugin` when you tell it to update or uninstall itself. Its own network traffic is the release check under [Update](#update), a `git ls-remote` at most every six hours that a setting turns off, and the fetch `/bsd update` makes when you run it. It installs no git hooks and never writes to your working tree. `claude plugin validate` lists every event a mod hooks and every call it makes, so you can check that before installing.
 - **The edit guard covers the editing tools.** A shell command can still write a file, so that part rests on the contract and on Claude Code's normal permission prompts.
 
 ## Install
@@ -494,17 +509,9 @@ To use the working copy in a project of your own, start Claude Code there with `
 
 Everything above this heading exists. What is under it is decided and is being built in the order the [roadmap](#roadmap) gives. A feature here does not exist until its line in the roadmap is checked.
 
-### Staying up to date
-
-While the tutor is on, it checks at most every six hours whether a newer release is on GitHub, and says so in the pane. `/bsd update` (or `/backseat-driver-update`) fetches it, and the tutor comes back on by itself afterwards. A setting turns the check off.
-
-### Uninstalling
-
-`/bsd uninstall` will forget everything, remove the plugin, and say what is left in your settings.
-
 ### Where it is kept
 
-The data folder that holds your profiles, and each project's journal and cache, will also hold the progress records:
+The data folder holds your profiles, your progress, and each project's journal and cache:
 
 ```text
 ~/.local/share/backseat-driver/
@@ -517,6 +524,7 @@ The data folder that holds your profiles, and each project's journal and cache, 
     files/<hash>-<name>.json    one source file: its outline and explanations
   focus.json                    written by an editor: where the cursor is, what is open
   view.json                     written by the tutor: what it knows about that spot
+  update.json                   when it last asked for a newer release, and what it found
 ```
 
 ## The editor side
@@ -590,7 +598,7 @@ Part two:
 - [x] **One cache for all three jobs.** Deep reviews write overviews and insights into the project's cache, a first look at each new project, and the play-by-play and Explain read from it, under the same never-stale rule.
 - [x] **Journal.** A record per project of what you do in the code, read by every model the tutor calls, the "Working on" line in the pane with `w` and `/bsd working`, the editor's buffers and attention in `focus.json`, and the `working` and `activity` tools for the tutor.
 - [x] **Progress.** Whose work it is, the evidence ledger, the rules for moving a level, the Progress tab, a first placement from past commits, and the observed level in every prompt.
-- [ ] **Updates and uninstall.** Release tags, the update notice, `/bsd update` and `/bsd uninstall`.
+- [x] **Updates and uninstall.** Release tags and `scripts/release.sh`, the update notice, `/bsd update` and `/backseat-driver-update`, and `/bsd uninstall`.
 - [ ] **Usability, second pass.** Every screen and command walked through in a real session.
 
 ## Related

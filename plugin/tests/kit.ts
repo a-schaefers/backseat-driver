@@ -116,6 +116,12 @@ export type StubOptions = {
   isNewProject?: boolean
   /** The email git says is the person's in the fake repository. '' for none. Default: `me@example.com`. */
   email?: string
+  /** How this copy of the plugin was installed: a clone (whose top is the plugin's parent folder), or through a marketplace. Left out, neither. */
+  install?: 'clone' | 'installed'
+  /** The release tags upstream, such as `v0.3.0`. Left out, `git ls-remote` fails, as it does offline. */
+  tags?: string[]
+  /** True when the clone has changes of its own. */
+  isCloneDirty?: boolean
 }
 
 /** Who wrote a commit in the fake repository, and anything its message says besides its title. */
@@ -156,6 +162,8 @@ export function stubSession(on: On, options: StubOptions = {}) {
       .join('\n')
   }
 
+  /** The clone's top folder, once the plugin has asked git for it. */
+  let cloneTop = ''
   const session = {
     opened: [] as string[],
     closed: [] as string[],
@@ -198,6 +206,8 @@ export function stubSession(on: On, options: StubOptions = {}) {
     ),
     /** What the plugin deleted with `rm`, in order. */
     removed: [] as string[],
+    /** The `claude` commands the plugin ran, the network git commands, and `git pull`, in order. */
+    ran: [] as string[],
     /** The folder that holds what the tutor knows about the fake repository. */
     projectFolder: `${options.env?.BACKSEAT_DRIVER_HOME ?? DATA_HOME}/projects/${projectId(ROOT)}`,
     /** A JSON file in the tutor's data folder, by path from it, or undefined when it is not there. */
@@ -274,6 +284,10 @@ export function stubSession(on: On, options: StubOptions = {}) {
     },
   }
 
+  if (options.install === 'installed') {
+    // An install path of `/` holds every folder, the plugin's included.
+    session.disk.set(`${HOME}/.claude/plugins/installed_plugins.json`, JSON.stringify({ version: 2, plugins: { 'backseat-driver@backseat-driver': [{ installPath: '/' }] } }))
+  }
   if (options.isNewProject !== true && !session.disk.has(`${session.projectFolder}/project.json`)) {
     session.disk.set(`${session.projectFolder}/project.json`, JSON.stringify({ ...emptyProject(ROOT), isSurveyed: true }))
   }
@@ -323,7 +337,10 @@ export function stubSession(on: On, options: StubOptions = {}) {
     return { value: undefined }
   })
   on('fs.exists', ($, e) => ({
-    value: session.disk.has(e.path) || [...session.disk.keys()].some(path => path.startsWith(`${e.path}/`)),
+    value:
+      (options.install === 'clone' && cloneTop !== '' && e.path === `${cloneTop}/.claude-plugin/marketplace.json`) ||
+      session.disk.has(e.path) ||
+      [...session.disk.keys()].some(path => path.startsWith(`${e.path}/`)),
   }))
   on('fs.list', ($, e) => {
     const inside = [...session.disk.keys()].filter(path => path.startsWith(`${e.path}/`))
@@ -373,7 +390,37 @@ export function stubSession(on: On, options: StubOptions = {}) {
 
       return ok('')
     }
+    if (e.argv[0] === 'claude') {
+      session.ran.push(e.argv.join(' '))
+
+      return ok('')
+    }
     if (e.argv[0] !== 'git' || e.argv[1] !== '--no-optional-locks') return { deny: `unexpected process: ${e.argv.join(' ')}` }
+    const cwd = String(e.init?.cwd ?? '')
+    if (args[0] === 'ls-remote') {
+      session.ran.push(`git ${args.join(' ')}`)
+      const tags = options.tags
+
+      return tags === undefined ? failed : ok(tags.map((tag, index) => `${commitHash(100 + index)}\trefs/tags/${tag}`).join('\n'))
+    }
+    // The plugin's own folder, and the clone it may live in.
+    if (cwd.endsWith('/plugin') || (cloneTop !== '' && cwd === cloneTop)) {
+      if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') {
+        if (options.install !== 'clone') return failed
+        cloneTop = cwd.replace(/\/plugin$/, '')
+
+        return ok(`${cloneTop}\n`)
+      }
+      if (args[0] === 'remote') return ok('git@example.com:me/backseat-driver.git\n')
+      if (args[0] === 'status') return ok(options.isCloneDirty === true ? ' M plugin/hooks/register.tsx\n' : '')
+      if (args[0] === 'pull') {
+        session.ran.push(`git ${args.join(' ')}`)
+
+        return ok('Updating 1111111..2222222\nFast-forward\n')
+      }
+
+      return failed
+    }
     if (options.isRepository === false) return failed
 
     if (args[0] === 'rev-parse') {

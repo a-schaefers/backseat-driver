@@ -33,6 +33,8 @@ export type PaneView = {
   /** What they are working on: what they said, what a look made of it, and where their activity is. */
   working: Working
   progress: ProgressView
+  /** What to say about a newer release, or ''. */
+  update: string
   /** True while the pane has the keyboard, which is when its keys work. */
   isFocused: boolean
   /** How wide the pane's body is, in columns. */
@@ -504,6 +506,7 @@ export function renderPane(kit: Kit, view: PaneView, actions: PaneActions) {
         ))}
       </Box>
       <Text dimColor>{statusLine(view)}</Text>
+      {view.update !== '' && <Text color="yellow">{view.update}</Text>}
       {/* Outside a repository there is no journal, so nothing to go on and nowhere to keep an answer. */}
       {view.watch.state !== 'no-git' && workingOn(kit, view, actions)}
       <Text> </Text>

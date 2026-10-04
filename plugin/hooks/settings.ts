@@ -20,6 +20,8 @@ export type Settings = {
   isAnimated: boolean
   /** Whether the tutor keeps a record of the person's level in each language, from their own commits. */
   isProgressOn: boolean
+  /** Whether the tutor asks the upstream repository for a newer release, at most every six hours. */
+  isUpdateCheckOn: boolean
   playByPlay: {
     isAutomatic: boolean
     quietMs: number
@@ -78,6 +80,7 @@ export function readSettings(options: PluginOptions): Settings {
     },
     isAnimated: options.animated_persona !== false,
     isProgressOn: options.progress_report !== false,
+    isUpdateCheckOn: options.update_check !== false,
     playByPlay: {
       isAutomatic: options.play_by_play !== 'on request',
       quietMs: durationMs(options.quiet_time, 10_000),

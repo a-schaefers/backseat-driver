@@ -8,6 +8,7 @@ import { PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const VIEW: PaneView = {
   progress: { isOn: true, identity: [], records: [], busy: '', skipped: '' },
+  update: '',
   mode: 'on',
   tab: 'play',
   persona: { voice: 'default', engineering: 'default' },

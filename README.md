@@ -97,6 +97,7 @@ Type `/bsd` in Claude Code. That's it. The first time you work in a language, it
 | `/bsd explain src/app.py:42` | Explain a spot in the code |
 | `/bsd working on the parser` | Say what you're doing. It usually works this out by itself |
 | `/bsd forget` | Erase what it remembers: one project, one language, or everything |
+| `/bsd update`, `/bsd uninstall` | Fetch a newer release when the pane says there is one, or remove the plugin |
 | `/bsd help` | Every command and key |
 
 **The pane.** `Ctrl+X Tab` gives the pane the keyboard, and `Esc` gives it back. `1` to `4` switch tabs. On a note, `e` asks for an explanation, `d` dismisses it, `m` mutes the topic for good and `l` looks now. In a wide terminal the pane sits beside the conversation. In a narrow one it sits above the prompt.
@@ -107,7 +108,7 @@ Type `/bsd` in Claude Code. That's it. The first time you work in a language, it
 
 - **It reads what you save.** It looks at files on disk, not at unsaved changes in your editor.
 - **It costs usage.** Each look and each review is a model call on your plan. It waits for pauses in your work, backs off near your plan's limits, and can be set to look only when you ask.
-- **It stays in its lane.** It runs git, reads your repository, keeps its memory in its own folder and draws a pane. It installs no git hooks and never writes to your working tree. [DESIGN.md](DESIGN.md#limits) has the full list.
+- **It stays in its lane.** It runs git, reads your repository, keeps its memory in its own folder and draws a pane. Its only network request of its own is a check for a newer release, every six hours at most. It installs no git hooks and never writes to your working tree. [DESIGN.md](DESIGN.md#limits) has the full list.
 - **Mods are new.** Claude Code's mod API is in early access. Panes draw in the terminal and in the desktop app's Code tab, not in the VS Code chat panel.
 
 ## Learn more

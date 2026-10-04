@@ -88,6 +88,14 @@ export function fileEntryPath(root: string, repoRoot: string, path: string): str
   return `${projectDir(root, repoRoot)}/files/${shortHash(path)}-${safeName(baseName(path))}.json`
 }
 
+/**
+ * Whether a folder holds nothing but what the tutor puts there, judged by
+ * the names directly in it. Only then may the folder itself be deleted.
+ */
+export function isOwnFolder(names: readonly string[]): boolean {
+  return names.includes(MARKER) && names.every(name => name === MARKER || REMOVABLE.some(own => own === name))
+}
+
 /** What the tutor may delete: only these, directly under its own folder. */
 export const REMOVABLE = ['profiles', 'progress', 'projects', 'focus.json', 'view.json', 'update.json'] as const
 
