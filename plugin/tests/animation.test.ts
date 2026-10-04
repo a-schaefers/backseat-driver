@@ -193,3 +193,22 @@ sessionTest('the character stands on the play-by-play and deep review tabs only'
   expect(await ui.find({ type: 'Text', text: 'Riding along. You drive.' })).toBeUndefined()
   await ui.unmount()
 })
+
+sessionTest("the character never reads out the notes a deep review leaves for the tutor's memory", async ($, on) => {
+  const session = stubSession(on)
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+  await session.clock.settle()
+
+  session.write('stats.py', MEAN)
+  session.commit('Add mean')
+  await session.clock.advance(2000)
+  const notes = { overview: 'A statistics library.', files: [], insights: [] }
+  await $.turn.complete(session.finish(1, `Good change.\n\n**Next:** test \`mean\` when empty.\n\n\`\`\`backseat-notes\n${JSON.stringify(notes)}\n\`\`\`\n`))
+  await session.clock.advance(SAY_ALL)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: "Review's in. Next: test mean when empty." })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /backseat-notes|overview/ })).toBeUndefined()
+  await ui.unmount()
+})

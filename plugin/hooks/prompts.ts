@@ -82,10 +82,13 @@ export function playByPlayPrompt<Change extends FileChange>(
   open: readonly Note[],
   dismissed: readonly Note[] = [],
   bubble: Bubble | null = null,
+  /** What is known about the project and these files, from the deep review. '' when nothing is. */
+  brief = '',
 ): { prompt: string; shown: Change[] } {
   // Only what was dismissed in the files of this look: the rest cannot come up.
   const gone = dismissed.filter(note => changes.some(change => change.path === note.file))
   const head = [
+    ...(brief === '' ? [] : ['Background:', brief, '']),
     'Notes still open in the pane:',
     open.length === 0 ? '(none)' : listNotes(open),
     '',

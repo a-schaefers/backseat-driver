@@ -6,6 +6,9 @@ import type { AgentSpec, ModelCompleteRequest, On, ToolSpec } from 'claude-code'
 import { mock, test } from 'claude-code/testing'
 import type { TestBody, TestOptions, TestRest } from 'claude-code/testing'
 
+import { projectId } from '../hooks/datahome'
+import { emptyProject } from '../hooks/project'
+
 /**
  * A test gets five seconds unless it asks for more. One that starts a session
  * loads the whole mod first, and every test file runs at once, so on a busy
@@ -105,6 +108,12 @@ export type StubOptions = {
   data?: Record<string, unknown>
   /** Environment variables besides HOME. */
   env?: Record<string, string>
+  /**
+   * True for a project the tutor has never seen, which gets a survey by the
+   * deep reviewer when the tutor is switched on. Left out, the project counts
+   * as surveyed already, so that a test's first subagent is its own.
+   */
+  isNewProject?: boolean
 }
 
 /**
@@ -157,6 +166,8 @@ export function stubSession(on: On, options: StubOptions = {}) {
     ),
     /** What the plugin deleted with `rm`, in order. */
     removed: [] as string[],
+    /** The folder that holds what the tutor knows about the fake repository. */
+    projectFolder: `${options.env?.BACKSEAT_DRIVER_HOME ?? DATA_HOME}/projects/${projectId(ROOT)}`,
     /** A JSON file in the tutor's data folder, by path from it, or undefined when it is not there. */
     data(path: string): unknown {
       const text = session.disk.get(`${DATA_HOME}/${path}`)
@@ -223,6 +234,10 @@ export function stubSession(on: On, options: StubOptions = {}) {
       if (when === undefined) session.lookupReplies.push(text)
       else session.lookupAnswers.push({ when, reply: text })
     },
+  }
+
+  if (options.isNewProject !== true && !session.disk.has(`${session.projectFolder}/project.json`)) {
+    session.disk.set(`${session.projectFolder}/project.json`, JSON.stringify({ ...emptyProject(ROOT), isSurveyed: true }))
   }
 
   on('session.start', () => ({ cwd: ROOT }))

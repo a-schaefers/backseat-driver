@@ -125,6 +125,8 @@ export type ExplainView = {
   /** What is in focus: a symbol, a selection, or nothing when the line is between symbols. */
   target: OutlineRow | null
   detail: { what: string; how: string; why: string; watch: string; uses: string[] } | null
+  /** What a deep review said about this spot that still applies, each with the commit it comes from. */
+  insights: string[]
 }
 
 declare module 'claude-code' {

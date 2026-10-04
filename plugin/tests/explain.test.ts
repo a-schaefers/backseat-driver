@@ -3,6 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import { createExplainer, RETRY_MS, SETTLE_MS } from '../hooks/explainer'
 import { detailRequest, isMappable, outlineRequest, parseDetailReply, parseOutline } from '../hooks/explain-prompts'
 import {
+  firstChange,
   freshSymbols,
   isDetailFresh,
   parseKnowledge,
@@ -564,4 +565,24 @@ test('a file edited under the cursor is not mapped again until it has settled', 
   // One mapping, of the text as it ended up.
   expect(w.asked.length).toBe(before + 1)
   expect(w.asked[before]?.prompt).toMatch('** 5 for')
+})
+
+test('firstChange points at where an edit begins, past blank lines', async () => {
+  const before = splitSource(STATS)
+  // A function added at the end: its first line, not the blank line before it.
+  expect(firstChange(before, splitSource(`${STATS}\n\ndef total(xs):\n    return sum(xs)\n`))).toBe(10)
+  // A change inside variance.
+  expect(firstChange(before, splitSource(STATS.replace('** 2 for', '** 3 for')))).toBe(7)
+  // Lines taken off the end: the last line that is left.
+  expect(firstChange(before, before.slice(0, 2))).toBe(2)
+  expect(firstChange(before, before)).toBe(7)
+  expect(firstChange([], ['x = 1'])).toBe(1)
+})
+
+test('a save takes the focus to where the change began, once the file has been read before', async () => {
+  const w = await visited()
+  w.save('stats.py', `${STATS}\n\ndef total(xs):\n    return sum(xs)\n`)
+  expect(await w.explainer.where('stats.py')).toBe(10)
+  w.save('stats.py', STATS.replace('m = mean(xs)', 'mu = mean(xs)'))
+  expect(await w.explainer.where('stats.py')).toBe(6)
 })

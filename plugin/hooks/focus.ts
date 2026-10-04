@@ -96,6 +96,7 @@ export function viewText(view: ExplainView): string {
     if (view.detail.watch !== '') lines.push(`Watch: ${view.detail.watch}`)
     if (view.detail.uses.length > 0) lines.push(`Relies on: ${view.detail.uses.join(', ')}`)
   }
+  for (const insight of view.insights) lines.push(`From the deep review: ${insight}`)
   if (view.outline.length > 0 && view.target === null) {
     lines.push('In this file:', ...view.outline.map(row => `- ${row.name} (${row.kind}, line ${row.startLine}): ${row.summary}`))
   }

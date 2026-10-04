@@ -54,6 +54,7 @@ const VIEW: ExplainView = {
   isMappable: true,
   target: { name: 'variance', kind: 'function', startLine: 5, endLine: 7, summary: 'How spread out a list is.' },
   detail: { ...ABOUT_VARIANCE },
+  insights: [],
 }
 
 test('relativeTo and the two ways a spot is named', async () => {

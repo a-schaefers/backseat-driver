@@ -6,6 +6,7 @@ import type { Avatar } from './avatar'
 import { languageName } from './languages'
 import { sortNotes } from './notes'
 import { ANSWER_LABELS, explained, GENERAL, recurring } from './profiles'
+import { SURVEY_SUBJECT } from './review'
 import { DEFAULT_PERSONA } from './settings'
 import type { Persona } from './settings'
 
@@ -241,12 +242,15 @@ function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
       <Text bold>{target === null ? explain.spot.path : `${explain.spot.path} · ${target.name}`}</Text>
       {target !== null && (
         <Text dimColor>
-          {target.kind}, lines {target.startLine} to {target.endLine}
+          {`${target.kind}, lines ${target.startLine} to ${target.endLine}`}
         </Text>
       )}
       {target === null && explain.fileSummary !== '' && <Text>{explain.fileSummary}</Text>}
       {target !== null && detail === null && target.summary !== '' && <Text>{target.summary}</Text>}
       {detail !== null && <Markdown key="explanation" text={detailMarkdown(detail)} />}
+      {explain.insights.map(insight => (
+        <Text>{`Deep review: ${insight}`}</Text>
+      ))}
       {notice !== '' && <Text dimColor>{notice}</Text>}
       {!explain.isMappable && <Text dimColor>This file is too large to map, so only the lines around the cursor are explained.</Text>}
       {explain.outline.length > 0 && <Text> </Text>}
@@ -273,7 +277,9 @@ function deepReview({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
   return (
     <Box flexDirection="column">
       {review.state === 'none' && <Text dimColor>No deep review yet. One runs {view.reviewSchedule}.</Text>}
-      {review.state === 'running' && <Text dimColor>Reviewing {review.subject}.</Text>}
+      {review.state === 'running' && (
+        <Text dimColor>{review.subject === SURVEY_SUBJECT ? 'Taking a first look around this project.' : `Reviewing ${review.subject}.`}</Text>
+      )}
       {review.state === 'failed' && (
         <Text>
           The review of {review.subject} did not finish: {review.text}

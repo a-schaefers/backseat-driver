@@ -120,6 +120,7 @@ Current files:
 | `explainer.ts` | The lookup engine, with its effects as ports: the queue, what may be fetched when, and never storing an answer for text that has changed |
 | `focus.ts` | The spot in focus, the two files an editor shares with the tutor, and what the conversation is told about the spot |
 | `avatar.ts` | The animated persona: a character per voice, its poses, how a line is said one word a tick, and the speech bubble |
+| `project.ts` | What is known about a project as a whole: the notes a deep review leaves, what is kept of them, and what the play-by-play and the next review are told |
 | `questions.ts` | The first-run questions |
 | `pane.tsx` | The pane's tree from plain data, with the handlers passed in |
 
@@ -241,6 +242,19 @@ README, "The animated persona". A character per voice stands at the top of the P
 
 Seen in real sessions on Sonnet at low thinking: switched on, the mascot said its hello word by word in Claude's orange and then dimmed to gray. It blinked, and its eyes turned up while a look ran. Then, arms flapping, it said "Every membership check on a list is a scan; think about what this collection is for." about a list used for membership tests, and paused it slept. With the `primeagen` voice and the `torvalds` engineering persona in a 100-column terminal, the pane sat above the prompt and the streamer said, in one line, "Factory, abstract base, one square. That's a lot of ceremony for four sides, chat." beside a note asking what each layer of a one-class hierarchy buys.
 
+### The project cache
+
+README, "What it learns about a project". `projects/<id>/project.json` holds the overview, each file's role and the deep review's insights. `reviews.json` holds the last twelve reviews' text. `files/` is Explain's.
+
+- **The deep review writes it.** `prompts/deep-review.md` asks every review to end with a fenced `backseat-notes` JSON block. `splitReview` takes the block off before the review reaches the pane, whether or not it parses, so the person never sees it. `keepReview` in `register.tsx` reads the project file right before writing it, merges the notes (`withReviewNotes`), and appends the review's text to `reviews.json`.
+- **An insight is tied to code.** It is kept with the fingerprint of the symbol it names (from the explainer, when the file has been mapped) or of the whole file, and with which of the two that is. One that cannot be fingerprinted is not kept. `insightsFor` shows it in Explain only while that fingerprint matches, and `currentInsights` passes it to the play-by-play only on the same condition. In the play-by-play's case the file has just changed, so a file-level insight is dropped and a symbol-level one survives when that symbol was not edited.
+- **The overview** is project-wide and cannot be fingerprinted. It carries the commit it was written at, and the reviewer is given it with an instruction to correct it.
+- **The survey** is a `ReviewScope` of kind `survey`: no change, a request to look around. `maybeSurvey` runs it once per project (`isSurveyed`), from `engage` on a fresh switch-on, and not when both deep review triggers are off or usage is at 80% or more. A survey's text goes to the Deep review tab and is not kept in `reviews.json`.
+- **The next review follows up.** `reviewRequest(scope, { overview, earlier })` gives it the overview and `reviewDigest` of the last three reviews.
+- In the kit, a project counts as surveyed already unless `stubSession(on, { isNewProject: true })`, so that a test's first subagent is its own.
+- Seen in a real session on Sonnet at low thinking, in a fresh two-file project: the survey started on switch-on and was in the Deep review tab about ten seconds later, as plain prose, with the overview and both files' roles in `project.json`. A commit's review landed twelve seconds after the commit, with no notes block in the tab and three insights in the cache. `/bsd explain` on a function then showed the review's insight beside it with its commit, and editing the file took the insight off the screen 200 ms later.
+- **A save moves the Explain focus to where the change began**: `firstChange` between the text the explainer last read and the new one, past blank lines. Before, it went to the first symbol that had changed, which is line 1 when the change is a new function.
+
 ### The data folder
 
 Everything the tutor keeps between sessions is a JSON file under one folder: `$BACKSEAT_DRIVER_HOME`, else `$XDG_DATA_HOME/backseat-driver`, else `~/.local/share/backseat-driver`. `datahome.ts` builds every path in it. `scripts/dev-session.sh` sets `BACKSEAT_DRIVER_HOME` to a scratch folder (`BSD_DATA_DIR`), so a live check never touches the owner's real data.
@@ -298,6 +312,7 @@ In tests:
 - In the kit, Explain's requests are kept apart from the play-by-play's: `session.lookups`, answered with `session.explain(reply, 'text the prompt contains')`. Lookups run side by side, so a test cannot count on their order. With no answer set, a file maps to no symbols. `session.editor(file, line)` writes the focus file as an editor would.
 - The kit has a second disk for everything outside the fake repository: `session.disk` (absolute path to text), seeded with `stubSession(on, { data: { 'profiles/python.json': profile } })` and read back with `session.data('profiles/python.json')`. `session.removed` lists what the plugin deleted with `rm`. Forgetting needs the marker, so a test that expects a deletion sets `session.disk.set(MARKER_PATH, …)` or makes the plugin write something first.
 - A test that starts a session is written with `sessionTest` from `kit.ts`, not `test`. It is the same function with a 30-second limit in place of the default five. Every test file runs at once, each in its own process, and each test loads the whole mod first, so on a busy machine a session test can take four seconds before it has done anything. Tests of pure functions keep `test`.
+- Under heavy load (two sessions running the suite at once), `advance` once resolved before a deep review that the timer had started had finished spawning, and the assertion after it failed. An `await session.clock.settle()` before asserting on what timers started makes that reliable.
 - A stub can be registered only once per event. To see inside a failing test, add what you need to `stubSession` rather than registering a second `ui.log` or `tool.call`.
 - Take temporary debug lines out by hand. `git checkout <file>` also throws away every other uncommitted change in that file.
 

@@ -186,6 +186,8 @@ sessionTest('the timer reviews everything since the previous review, and skips w
   session.write('stats.py', `${MEAN}\ndef total(xs):\n    return sum(xs)\n`)
   session.write('fresh.py', 'x = 1\n')
   await session.clock.advance(300_000)
+  // Under heavy load the review the timer started had once not finished spawning when `advance` resolved.
+  await session.clock.settle()
   expect(session.spawned.length).toBe(1)
   expect(session.spawned[0]?.prompt).toMatch('Review the work done since your previous review.')
   expect(session.spawned[0]?.prompt).toMatch('def total(xs):')

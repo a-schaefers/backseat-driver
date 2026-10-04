@@ -68,6 +68,24 @@ export function splitSource(text: string): string[] {
   return lines.map(line => (line.endsWith('\r') ? line.slice(0, -1) : line))
 }
 
+/**
+ * Where an edit begins: the first line of `after` that differs from
+ * `before`, moved past blank lines to the code. 1-based. When lines were
+ * only taken off the end, the last line.
+ */
+export function firstChange(before: readonly string[], after: readonly string[]): number {
+  let index = 0
+  while (index < before.length && index < after.length && before[index] === after[index]) index += 1
+  while (index < after.length - 1 && (after[index] ?? '').trim() === '') index += 1
+
+  return Math.max(1, Math.min(after.length, index + 1))
+}
+
+/** The fingerprint of a whole file's text, however its lines end. */
+export function sourcePrint(text: string): string {
+  return fingerprint(splitSource(text).join('\n'))
+}
+
 /** The fingerprint of lines `start` to `end`, 1-based and inclusive. */
 export function printOf(lines: readonly string[], start: number, end: number): string {
   return fingerprint(lines.slice(start - 1, end).join('\n'))

@@ -25,7 +25,7 @@ import {
   TALK_MS,
 } from './avatar'
 import { personaPrompt, reframeInstructions, SESSION_NOTES, stripFrontmatter, tutorSections } from './contract'
-import { dataHome, fileEntryPath, isRemovable, MARKER, MARKER_TEXT, profilePath, projectId } from './datahome'
+import { dataHome, fileEntryPath, isRemovable, MARKER, MARKER_TEXT, profilePath, projectDir, projectId } from './datahome'
 import { createExplainer, NO_VIEW } from './explainer'
 import type { Explainer, Intent } from './explainer'
 import { describeSpot, parseFocusFile, parseTarget, relativeTo, viewFile, viewText } from './focus'
@@ -54,6 +54,7 @@ import type { Throttle } from './gate'
 import { parseStatus } from './git'
 import { DENIAL, isUsersFile } from './guard'
 import { languageName, languageOf, mainLanguages } from './languages'
+import { sourcePrint } from './knowledge'
 import { helpText, isModeRequest, parseRequest, transition } from './mode'
 import { isNoiseFile } from './noise'
 import { applyReply, parseReply, withDismissed } from './notes'
@@ -74,6 +75,20 @@ import {
   withHush,
   withoutHush,
 } from './profiles'
+import {
+  emptyProject,
+  insightLine,
+  insightsFor,
+  overviewLine,
+  parseProject,
+  parseReviews,
+  projectBrief,
+  reviewDigest,
+  splitReview,
+  withReview,
+  withReviewNotes,
+} from './project'
+import type { Insight, KeptInsight, ProjectKnowledge, ReviewRecord } from './project'
 import { explainAsk, explainContext, explainRequest, paneContext, playByPlayPrompt, reviewerSystem } from './prompts'
 import type { Bubble } from './prompts'
 import { firstRunQuestions, groupAnswers } from './questions'
@@ -89,6 +104,7 @@ import {
   reviewRequest,
   scopePrint,
   scopeSubject,
+  shortHash,
   showCommitArgs,
 } from './review'
 import type { ReflogEntry, ReviewScope } from './review'
@@ -207,6 +223,13 @@ let quietLooks = 0
 let slowdown: Throttle = { gapFactor: 1, isHeld: false }
 let slowdownReadAt = 0
 const USAGE_READ_MS = 30_000
+
+/**
+ * What is known about this project as a whole, which the deep review writes
+ * and the other two jobs read, and the deep review's own recent reviews.
+ */
+let project: ProjectKnowledge | null = null
+let reviews: ReviewRecord[] = []
 
 /** The deep review's working state. */
 let repoRoot = ''
@@ -659,7 +682,10 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
       : quietLooks >= QUIET_LOOKS_BEFORE_REMARK
         ? 'remark'
         : 'insight'
-    const { prompt, shown } = playByPlayPrompt(changes, await read($, notesAtom), await read($, dismissedAtom), bubble)
+    const changedFiles = changes.map(change => change.path)
+    const current = await currentInsights($, changedFiles)
+    const brief = project === null ? '' : projectBrief(project, changedFiles, insight => current.has(insight))
+    const { prompt, shown } = playByPlayPrompt(changes, await read($, notesAtom), await read($, dismissedAtom), bubble, brief)
     const result = await $.model.complete({
       model: settings.playByPlay.model,
       effort: settings.playByPlay.thinking,
@@ -754,7 +780,7 @@ async function startReview($: EngineInterface, scope: ReviewScope): Promise<void
     const spawned = await $.agent.spawn({
       subagentType: 'backseat-driver:deep-reviewer',
       description: `Deep review of ${subject}`,
-      prompt: reviewRequest(scope),
+      prompt: reviewRequest(scope, { overview: project === null ? '' : overviewLine(project), earlier: reviewDigest(reviews) }),
     })
     const agentId = spawned.deny === undefined ? await startedReviewer($, spawned.agentId) : undefined
     if (agentId === undefined) {
@@ -768,6 +794,88 @@ async function startReview($: EngineInterface, scope: ReviewScope): Promise<void
     $.ui.log(`deep review did not start: ${String(error)}`, { to: 'debug' })
     await setReview($, { state: 'failed', text: 'the reviewer did not start' })
   }
+}
+
+/** The fingerprint of the code an insight is about, as that code is now. Null when its file cannot be read. */
+async function printForInsight($: EngineInterface, insight: Insight): Promise<{ print: string; of: 'symbol' | 'file' } | null> {
+  if (explainer !== null) return explainer.printFor(insight.file, insight.symbol)
+  try {
+    return { print: sourcePrint(await $.fs.read(`${repoRoot}/${insight.file}`)), of: 'file' }
+  } catch {
+    return null
+  }
+}
+
+/** The deep review's insights on these files whose code is still exactly what it was when they were written. */
+async function currentInsights($: EngineInterface, files: readonly string[]): Promise<Set<KeptInsight>> {
+  const current = new Set<KeptInsight>()
+  for (const insight of project?.insights ?? []) {
+    if (!files.includes(insight.file)) continue
+    const now = await printForInsight($, insight)
+    if (now !== null && now.of === insight.of && now.print === insight.print) current.add(insight)
+  }
+
+  return current
+}
+
+/** Reads what is known about this project from its cache. */
+async function loadProject($: EngineInterface): Promise<void> {
+  if (repoRoot === '' || dataRoot === '') {
+    project = null
+    reviews = []
+
+    return
+  }
+  const folder = projectDir(dataRoot, repoRoot)
+  project = parseProject(await readJson(diskOf($), `${folder}/project.json`), repoRoot)
+  reviews = parseReviews(await readJson(diskOf($), `${folder}/reviews.json`))
+}
+
+/**
+ * Keeps what a deep review said: its notes go into the project's cache, for
+ * Explain and the play-by-play to read, and its text is kept for the next
+ * review to follow up on. Resolves to the review as the person reads it.
+ */
+async function keepReview($: EngineInterface, scope: ReviewScope, answer: string): Promise<string> {
+  const { text, notes } = splitReview(answer)
+  if (repoRoot === '' || dataRoot === '') return text
+  try {
+    const at = await $.clock.now()
+    // A survey looked at the project as of HEAD. Work since a review may include uncommitted changes, so it names no commit.
+    const commit = scope.kind === 'commit' ? shortHash(scope.hash) : scope.kind === 'survey' && lastHead !== '' ? shortHash(lastHead) : ''
+    const prints = new Map<Insight, { print: string; of: 'symbol' | 'file' } | null>()
+    for (const insight of notes?.insights ?? []) prints.set(insight, await printForInsight($, insight))
+
+    const folder = projectDir(dataRoot, repoRoot)
+    const disk = diskOf($)
+    await markHome($)
+    // Read right before writing: another session may be reviewing this project too.
+    const current = parseProject(await readJson(disk, `${folder}/project.json`), repoRoot)
+    const surveyed = scope.kind === 'survey' ? { ...current, isSurveyed: true } : current
+    project = notes === null ? surveyed : withReviewNotes(surveyed, notes, commit, at, insight => prints.get(insight) ?? null)
+    await writeJson(disk, `${folder}/project.json`, project)
+    if (scope.kind !== 'survey') {
+      reviews = withReview(parseReviews(await readJson(disk, `${folder}/reviews.json`)), { commit, subject: scopeSubject(scope), at, text })
+      await writeJson(disk, `${folder}/reviews.json`, reviews)
+    }
+  } catch (error) {
+    $.ui.log(`could not keep the deep review's notes: ${String(error)}`, { to: 'debug' })
+  }
+
+  return text
+}
+
+/**
+ * A project the tutor has not seen before gets one look around by the deep
+ * review model, so that the faster models start from the big picture.
+ */
+async function maybeSurvey($: EngineInterface, settings: Settings, run: number): Promise<void> {
+  if (project === null || project.isSurveyed || reviewAgentId !== null) return
+  // With both triggers off, the deep review model runs only when asked, and that goes for this too.
+  if (!settings.deepReview.isAfterCommit && settings.deepReview.everyMs === 0) return
+  const held = await readSlowdown($, await $.clock.now())
+  if (held.isHeld || held.gapFactor !== 1 || run !== engagement || mode !== 'on') return
+  await startReview($, { kind: 'survey' })
 }
 
 async function reviewCommit($: EngineInterface, entry: ReflogEntry): Promise<void> {
@@ -902,6 +1010,8 @@ function stopWatching(): void {
   focusTimer = null
   explainer?.stop()
   explainer = null
+  project = null
+  reviews = []
   focus = null
   focusStamp = ''
   writtenView = ''
@@ -1129,8 +1239,9 @@ async function startExplaining($: EngineInterface, settings: Settings, run: numb
       return result.isAnswered ? result.text : null
     },
     now: () => $.clock.now(),
-    project: () => ({ name: projectId(root).replace(/-[0-9a-f]{8}$/, ''), overview: '' }),
-    insights: () => [],
+    project: () => ({ name: projectId(root).replace(/-[0-9a-f]{8}$/, ''), overview: project === null ? '' : overviewLine(project) }),
+    insights: (path, name, symbolPrint, filePrint) =>
+      project === null ? [] : insightsFor(project, path, name, symbolPrint, filePrint).map(insightLine),
     // Paused, nothing is fetched unless it is asked for.
     mode: () => (mode === 'off' ? 'off' : mode === 'paused' ? 'on request' : settings.explain.mode),
     pressure: () => (slowdown.isHeld ? 'held' : slowdown.gapFactor === 1 ? 'none' : 'slowed'),
@@ -1206,9 +1317,11 @@ async function engage($: EngineInterface, settings: Settings, run: number, isFre
     if (run !== engagement) return
     await moveOutOfStore($)
     const main = await setUpProfiles($)
+    await loadProject($)
     await registerReviewer($, settings)
     await registerTools($)
     await startExplaining($, settings, run)
+    if (isFresh) void maybeSurvey($, settings, run)
     // Last, so that everything already works if the questions are dismissed.
     if (isFresh && run === engagement) await ask($, settings, unasked(main))
   } catch (error) {
@@ -1316,6 +1429,8 @@ async function forget($: EngineInterface, settings: Settings, named: Scope | nul
 
     // What this session holds in memory goes too, so that the blank slate starts now.
     if (scope.kind !== 'language') {
+      project = repoRoot === '' ? null : emptyProject(repoRoot)
+      reviews = []
       explainer?.reset()
       writtenView = ''
       await update($, explainAtom, () => NO_VIEW)
@@ -1463,13 +1578,20 @@ export const register: Register = (on, options) => {
     reviewScope = null
 
     if (e.reason === 'answer' && e.answer.trim() !== '' && scope !== null) {
-      reviewedHead = scope.kind === 'commit' ? scope.hash : lastHead
-      reviewedPrint = scope.kind === 'commit' ? '' : scopePrint(scope)
+      if (scope.kind !== 'survey') {
+        reviewedHead = scope.kind === 'commit' ? scope.hash : lastHead
+        reviewedPrint = scope.kind === 'commit' ? '' : scopePrint(scope)
+      }
+      // The notes at its end go to the project's cache, and never to the pane.
+      const shown = await keepReview($, scope, e.answer)
       const isUnseen = (await read($, tabAtom)) !== 'review'
-      await setReview($, { state: 'done', text: fitReview(e.answer), isUnseen })
+      await setReview($, { state: 'done', text: fitReview(shown), isUnseen })
       if (isUnseen) $.ui.toast(`Deep review ready: ${scopeSubject(scope)}`)
       // The review ends on the one thing most worth doing next, which is worth saying out loud.
-      if (settings.isAnimated) await say($, `Review's in. ${closingLine(e.answer)}`)
+      // Its last line as shown: the notes after it are not for the person.
+      if (settings.isAnimated) await say($, `${scope.kind === 'survey' ? "I've had a look around." : "Review's in."} ${closingLine(shown)}`)
+      // What it said may be about the spot the Explain tab is on.
+      void refreshView($)
     } else {
       await setReview($, { state: 'failed', text: e.reason === 'answer' ? 'the reviewer said nothing' : e.reason })
     }

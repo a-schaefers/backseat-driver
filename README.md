@@ -136,6 +136,25 @@ A profile comes into play when you work on a file in that language. In a project
 
 Profiles are saved automatically, on your machine and outside any project, as plain JSON files in one folder: `~/.local/share/backseat-driver/`, or under `$XDG_DATA_HOME` when that is set. They are never written into your repository. It is the same folder however the plugin was installed, and nothing in it expires. The pane's Profile tab shows what the tutor has on record for the languages in play. Beside each thing you hushed is a key to bring it back, and under each language a key to answer its questions again.
 
+## What it learns about a project
+
+Your profile is per language. What the tutor learns about the code is kept per project, and the three background jobs share it:
+
+| Job | The question it answers | When it speaks |
+| --- | --- | --- |
+| Play-by-play | What should I look at in what I just wrote? | While you hack |
+| Deep review | How was the work I just finished? | After a commit |
+| Explain | What is this code I am looking at? | While you read |
+
+- **The deep review writes the big picture.** Each review ends with notes you never see: an overview of the project, what each file it read is for, and a few insights on specific functions, such as an assumption one makes or why it is the way it is. The next review is also given what the last few said, so that it can follow up instead of repeating itself.
+- **A new project gets a first look.** The first time you switch the tutor on in a project, the deep review model takes one look around and writes the overview, so that the faster models start from the big picture. It runs once per project, and not when deep reviews only run on request or your plan is near its limit.
+- **The play-by-play reads it.** Before it looks at what you just saved, the faster model is told what the project is, what the file is for, and what the deep review said about the parts of it you did not just change. It can then keep to the detail of your change with the bigger picture in front of it.
+- **Explain shows it.** Beside the function you are reading, the Explain tab shows what the last deep review said about it, with the commit it comes from.
+
+The never-stale rule holds here too. An insight is kept with a fingerprint of the code it was written about, and it is shown or passed on only while that code is exactly what it was. Change the function and what was said about the old one goes. The overview is about the project as a whole, so it is labelled with the commit it was written at, and the next review corrects it when it is wrong.
+
+All of it is plain JSON in the data folder, under `projects/<name>-<hash>/`. `/bsd forget project` erases it.
+
 ## Ground rules
 
 The tutor follows a short contract. It defines the project, so here it is in plain words:
@@ -393,20 +412,6 @@ To use the working copy in a project of your own, start Claude Code there with `
 
 Everything above this heading exists. What is under it is decided and is being built in the order the [roadmap](#roadmap) gives. A feature here does not exist until its line in the roadmap is checked.
 
-### One cache for all three jobs
-
-| Job | The question it answers | When it speaks |
-| --- | --- | --- |
-| Play-by-play | What should I look at in what I just wrote? | While you hack |
-| Deep review | How was the work I just finished? | After a commit |
-| Explain | What is this code I am looking at? | While you read |
-
-Explain keeps a cache per project, unlike your profile, which is per language. Today only Explain writes to it and reads from it. The other two jobs are to share it:
-
-- The deep review will write into it: an overview of the project, what each file is for, and insights on specific functions. A new project will get one survey by the deep review model to start it off.
-- The play-by-play will read from it, so that the faster model can keep to the detail of what you just typed with the bigger picture in front of it.
-- Explain will show what the last deep review said about the function you are on.
-
 ### Progress
 
 A report per language, the same in every project, built from what the tutor has seen you do. It shows:
@@ -434,13 +439,16 @@ While the tutor is on, it checks at most every six hours whether a newer release
 
 ### Where it is kept
 
-The data folder that holds your profiles today will also hold the progress records and each project's cache:
+The data folder that holds your profiles and each project's cache will also hold the progress records:
 
 ```text
 ~/.local/share/backseat-driver/
-  profiles/<language>.json      answers, hushes, lesson memory          (exists)
-  progress/<language>.json      evidence, level, report
-  projects/<name>-<hash>/       one project's cache
+  profiles/<language>.json      answers, hushes, lesson memory
+  progress/<language>.json      evidence, level, report                  (planned)
+  projects/<name>-<hash>/
+    project.json                overview, what each file is for, insights
+    reviews.json                the last few deep reviews
+    files/<hash>-<name>.json    one source file: its outline and explanations
   focus.json                    written by an editor: where the cursor is
   view.json                     written by the tutor: what it knows about that spot
 ```
@@ -503,7 +511,7 @@ Part two:
 - [x] **Persona in two halves.** The voice and the engineering persona as separate settings, so that how the tutor talks and whose judgment it reviews with are chosen apart.
 - [x] **Explain.** The lookup engine and its queue, the never-stale rule, the Explain tab, `/bsd explain`, the files an editor reads and writes, and a lookup tool for the tutor.
 - [x] **Animated persona.** A small character for each voice at the top of the pane, which talks at the critical and decision points a look finds, passes on a deep review's takeaway, and jokes now and then. A setting turns it off.
-- [ ] **One cache for all three jobs.** Deep reviews write overviews and insights into the cache, a survey for each new project, and both reviewers read from it.
+- [x] **One cache for all three jobs.** Deep reviews write overviews and insights into the project's cache, a first look at each new project, and the play-by-play and Explain read from it, under the same never-stale rule.
 - [ ] **Progress.** Whose work it is, the evidence ledger, the rules for moving a level, the Progress tab and a first placement from past commits.
 - [ ] **Updates and uninstall.** Release tags, the update notice, `/bsd update` and `/bsd uninstall`.
 - [ ] **Usability, second pass.** Every screen and command walked through in a real session.

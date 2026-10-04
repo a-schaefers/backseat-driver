@@ -48,6 +48,8 @@ export type ReviewScope =
       /** New files git does not track yet, which no diff shows. */
       untracked: readonly string[]
     }
+  /** No change at all: a first look around a project the tutor has not seen before. */
+  | { kind: 'survey' }
 
 export function showCommitArgs(hash: string): string[] {
   return ['show', '--no-color', '--stat', '--patch', '--format=commit %H%nAuthor: %an%nDate:   %ad%n%n%s%n%n%b', hash]
@@ -62,8 +64,12 @@ function capped(text: string): string {
   return `${text.slice(0, MAX_PATCH_CHARS)}\n[Cut here: ${text.length - MAX_PATCH_CHARS} more characters. Read the files for the rest.]`
 }
 
+/** What the pane calls a survey, which reviews nothing. */
+export const SURVEY_SUBJECT = 'a first look around this project'
+
 /** What the pane calls the thing under review. */
 export function scopeSubject(scope: ReviewScope): string {
+  if (scope.kind === 'survey') return SURVEY_SUBJECT
   if (scope.kind === 'commit') return `commit ${shortHash(scope.hash)}: ${scope.title}`
 
   return scope.log.trim() === '' ? 'your uncommitted work' : `your work since ${shortHash(scope.from)}`
@@ -74,18 +80,42 @@ export function isEmptyScope(scope: ReviewScope): boolean {
   return scope.kind === 'since' && scope.diff.trim() === '' && scope.untracked.length === 0
 }
 
+/** What the reviewer is given besides the change: what is already known, and what it said before. */
+export type ReviewContext = {
+  /** The project's overview as last written, or ''. */
+  overview: string
+  /** The reviewer's own recent reviews, newest first, or ''. */
+  earlier: string
+}
+
+function background(context: ReviewContext): string[] {
+  return [
+    ...(context.overview === '' ? [] : ['', 'What is on record about this project. Correct it in your notes if it is wrong or out of date:', context.overview]),
+    ...(context.earlier === ''
+      ? []
+      : ['', 'Your earlier reviews, newest first. Where this change answers something you raised, say so. Do not repeat a point that still stands unless it matters more now:', context.earlier]),
+  ]
+}
+
 /** The task handed to the deep reviewer. Its instructions are its system prompt. */
-export function reviewRequest(scope: ReviewScope): string {
+export function reviewRequest(scope: ReviewScope, context: ReviewContext = { overview: '', earlier: '' }): string {
   const closing =
     'The repository is your working directory. Read the files this touches, and the code around them, before you write.'
 
+  if (scope.kind === 'survey') {
+    return [
+      'Survey this project. Nothing has changed: this is a first look around, so that later reviews and explanations start from the big picture.',
+      'The repository is your working directory. Look at its layout, its entry points, its main modules and its tests. A dozen files read is plenty.',
+    ].join('\n')
+  }
   if (scope.kind === 'commit') {
-    return [`Review this commit.`, closing, '', capped(scope.patch)].join('\n')
+    return [`Review this commit.`, closing, ...background(context), '', capped(scope.patch)].join('\n')
   }
 
   return [
     'Review the work done since your previous review. Some of it is committed and some is not.',
     closing,
+    ...background(context),
     '',
     'Commits since then:',
     scope.log.trim() === '' ? '(none)' : scope.log.trim(),
@@ -100,7 +130,8 @@ export function reviewRequest(scope: ReviewScope): string {
 
 /** A cheap fingerprint of a scope, to tell whether anything changed since the previous review. */
 export function scopePrint(scope: ReviewScope): string {
-  const text = scope.kind === 'commit' ? scope.hash : `${scope.from}\n${scope.diff}\n${scope.untracked.join('\n')}`
+  const text =
+    scope.kind === 'survey' ? 'survey' : scope.kind === 'commit' ? scope.hash : `${scope.from}\n${scope.diff}\n${scope.untracked.join('\n')}`
   let hash = 5381
   for (let i = 0; i < text.length; i += 1) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0
 

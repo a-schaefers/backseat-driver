@@ -1,13 +1,14 @@
 import { detailRequest, isMappable, outlineRequest, parseDetailReply, parseOutline } from './explain-prompts'
 import type { ProjectContext } from './explain-prompts'
-import { fingerprint } from './hash'
 import {
   freshSymbols,
   isDetailFresh,
   parseKnowledge,
   placeSymbols,
   printOf,
+  firstChange,
   regionFor,
+  sourcePrint,
   splitSource,
   symbolAt,
   withDetail,
@@ -38,6 +39,7 @@ export const NO_VIEW: ExplainView = {
   isMappable: true,
   target: null,
   detail: null,
+  insights: [],
 }
 
 /**
@@ -62,8 +64,11 @@ export type ExplainPorts = {
   complete: (prompt: string, maxTokens: number, signal: AbortSignal) => Promise<string | null>
   now: () => Promise<number>
   project: () => ProjectContext
-  /** What a deep review said about a symbol. */
-  insights: (path: string, name: string) => string[]
+  /**
+   * What a deep review said about a symbol, or about its file when `name` is
+   * '', that still applies to code with these fingerprints.
+   */
+  insights: (path: string, name: string, symbolPrint: string, filePrint: string) => string[]
   /** `automatic`: fetch what the person looks at and saves. `on request`: only what they ask for. */
   mode: () => 'automatic' | 'on request' | 'off'
   pressure: () => Pressure
@@ -122,6 +127,8 @@ export function createExplainer(ports: ExplainPorts) {
   const writing = new Map<string, Promise<void>>()
   /** When each file was last seen to change on disk. A file is not mapped while it may still be being typed. */
   const changedAt = new Map<string, number>()
+  /** Where that change began, for the focus to follow a save to. */
+  const changedLine = new Map<string, number>()
   let isStopped = false
 
   /** The file as it is on disk now. The text is read again only when its stamp has changed. */
@@ -136,10 +143,13 @@ export function createExplainer(ports: ExplainPorts) {
     if (cached !== undefined && cached.stamp === stamp) return cached
     const text = await ports.read(path)
     if (text === null) return null
-    // Seen before and different now: it was just saved.
-    if (cached !== undefined && cached.text !== text) changedAt.set(path, await ports.now())
     const lines = splitSource(text)
-    const read = { stamp, text, lines, print: fingerprint(lines.join('\n')) }
+    // Seen before and different now: it was just saved.
+    if (cached !== undefined && cached.text !== text) {
+      changedAt.set(path, await ports.now())
+      changedLine.set(path, firstChange(cached.lines, lines))
+    }
+    const read = { stamp, text, lines, print: sourcePrint(text) }
     sources.delete(path)
     sources.set(path, read)
     // Only the files looked at lately are kept in memory. The oldest goes first.
@@ -277,6 +287,8 @@ export function createExplainer(ports: ExplainPorts) {
     let target: OutlineRow | null = null
     let detail: Detail | null = null
     let wanted = ''
+    // What the deep review said about the file. A symbol in focus narrows it to that symbol.
+    let insights = ports.insights(spot.path, '', '', read.print)
 
     if (end > line) {
       // A selection is explained as what it is, whatever symbols it cuts across.
@@ -292,6 +304,7 @@ export function createExplainer(ports: ExplainPorts) {
       const symbol = symbolAt(fresh, line)
       if (symbol !== undefined) {
         target = row(symbol)
+        insights = ports.insights(spot.path, symbol.name, symbol.print, read.print)
         detail = await trusted(symbol.detail)
         if (detail === null) {
           const job = detailJob(spot.path, symbol.print, symbol.endLine - symbol.startLine + 1, symbol.startLine, false, priority)
@@ -326,6 +339,7 @@ export function createExplainer(ports: ExplainPorts) {
         detail === null
           ? null
           : { what: detail.what, how: detail.how, why: detail.why, watch: detail.watch, uses: detail.uses.map(use => use.name) },
+      insights,
     }
   }
 
@@ -457,7 +471,7 @@ export function createExplainer(ports: ExplainPorts) {
         start: found.start,
         end: found.end,
         name: found.name,
-        insights: found.name === '' ? [] : ports.insights(job.path, found.name),
+        insights: found.name === '' ? [] : ports.insights(job.path, found.name, job.print, before.print),
       }),
       1500,
       signal,
@@ -506,17 +520,35 @@ export function createExplainer(ports: ExplainPorts) {
       enqueue(outlineJob(path, SAVED))
     },
     /**
-     * The line of the first symbol that has changed since the file was mapped:
-     * where the person is most likely working. 1 when nothing is known.
+     * Where the person is most likely working in a file they just saved: the
+     * line where their latest change began, when the file was read before it.
+     * Otherwise the first symbol that changed since the file was mapped, and
+     * otherwise the file's first line.
      */
     async where(path: string): Promise<number> {
       const read = await source(path)
+      if (read === null) return 1
+      const changed = changedLine.get(path)
+      if (changed !== undefined) return Math.min(changed, read.lines.length)
       const held = await knowledge(path)
-      if (read === null || held === null) return 1
+      if (held === null) return 1
       const unchanged = new Set(freshSymbols(held, read.lines).map(symbol => symbol.print))
       const edited = held.symbols.find(symbol => !unchanged.has(symbol.print))
 
       return edited === undefined ? 1 : Math.max(1, Math.min(read.lines.length, edited.startLine))
+    },
+    /**
+     * The fingerprint of a symbol as it is now, for something that wants to
+     * be tied to that code. Falls back to the whole file's when the symbol is
+     * not known by that name. Null when the file cannot be read.
+     */
+    async printFor(path: string, name: string): Promise<{ print: string; of: 'symbol' | 'file' } | null> {
+      const read = await source(path)
+      if (read === null) return null
+      const held = await knowledge(path)
+      const symbol = name === '' || held === null ? undefined : freshSymbols(held, read.lines).find(candidate => candidate.name === name)
+
+      return symbol === undefined ? { print: read.print, of: 'file' } : { print: symbol.print, of: 'symbol' }
     },
     /** Lets waiting lookups start if their time has come. Called on a timer. */
     async tick(): Promise<void> {
@@ -534,6 +566,7 @@ export function createExplainer(ports: ExplainPorts) {
       failedAt.clear()
       writing.clear()
       changedAt.clear()
+      changedLine.clear()
     },
     stop(): void {
       isStopped = true
