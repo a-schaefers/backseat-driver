@@ -16,7 +16,7 @@ const VIEW: PaneView = {
   selected: null,
   watch: { state: 'idle', lastLookAt: null, detail: '' },
   isAutomatic: true,
-  review: { state: 'none', subject: '', text: '', isUnseen: false },
+  review: { state: 'none', subject: '', text: '', isUnseen: false, decisions: [], insights: [] },
   reviewSchedule: 'after each commit',
   profiles: { languages: [], subjects: {} },
   explain: NO_VIEW,

@@ -38,6 +38,8 @@ Stance: the project is against Claude writing the user's code, not neutral. Whil
 - The pane's default view is the play-by-play. Tabs: 1 Play-by-play, 2 Deep review, 3 Explain, 4 Progress.
 - First-run questions are few and single choice: the language they know best (once ever), then three per new language (level, goals, focus). Never more than ten at once. Esc skips the rest. Re-ask with `/bsd questions` or `q` in Progress.
 - Three background jobs, each with its own model and thinking level: play-by-play (while hacking), deep review (commits), Explain (reading). The conversation uses the session's model. Explain's cache is per project (profiles are per language); all three jobs feed it and read it.
+- Learning and Explanatory modes, read-only (owner, 2026-10-04): take the good parts of Anthropic's `learning-output-style` plugin and leave all the driving to the user. Its decision-point criteria and its `★ Insight` format are adapted into the play-by-play, the deep review and the contract. A decision point is pointed out as the user's call, with what each way costs, never handed over to be written. Insights are about this codebase and this code, never general concepts, and never a defect in disguise.
+- License: MIT (owner's preference). The adapted parts stay under Apache-2.0: `THIRD_PARTY_NOTICES.md` (root and `plugin/`, identical; `npm run licenses` compares them) holds the attribution, what changed and the license text. Each adapted prompt credits it in an HTML comment at its top, which `stripComments` removes before a model sees the file. Credit the same way when adapting anything else.
 - Explain is never stale: freshness beats speed. Nothing is shown unless it matches the file on disk at that moment.
 - No editor plugins yet (vim and emacs come later). Build only the side they talk to (`focus.json`/`view.json`, below).
 - Progress is honest: one report per language across projects. A level (beginner, junior, mid, senior), why, what the next level needs, recent notes, and encouragement kept apart from the level. Only the user's own work counts. A level can come back down. It stays in step with deep reviews. The owner says it is worth the token burn.
@@ -84,6 +86,8 @@ plugin/.claude-plugin/plugin.json   manifest + userConfig (source of truth for s
 plugin/skills/tutor/SKILL.md        the contract
 plugin/personas/{voice,engineering}/*.md
 plugin/prompts/                     play-by-play.md, deep-review.md, explain.md, progress.md, speech-bubble.md
+LICENSE, plugin/LICENSE             MIT, identical
+THIRD_PARTY_NOTICES.md (also plugin/) the Apache-2.0 parts: learning-output-style, adapted
 plugin/hooks/hooks.json             {"modules": ["./register.tsx"]}
 plugin/hooks/register.tsx           all effects
 plugin/hooks/*.ts, pane.tsx         pure logic
@@ -101,7 +105,8 @@ The ground rules in README ("Claude does not edit your files" etc.) describe end
 
 ```bash
 npm install                      # once: TypeScript, the only dev dependency
-npm run check                    # validate + test + typecheck
+npm run check                    # validate + licenses + test + typecheck
+npm run licenses                 # LICENSE and THIRD_PARTY_NOTICES.md: root and plugin/ copies identical
 npm run validate                 # claude plugin validate . --strict && ./plugin --strict
 npm test                         # claude plugin test ./plugin
 npm run typecheck                # tsc -p plugin/tsconfig.json
@@ -200,6 +205,7 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 - `prompt.submit` attaches the open notes, the latest review, the character's last line and the journal brief.
 - `tool.call` on `Edit|Write|NotebookEdit` denies unless the path is Claude Code's own (`~/.claude/`, or `/tmp/claude-<uid>/`), so the tutor can still save memories.
 - Note buttons send questions with `$.prompt.submit`.
+- The contract's "Decision points are theirs" and "Insights" sections are the conversation's half of the adapted Learning and Explanatory modes: name a decision as the user's, with the trade-offs, and step back; offer a `★ Insight` box (two or three points about this code) when explaining, not in every reply.
 - Live: told to "add a median function" in a repo whose CLAUDE.md says to edit files, the tutor declined, hinted, and used that file's conventions. Ordered to use Edit, it refused without calling it.
 
 ### Play-by-play and watcher
@@ -218,6 +224,8 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 - A failed look settles nothing; backoff is 30 s, doubling, up to 10 min. An unparseable reply is settled and dropped, never retried or shown. Files beyond the prompt size limit stay unsettled for the next look. After a reload the watcher restarts from the current tree; notes survive in state.
 - The play-by-play is one `$.model.complete`, no tools, no history. It is given the open notes and the dismissed notes for the files shown. `applyReply` drops a note with the same file and topic slug as either. Dismissed notes live in state until switch-off. Lesson memory counts only notes that reached the pane.
 - The prompt says one idea per note, under 40 words (the first live note bundled three).
+- Note kinds, in sort order: `bug`, `risk`, `decision`, `idiom`, `tip`, `insight`. `decision` marks a meaningful choice (just made, or ahead in a stub or TODO: the one exception to "no notes on unfinished code"), framed as theirs with its trade-offs. `insight` is an implementation choice or a codebase pattern. At most one of each per look. The pane draws decisions first under `◆ Your call` (magenta), the problems by file, then insights under `★ Insight` (cyan) (`DECISION_HEADING`, `INSIGHT_HEADING`). `isProblem` is false for both: they never count in the lesson memory (`flagged` or `explained`). `e` on a decision asks the conversation to lay out the options and leave the choice to the user; on an insight, where else it shows up.
+- Live (decision points): a TODO for the even-count median got `◆ Your call` with the trade-off (the textbook median versus keeping the input's type) and no choice made, beside a separate `risk` for an unclosed file.
 - `d` dismisses (the same point isn't raised about that file again until switch-off). `m` hushes the topic. `e` asks the conversation for the concept, then an example on request, never a patch. `l` looks now.
 - Plan limits: `tick` reads `$.session.usage().rateLimits` (free) at most twice a minute, and only when something is pending.
   - At 80% of the tightest window: the gap is ×4, minimum 4 min.
@@ -235,6 +243,7 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
   - No git hooks (they would write into the user's repo).
 - A timed review covers `git diff <base>` against the working tree, plus untracked files by name. A scope fingerprint prevents re-reviewing the same uncommitted work; it is skipped when nothing changed.
 - `$.agent.spawn` resolves at start, with `agentId`. The answer arrives as a `turn.complete` carrying that id and goes to state, never the conversation. One review at a time; a commit made meanwhile is queued (latest only). Done → short notice, and the tab is marked new.
+- The notes block also carries `decisions` (file, line, choice, tradeoff; at most `MAX_DECISIONS` = 3). The review's `decisions` and `insights` go into the `Review` state; the tab draws the decisions before the review text and the insights after it, so the text should not repeat them. `insights` must describe choices and patterns, not defects: the first live run returned defects until the prompt said an insight is never a problem.
 - A contested point is the one review that lands in chat: the tutor delegates it to the same reviewer and reports the verdict.
 - Live: commit noticed within one tick, footer showed a background agent, review in the tab 12 s later. No conversation row, notification or attachment, then or on the next turn. Contested point verdict in chat after 32 s. The 5-min timer with after-commit off reviewed uncommitted work at 5 min.
 

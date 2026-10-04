@@ -1,3 +1,5 @@
+import type { DecisionPoint } from '../types'
+
 /**
  * What is known about a project as a whole: the part of the per-project
  * cache that the deep review writes and that Explain and the play-by-play
@@ -15,7 +17,13 @@
 export type Insight = { file: string; symbol: string; text: string }
 
 /** What a deep review leaves for the tutor's memory. */
-export type ReviewNotes = { overview: string; files: { file: string; role: string }[]; insights: Insight[] }
+export type ReviewNotes = {
+  overview: string
+  files: { file: string; role: string }[]
+  insights: Insight[]
+  /** The meaningful decision points the review found, for the pane to put first. */
+  decisions: DecisionPoint[]
+}
 
 /**
  * An insight as kept: with the commit it was written at, and a fingerprint
@@ -124,8 +132,24 @@ function parseNotes(block: string): ReviewNotes | null {
     }
   }
 
-  return { overview: text(stored.overview, MAX_OVERVIEW), files: files.slice(0, 40), insights: insights.slice(0, 20) }
+  const decisions: DecisionPoint[] = []
+  for (const item of Array.isArray(stored.decisions) ? stored.decisions : []) {
+    const decision = asRecord(item)
+    const path = cleanPath(decision?.file)
+    if (decision === null || path === '' || text(decision.choice) === '') continue
+    decisions.push({ file: path, line: Math.max(0, whole(decision.line)), choice: text(decision.choice, 200), tradeoff: text(decision.tradeoff, 400) })
+  }
+
+  return {
+    overview: text(stored.overview, MAX_OVERVIEW),
+    files: files.slice(0, 40),
+    insights: insights.slice(0, 20),
+    decisions: decisions.slice(0, MAX_DECISIONS),
+  }
 }
+
+/** A review names at most this many decision points: more than that and none of them stands out. */
+export const MAX_DECISIONS = 3
 
 /** The project file as read from disk. Whatever does not fit is dropped. */
 export function parseProject(value: unknown, root: string): ProjectKnowledge {

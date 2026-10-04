@@ -159,7 +159,15 @@ export function paneContext(notes: readonly Note[], review: Review, said = ''): 
  * was the nudge, so this asks for the next step of the contract's ladder.
  */
 export function explainRequest(note: Note): string {
-  return `Explain play-by-play note ${note.id} (${note.file} line ${note.line}): "${note.text}" I have read the nudge. Give me the concept behind it.`
+  const where = `${note.file} line ${note.line}`
+  if (note.kind === 'decision') {
+    return `Talk me through decision point ${note.id} (${where}): "${note.text}" Lay out the ways I could go and what each costs. The choice stays mine.`
+  }
+  if (note.kind === 'insight') {
+    return `Tell me more about the insight in note ${note.id} (${where}): "${note.text}" Where else does it show up in this codebase?`
+  }
+
+  return `Explain play-by-play note ${note.id} (${where}): "${note.text}" I have read the nudge. Give me the concept behind it.`
 }
 
 /** What the conversation is told about the Explain tab, or '' when it shows nothing worth telling. */

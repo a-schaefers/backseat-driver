@@ -12,7 +12,16 @@ export type ReviewReply = {
   workingOn: string
 }
 
-const KINDS: readonly NoteKind[] = ['bug', 'risk', 'idiom', 'tip']
+/**
+ * Most important first. A decision point comes after what will or may break,
+ * and before what only teaches. An insight comes last: it is never a problem.
+ */
+const KINDS: readonly NoteKind[] = ['bug', 'risk', 'decision', 'idiom', 'tip', 'insight']
+
+/** Kinds that point out something to learn from rather than something wrong. They are not lessons that keep coming back. */
+export function isProblem(kind: NoteKind): boolean {
+  return kind !== 'decision' && kind !== 'insight'
+}
 
 /** The pane never holds more than this many notes: more than a person reads is noise. */
 export const MAX_OPEN_NOTES = 8

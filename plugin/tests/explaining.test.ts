@@ -6,7 +6,7 @@ import { describeSpot, parseFocusFile, parseTarget, relativeTo, viewText } from 
 import { FORGET, SCOPE_PROJECT } from '../hooks/forget'
 import { detailMarkdown, explainNotice, outlineLine, tabRow } from '../hooks/pane'
 import { explainAsk, explainContext } from '../hooks/prompts'
-import type { ExplainView } from '../types'
+import type { ExplainView, Review } from '../types'
 import { DATA_HOME, PANE, ROOT, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const STATS = [
@@ -129,12 +129,12 @@ test('the outline gives each symbol one line, however long its summary', async (
 })
 
 test('the tabs keep to one line: full names when they fit, short ones when they do not', async () => {
-  const seen = { state: 'none', subject: '', text: '', isUnseen: false } as const
+  const seen: Review = { state: 'none', subject: '', text: '', isUnseen: false, decisions: [], insights: [] }
   expect(tabRow({ columns: 76, review: seen })).toEqual({ labels: ['Play-by-play', 'Deep review', 'Explain', 'Progress'], gap: 3 })
   expect(tabRow({ columns: 59, review: seen }).gap).toBe(3)
   expect(tabRow({ columns: 58, review: seen })).toEqual({ labels: ['Play', 'Review', 'Explain', 'Progress'], gap: 2 })
-  expect(tabRow({ columns: 60, review: { ...seen, isUnseen: true } }).labels[1]).toBe('Review (new)')
-  expect(tabRow({ columns: 76, review: { ...seen, isUnseen: true } }).labels[1]).toBe('Deep review (new)')
+  expect(tabRow({ columns: 60, review: { ...seen, isUnseen: true, decisions: [], insights: [] } }).labels[1]).toBe('Review (new)')
+  expect(tabRow({ columns: 76, review: { ...seen, isUnseen: true, decisions: [], insights: [] } }).labels[1]).toBe('Deep review (new)')
 })
 
 sessionTest('saving a file maps it once it has settled, and the Explain tab follows the save', async ($, on) => {

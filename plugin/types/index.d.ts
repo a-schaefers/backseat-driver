@@ -5,7 +5,26 @@ export type Mode = 'off' | 'on' | 'paused'
 export type Tab = 'play' | 'review' | 'explain' | 'profile'
 
 /** How much a note matters, most first: `bug` will break, `risk` may, `idiom` and `tip` teach. */
-export type NoteKind = 'bug' | 'risk' | 'idiom' | 'tip'
+/**
+ * `bug` will break, `risk` may, `idiom` and `tip` teach. `decision` marks a
+ * meaningful choice in their code, which stays theirs to make, and `insight`
+ * points out an implementation choice or a pattern of their codebase. The last
+ * two follow the Learning and Explanatory modes of Anthropic's
+ * learning-output-style plugin (Apache-2.0), turned read-only: see
+ * THIRD_PARTY_NOTICES.md.
+ */
+export type NoteKind = 'bug' | 'risk' | 'decision' | 'idiom' | 'tip' | 'insight'
+
+/** A meaningful decision point a deep review found: a choice with real trade-offs, which stays theirs to make. */
+export type DecisionPoint = {
+  /** Path from the repository root, and a line in it, 0 when the review gave none. */
+  file: string
+  line: number
+  /** What is being decided, in a few words. */
+  choice: string
+  /** What is at stake between the ways to go. */
+  tradeoff: string
+}
 
 /** One comment from the play-by-play, as the pane shows it. */
 export type Note = {
@@ -42,6 +61,10 @@ export type Review = {
   text: string
   /** True until the user has opened the tab since this review arrived. */
   isUnseen: boolean
+  /** The meaningful decisions the reviewed work made or left open. The pane puts them first. */
+  decisions: DecisionPoint[]
+  /** What the review found worth knowing about the implementation choices and patterns of this codebase. */
+  insights: string[]
 }
 
 /** What the pane's animated character is saying. */

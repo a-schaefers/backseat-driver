@@ -57,7 +57,8 @@ Let's make coding human again.
 ```
 
 - **Play-by-play.** Save, pause, and a fast model reads what changed. If it's worth saying, a short note lands in the pane: a bug, a risky pattern, a better idiom. A hint, never a fix. Fix the code and the note goes away.
-- **Deep review.** Commit, and a stronger model reviews it in context.
+- **Decision points and insights.** When your code reaches a real choice, like how to handle errors or which data structure to use, the pane marks it as **your call** and lays out what each way costs. Then it gets out of the way. It also points out ★ insights about how your codebase does things.
+- **Deep review.** Commit, and a stronger model reviews it in context, decision points first.
 - **Explain.** What the code under your cursor does, how and why. Edit the code and the old explanation is gone.
 - **Progress.** An honest level per language, beginner to senior, judged only on commits you wrote. It follows you across projects, and it can go down.
 - **Conversation.** Ask anything. Push back, and a contested point gets a second opinion. Tell it to drop a topic, and it's dropped for good. You have the last word.
@@ -97,3 +98,7 @@ Type `/bsd` in Claude Code. The first time you work in a language, it asks a few
 | `/bsd help` | Every command and key |
 
 `Ctrl+X Tab` focuses the pane, and `Esc` leaves it. `1` to `4` switch tabs. The pane draws in the terminal and in the desktop app's Code tab. Models, pacing and persona (`torvalds`, `knuth`, `primeagen`, `eli5-tldr-kiss-terse`) are set in `/config`.
+
+## License
+
+MIT. The decision points and insights are adapted, with thanks, from Anthropic's [learning-output-style](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/learning-output-style) plugin, under its Apache 2.0 license. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

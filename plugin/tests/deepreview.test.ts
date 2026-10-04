@@ -1,5 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
+import type { Review } from '../types'
+
 import { reviewSchedule } from '../hooks/pane'
 import { paneContext } from '../hooks/prompts'
 import {
@@ -69,10 +71,10 @@ test('fitReview and reviewSchedule', async () => {
 })
 
 test('paneContext tells the conversation about a finished review', async () => {
-  const none = { state: 'none', subject: '', text: '', isUnseen: false } as const
+  const none: Review = { state: 'none', subject: '', text: '', isUnseen: false, decisions: [], insights: [] }
   expect(paneContext([], none)).toBe('')
-  expect(paneContext([], { state: 'done', subject: 'commit abc: X', text: 'REVIEW', isUnseen: true })).toMatch('REVIEW')
-  expect(paneContext([], { state: 'running', subject: 'commit abc: X', text: '', isUnseen: false })).toBe('')
+  expect(paneContext([], { state: 'done', subject: 'commit abc: X', text: 'REVIEW', isUnseen: true, decisions: [], insights: [] })).toMatch('REVIEW')
+  expect(paneContext([], { state: 'running', subject: 'commit abc: X', text: '', isUnseen: false, decisions: [], insights: [] })).toBe('')
 })
 
 sessionTest('a commit is reviewed by the registered reviewer, and the review lands in the pane', async ($, on) => {

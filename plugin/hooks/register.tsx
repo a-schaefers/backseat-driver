@@ -24,7 +24,7 @@ import {
   speech,
   TALK_MS,
 } from './avatar'
-import { personaPrompt, reframeInstructions, SESSION_NOTES, stripFrontmatter, tutorSections } from './contract'
+import { personaPrompt, reframeInstructions, SESSION_NOTES, stripComments, stripFrontmatter, tutorSections } from './contract'
 import {
   addedLines,
   byLanguage,
@@ -107,7 +107,7 @@ import { assessmentRequest, emptyRecord, parseAssessment, parseRecord, progressT
 import type { AssessedCommit, CommitForAssessment } from './progress'
 import { helpText, isModeRequest, parseRequest, transition } from './mode'
 import { isNoiseFile } from './noise'
-import { applyReply, parseReply, withDismissed } from './notes'
+import { applyReply, isProblem, parseReply, withDismissed } from './notes'
 import { renderPane, reviewSchedule } from './pane'
 import {
   ANSWER_LABELS,
@@ -138,7 +138,7 @@ import {
   withReview,
   withReviewNotes,
 } from './project'
-import type { Insight, KeptInsight, ProjectKnowledge, ReviewRecord } from './project'
+import type { Insight, KeptInsight, ProjectKnowledge, ReviewNotes, ReviewRecord } from './project'
 import { explainAsk, explainContext, explainRequest, paneContext, playByPlayPrompt, reviewerSystem } from './prompts'
 import type { Bubble } from './prompts'
 import { firstRunQuestions, groupAnswers } from './questions'
@@ -178,7 +178,7 @@ const MAX_SKIPPED_TICKS = 15
 
 const IDLE: Watch = { state: 'idle', lastLookAt: null, detail: '' }
 const STARTING: Watch = { state: 'starting', lastLookAt: null, detail: '' }
-const NO_REVIEW: Review = { state: 'none', subject: '', text: '', isUnseen: false }
+const NO_REVIEW: Review = { state: 'none', subject: '', text: '', isUnseen: false, decisions: [], insights: [] }
 const NO_PROFILES: Profiles = { languages: [], subjects: {} }
 const NO_WORKING: Working = { said: '', saidAgo: '', inferred: '', where: '', share: '' }
 
@@ -339,12 +339,13 @@ async function loadTutor($: EngineInterface, chosen: Persona): Promise<void> {
     readPersona($, 'voice', chosen.voice),
     resolveHome($),
   ])
-  contract = stripFrontmatter(skill)
-  lookInstructions = lookText.trim()
-  reviewInstructions = reviewText.trim()
-  explainInstructions = explainText.trim()
-  progressInstructions = progressFile.trim()
-  bubbleInstructions = bubbleText.trim()
+  // Credits in HTML comments stay in the files and never reach a model.
+  contract = stripComments(stripFrontmatter(skill))
+  lookInstructions = stripComments(lookText)
+  reviewInstructions = stripComments(reviewText)
+  explainInstructions = stripComments(explainText)
+  progressInstructions = stripComments(progressFile)
+  bubbleInstructions = stripComments(bubbleText)
   persona = personaPrompt({ engineering, voice })
 }
 
@@ -1173,7 +1174,8 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
       recorder?.infer(reply.workingOn, paths, now)
       await showWorking($, now)
       const raised = new Map<string, string[]>()
-      for (const note of added) {
+      // A decision point or an insight is not a mistake, so it is no lesson that keeps coming back.
+      for (const note of added.filter(item => isProblem(item.kind))) {
         const subject = languageOf(note.file) ?? GENERAL
         raised.set(subject, [...(raised.get(subject) ?? []), note.topic])
       }
@@ -1218,7 +1220,7 @@ async function startedReviewer($: EngineInterface, spawnedId: string | undefined
 /** Hands a scope to the deep reviewer. Its answer arrives later, at `turn.complete`. */
 async function startReview($: EngineInterface, scope: ReviewScope): Promise<void> {
   const subject = scopeSubject(scope)
-  await setReview($, { state: 'running', subject, text: '', isUnseen: false })
+  await setReview($, { state: 'running', subject, text: '', isUnseen: false, decisions: [], insights: [] })
   try {
     const spawned = await $.agent.spawn({
       subagentType: 'backseat-driver:deep-reviewer',
@@ -1283,9 +1285,9 @@ async function loadProject($: EngineInterface): Promise<void> {
  * Explain and the play-by-play to read, and its text is kept for the next
  * review to follow up on. Resolves to the review as the person reads it.
  */
-async function keepReview($: EngineInterface, scope: ReviewScope, answer: string): Promise<string> {
+async function keepReview($: EngineInterface, scope: ReviewScope, answer: string): Promise<{ text: string; notes: ReviewNotes | null }> {
   const { text, notes } = splitReview(answer)
-  if (repoRoot === '' || dataRoot === '') return text
+  if (repoRoot === '' || dataRoot === '') return { text, notes }
   try {
     const at = await $.clock.now()
     // A survey looked at the project as of HEAD. Work since a review may include uncommitted changes, so it names no commit.
@@ -1309,7 +1311,7 @@ async function keepReview($: EngineInterface, scope: ReviewScope, answer: string
     $.ui.log(`could not keep the deep review's notes: ${String(error)}`, { to: 'debug' })
   }
 
-  return text
+  return { text, notes }
 }
 
 /**
@@ -2295,9 +2297,13 @@ export const register: Register = (on, options) => {
         reviewedPrint = scope.kind === 'commit' ? '' : scopePrint(scope)
       }
       // The notes at its end go to the project's cache, and never to the pane.
-      const shown = await keepReview($, scope, e.answer)
+      const kept = await keepReview($, scope, e.answer)
+      const shown = kept.text
       const isUnseen = (await read($, tabAtom)) !== 'review'
-      await setReview($, { state: 'done', text: fitReview(shown), isUnseen })
+      // What the pane puts first: the decision points and insights the review's notes named.
+      const decisions = kept.notes?.decisions ?? []
+      const insights = (kept.notes?.insights ?? []).map(insight => `${insight.file}${insight.symbol === '' ? '' : `, ${insight.symbol}`}: ${insight.text}`)
+      await setReview($, { state: 'done', text: fitReview(shown), isUnseen, decisions, insights })
       // A survey reviewed none of their work, so it is not part of the record of it.
       if (scope.kind !== 'survey') recorder?.add({ at: await $.clock.now(), kind: 'review', text: scopeSubject(scope) })
       if (isUnseen) $.ui.toast(`Deep review ready: ${scopeSubject(scope)}`)
@@ -2465,7 +2471,8 @@ export const register: Register = (on, options) => {
       onExplain: (note: Note) => {
         // Not awaited: it resolves when the turn starts, which may be after the one now running.
         void $.prompt.submit({ text: explainRequest(note), asUser: true })
-        void saveSubject($, settings, languageOf(note.file) ?? GENERAL, profile => withExplained(profile, note.topic))
+        // A decision point or an insight is about this one spot in their code, not an idea now explained to them.
+        if (isProblem(note.kind)) void saveSubject($, settings, languageOf(note.file) ?? GENERAL, profile => withExplained(profile, note.topic))
       },
       onMute: (note: Note) => {
         const entry = { topic: note.topic, text: note.topic.replaceAll('-', ' ') }

@@ -4,7 +4,7 @@ import type { ExplainView, Mode, Note, OutlineRow, Profile, Profiles, ProgressRe
 import { bubbleColumn, bubbleWidth, isTalking, poseOf, saidSoFar, wordsSaid } from './avatar'
 import type { Avatar } from './avatar'
 import { languageName } from './languages'
-import { sortNotes } from './notes'
+import { isProblem, sortNotes } from './notes'
 import { ANSWER_LABELS, explained, GENERAL, recurring } from './profiles'
 import { lately, levelPhrase, skillStates } from './progress'
 import { SURVEY_SUBJECT } from './review'
@@ -337,14 +337,73 @@ function deepReview({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
         </Text>
       )}
       {review.state === 'done' && <Text bold>{review.subject}</Text>}
+      {review.state === 'done' && review.decisions.length > 0 && (
+        <Box flexDirection="column">
+          <Text bold color="magenta">
+            {DECISION_HEADING}
+          </Text>
+          {review.decisions.map(decision => (
+            <Box flexDirection="column">
+              <Text>{`${decision.line > 0 ? `${decision.file}:${decision.line}` : decision.file}  ${decision.choice}`}</Text>
+              {decision.tradeoff !== '' && (
+                <Box paddingLeft={4}>
+                  <Text dimColor>{decision.tradeoff}</Text>
+                </Box>
+              )}
+            </Box>
+          ))}
+          <Text> </Text>
+        </Box>
+      )}
       {review.state === 'done' && <Markdown key="review" text={review.text} />}
+      {review.state === 'done' && review.insights.length > 0 && (
+        <Box flexDirection="column">
+          <Text> </Text>
+          <Text color="cyan">{INSIGHT_HEADING}</Text>
+          {review.insights.map(insight => (
+            <Text>{`- ${insight}`}</Text>
+          ))}
+        </Box>
+      )}
       <Text> </Text>
       <Button key="review-now" label="review now" hotkey="r" plain onPress={() => actions.onReview()} />
     </Box>
   )
 }
 
-function playByPlay({ Box, Text, Button }: Kit, view: PaneView, actions: PaneActions) {
+/**
+ * The marks that set the two learning sections apart from the rest of the
+ * notes. The ★ and the rule are the insight block of the Explanatory mode in
+ * Anthropic's learning-output-style plugin (Apache-2.0), with thanks; see
+ * THIRD_PARTY_NOTICES.md.
+ */
+export const DECISION_HEADING = '◆ Your call'
+export const INSIGHT_HEADING = '★ Insight ─────────────────────────'
+
+/** One note: the key that selects it, then its text, indented. */
+function noteRow({ Box, Text, Button }: Kit, note: Note, current: Note, label: string, actions: PaneActions) {
+  return (
+    <Box flexDirection="column">
+      <Button
+        key={`note-${note.id}`}
+        label={`${note.id === current.id ? '>' : ' '} ${label}`}
+        plain
+        dimColor={note.id !== current.id}
+        onPress={() => actions.onSelect(note.id)}
+      />
+      <Box paddingLeft={4}>
+        <Text>{note.text}</Text>
+      </Box>
+    </Box>
+  )
+}
+
+/**
+ * The play-by-play: decision points first, set apart as theirs to make, then
+ * what will or may break and what reads better, by file, then insights last.
+ */
+function playByPlay(kit: Kit, view: PaneView, actions: PaneActions) {
+  const { Box, Text, Button } = kit
   const notes = sortNotes(view.notes)
   const current = currentNote(view)
   if (current === undefined) {
@@ -357,23 +416,28 @@ function playByPlay({ Box, Text, Button }: Kit, view: PaneView, actions: PaneAct
     )
   }
 
+  const decisions = notes.filter(note => note.kind === 'decision')
+  const insights = notes.filter(note => note.kind === 'insight')
+  const others = notes.filter(note => isProblem(note.kind))
+
   return (
     <Box flexDirection="column">
-      {notes.map((note, index) => (
+      {decisions.length > 0 && (
+        <Text bold color="magenta">
+          {DECISION_HEADING}
+        </Text>
+      )}
+      {decisions.map(note => noteRow(kit, note, current, `${note.id}  ${note.file} · line ${note.line}`, actions))}
+      {decisions.length > 0 && others.length > 0 && <Text> </Text>}
+      {others.map((note, index) => (
         <Box flexDirection="column">
-          {note.file !== notes[index - 1]?.file && <Text bold>{note.file}</Text>}
-          <Button
-            key={`note-${note.id}`}
-            label={`${note.id === current.id ? '>' : ' '} ${note.id}  ${note.kind} · line ${note.line}`}
-            plain
-            dimColor={note.id !== current.id}
-            onPress={() => actions.onSelect(note.id)}
-          />
-          <Box paddingLeft={4}>
-            <Text>{note.text}</Text>
-          </Box>
+          {note.file !== others[index - 1]?.file && <Text bold>{note.file}</Text>}
+          {noteRow(kit, note, current, `${note.id}  ${note.kind} · line ${note.line}`, actions)}
         </Box>
       ))}
+      {insights.length > 0 && (decisions.length > 0 || others.length > 0) && <Text> </Text>}
+      {insights.length > 0 && <Text color="cyan">{INSIGHT_HEADING}</Text>}
+      {insights.map(note => noteRow(kit, note, current, `${note.id}  ${note.file} · line ${note.line}`, actions))}
       <Text> </Text>
       <Box flexDirection="row" columnGap={3}>
         <Button key="explain" label="explain" hotkey="e" plain onPress={() => actions.onExplain(current)} />

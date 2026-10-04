@@ -8,6 +8,7 @@
     "url": "https://github.com/a-schaefers"
   },
   "repository": "https://github.com/a-schaefers/backseat-driver",
+  "license": "MIT",
   "keywords": ["tutor", "learning", "code-review", "mod"],
   "types": "./types/index.d.ts",
   "userConfig": {

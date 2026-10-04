@@ -4,6 +4,18 @@ import type { PromptComposeSection } from 'claude-code'
 export const CONTRACT_ID = 'backseat-driver:contract'
 
 /** A SKILL.md or persona file without its YAML frontmatter. */
+/**
+ * Instructions without their HTML comments. A prompt file credits where its
+ * text comes from in a comment, which is for the people reading the file and
+ * costs the model nothing once taken out.
+ */
+export function stripComments(markdown: string): string {
+  return markdown
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 export function stripFrontmatter(markdown: string): string {
   if (!markdown.startsWith('---')) return markdown.trim()
   const close = markdown.indexOf('\n---', 3)

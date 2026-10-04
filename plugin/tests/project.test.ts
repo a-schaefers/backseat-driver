@@ -36,6 +36,7 @@ const NOTES = {
   overview: 'A small statistics library with no dependencies.',
   files: [{ file: 'stats.py', role: 'Every helper lives here.' }],
   insights: [{ file: 'stats.py', symbol: 'variance', text: 'Divides by n, so it is the population variance.' }],
+  decisions: [],
 }
 const INSIGHT = 'Deep review: Divides by n, so it is the population variance. (deep review of 0000000)'
 const REVIEW = `Nice and small.\n\n- \`stats.py:7\`: think about which variance this is.\n\n\`\`\`backseat-notes\n${JSON.stringify(NOTES)}\n\`\`\`\n`
@@ -52,7 +53,7 @@ test('splitReview takes the notes off the end of a review, whether or not they p
 
   // Paths that could not be files of the project are dropped, and so is anything without its text.
   const odd = splitReview('```backseat-notes\n{"overview": 7, "files": [{"file": "../x", "role": "r"}, {"file": "a.py"}], "insights": [{"file": "/etc/passwd", "text": "t"}, {"file": "./a.py", "symbol": 3, "text": "kept"}]}\n```')
-  expect(odd.notes).toEqual({ overview: '', files: [], insights: [{ file: 'a.py', symbol: '', text: 'kept' }] })
+  expect(odd.notes).toEqual({ overview: '', files: [], insights: [{ file: 'a.py', symbol: '', text: 'kept' }], decisions: [] })
 })
 
 test('withReviewNotes: newer notes replace older ones about the same thing, and an overview is kept until a new one comes', async () => {
@@ -64,7 +65,7 @@ test('withReviewNotes: newer notes replace older ones about the same thing, and 
 
   const next = withReviewNotes(
     first,
-    { overview: '', files: [], insights: [{ file: 'stats.py', symbol: 'variance', text: 'Now divides by n - 1.' }, { file: 'stats.py', symbol: 'mean', text: 'Fails on an empty list.' }] },
+    { overview: '', files: [], insights: [{ file: 'stats.py', symbol: 'variance', text: 'Now divides by n - 1.' }, { file: 'stats.py', symbol: 'mean', text: 'Fails on an empty list.' }], decisions: [] },
     'bbb2222',
     200,
     insight => (insight.symbol === 'mean' ? null : { print: 'p2', of: 'symbol' }),
