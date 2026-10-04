@@ -2,7 +2,9 @@
 
 # Backseat Driver
 
-**A coding tutor that rides along while you write the code yourself.**
+**The only backseat driver you'll actually want.**
+
+A coding tutor that rides along while you write the code yourself.
 
 [![tests](https://img.shields.io/github/actions/workflow/status/a-schaefers/backseat-driver/check.yml?branch=main&label=tests)](https://github.com/a-schaefers/backseat-driver/actions/workflows/check.yml)
 [![newest Claude Code](https://img.shields.io/github/actions/workflow/status/a-schaefers/backseat-driver/nightly.yml?branch=main&label=newest%20Claude%20Code)](https://github.com/a-schaefers/backseat-driver/actions/workflows/nightly.yml)
@@ -20,7 +22,7 @@ You stay in the driver's seat.
 
 AI can write a lot of code now, and it is tempting to let it write all of it. We worry about what that costs in the long run. Skills you stop using fade. An engineer who only reviews generated code slowly loses the ability to write it, and to tell when it is wrong. We don't want to find out what the industry looks like when that happens to everyone.
 
-We also just love this stuff. We're in it for the love of the game: the puzzle, the craft, the moment it clicks. We don't want AI to take that away. We want it to make us better at it.
+We also just love this stuff. We're in it for the love of the game: the puzzle, the craft, the moment it clicks. We don't want AI to take that away. We want it to make us better at it. Let's make coding human again.
 
 So Backseat Driver turns the usual arrangement around. You drive. The AI rides along, watches the road, and speaks up when it matters, like a good mentor in the passenger seat.
 
