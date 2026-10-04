@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { parseRequest, transition, USAGE } from '../hooks/mode'
-import { SESSION, typed } from './kit'
+import { SESSION, stubSession, typed } from './kit'
 
 test('parseRequest: no argument means on, an unknown word means help', async () => {
   expect(parseRequest('')).toBe('on')
@@ -28,9 +28,7 @@ test('transition: status and help never change the mode', async () => {
 })
 
 test('/bsd and /backseat-driver switch the same tutor', async ($, on) => {
-  on('session.start', () => ({ cwd: '/work' }))
-  on('command.register', ($, e) => ({ value: { command: e.name } }))
-
+  stubSession(on)
   await $.session.start(SESSION)
 
   const started = await $.command.run(typed('bsd'))
@@ -49,11 +47,29 @@ test('/bsd and /backseat-driver switch the same tutor', async ($, on) => {
   expect(stopped.text).toBe('Backseat Driver is off. Claude Code is back to normal.')
 })
 
-test('the tutor is still on after /clear', async ($, on) => {
-  on('session.start', () => ({ cwd: '/work' }))
-  on('command.register', ($, e) => ({ value: { command: e.name } }))
-  on('classic.SessionStart', () => ({}))
+test('the pane opens with the tutor, closes with it, and stays through a pause', async ($, on) => {
+  const calls = stubSession(on)
+  await $.session.start(SESSION)
+  expect(calls.opened).toEqual([])
 
+  await $.command.run(typed('bsd'))
+  expect(calls.opened).toEqual(['backseat-driver'])
+
+  await $.command.run(typed('bsd', 'pause'))
+  await $.command.run(typed('bsd', 'resume'))
+  expect(calls.opened).toEqual(['backseat-driver'])
+  expect(calls.closed).toEqual([])
+
+  // Asking for "on" again brings back a pane the user closed by hand.
+  await $.command.run(typed('bsd'))
+  expect(calls.opened).toEqual(['backseat-driver', 'backseat-driver'])
+
+  await $.command.run(typed('bsd', 'off'))
+  expect(calls.closed).toEqual(['backseat-driver'])
+})
+
+test('the tutor is still on after /clear', async ($, on) => {
+  stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
   await $.classic.SessionStart({ source: 'clear' })

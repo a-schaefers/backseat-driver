@@ -6,7 +6,7 @@ Backseat Driver is a plugin for [Claude Code](https://claude.com/claude-code). S
 
 You learn by building whatever you want to build. The tutor sets no exercises and runs no quizzes. It chimes in from the background, and how often, how deeply and in what voice is yours to tune.
 
-> **Status: early build.** Only the scaffold exists: the plugin loads, and `/bsd` switches a mode on and off that does nothing yet. The rest of this README is the plan: what the project is for and how it will be built. The [roadmap](#roadmap) tracks what exists.
+> **Status: early build.** Tutor mode works: `/bsd` turns Claude into a tutor that hints and explains in the persona you choose, and that cannot edit your files. The play-by-play, the deep review and profiles are not built yet, so the pane's tabs are empty. The rest of this README is the plan. The [roadmap](#roadmap) tracks what exists.
 
 ## Using it
 
@@ -167,10 +167,10 @@ The watcher asks git what changed every couple of seconds, and stretches that in
 | Behavior | Mechanism |
 | --- | --- |
 | `/backseat-driver` and `/bsd` | Two commands the mod registers with `$.command.register`, answered by the same hook. They run at once, without a model turn. |
-| The tutor contract | `plugin/skills/tutor/SKILL.md`. While the mode is on, a `prompt.compose` hook adds it, and the profiles in play, to the system prompt. |
+| The tutor contract | `plugin/skills/tutor/SKILL.md`. While the mode is on, a `prompt.compose` hook adds it, and the profiles in play, to the system prompt. The same hook replaces Claude Code's own "Doing tasks" section, which tells Claude to find the code and modify it. |
 | Tutor persona | One Markdown style sheet per persona in `plugin/personas/`. The chosen one is added to the system prompt and to both review prompts. |
 | The contract outranks the project's `CLAUDE.md` | A `prompt.context` hook keeps the project's instruction files loaded but reframes them as background that yields to the contract. |
-| Claude never edits your files | A `tool.call` hook refuses `Edit`, `Write` and `NotebookEdit` while the mode is on. |
+| Claude never edits your files | A `tool.call` hook refuses `Edit`, `Write` and `NotebookEdit` while the mode is on. The only paths it lets through are Claude Code's own: its folder under your home directory, where it keeps its notes, and its scratch folder. |
 | Noticing saves and commits | A `$.clock.every` timer runs `git` through `$.process.run`: status and diff for saves, `HEAD` and the reflog for commits. |
 | Finding the project's languages | `git ls-files` and a table of file extensions. |
 | First-run questions | `$.ui.ask`, the same question dialog Claude uses. |
@@ -251,7 +251,7 @@ A persona changes how the tutor talks and what it dwells on. It never changes th
 
 ## Install
 
-Not yet: only the scaffold exists. This repository is its own plugin marketplace, so once the tutor is usable, installing it will be:
+Not yet: only tutor mode exists. This repository is its own plugin marketplace, so once the play-by-play is in, installing it will be:
 
 ```bash
 claude plugin marketplace add a-schaefers/backseat-driver
@@ -272,8 +272,8 @@ backseat-driver/
 │   ├── .claude-plugin/
 │   │   └── plugin.json         manifest and the settings shown in /config
 │   ├── skills/
-│   │   └── tutor/SKILL.md      the tutor contract (planned)
-│   ├── personas/               one style sheet per tutor persona (planned)
+│   │   └── tutor/SKILL.md      the tutor contract
+│   ├── personas/               one style sheet per tutor persona
 │   ├── prompts/                instructions for the two reviewers (planned)
 │   ├── hooks/
 │   │   ├── hooks.json          points Claude Code at the mod
@@ -302,7 +302,7 @@ To use the working copy in a project of your own, start Claude Code there with `
 ## Roadmap
 
 - [x] **Scaffold.** Plugin manifest, marketplace entry, settings, the `/backseat-driver` and `/bsd` commands, validation, tests and type checking.
-- [ ] **Tutor mode.** The contract as a skill, the `/backseat-driver` and `/bsd` switch, the system-prompt override, the edit guard and the personas. Useful by itself as a conversational tutor.
+- [x] **Tutor mode.** The contract as a skill, the `/backseat-driver` and `/bsd` switch, the system-prompt override, the edit guard, the personas and the pane with its three tabs. Useful by itself as a conversational tutor.
 - [ ] **Play-by-play.** Watcher, gate, reviewer on the chosen model and thinking level, and the Play-by-play tab.
 - [ ] **Deep review.** Commit detection, the timer, the read-only reviewer with its own model and thinking level, and the Deep review tab.
 - [ ] **Profiles.** Language detection, the first-run questions, one profile per language shared across projects, hushing in chat or by key, lesson memory and the Profile tab.

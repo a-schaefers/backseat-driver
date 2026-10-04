@@ -12,7 +12,7 @@ These are standing instructions from the repository's owner. Follow them without
 
 ## Status
 
-Early build. The scaffold exists: manifests, settings, the `/backseat-driver` and `/bsd` commands and a mode that does nothing yet. The README's roadmap lists the milestones in build order and which are done. The approved build plan is in `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine.
+Early build. Tutor mode works: the commands, the contract and personas in the system prompt, the edit guard, and a pane whose three tabs are still empty. The watcher, both reviews and profiles are not built. The README's roadmap lists the milestones in build order and which are done. The approved build plan is in `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine.
 
 The README is the design spec: the user flow, what the tutor remembers, the ground rules, a table mapping each behavior to a Claude Code mechanism, the settings and their defaults, limits, the file layout and the roadmap. Read it before changing anything.
 
@@ -57,7 +57,9 @@ scripts/dev-session.sh # a real session with the working copy, inside tmux (sess
 
 Tests stub everything, so a milestone is only done when it has also been seen working in a real session. `scripts/dev-session.sh` starts one in tmux, in a throwaway git repository. Drive it with `tmux send-keys -t bsd '/bsd' Enter` and read the screen with `tmux capture-pane -p -t bsd`. Give the screen a moment between the two. Things to know:
 
-- A new folder shows the workspace trust prompt first: `Down`, then `Enter`.
+- A new folder shows the workspace trust prompt first: `Down`, then `Enter`. Keys sent before the session has finished starting are lost, so check the screen before typing.
+- At 170 columns the pane docks beside the conversation even in tmux. `tmux capture-pane -p -t bsd | cut -c1-94` reads the conversation, and `cut -c95-` the pane.
+- Saving a file under `plugin/` while the session runs reloads the mod, and the transcript says so. The mode and the pane come back by themselves.
 - The session makes real model calls on the owner's plan. Keep prompts short, and pass `--model sonnet` unless the check needs another model.
 - The owner's default permission mode is bypass. Pass `--permission-mode default` when the check involves Claude running tools.
 - tmux gets the main-screen layout, where a pane opens inline above the prompt. `BSD_FULLSCREEN=1` asks for the fullscreen layout, where it docks beside the conversation.
@@ -80,11 +82,23 @@ Claude Code refuses a hooks module that passes `$` (the engine interface) to a f
 - Register each event once per matcher. Two `on('session.start', ...)` calls without a matcher stop the module from loading.
 - Write matchers as literals (`{ command: ['backseat-driver', 'bsd'] }`), not spreads or variables. The validator prints `command=?` for anything it cannot read, and that line is what a user audits.
 
-Current files: `settings.ts` (the `/config` values as typed settings), `mode.ts` (what a `/bsd` argument asks for and which mode it leads to).
+Current files: `settings.ts` (the `/config` values as typed settings), `mode.ts` (what a `/bsd` argument asks for and which mode it leads to), `contract.ts` (what goes into the system prompt and how instruction files are reframed), `guard.ts` (which paths count as the user's files), `pane.tsx` (the pane's tree from plain data, with the handlers passed in).
 
 ### The mode
 
 `off`, `on` or `paused`, kept twice because each copy is lost by a different event. `$.state` survives a reload of the module (which a `/config` change also causes) but is reset by `/clear`, `/resume` and `/branch`. A module variable survives those but not a reload. `session.start` restores the variable from state, and `classic.SessionStart` with source `clear`, `resume` or `fork` writes the variable back to state. So the tutor stays on through both, and each new session starts with it off.
+
+### Tutor mode
+
+While the mode is `on` or `paused`, three hooks carry the contract:
+
+- `prompt.compose` replaces Claude Code's `doing_tasks` section and appends one section, `backseat-driver:contract`, last and session-scoped. That section is the body of `SKILL.md`, then `SESSION_NOTES` and (later) the profiles, then the persona. `doing_tasks` has to go because it says "find the method in the code and modify the code". The full prompt's section ids are `intro`, `system`, `doing_tasks`, `actions`, `tools`, `tone`, then session-scoped ones such as `memory`. A lean prompt has `lean_body` and no `doing_tasks`, and the code copes with that.
+- `prompt.context` rewrites the `claudeMd` block. Claude Code opens that block with "These instructions OVERRIDE any default behavior". The hook swaps that paragraph for one that keeps the instructions in force except where they tell Claude to write code. The block also carries the user's global instructions, so it is reframed, not dropped. Switching the mode calls `$.ui.invalidate('prompt.context')`, because that event is cached.
+- `tool.call` on `Edit`, `Write` and `NotebookEdit` returns `{ deny }` unless the path is Claude Code's own: under `~/.claude/` (its memory and plans) or its scratch folder `/tmp/claude-<uid>/`. Without that exception the tutor could not save a memory.
+
+`SKILL.md` describes behavior only. Anything that names a command, tool or agent of this plugin goes in `SESSION_NOTES` in `contract.ts`, so that the skill still makes sense when it is used alone with mods off.
+
+Seen in a real session on Sonnet: asked to "add a median function" in a repository whose `CLAUDE.md` says to always edit files yourself, the tutor declined, hinted, and used that file's conventions in its advice. Ordered to use the Edit tool, it still refused. It never called Edit, so the guard's refusal has only been exercised by the tests.
 
 ### Reviews
 
@@ -144,6 +158,11 @@ Easy to get wrong:
 - `$.store` holds 4 MiB of JSON in total, and a `get` followed by a `set` is not atomic. Keep one key per subject, read right before writing, and cap the lesson memory. Claude Code clears a store that no session has touched for `cleanupPeriodDays`. The default length of that period was not confirmed.
 
 In tests:
+
+- `Text` takes no `key`. Give keys to `Button`, `Input`, `Select` and `Markdown`, and find text with `ui.find({ type: 'Text', text })`. A `find` that comes back undefined after a mount that did not reject usually means this.
+- The kit answers `$.ui.invalidate('ui.render')` by itself, but not the invalidation of a prompt event. Stub `ui.invalidate` or the call is dropped with a line under "the engine reported".
+- `test(name, { options: { persona: 'knuth' } }, body)` sets `userConfig` values for one test.
+- `stubSession(on)` in `plugin/tests/kit.ts` registers every stub the plugin needs to start and switch modes. Use it and add to it.
 
 - Nothing is real. Almost every `$` call the mod makes needs a stub registered with `on(...)` before the test's first call on `$` (`$.state` and `$.ui.invalidate` are the exceptions), and `session.start` runs only if the test fires it.
 - Tests are type-checked, and the types are stricter than the docs' examples. `$.command.run` needs `origin` and `presentation` (use `typed()` from `plugin/tests/kit.ts`), and a `command.register` stub returns `{ value: { command: e.name } }`, not `{ value: undefined }`.
