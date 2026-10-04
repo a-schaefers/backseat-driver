@@ -29,7 +29,7 @@ So Backseat Driver turns the usual arrangement around. You drive. The AI rides a
 ## Who it's for
 
 - **Anyone who wants to keep writing their own code**, and get better at it while they do.
-- **People learning a language.** Your profile carries from project to project, and it explains new ideas in terms of a language you already know.
+- **People learning a language.** It remembers how far along you are in each language, in every project, and explains new ideas by comparison with a language you already know.
 - **Experienced engineers who want a sparring partner**, not a ghostwriter.
 
 It's not for getting code written as fast as possible. For that, use Claude Code normally. `/bsd off` gives it back to you.
@@ -68,7 +68,7 @@ The ground rules:
 4. **You have the last word.** "Do it my way" always stands.
 5. **No exercises and no quizzes.** The project you chose to build is the lesson.
 
-It remembers you per language, not per project, so your Python profile follows you everywhere. Everything it keeps is plain JSON in `~/.local/share/backseat-driver/`, never in your repository.
+What it learns about you is kept per language, not per project: your level, what it has already explained, the mistakes that keep coming back, and the topics you told it to drop. So what it knows about your Python follows you to every Python project. Everything it keeps is plain JSON in `~/.local/share/backseat-driver/`, never in your repository.
 
 ## Get it
 
