@@ -12,7 +12,7 @@ These are standing instructions from the repository's owner. Follow them without
 
 ## Status
 
-Early build. Tutor mode works: the commands, the contract and personas in the system prompt, the edit guard, and a pane whose three tabs are still empty. The watcher, both reviews and profiles are not built. The README's roadmap lists the milestones in build order and which are done. The approved build plan is in `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine.
+Early build. Tutor mode and the play-by-play work: the commands, the contract and personas in the system prompt, the edit guard, the watcher, the reviewer and its notes in the pane. The deep review and profiles are not built, so those two tabs are empty. The README's roadmap lists the milestones in build order and which are done. The approved build plan is in `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine.
 
 The README is the design spec: the user flow, what the tutor remembers, the ground rules, a table mapping each behavior to a Claude Code mechanism, the settings and their defaults, limits, the file layout and the roadmap. Read it before changing anything.
 
@@ -58,6 +58,7 @@ scripts/dev-session.sh # a real session with the working copy, inside tmux (sess
 Tests stub everything, so a milestone is only done when it has also been seen working in a real session. `scripts/dev-session.sh` starts one in tmux, in a throwaway git repository. Drive it with `tmux send-keys -t bsd '/bsd' Enter` and read the screen with `tmux capture-pane -p -t bsd`. Give the screen a moment between the two. Things to know:
 
 - A new folder shows the workspace trust prompt first: `Down`, then `Enter`. Keys sent before the session has finished starting are lost, so check the screen before typing.
+- `tmux send-keys -t bsd C-x Tab` gives the pane the keyboard, after which its hotkeys (`e`, `d`, `l`, `1` to `3`) work. `Escape` gives it back.
 - At 170 columns the pane docks beside the conversation even in tmux. `tmux capture-pane -p -t bsd | cut -c1-94` reads the conversation, and `cut -c95-` the pane.
 - Saving a file under `plugin/` while the session runs reloads the mod, and the transcript says so. The mode and the pane come back by themselves.
 - The session makes real model calls on the owner's plan. Keep prompts short, and pass `--model sonnet` unless the check needs another model.
@@ -82,7 +83,19 @@ Claude Code refuses a hooks module that passes `$` (the engine interface) to a f
 - Register each event once per matcher. Two `on('session.start', ...)` calls without a matcher stop the module from loading.
 - Write matchers as literals (`{ command: ['backseat-driver', 'bsd'] }`), not spreads or variables. The validator prints `command=?` for anything it cannot read, and that line is what a user audits.
 
-Current files: `settings.ts` (the `/config` values as typed settings), `mode.ts` (what a `/bsd` argument asks for and which mode it leads to), `contract.ts` (what goes into the system prompt and how instruction files are reframed), `guard.ts` (which paths count as the user's files), `pane.tsx` (the pane's tree from plain data, with the handlers passed in).
+Current files:
+
+| File | What it holds |
+| --- | --- |
+| `settings.ts` | The `/config` values as typed settings |
+| `mode.ts` | What a `/bsd` argument asks for and which mode it leads to |
+| `contract.ts` | What goes into the system prompt and how instruction files are reframed |
+| `guard.ts` | Which paths count as the user's files |
+| `git.ts`, `noise.ts`, `diff.ts` | Parsing `git status`, which files and edits never deserve a look, a line diff |
+| `watcher.ts` | What changed since the previous look. Takes its effects as ports, so its tests use a tree in memory |
+| `gate.ts` | Whether a look is due |
+| `notes.ts`, `prompts.ts` | Reading the reviewer's reply into notes, and building what the reviewer and the conversation are told |
+| `pane.tsx` | The pane's tree from plain data, with the handlers passed in |
 
 ### The mode
 
@@ -114,6 +127,17 @@ A contested point is the one review that does land in the conversation. The tuto
 ### Watcher
 
 The watcher polls git and never calls a model. A play-by-play look needs all of: the working tree still for the quiet time (default 10 s), the minimum gap since the previous look elapsed (default 1 min), a real change (not whitespace-only, not only ignored, binary, generated or lock files), and no look in flight. A look sends the net change since the previous look. Work that was already uncommitted when the tutor was switched on is the baseline, not something to review.
+
+How it is built:
+
+- `watcher.ts` keeps a fingerprint (size and modification time) of every changed file at the last poll and at the last look. What differs is pending. It also keeps each changed file's text from the last look, which is what the next look is diffed against. A file not in that map was clean, so its baseline is `git show HEAD:path`.
+- `collect()` returns the real changes. `settle()` records what a look saw, using the fingerprints from collection time, so a file that changed again while the model was thinking stays pending.
+- A look that gets no answer settles nothing and counts as a failure, and each failure pushes the next look out (30 seconds, doubling, up to 10 minutes). A look whose answer cannot be parsed is settled and dropped, so a bad reply is never retried or shown.
+- The prompt has a size limit. Files that do not fit are not settled and wait for the next look.
+- After a reload of the mod, the watcher starts again from the tree as it stands. Notes survive in `$.state`.
+- `register.tsx` writes `git --no-optional-locks` as a literal in its one `$.process.run` call, so that a reader of that file and the validator's output can both see that git is the only process.
+
+Seen in a real session with the defaults: a file saved with a planted bug got its note 14 seconds later, nothing appeared in the conversation, `e` in the focused pane sent the explain request, and saving the fix cleared the note at the next look. The first live note bundled three problems into five lines, which is why `prompts/play-by-play.md` now says one idea per note and under 40 words.
 
 - Polling is deliberate. Claude Code's `FileChanged` hook watches named files (a matcher of literal filenames, or `watchPaths` set at session start), not a working tree, and native watchers (inotify-tools, fswatch, Watchman) are extra installs. None of them is on the owner's machine. Anthropic's own `diff` mod polls `HEAD` the same way.
 - The poll interval is not a setting. Start around 2 s and stretch it when `git status` is slow.
@@ -153,11 +177,14 @@ Easy to get wrong:
 - `prompt.compose` is not cached and cannot be invalidated: it runs each time a system prompt is rendered. `prompt.context`, `prompt.section` and `tool.describe` are cached until `$.ui.invalidate` names them.
 - `$.model.complete` takes the thinking level directly, as `effort`. `$.agent.spawn` takes a `model` but no effort, and the mod's own `turn.step` and `tool.call` hooks do not see a subagent the mod spawned.
 - A mod's tool is served by answering `tool.call` without calling `next`, and the docs say no permission prompt appears in that case. Not yet seen in a real session.
+- `update($, atom, fn)` fails to type-check with a misleading "Atom<...> is not assignable to StateRef" when `fn` builds an object whose fields are a union of literals. Annotate the return type: `(watch): Watch => ({ ...watch, state: 'looking' })`.
 - A `userConfig` picker (`options`) works only on string fields. The timer interval is therefore a string picker and the after-commit trigger a separate boolean. Changing a setting in `/config` reloads the mod with the new `options`.
 - `$.ui.ask` asks one question per call, with two to four options plus free text. It rejects when the user dismisses the dialog, which the first-run questions must treat as "skip the rest", and it rejects under `claude -p`.
 - `$.store` holds 4 MiB of JSON in total, and a `get` followed by a `set` is not atomic. Keep one key per subject, read right before writing, and cap the lesson memory. Claude Code clears a store that no session has touched for `cleanupPeriodDays`. The default length of that period was not confirmed.
 
 In tests:
+
+- `stubSession(on, options)` in `plugin/tests/kit.ts` is the whole fake world: the session, a git repository under `/work` with `write()` and `commit()`, a clock (`session.clock.advance(ms)`), and a model that answers from `session.reply(...)`. `advance` resolves after the timers it fired and the work they started have settled, so an assertion can follow it directly.
 
 - `Text` takes no `key`. Give keys to `Button`, `Input`, `Select` and `Markdown`, and find text with `ui.find({ type: 'Text', text })`. A `find` that comes back undefined after a mount that did not reject usually means this.
 - The kit answers `$.ui.invalidate('ui.render')` by itself, but not the invalidation of a prompt event. Stub `ui.invalidate` or the call is dropped with a line under "the engine reported".

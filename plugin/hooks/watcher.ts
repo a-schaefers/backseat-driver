@@ -1,0 +1,153 @@
+import { diffLines } from './diff'
+import { dirtyPaths, parseStatus } from './git'
+import { isNoiseFile, isTrivialChange, looksBinary } from './noise'
+import type { FileChange } from './prompts'
+
+/** The effects the watcher needs. register.tsx supplies them as closures over `$`. */
+export type WatcherPorts = {
+  /** Runs git in the repository's root with these arguments. */
+  git: (args: readonly string[]) => Promise<{ exitCode: number; stdout: string }>
+  /** A file's text by its path from the repository root, or null when it cannot be read. */
+  read: (path: string) => Promise<string | null>
+  /** A file's size and modification time, or null when it is gone. */
+  stat: (path: string) => Promise<{ size: number; mtimeMs: number } | null>
+}
+
+/** A change collected for a look, with the fingerprint its file had at that moment. */
+export type Collected = FileChange & { print: string }
+
+const STATUS = ['status', '--porcelain=v1', '-z', '--untracked-files=all'] as const
+/** Larger files are not sent to a model. */
+const MAX_FILE_CHARS = 200_000
+
+function sameMap(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>): boolean {
+  if (a.size !== b.size) return false
+  for (const [key, value] of a) {
+    if (b.get(key) !== value) return false
+  }
+
+  return true
+}
+
+/**
+ * Tracks what changed in the working tree since the previous look.
+ *
+ * A file's fingerprint is its size and modification time. `seen` holds the
+ * fingerprints of the changed files at the last poll, `looked` at the last
+ * look. Whatever differs between the two is pending.
+ */
+export function createWatcher(ports: WatcherPorts) {
+  let seen = new Map<string, string>()
+  const looked = new Map<string, string>()
+  /** What each changed file contained at the last look. A file not listed was clean then, so its baseline is HEAD. */
+  const baseline = new Map<string, string>()
+
+  async function fingerprints(): Promise<Map<string, string> | null> {
+    const status = await ports.git(STATUS)
+    if (status.exitCode !== 0) return null
+
+    const prints = new Map<string, string>()
+    for (const path of dirtyPaths(parseStatus(status.stdout))) {
+      if (isNoiseFile(path)) continue
+      const stat = await ports.stat(path)
+      if (stat !== null) prints.set(path, `${stat.size}:${stat.mtimeMs}`)
+    }
+
+    return prints
+  }
+
+  async function headText(path: string): Promise<string | null> {
+    const shown = await ports.git(['show', `HEAD:${path}`])
+
+    return shown.exitCode === 0 ? shown.stdout : null
+  }
+
+  return {
+    /**
+     * Takes the working tree as it stands for the baseline, so that work
+     * already uncommitted when the tutor is switched on is not reviewed.
+     * Resolves false when this is not a git repository.
+     */
+    async start(): Promise<boolean> {
+      const prints = await fingerprints()
+      if (prints === null) return false
+
+      seen = prints
+      looked.clear()
+      baseline.clear()
+      for (const [path, print] of prints) {
+        looked.set(path, print)
+        const text = await ports.read(path)
+        if (text !== null) baseline.set(path, text)
+      }
+
+      return true
+    },
+
+    /** Asks git what is changed now. Resolves true when that differs from the previous poll. */
+    async poll(): Promise<boolean> {
+      const prints = await fingerprints()
+      if (prints === null) return false
+      const hasChanged = !sameMap(prints, seen)
+      seen = prints
+
+      return hasChanged
+    },
+
+    /** Whether any file differs from what the previous look saw. */
+    hasPending(): boolean {
+      for (const [path, print] of seen) {
+        if (looked.get(path) !== print) return true
+      }
+
+      return false
+    },
+
+    /**
+     * The real changes since the previous look. Files that cannot be read,
+     * are too large or binary, or changed only in whitespace are settled
+     * here and never reach a model.
+     */
+    async collect(): Promise<Collected[]> {
+      const changes: Collected[] = []
+      for (const [path, print] of seen) {
+        if (looked.get(path) === print) continue
+
+        const after = await ports.read(path)
+        if (after === null || after.length > MAX_FILE_CHARS || looksBinary(after)) {
+          looked.set(path, print)
+          continue
+        }
+        const before = baseline.get(path) ?? (await headText(path)) ?? ''
+        if (before === after || isTrivialChange(before, after)) {
+          baseline.set(path, after)
+          looked.set(path, print)
+          continue
+        }
+        changes.push({ path, before, after, hunks: diffLines(before, after), print })
+      }
+
+      return changes
+    },
+
+    /**
+     * Records that a look saw these changes. A file that changed again while
+     * the look ran keeps a newer fingerprint in `seen`, so it stays pending.
+     */
+    settle(changes: readonly Collected[]): void {
+      for (const change of changes) {
+        baseline.set(change.path, change.after)
+        looked.set(change.path, change.print)
+      }
+      // Files that are clean again (committed or reverted) go back to HEAD as their baseline.
+      for (const path of [...looked.keys()]) {
+        if (!seen.has(path)) {
+          looked.delete(path)
+          baseline.delete(path)
+        }
+      }
+    },
+  }
+}
+
+export type Watcher = ReturnType<typeof createWatcher>

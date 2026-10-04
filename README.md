@@ -6,7 +6,7 @@ Backseat Driver is a plugin for [Claude Code](https://claude.com/claude-code). S
 
 You learn by building whatever you want to build. The tutor sets no exercises and runs no quizzes. It chimes in from the background, and how often, how deeply and in what voice is yours to tune.
 
-> **Status: early build.** Tutor mode works: `/bsd` turns Claude into a tutor that hints and explains in the persona you choose, and that cannot edit your files. The play-by-play, the deep review and profiles are not built yet, so the pane's tabs are empty. The rest of this README is the plan. The [roadmap](#roadmap) tracks what exists.
+> **Status: early build.** Tutor mode and the play-by-play work: `/bsd` turns Claude into a tutor that cannot edit your files, and notes about what you save appear in the pane on the model and thinking level you choose. The deep review and profiles are not built yet, so those two tabs are empty, and nothing is remembered between sessions. The rest of this README is the plan. The [roadmap](#roadmap) tracks what exists.
 
 ## Using it
 
@@ -32,23 +32,23 @@ A language you only touch later, such as the one shell script in a Python projec
 - **Commits get a deeper review.** After each commit, a stronger model reads the whole commit together with the code around it and writes a longer review in the pane's Deep review tab. It can also run on a timer, or only when you ask.
 
 ```text
-┌─ conversation ─────────────────────────┬─ Backseat ───────────────────────────────────┐
-│                                        │ [ Play-by-play ]   Deep review   Profile     │
-│ > /backseat-driver                     │                                              │
-│   Backseat Driver is on. You drive.    │ src/cache.rs                                 │
-│                                        │ 1  risk · line 42                            │
-│ > why does note 1 matter? the tests    │    This guard is still held when you reach   │
-│   pass                                 │    the .await on line 47. Who else is        │
-│                                        │    waiting on it?                            │
-│ ● They pass because nothing in them    │                                              │
-│   competes for the lock. Look at what  │ 2  idiom · line 18                           │
-│   is still alive when you reach the    │    This match only changes the Some case.    │
-│   .await on line 47. While this task   │    Option has a method for exactly that.     │
-│   is parked there, what can every      │                                              │
-│   other task that wants the cache do?  │                                              │
-│                                        │                                              │
-│ >                                      │ e: explain  d: dismiss  m: mute  r: review   │
-└────────────────────────────────────────┴──────────────────────────────────────────────┘
+┌─ conversation ─────────────────────────┬─ Backseat ────────────────────────────────────┐
+│                                        │ 1: Play-by-play   2: Deep review   3: Profile │
+│ > /backseat-driver                     │ On. Watching for your next save.              │
+│   Backseat Driver is on. You drive.    │                                               │
+│                                        │ src/cache.rs                                  │
+│ > why does note 1 matter? the tests    │ > 1  risk · line 42                           │
+│   pass                                 │     This guard is still held when you reach   │
+│                                        │     the .await on line 47. Who else is        │
+│ ● They pass because nothing in them    │     waiting on it?                            │
+│   competes for the lock. Look at what  │   2  idiom · line 18                          │
+│   is still alive when you reach the    │     This match only changes the Some case.    │
+│   .await on line 47. While this task   │     Option has a method for exactly that.     │
+│   is parked there, what can every      │                                               │
+│   other task that wants the cache do?  │ e: explain   d: dismiss   m: mute             │
+│                                        │ l: look now   r: deep review                  │
+│ >                                      │                                               │
+└────────────────────────────────────────┴───────────────────────────────────────────────┘
 ```
 
 In a narrow terminal the pane sits above the prompt instead of beside the conversation.
@@ -153,10 +153,10 @@ Saving a file does not call a model. The watcher only notices that something cha
 
 - The working tree has been still for the quiet time, 10 seconds by default. A burst of saves, or an editor that autosaves as you type, counts once.
 - The minimum gap since the previous look has passed, 1 minute by default.
-- Something real changed since the previous look. Whitespace-only edits don't count, and neither do files that git ignores, binary files, generated files or lock files.
+- Something real changed since the previous look. An edit that only touches blank lines, trailing whitespace or line endings doesn't count, and neither do files that git ignores, binary files, generated files or lock files.
 - No other look is still running.
 
-A look covers the net change since the previous look, however many saves that took. Looks also slow down by themselves as you approach your plan's usage limits.
+A look covers the net change since the previous look, however many saves that took. Work that was already uncommitted when you switched the tutor on is the starting point, not something to review. After a look fails, for instance on a rate limit, the next one waits longer. Looks will also slow down by themselves as you approach your plan's usage limits.
 
 ### Why the watcher polls
 
@@ -251,7 +251,7 @@ A persona changes how the tutor talks and what it dwells on. It never changes th
 
 ## Install
 
-Not yet: only tutor mode exists. This repository is its own plugin marketplace, so once the play-by-play is in, installing it will be:
+Not through a marketplace yet. To try what exists, load the working copy as described under [Repository layout](#repository-layout). This repository is its own plugin marketplace, so once the roadmap is further along, installing it will be:
 
 ```bash
 claude plugin marketplace add a-schaefers/backseat-driver
@@ -274,7 +274,7 @@ backseat-driver/
 │   ├── skills/
 │   │   └── tutor/SKILL.md      the tutor contract
 │   ├── personas/               one style sheet per tutor persona
-│   ├── prompts/                instructions for the two reviewers (planned)
+│   ├── prompts/                instructions for the reviewers
 │   ├── hooks/
 │   │   ├── hooks.json          points Claude Code at the mod
 │   │   ├── register.tsx        the mod: every effect the plugin has
@@ -303,7 +303,7 @@ To use the working copy in a project of your own, start Claude Code there with `
 
 - [x] **Scaffold.** Plugin manifest, marketplace entry, settings, the `/backseat-driver` and `/bsd` commands, validation, tests and type checking.
 - [x] **Tutor mode.** The contract as a skill, the `/backseat-driver` and `/bsd` switch, the system-prompt override, the edit guard, the personas and the pane with its three tabs. Useful by itself as a conversational tutor.
-- [ ] **Play-by-play.** Watcher, gate, reviewer on the chosen model and thinking level, and the Play-by-play tab.
+- [x] **Play-by-play.** Watcher, gate, reviewer on the chosen model and thinking level, and the Play-by-play tab with explain, dismiss and look now.
 - [ ] **Deep review.** Commit detection, the timer, the read-only reviewer with its own model and thinking level, and the Deep review tab.
 - [ ] **Profiles.** Language detection, the first-run questions, one profile per language shared across projects, hushing in chat or by key, lesson memory and the Profile tab.
 - [ ] **Follow-through.** Explain and dismiss on each note, notes and reviews shared with the conversation, second opinions on contested points.

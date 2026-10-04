@@ -1,0 +1,109 @@
+import type { Note } from '../types'
+import { formatHunks, splitLines } from './diff'
+import type { Hunk } from './diff'
+import { listNotes } from './notes'
+
+/** One file's change since the previous look. */
+export type FileChange = {
+  /** Path from the repository root. */
+  path: string
+  before: string
+  after: string
+  hunks: Hunk[]
+}
+
+/** A file this short is shown whole. A longer one is shown around its changes. */
+const WHOLE_FILE_LINES = 300
+/** How many lines are shown on each side of a change in a long file. */
+const WINDOW = 30
+/** Roughly 12,000 tokens. Files that do not fit wait for the next look. */
+const MAX_PROMPT_CHARS = 48_000
+
+function numbered(lines: readonly string[], from: number, to: number): string {
+  const width = String(to).length
+  const shown: string[] = []
+  for (let line = from; line <= to; line += 1) {
+    shown.push(`${String(line).padStart(width)} | ${lines[line - 1] ?? ''}`)
+  }
+
+  return shown.join('\n')
+}
+
+/** The file as it is now, with line numbers: all of it when short, otherwise the parts around the changes. */
+export function excerpt(after: string, hunks: readonly Hunk[]): string {
+  const lines = splitLines(after)
+  if (lines.length <= WHOLE_FILE_LINES) return numbered(lines, 1, lines.length)
+
+  const windows: { from: number; to: number }[] = []
+  for (const hunk of hunks) {
+    const from = Math.max(1, hunk.newStart - WINDOW)
+    const to = Math.min(lines.length, hunk.newStart + hunk.newLines + WINDOW)
+    const last = windows[windows.length - 1]
+    if (last !== undefined && from <= last.to + 1) last.to = Math.max(last.to, to)
+    else windows.push({ from, to })
+  }
+
+  return windows.map(window => numbered(lines, window.from, window.to)).join('\n...\n')
+}
+
+function fileSection(change: FileChange): string {
+  return [
+    `=== ${change.path} ===`,
+    'What changed since your last look:',
+    formatHunks(change.hunks),
+    '',
+    'The file as it is now, with line numbers:',
+    excerpt(change.after, change.hunks),
+  ].join('\n')
+}
+
+/**
+ * The user message for one look, and which files it shows. Files that would
+ * push it past the size limit are left out, and wait for the next look.
+ */
+export function playByPlayPrompt<Change extends FileChange>(
+  changes: readonly Change[],
+  open: readonly Note[],
+): { prompt: string; shown: Change[] } {
+  const head = [
+    'Notes still open in the pane:',
+    open.length === 0 ? '(none)' : listNotes(open),
+    '',
+    'Changes since your last look:',
+  ].join('\n')
+
+  const sections: string[] = []
+  const shown: Change[] = []
+  let size = head.length
+  for (const change of changes) {
+    const section = fileSection(change)
+    // The first file is always shown, however large, or nothing would ever be looked at.
+    if (shown.length > 0 && size + section.length > MAX_PROMPT_CHARS) continue
+    sections.push(section)
+    shown.push(change)
+    size += section.length
+  }
+
+  return { prompt: [head, ...sections].join('\n\n'), shown }
+}
+
+/** The reviewer's system prompt: its instructions, then what is known about the person, then the persona. */
+export function reviewerSystem(instructions: string, extras: readonly string[], persona: string): string {
+  return [instructions, ...extras, persona].filter(part => part !== '').join('\n\n')
+}
+
+/** What the conversation is told about the pane, attached to each prompt while there are notes. */
+export function notesContext(notes: readonly Note[]): string {
+  return [
+    'Backseat Driver: these play-by-play notes are open in the pane beside this conversation. The user can see them and may refer to them by number.',
+    listNotes(notes),
+  ].join('\n')
+}
+
+/**
+ * What pressing "explain" on a note sends into the conversation. The note
+ * was the nudge, so this asks for the next step of the contract's ladder.
+ */
+export function explainRequest(note: Note): string {
+  return `Explain play-by-play note ${note.id} (${note.file} line ${note.line}): "${note.text}" I have read the nudge. Give me the concept behind it.`
+}

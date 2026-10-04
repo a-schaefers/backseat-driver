@@ -32,7 +32,7 @@ test('while the tutor is on, the system prompt carries the contract', async ($, 
 })
 
 test('the chosen persona follows the contract', { options: { persona: 'knuth' } }, async ($, on) => {
-  stubSession(on, { '/personas/knuth.md': '# Persona: knuth\n\nPatient and precise.\n' })
+  stubSession(on, { pluginFiles: { '/personas/knuth.md': '# Persona: knuth\n\nPatient and precise.\n' } })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
 
