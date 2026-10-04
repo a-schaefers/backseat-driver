@@ -63,15 +63,15 @@ Every roadmap milestone is built and was seen working in short scripted real ses
 - Never run: the `primeagen` engineering persona.
 - Persona pairs run live: `eli5-tldr-kiss-terse`+`knuth`, `primeagen`+`torvalds`. Every voice's character has been seen live.
 - The editor side has been tried only with a script writing `focus.json`.
+- Decision points and insights (from `learning-output-style`): seen live in the play-by-play, the deep review and the conversation on Sonnet at low thinking. A play-by-play `insight` has not been seen live.
 - Marketplace install, `/bsd update` and `/bsd uninstall` were run against a local git server at one project's scope, not GitHub. No release has been published, so installed copies stay at 0.1.0.
 - Open owner decisions:
   - which ref new installs get (see Updates)
-  - a license: none yet, and Anthropic's directory blocks without one
   - whether to submit to Anthropic's directory
 - Directory facts (checked 2026-10-04):
   - It lists mods, for Claude Code only.
   - Submit at claude.ai/directory/manage. It tracks a branch or tag, and the plugin path can be `plugin`.
-  - Blocking: no LICENSE (or `license` in plugin.json), and no README of 40+ words inside `plugin/`.
+  - Blocking: no README of 40+ words inside `plugin/`. (A LICENSE was the other blocker; `plugin/LICENSE` and `"license": "MIT"` now settle it.)
   - Limits: files under 256 KiB, at most 512 files.
   - Directory installs load as `<name>@synced`.
 - Approved plan for part two: `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine (nine decisions, risks per milestone).
@@ -224,8 +224,8 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 - A failed look settles nothing; backoff is 30 s, doubling, up to 10 min. An unparseable reply is settled and dropped, never retried or shown. Files beyond the prompt size limit stay unsettled for the next look. After a reload the watcher restarts from the current tree; notes survive in state.
 - The play-by-play is one `$.model.complete`, no tools, no history. It is given the open notes and the dismissed notes for the files shown. `applyReply` drops a note with the same file and topic slug as either. Dismissed notes live in state until switch-off. Lesson memory counts only notes that reached the pane.
 - The prompt says one idea per note, under 40 words (the first live note bundled three).
-- Note kinds, in sort order: `bug`, `risk`, `decision`, `idiom`, `tip`, `insight`. `decision` marks a meaningful choice (just made, or ahead in a stub or TODO: the one exception to "no notes on unfinished code"), framed as theirs with its trade-offs. `insight` is an implementation choice or a codebase pattern. At most one of each per look. The pane draws decisions first under `◆ Your call` (magenta), the problems by file, then insights under `★ Insight` (cyan) (`DECISION_HEADING`, `INSIGHT_HEADING`). `isProblem` is false for both: they never count in the lesson memory (`flagged` or `explained`). `e` on a decision asks the conversation to lay out the options and leave the choice to the user; on an insight, where else it shows up.
-- Live (decision points): a TODO for the even-count median got `◆ Your call` with the trade-off (the textbook median versus keeping the input's type) and no choice made, beside a separate `risk` for an unclosed file.
+- Note kinds, in sort order: `bug`, `risk`, `decision`, `idiom`, `tip`, `insight`. `decision` marks a meaningful choice (just made, or ahead in a stub or TODO: the one exception to "no notes on unfinished code"), framed as theirs with its trade-offs. `insight` is an implementation choice or a codebase pattern. Priority, in the prompt only: a bug or a risk before a decision, a decision before anything else, never more than one insight (a cap of one decision was dropped: a live save with two real open choices got both, which was right). The pane draws decisions first under `◆ Your call` (magenta), the problems by file, then insights under `★ Insight` (cyan) (`DECISION_HEADING`, `INSIGHT_HEADING`). `isProblem` is false for both: they never count in the lesson memory (`flagged` or `explained`). `e` on a decision asks the conversation to lay out the options and leave the choice to the user; on an insight, where else it shows up.
+- Live (decision points): a TODO for the even-count median got `◆ Your call` with the trade-off (the textbook median versus keeping the input's type) and no choice made, beside a separate `risk` for an unclosed file. An uncommented tie rule in `mode()` was flagged as an open decision, and adding a comment that made it deliberate resolved the note at the next look. `e` on a decision got six options with their costs and the questions that decide between them, then "tell me which way you're leaning". "Which would you pick?" got a question back about what they weighed. No play-by-play `insight` has been seen live yet: the model has preferred decisions.
 - `d` dismisses (the same point isn't raised about that file again until switch-off). `m` hushes the topic. `e` asks the conversation for the concept, then an example on request, never a patch. `l` looks now.
 - Plan limits: `tick` reads `$.session.usage().rateLimits` (free) at most twice a minute, and only when something is pending.
   - At 80% of the tightest window: the gap is ×4, minimum 4 min.
@@ -243,7 +243,7 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
   - No git hooks (they would write into the user's repo).
 - A timed review covers `git diff <base>` against the working tree, plus untracked files by name. A scope fingerprint prevents re-reviewing the same uncommitted work; it is skipped when nothing changed.
 - `$.agent.spawn` resolves at start, with `agentId`. The answer arrives as a `turn.complete` carrying that id and goes to state, never the conversation. One review at a time; a commit made meanwhile is queued (latest only). Done → short notice, and the tab is marked new.
-- The notes block also carries `decisions` (file, line, choice, tradeoff; at most `MAX_DECISIONS` = 3). The review's `decisions` and `insights` go into the `Review` state; the tab draws the decisions before the review text and the insights after it, so the text should not repeat them. `insights` must describe choices and patterns, not defects: the first live run returned defects until the prompt said an insight is never a problem.
+- The notes block also carries `decisions` (file, line, choice, tradeoff; at most `MAX_DECISIONS` = 3). The review's `decisions` and `insights` go into the `Review` state; the tab draws the decisions before the review text and the insights after it, so the text should not repeat them. `insights` must describe choices and patterns, not defects. With the first wording, a live review's insights were defects. With "an insight is never a problem", a fresh session's were choices (`Counter`'s insertion order giving first-seen ties, `sorted()` leaving the caller's list alone) while the defects went to decisions and the review: one run each.
 - A contested point is the one review that lands in chat: the tutor delegates it to the same reviewer and reports the verdict.
 - Live: commit noticed within one tick, footer showed a background agent, review in the tab 12 s later. No conversation row, notification or attachment, then or on the next turn. Contested point verdict in chat after 32 s. The 5-min timer with after-commit off reviewed uncommitted work at 5 min.
 
