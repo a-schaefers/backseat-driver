@@ -26,7 +26,7 @@ First they took the environment. Then the tools. Then the stack. Now, in 2026, w
 
 Good grief.
 
-The skills you don't use, you lose. One developer who handed their job to the AI said they forgot everything in two or three months. Juniors aren't getting the reps at all. And the whole time, the people steering the agent think they're in the driver's seat.
+The skills you don't use, you lose. Devs who handed their jobs to the AI keep saying the same thing: give it a few months and you forget how to code. Juniors aren't getting the reps at all. And the whole time, the people steering the agent think they're in the driver's seat.
 
 It's not about speed. If it takes me longer, but I grok it, that matters. **It's about ownership of understanding.**
 
@@ -97,11 +97,3 @@ Type `/bsd` in Claude Code. The first time you work in a language, it asks a few
 | `/bsd help` | Every command and key |
 
 `Ctrl+X Tab` focuses the pane, and `Esc` leaves it. `1` to `4` switch tabs. The pane draws in the terminal and in the desktop app's Code tab. Models, pacing and persona (`torvalds`, `knuth`, `primeagen`, `eli5-tldr-kiss-terse`) are set in `/config`.
-
-The full design is in [DESIGN.md](DESIGN.md).
-
----
-
-If you made it this far, you're probably already one of us.
-
-— [Adam Schaefers](https://adamschaefers.com), [Land of Enchantment Games](https://enchant.games)

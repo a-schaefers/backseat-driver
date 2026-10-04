@@ -1,391 +1,516 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+AI-only reference for this repository. Terse by design. `README.md` is the only human document; this file is everything else. There is no separate design spec.
 
-## Working agreement
+## Rules (owner's standing instructions)
 
-These are standing instructions from the repository's owner. Follow them without being asked again.
+- Keep this file current: any change to what it describes (commands, layout, behavior, invariants, API gotchas, verification status) updates it in the same commit. Record mod-API discoveries the next session would otherwise rediscover.
+- Record product decisions here (section "Product") the session the owner states them.
+- Commit and push to `origin main` when work is complete, unasked. Never force-push or rewrite pushed history without asking. Other sessions push to `main` too: fetch and rebase before pushing, stage by path, never `git add -A`. To push without publishing another session's unpushed local commit, commit from a worktree based on `origin/main` and `git push origin HEAD:main`.
+- README rules:
+  - Sections only: why, what it is, what it is not, who it's for (and not for), how to use it. Nothing said twice. Short.
+  - Owner's voice, as in their Enchant Games Journal (https://enchant.games/?slug=journal, feed `/rss.xml`, articles are YAML under `/news/`, listed in `/news.json`): first person, short punchy lines, blunt, a little irreverent, quotes as punctuation. Keep that voice.
+  - No internal status (what was or wasn't tried, tested or installed): the owner called it invasive.
+  - Never tell users how to run their workflow (which terminal or editor, where to run `claude`). State what works and where.
+  - Never frame writing your own code as the slow option (no "for getting code written as fast as possible"). Saying the tutor isn't for having Claude write code, and that `/bsd off` restores normal Claude Code, is fine.
+  - Never suggest autosave to make it closer to live: editor plugins are the answer.
+  - Never link to this file or to design detail. A new feature gets a line at most.
+  - It carries facts that must stay true: install commands, minimum Claude Code version (text and badge), the `/bsd` command table, the footprint line under "What it is not".
+- Pronouns: the owner's are not stated. Use "the owner" or they/them.
 
-- **Keep this file current.** Whenever a change adds, removes or alters something this file describes (commands, layout, architecture, invariants, API gotchas), update this file in the same commit. Do the same when you learn something about the mod API that the next session would otherwise have to rediscover.
-- **Write product decisions down as they are made.** When the owner states a requirement or a preference for the product, record it in `DESIGN.md`, which is the design spec, in the same session.
-- **Keep the README short and human.** `README.md` says what the plugin is and is not, who it is for and not for, why it exists, and how to use it, and nothing more. Nothing in it is said twice. Detail goes in `DESIGN.md`, and the README links to it. A new feature gets at most a line in the README. The README never reports internal status, such as what has or has not been tried, tested or installed: the owner called that invasive. That belongs in DESIGN.md's Status note. The README is written in the owner's own voice, as in their journal: first person, short punchy lines, blunt and a little irreverent, quotes as punctuation, signed by them at the end. Keep that voice when editing it. The docs never tell users how to run their own workflow, such as which terminal or editor to use or where to run `claude`. They say what works and where, and the user decides.
-- **Commit and push when a piece of work is complete.** Push to `origin main` without waiting to be asked. This does not cover force-pushing or rewriting pushed history. Ask before either.
+## Product
+
+### Why it exists (owner's reasons; every decision serves them)
+
+- Ownership of understanding over speed: "if it takes me longer, but I grok it".
+- The progressive surrender of engineers' technical autonomy (environment, tools, stack, now their brains). Unused skills fade. Developers who handed their work to agents commonly report losing the ability to code within months. People steering an agent think they are in the driver's seat while the machine thinks for them.
+- The love of the game: the craft is the point.
+- Iron sharpens iron: mentorship with a beginner's mind.
+
+Stance: the project is against Claude writing the user's code, not neutral. While on, the AI never drives, and nothing presents handing code to it as faster or better.
+
+### Decisions (do not re-propose rejected ones; do not design around the rest)
+
+- Learning happens through the user's own projects. No exercises, quizzes or practice mode (rejected). The tutor chimes in from the background; the user tunes how often, how deeply, in what voice.
+- One command, then hands off: `/backseat-driver` or `/bsd`. Every setting has a default, every question is skippable, setup never blocks work. A language first met mid-session gets defaults; its questions are offered in the pane, never interrupting.
+- One profile per language, never per project (`python`, not "python project 1"). It matters only once the user works in that language. The tutor may read other profiles (e.g. explain Rust via Python).
+- The user has the last word. Pushback is weighed. A contested point goes to the deep review model for a second opinion, and the user is told. "Do it my way" always stands. The play-by-play may keep flagging until the user hushes it; a hush saves to that language's profile at once.
+- The pane's default view is the play-by-play. Tabs: 1 Play-by-play, 2 Deep review, 3 Explain, 4 Progress.
+- First-run questions are few and single choice: the language they know best (once ever), then three per new language (level, goals, focus). Never more than ten at once. Esc skips the rest. Re-ask with `/bsd questions` or `q` in Progress.
+- Three background jobs, each with its own model and thinking level: play-by-play (while hacking), deep review (commits), Explain (reading). The conversation uses the session's model. Explain's cache is per project (profiles are per language); all three jobs feed it and read it.
+- Explain is never stale: freshness beats speed. Nothing is shown unless it matches the file on disk at that moment.
+- No editor plugins yet (vim and emacs come later). Build only the side they talk to (`focus.json`/`view.json`, below).
+- Progress is honest: one report per language across projects. A level (beginner, junior, mid, senior), why, what the next level needs, recent notes, and encouragement kept apart from the level. Only the user's own work counts. A level can come back down. It stays in step with deep reviews. The owner says it is worth the token burn.
+- State is never cleared by accident: clearing is deliberate and confirmed (one project, one language, or everything). Uninstalling can clear everything.
+- Users stay up to date: a newer release is announced in the pane, one command fetches it, and the tutor comes back on by itself.
+- Everything feels instant: no command waits on git or a model.
+- The persona has two halves, chosen apart. The voice sets teaching style, tone and wording. The engineering persona sets what the tutor values, flags and recommends; its `default` is Claude's own judgment. Both apply to notes, deep reviews and conversation. A voice never brings its namesake's opinions about code; an engineering persona never brings its namesake's manner. Neither overrides the contract. A persona named after a real person is "in the spirit of": the tutor never claims to be them or quotes them, and is hard on the code, never on the user.
+  - Voices: `default`, `torvalds`, `knuth`, `primeagen`, `eli5-tldr-kiss-terse`. Engineering: `default`, `torvalds`, `knuth`, `primeagen`.
+- The persona has a face and can be switched off. A small animated character per voice speaks one short line at a time: a critical or design point in the user's latest save, a deep review's takeaway, now and then a joke. Dim at rest, quiet unless a look gives it something to say, one line where rows are scarce, no model calls of its own, off with one setting. Real-person personas get ASCII caricatures in good spirit (owner's call; a first version with mascots was rejected as too timid): Linus with square glasses, Knuth with round glasses, ThePrimeagen with headphones and mustache, the KISS Linux penguin in a top hat, and Claude Code's mascot for `default`.
+- The tutor knows what the user is doing without making them say it: a per-project journal (below). "What are you working on right now?" is asked only on `w`, `/bsd working`, or by the tutor in chat when it is unclear and matters. The user's answer overrides the inference and persists across sessions until changed or taken back. Borrowed from the owner's topstep-claudebot (journal and briefings; not its reflection loop or inbox).
 
 ## Status
 
-Built and not yet lived with. Every milestone on the roadmap in DESIGN.md is done and was seen working in a short real session, with these exceptions. Tests only: the slow-down near plan limits (a real session cannot be put at 95% of its plan on demand), the edit guard (the tutor declined to edit before the hook was needed), and the deep review on its default model and thinking level (live runs used Sonnet at low thinking to keep them cheap). Since the persona was split into a voice and an engineering half, two pairs have been run: the `eli5-tldr-kiss-terse` voice with the `knuth` engineering persona, and the `primeagen` voice with the `torvalds` engineering persona. The animated persona has been seen in real sessions with every voice. The journal's sitting roll-up, two sessions sharing one journal, and the deep reviewer reading it have been run only in tests. Never run at all: the `primeagen` engineering persona. Installing, updating and uninstalling through a marketplace were run against a local git server at one project's scope, not against GitHub, and no release has been published: which ref new installs get is still the owner's decision (see "Updates and uninstalling"). Nobody has done real work with the tutor yet, so the prompts in `plugin/prompts/` and `plugin/skills/tutor/SKILL.md` are the part most likely to need changing. The roadmap in DESIGN.md lists the milestones in build order and which are done. The approved plan for part two is in `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine. It lists nine decisions the owner approved and the risks to probe at the start of each milestone.
+Every roadmap milestone is built and was seen working in short scripted real sessions on 2.1.289. Nobody has done real work with it yet, so the prompts (`plugin/prompts/`, `plugin/skills/tutor/SKILL.md`) are what will most likely need changing.
 
-`DESIGN.md` is the design spec: the user flow, what the tutor remembers, the ground rules, a table mapping each behavior to a Claude Code mechanism, the settings and their defaults, limits, the file layout and the roadmap. Read it before changing anything.
+- Tests only:
+  - the slow-down near plan limits (a session can't be put at 95% on demand)
+  - the edit guard's refusal (the tutor never tried to edit)
+  - the deep review on its default model and effort (live runs used Sonnet at low)
+  - the journal's sitting roll-up, two sessions sharing a journal, and the deep reviewer reading the journal
+- Never run: the `primeagen` engineering persona.
+- Persona pairs run live: `eli5-tldr-kiss-terse`+`knuth`, `primeagen`+`torvalds`. Every voice's character has been seen live.
+- The editor side has been tried only with a script writing `focus.json`.
+- Marketplace install, `/bsd update` and `/bsd uninstall` were run against a local git server at one project's scope, not GitHub. No release has been published, so installed copies stay at 0.1.0.
+- Open owner decisions:
+  - which ref new installs get (see Updates)
+  - a license: none yet, and Anthropic's directory blocks without one
+  - whether to submit to Anthropic's directory
+- Directory facts (checked 2026-10-04):
+  - It lists mods, for Claude Code only.
+  - Submit at claude.ai/directory/manage. It tracks a branch or tag, and the plugin path can be `plugin`.
+  - Blocking: no LICENSE (or `license` in plugin.json), and no README of 40+ words inside `plugin/`.
+  - Limits: files under 256 KiB, at most 512 files.
+  - Directory installs load as `<name>@synced`.
+- Approved plan for part two: `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine (nine decisions, risks per milestone).
 
-`DESIGN.md` also makes statements about the present: the Status note, what Install says has and has not been tried, the layout tree and the roadmap checkboxes. So does the README, more briefly: the install commands and the minimum Claude Code version in its text and badge. Update them in the same change that makes them false.
+## Repository
 
-## What this repository is
+The root is a plugin marketplace (`.claude-plugin/marketplace.json`, one entry with source `./plugin`). The plugin is `plugin/`, and everything in it ships to users. The validator warns about a `CLAUDE.md` at a plugin root (a failure under `--strict`), so dev files (`CLAUDE.md`, `package.json`, `node_modules/`, `scripts/`, `.github/`) stay at the root. There is no build step: Claude Code loads the TypeScript as it is.
 
-Backseat Driver is a Claude Code plugin. There is no application, build step or runtime of its own: Claude Code loads the plugin's files as they are, TypeScript included.
+```text
+.claude-plugin/marketplace.json
+plugin/.claude-plugin/plugin.json   manifest + userConfig (source of truth for settings and defaults)
+plugin/skills/tutor/SKILL.md        the contract
+plugin/personas/{voice,engineering}/*.md
+plugin/prompts/                     play-by-play.md, deep-review.md, explain.md, progress.md, speech-bubble.md
+plugin/hooks/hooks.json             {"modules": ["./register.tsx"]}
+plugin/hooks/register.tsx           all effects
+plugin/hooks/*.ts, pane.tsx         pure logic
+plugin/types/index.d.ts             state keys, tool inputs
+plugin/tests/                       claude plugin test; kit.ts is the fake world
+scripts/dev-session.sh              live session in tmux
+scripts/release.sh                  cut a release
+.github/workflows/check.yml         npm run check on push/PR, pinned Claude Code
+.github/workflows/nightly.yml       same check daily on newest Claude Code
+```
 
-The plugin turns a session into a tutor for someone who writes their own code. The ground rules in the README and DESIGN.md, such as "Claude does not edit your files", describe that product behavior in an end user's session. They are not rules for working in this repository.
-
-The repository root is a plugin marketplace (`.claude-plugin/marketplace.json`) and the plugin itself lives in `plugin/`. Keep that split. Everything in `plugin/` is installed on users' machines, and Claude Code's validator warns about a `CLAUDE.md` at a plugin's root, which `--strict` turns into a failure. So this file stays at the repository root and nothing like it goes in `plugin/`. `package.json`, `node_modules/` and `scripts/` are dev tooling and stay at the root for the same reason.
-
-## Product decisions
-
-Decided by the owner. Do not re-propose what was rejected, and do not design around the rest.
-
-- **Why it exists.** The owner's reasons are argued in their Enchant Games Journal (https://enchant.games/?slug=journal, feed at /rss.xml): ownership of understanding over speed ("if it takes me longer, but I grok it"), the progressive surrender of engineers' technical autonomy that now reaches their own brains, the love of the game, and iron sharpening iron. Unused skills fade, and someone steering an agent can believe they are in the driver's seat while the machine thinks for them. Every other decision serves that: the person writes the code, and the AI makes them sharper. The README says this in plain words, and DESIGN.md ("Why it exists") records it.
-- **The AI never drives, and is never sold as the faster way.** The project is against letting Claude write the user's code, not neutral about it. It is fine to say plainly that the tutor is not for having Claude write your code, and that `/bsd off` puts Claude Code back to normal. It is not fine to frame the tutor against "getting code written as fast as possible" or anything like it, because that casts writing your own code as the slow, second-best option. The owner rejected exactly that wording in the README.
-
-- **Learning happens through the user's own projects.** No exercises, quizzes or practice mode (rejected). The tutor chimes in from the background, and the user tunes how often, how deeply and in what voice.
-- **One command, then hands off.** `/backseat-driver` or `/bsd` is all a user has to type. Every setting has a default, every question can be skipped, and setup never blocks work: a language first met mid-session gets defaults, and its questions are offered in the pane instead of interrupting.
-- **One profile per language, never per project.** The subject is `python`, not "python project 1", so it carries across projects. A language's profile matters only once the user works in that language. The tutor may read other profiles when that helps.
-- **The user has the last word.** Pushback in chat is weighed. A contested point goes to the deep review model for a second opinion, and the user is told that is happening. "Do it my way" always stands. The play-by-play may keep flagging the point until the user says to hush, and a hush is saved to that language's profile at once.
-- **Play-by-play is the pane's default view.** The deep review and the profile are other tabs.
-- **First-run questions are few and single choice.** One about the language they know best, asked once ever, then three per new language, and never more than ten in one go.
-- **Three jobs, each with its own model and thinking level.** The play-by-play comments while the user hacks. The deep review checks up on what they committed. Explain helps them read the codebase. Explain's cache is per project, where profiles are per language, and all three jobs feed it and read it.
-- **Explain is never stale.** Where freshness and speed pull apart, freshness wins. Nothing is shown unless it matches the file on disk at that moment.
-- **No editor plugins yet.** Plugins for vim and emacs come later. Build only the side they will talk to. The docs do not suggest autosave as a way to make the tutor closer to live: the owner rejected that, because the editor plugins are the answer.
-- **Progress is honest.** One report per language across projects, with a level (beginner, junior, mid, senior), why, what the next level needs, recent notes and encouragement. Only the user's own work counts, so that hacking on someone else's excellent code cannot inflate it. A level can come back down. It stays in step with the deep reviews. The owner said it is worth the token burn.
-- **State is never cleared by accident.** Clearing is deliberate and confirmed: one project, one language, or everything. Uninstalling clears everything.
-- **Users stay up to date.** A newer release upstream is announced in the pane, one command fetches it, and the tutor comes back on by itself.
-- **Everything feels instant.** No command waits on git or a model. The questions can be answered again in an obvious way.
-- **The persona has a face, and it can be switched off.** A small animated character for the voice stands in the pane and speaks one short line at a time: at critical points and decision points in the user's code, a deep review's takeaway, and now and then a joke. Fun but unobtrusive: dim at rest, quiet unless a look gives it something to say, one line where rows are scarce, no model calls of its own, and off with one setting. A persona named after a real person gets an ASCII caricature of that person, in good spirit: the owner's call, after a first version with mascots was rejected as too timid. A caricature is a drawing, not an impersonation, and the tutor still never claims to be them or quotes them.
-- **The tutor knows what the user is doing, and does not make them say it.** A journal per project records, in time order, what they save and what each save changed, where their editor's caret stays and for how long, which buffers are open and on screen, their commits and the notes raised, so that every model the tutor calls has an at-a-glance picture. What they are working on is worked out from that and shown in the pane. Being asked is a chore, so the one question, "What are you working on right now?", is asked only when they press `w` or run `/bsd working`, or by the tutor in chat when it is unclear and matters. Their answer overrides what was worked out, and they can take it back so that the tutor infers again. Borrowed from the owner's topstep-claudebot, whose journal and briefings keep its model aware of what is going on. Its reflection loop and inbox were not borrowed.
-- **A persona has two halves, chosen apart.** The voice sets teaching style, tone and wording. The engineering persona sets what the tutor values, flags and recommends, and its `default` is Claude's own judgment, not tilted toward anyone's. Both apply in notes, deep reviews and conversation. A voice never brings its namesake's opinions about code, and an engineering persona never brings its namesake's manner. Neither overrides the contract. A persona named after a real person is "in the spirit of": the tutor never claims to be that person or to quote them, and it is hard on the code, never on the user.
+The ground rules in README ("Claude does not edit your files" etc.) describe end-user product behavior, not rules for working in this repo.
 
 ## Commands
 
 ```bash
-npm install            # once: TypeScript, the only dev dependency
-npm run check          # everything below, in order
-npm run validate       # claude plugin validate, for the marketplace and for plugin/ (--strict)
-npm test               # claude plugin test ./plugin: every *.test.ts under plugin/
-npm run typecheck      # tsc -p plugin/tsconfig.json
-scripts/dev-session.sh # a real session with the working copy, inside tmux (session name: bsd)
-scripts/release.sh minor --push   # cut a release: bump plugin.json, check, commit, tag, push
+npm install                      # once: TypeScript, the only dev dependency
+npm run check                    # validate + test + typecheck
+npm run validate                 # claude plugin validate . --strict && ./plugin --strict
+npm test                         # claude plugin test ./plugin
+npm run typecheck                # tsc -p plugin/tsconfig.json
+scripts/dev-session.sh           # live session in tmux (default session name bsd)
+scripts/release.sh minor --push  # patch|minor|major|X.Y.Z: bump plugin.json, check, commit, tag, push
 ```
 
-- `claude plugin test` cannot run a single test. It accepts only the plugin's root (a subdirectory or a file path is an error), and the test kit has no `only` or name filter.
-- `npm run validate` prints the mod's `hooks:` and `calls:` lists. Read them after every change to `register.tsx`: they are what a user audits.
-- The type check reads the API types from `plugin/.claude-plugin/types/`. Claude Code writes that folder each time it loads the plugin from this working copy, so run `scripts/dev-session.sh` once on a fresh clone and again after a Claude Code update. A print-mode run writes it too, even with no login: `claude -p hi --plugin-dir ./plugin` fails at the model call after the types are written. The folder ignores itself in git.
-- CI: `.github/workflows/check.yml` runs `npm run check` on every push to `main` and every pull request, on the Claude Code version the code was last verified against (see "Working on the mod"; bump `CLAUDE_CODE_VERSION` in the workflow with it). `nightly.yml` runs the same check once a day on the newest Claude Code, and a failure there means a release changed the mod API, not that `main` is broken. The README shows both as badges. `claude plugin validate` and `claude plugin test` need no login. Read a run with `gh run list` and `gh run view --log-failed`.
-- A `--plugin-dir` session reloads the mod whenever one of its files is saved. A hook that throws or times out is skipped and the session carries on, and an invalid render tree is replaced by Claude Code's own drawing. Such a session shows one dim transcript line for each, and `claude --debug` logs every occurrence with its reason.
+- `claude plugin test` takes only the plugin root. It can't run one test, and the kit has no `only` or filter.
+- `npm run validate` prints the mod's `hooks:`, `calls:` and `env reads:`. Read them after every change to `register.tsx`: they are what a user audits.
+- Typecheck needs `plugin/.claude-plugin/types/` (self-gitignored). Claude Code writes it whenever it loads the plugin from this folder: a dev session, or `claude -p hi --plugin-dir ./plugin`, which writes the types even without a login and then fails at the model call. Rerun after a Claude Code update.
+- CI:
+  - `check.yml` pins `CLAUDE_CODE_VERSION` to the last-verified version (bump it with "last verified" below).
+  - `nightly.yml` runs on `latest`. Red there means a new Claude Code changed the mod API, not that `main` is broken. Both are README badges.
+  - Validate and test need no login.
+  - `gh run list`, `gh run view --log-failed`.
+- A `--plugin-dir` session reloads the mod on every save under `plugin/`. A hook that throws or times out is skipped, and an invalid render tree is replaced by Claude Code's own drawing; each shows one dim transcript line. `claude --debug` logs reasons.
 
-### Checking a change in a real session
+### Live checks (tests stub everything; a milestone is done only when seen live)
 
-Tests stub everything, so a milestone is only done when it has also been seen working in a real session. `scripts/dev-session.sh` starts one in tmux, in a throwaway git repository. Drive it with `tmux send-keys -t bsd '/bsd' Enter` and read the screen with `tmux capture-pane -p -t bsd`. Give the screen a moment between the two. Things to know:
-
-- The script kills any tmux session with the name it uses, `bsd` unless `BSD_SESSION` gives another, and its throwaway repository and data folder are shared by default. With other Claude Code sessions working on this repository, set `BSD_SESSION`, `BSD_RIDE_DIR` and `BSD_DATA_DIR` to names of your own and use that session name in every `tmux` command below. Two sessions on the default name kill each other's sessions and type into them: it happened once, mid-check.
-- To try a setting, pass `--settings '{"pluginConfigs":{"backseat-driver":{"options":{"deep_review_model":"sonnet"}}}}'`. Use it to keep real-session checks of the deep review cheap.
-- A new folder shows the workspace trust prompt first: `Down`, then `Enter`. Keys sent before the session has finished starting are lost, so check the screen before typing.
-- Send text and `Enter` as two separate `tmux send-keys` commands, and check that the prompt box is empty afterwards. Sent together, the `Enter` is often swallowed and the text just sits in the box.
-- Keep the throwaway repository's path plain. With a long path full of dashes, the model mistypes it and the session stops on a permission prompt for a file outside the project.
-- `tmux send-keys -t bsd C-x Tab` gives the pane the keyboard, after which its hotkeys (`e`, `d`, `l`, `1` to `3`) work. `Escape` gives it back.
-- At 170 columns the pane docks beside the conversation even in tmux. `tmux capture-pane -p -t bsd | cut -c1-94` reads the conversation, and `cut -c95-` the pane.
-- Saving a file under `plugin/` while the session runs reloads the mod, and the transcript says so. The mode and the pane come back by themselves.
-- The session makes real model calls on the owner's plan. Keep prompts short, and pass `--model sonnet` unless the check needs another model.
+- `scripts/dev-session.sh` starts tmux in a throwaway git repo with `BACKSEAT_DRIVER_HOME` pointed at a scratch folder (`BSD_DATA_DIR`).
+- With parallel sessions, set your own `BSD_SESSION`, `BSD_RIDE_DIR` and `BSD_DATA_DIR`, and use that session name in every tmux command. On the shared default name, two sessions killed and typed into each other's sessions.
+- Drive: `tmux send-keys -t bsd '/bsd'` then, separately, `tmux send-keys -t bsd Enter` (sent together, Enter is often swallowed). Check the prompt box is empty afterwards. Read with `tmux capture-pane -p -t bsd`, after a moment.
+- A new folder shows the trust prompt first: `Down`, `Enter`. Keys sent before startup finishes are lost.
+- Keep the throwaway repo path plain: with long dashed paths the model mistyped them and hit permission prompts.
+- `C-x Tab` focuses the pane (hotkeys work then), `Escape` unfocuses.
+- At 170 columns the pane docks beside the conversation. Read it with `cut -c1-94` (conversation) and `cut -c95-` (pane). tmux gets the main-screen layout (pane inline above the prompt) unless `BSD_FULLSCREEN=1`.
+- Settings: `--settings '{"pluginConfigs":{"backseat-driver":{"options":{"deep_review_model":"sonnet"}}}}'`. Keep deep-review checks cheap this way.
+- Real model calls on the owner's plan: short prompts, `--model sonnet` unless needed otherwise.
 - The owner's default permission mode is bypass. Pass `--permission-mode default` when the check involves Claude running tools.
-- tmux gets the main-screen layout, where a pane opens inline above the prompt. `BSD_FULLSCREEN=1` asks for the fullscreen layout, where it docks beside the conversation.
+- Saving under `plugin/` reloads the mod mid-session; the mode and pane come back.
 
 ## Architecture
 
-Two layers (DESIGN.md, "How it works"):
+- Contract: `SKILL.md`, the single source of tutor behavior. The mod injects it and never carries a copy.
+  - `SKILL.md` describes behavior only. Anything naming this plugin's commands, tools or agents goes in `SESSION_NOTES` in `contract.ts`, so the skill works alone (as `/backseat-driver:tutor`) with mods off. That fallback is a conversational tutor without background reviews.
+- Personas: the chosen engineering file, then the voice file, are injected after the contract and into both review prompts. Each persona file states which half it is and that it leaves the other alone; a new persona file needs that paragraph too.
+- Mod: `plugin/hooks/`. Commands via `$.command.register` (`/backseat-driver`, `/bsd`, `/backseat-driver-update`); tools via `$.tool.register` (`hush`, `unhush`, `record`, `lookup`, `progress`, `profile`, `working`, `activity`); pane via `$.ui.open` plus a `ui.render` hook, contents in `$.state`. Why a mod, not a skill plus a monitor: a monitor would turn every save into a conversation turn on the main model. The mod reviews out of band.
 
-- **Contract**: `plugin/skills/tutor/SKILL.md`, the tutor's rules as Markdown. It is the single source of tutor behavior. The mod injects this text into the system prompt and must not carry a second copy. Personas are Markdown files in two folders, `plugin/personas/voice/` and `plugin/personas/engineering/`, and the chosen engineering persona and voice, in that order, are injected after the contract and into both review prompts. Each file says which half it is and that it leaves the other half alone. That paragraph is what keeps a mixed pair apart, so a new persona file needs one too.
-- **Mod**: `plugin/hooks/`, function hooks that run inside Claude Code.
+### Module shape (enforced by Claude Code)
 
-### How the mod's code is split
+A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.noun.method(...)` must be spelled in the module itself. Hence:
 
-Claude Code refuses a hooks module that passes `$` (the engine interface) to a function imported from another file, and it requires every `on(...)` and every `$.noun.method(...)` to be spelled in the module itself. That gives the code its shape:
+- `register.tsx` is the only file with effects: all hooks, all `$` calls, all functions taking `$`.
+- Every other file is pure (plain values in and out), tested directly without stubs.
+- Effects cross imports as capabilities, i.e. closures over `$` (`args => $.process.run(['git', ...args])`). Passing a closure is allowed; passing `$` is not.
+- `atom(...)` definitions live in `register.tsx` with literal `plugin` and `key`. Every state key is declared in `plugin/types/index.d.ts`.
+- One `on` per event per matcher. Two unmatched `on('session.start')` stop the module loading.
+- A function taking `$` must have a name unique in the file, locals included. `const [skill, look] = …` broke loading because `look` was also a function.
+- Matchers must be literals (`{ command: ['backseat-driver', 'bsd'] }`). The validator prints `command=?` for spreads and variables.
 
-- `register.tsx` is the only file with effects. Every hook is registered there, every call on `$` is written there, and functions that take `$` are declared there.
-- Every other file in `plugin/hooks/` is pure logic: plain values in, plain values out. They are tested directly, without stubs.
-- When logic in another file needs an effect, `register.tsx` hands it a capability: a closure such as `args => $.process.run(['git', ...args])`. Passing a closure over `$` across an import is allowed. Passing `$` is not.
-- `atom(...)` definitions live in `register.tsx` too, with literal `plugin` and `key` strings, and every state key is declared in `plugin/types/index.d.ts`.
-- Register each event once per matcher. Two `on('session.start', ...)` calls without a matcher stop the module from loading.
-- A function that takes `$` must have a name no other declaration in the file shares, a local variable included. A `const [skill, look] = …` inside another function stopped the module loading, because `look` is also the function that makes a look.
-- Write matchers as literals (`{ command: ['backseat-driver', 'bsd'] }`), not spreads or variables. The validator prints `command=?` for anything it cannot read, and that line is what a user audits.
+### Files
 
-Current files:
-
-| File | What it holds |
+| File | Holds |
 | --- | --- |
-| `settings.ts` | The `/config` values as typed settings |
-| `mode.ts` | What a `/bsd` argument asks for, which mode it leads to, and the text of `/bsd help` |
-| `contract.ts` | What goes into the system prompt and how instruction files are reframed |
-| `guard.ts` | Which paths count as the user's files |
-| `git.ts`, `noise.ts`, `diff.ts` | Parsing `git status`, which files and edits never deserve a look, a line diff |
-| `watcher.ts` | What changed since the previous look. Takes its effects as ports, so its tests use a tree in memory |
-| `gate.ts` | Whether a look is due |
-| `notes.ts`, `prompts.ts` | Reading the reviewer's reply into notes, and building what the reviewer and the conversation are told |
-| `review.ts` | The deep review's scope: reading the reflog, what counts as a commit, the request handed to the reviewer |
-| `languages.ts` | File extension to language id, and a project's main languages from its file list |
-| `profiles.ts` | A profile as stored and as changed: answers, hushes, lesson memory, and the text every prompt gets about the person |
-| `hash.ts` | Fingerprints of text, for cache keys and folder names |
-| `datahome.ts`, `storage.ts` | Every path in the data folder and what may be deleted there. JSON files through a `Disk` port |
-| `forget.ts` | What `/bsd forget` can erase, the wording of its dialogs, and the paths each scope deletes |
-| `knowledge.ts` | What is known about one source file, and the freshness rule: fingerprints, finding unchanged symbols after an edit, checking a model's outline against the file |
-| `explain-prompts.ts` | The two requests Explain makes (map a file, explain a symbol or region) and reading their replies |
-| `explainer.ts` | The lookup engine, with its effects as ports: the queue, what may be fetched when, and never storing an answer for text that has changed |
-| `focus.ts` | The spot in focus, the two files an editor shares with the tutor, and what the conversation is told about the spot |
-| `avatar.ts` | The animated persona: a character per voice, its poses, how a line is said one word a tick, and the speech bubble |
-| `authorship.ts` | Whose work a commit is: its author against the person's git email, merges, co-author trailers, bulk imports, and the lines it added by language |
-| `progress.ts` | The progress ledger and the rules for moving a level, the request for an assessment, and what the tab, the tool and every prompt are told |
-| `project.ts` | What is known about a project as a whole: the notes a deep review leaves, what is kept of them, and what the play-by-play and the next review are told |
-| `journal.ts` | The journal as stored: its entries, runs of saves, rolling a finished sitting up, and merging with what another session wrote |
-| `attention.ts` | What an editor's `focus.json` says beyond the spot, and adding up the time the caret spends where it is and what is on screen beside it |
-| `enclosing.ts` | The name of the definition a line sits in, by indentation and the common shapes of a definition, with no parser |
-| `glance.ts` | The journal as text: the pane's "Working on" line, what the reviewers read, what the conversation gets with each prompt |
-| `recorder.ts` | The journal's engine, with its effects as ports: what a save changed, the caret's time, writing the file |
-| `working.ts` | The one question, "What are you working on right now?": its answers and `/bsd working` |
-| `questions.ts` | The first-run questions |
-| `pane.tsx` | The pane's tree from plain data, with the handlers passed in |
+| `settings.ts` | `/config` values as typed settings |
+| `mode.ts` | `/bsd` argument parsing, mode transitions, `HELP` (the authoritative command and key list) |
+| `contract.ts` | system prompt contents, `SESSION_NOTES`, instruction-file reframing |
+| `guard.ts` | which paths are the user's |
+| `git.ts`, `noise.ts`, `diff.ts` | `git status` parsing, files and edits never worth a look, line diff |
+| `watcher.ts` | change since the last look (ports; tests use an in-memory tree) |
+| `gate.ts` | whether a look is due |
+| `notes.ts`, `prompts.ts` | reviewer reply → notes; reviewer and conversation prompt text |
+| `review.ts` | deep review scope: reflog, what counts as a commit, the request |
+| `languages.ts` | extension → language; a project's main languages |
+| `profiles.ts` | profile storage and changes: answers, hushes, lesson memory, person text |
+| `hash.ts` | fingerprints |
+| `datahome.ts`, `storage.ts` | data folder paths, what is removable, `Disk` port, JSON I/O |
+| `forget.ts` | forget scopes, dialog wording, paths per scope |
+| `knowledge.ts` | per-file knowledge and the freshness rule |
+| `explain-prompts.ts` | map-a-file and explain-a-symbol requests and replies |
+| `explainer.ts` | Explain engine (ports): queue, fetch policy, never storing answers for changed text |
+| `focus.ts` | spot in focus, editor files, conversation's view of the spot |
+| `avatar.ts` | characters, poses, word-by-word speech, bubble |
+| `authorship.ts` | whose work a commit is; added lines by language |
+| `progress.ts` | ledger, level rules, assessment request, report text |
+| `project.ts` | project knowledge from deep reviews; what reviewers are told |
+| `journal.ts` | journal storage: entries, save runs, sitting roll-up, cross-session merge |
+| `attention.ts` | `focus.json` beyond the spot; caret and on-screen time |
+| `enclosing.ts` | enclosing definition name by indentation, no parser |
+| `glance.ts` | journal as text for pane, reviewers, conversation |
+| `recorder.ts` | journal engine (ports) |
+| `working.ts` | "What are you working on right now?" and `/bsd working` |
+| `update.ts` | install kind, versions, release tags, update and uninstall commands |
+| `questions.ts` | first-run questions |
+| `pane.tsx` | pane tree from plain data, handlers passed in |
 
-### The mode
+### Mode
 
-Switching on answers at once. `switchTo` loads the contract, sets the mode and opens the pane, and those are awaited, because the contract has to be in force from the first prompt after the command. Everything else (the watcher, the profiles, the reviewer, the tools, the first-run questions) runs in `engage`, which the command does not wait for. `engagement` counts switches, and each step of `engage` and `startWatching` checks it after every await, so that switching off while git is still answering leaves nothing running. In a real session `/bsd` printed its line 190 ms after Enter and the pane was up at 250 ms.
+- `/bsd` returns at once (live: line at 190 ms, pane at 250 ms). `switchTo` awaits only loading the contract, setting the mode and opening the pane, because the contract must be in force from the next prompt. Everything else (watcher, profiles, reviewer, tools, questions, survey, update check) runs in un-awaited `engage`. `engagement` counts switches, and every step of `engage` and `startWatching` re-checks it after each await, so switching off mid-setup leaves nothing running.
+- Modes: `off | on | paused`, stored twice. `$.state` survives a module reload (including a `/config` change) but is reset by `/clear`, `/resume` and `/branch`. A module variable survives those but not a reload. `session.start` restores the variable from state; `classic.SessionStart` (source `clear|resume|fork`) writes it back to state. Result: on survives both; every new session starts off.
 
-The mode is `off`, `on` or `paused`, kept twice because each copy is lost by a different event. `$.state` survives a reload of the module (which a `/config` change also causes) but is reset by `/clear`, `/resume` and `/branch`. A module variable survives those but not a reload. `session.start` restores the variable from state, and `classic.SessionStart` with source `clear`, `resume` or `fork` writes the variable back to state. So the tutor stays on through both, and each new session starts with it off.
+### Tutor mode (while `on` or `paused`)
 
-### Tutor mode
+- `prompt.compose` removes Claude Code's `doing_tasks` section ("find the method and modify the code"). It appends a last, session-scoped section `backseat-driver:contract`: SKILL body, `SESSION_NOTES`, person text (profiles + progress), engineering persona, voice. Full prompt section ids: `intro, system, doing_tasks, actions, tools, tone`, then session-scoped ones such as `memory`. A lean prompt has `lean_body` and no `doing_tasks`; the code handles both.
+- `prompt.context` rewrites the `claudeMd` block's opening ("These instructions OVERRIDE…") so the project's instructions stay in force except where they say to write code. The block also holds the user's global instructions, so reframe, never drop. A mode switch calls `$.ui.invalidate('prompt.context')` (cached event).
+- `prompt.submit` attaches the open notes, the latest review, the character's last line and the journal brief.
+- `tool.call` on `Edit|Write|NotebookEdit` denies unless the path is Claude Code's own (`~/.claude/`, or `/tmp/claude-<uid>/`), so the tutor can still save memories.
+- Note buttons send questions with `$.prompt.submit`.
+- Live: told to "add a median function" in a repo whose CLAUDE.md says to edit files, the tutor declined, hinted, and used that file's conventions. Ordered to use Edit, it refused without calling it.
 
-While the mode is `on` or `paused`, three hooks carry the contract:
+### Play-by-play and watcher
 
-- `prompt.compose` replaces Claude Code's `doing_tasks` section and appends one section, `backseat-driver:contract`, last and session-scoped. That section is the body of `SKILL.md`, then `SESSION_NOTES` and the profiles, then the engineering persona, then the voice. `doing_tasks` has to go because it says "find the method in the code and modify the code". The full prompt's section ids are `intro`, `system`, `doing_tasks`, `actions`, `tools`, `tone`, then session-scoped ones such as `memory`. A lean prompt has `lean_body` and no `doing_tasks`, and the code copes with that.
-- `prompt.context` rewrites the `claudeMd` block. Claude Code opens that block with "These instructions OVERRIDE any default behavior". The hook swaps that paragraph for one that keeps the instructions in force except where they tell Claude to write code. The block also carries the user's global instructions, so it is reframed, not dropped. Switching the mode calls `$.ui.invalidate('prompt.context')`, because that event is cached.
-- `tool.call` on `Edit`, `Write` and `NotebookEdit` returns `{ deny }` unless the path is Claude Code's own: under `~/.claude/` (its memory and plans) or its scratch folder `/tmp/claude-<uid>/`. Without that exception the tutor could not save a memory.
+- The watcher polls git and never calls a model. Interval about 2 s, stretched when `git status` is slow; not a setting.
+- Every background git command is `git --no-optional-locks …`; a plain `git status` takes the index lock and breaks the user's git. `register.tsx` has one literal `$.process.run` call so readers and the validator see git is the process.
+- Polling is deliberate. `FileChanged` watches named files only (literal matchers or `watchPaths`), not a tree. inotify-tools, fswatch and Watchman are extra installs, absent on the owner's machine. Anthropic's `diff` mod also polls.
+- A look needs all of:
+  - the tree still for the quiet time (default 10 s)
+  - the minimum gap since the last look (default 1 min)
+  - a real change (not whitespace-only; not only ignored, binary, generated or lock files)
+  - no look in flight
+- A look sends the net change since the last look. Work already uncommitted at switch-on is the baseline, not reviewed.
+- `watcher.ts` fingerprints (size, mtime) every changed file at the last poll and at the last look; what differs is pending. It keeps each file's text at the last look as the next diff base. A file never seen dirty diffs against `git show HEAD:path`.
+- `collect()` returns real changes. `settle()` records what a look saw, using collection-time fingerprints, so a file changed during the model call stays pending.
+- A failed look settles nothing; backoff is 30 s, doubling, up to 10 min. An unparseable reply is settled and dropped, never retried or shown. Files beyond the prompt size limit stay unsettled for the next look. After a reload the watcher restarts from the current tree; notes survive in state.
+- The play-by-play is one `$.model.complete`, no tools, no history. It is given the open notes and the dismissed notes for the files shown. `applyReply` drops a note with the same file and topic slug as either. Dismissed notes live in state until switch-off. Lesson memory counts only notes that reached the pane.
+- The prompt says one idea per note, under 40 words (the first live note bundled three).
+- `d` dismisses (the same point isn't raised about that file again until switch-off). `m` hushes the topic. `e` asks the conversation for the concept, then an example on request, never a patch. `l` looks now.
+- Plan limits: `tick` reads `$.session.usage().rateLimits` (free) at most twice a minute, and only when something is pending.
+  - At 80% of the tightest window: the gap is ×4, minimum 4 min.
+  - At 95%: no automatic look or deep review; the pane says "Holding back". Look now and review now still work.
+- Live: a planted bug got its note 14 s after the save, nothing appeared in the conversation, `e` sent the explain request, and saving the fix cleared the note.
 
-`SKILL.md` describes behavior only. Anything that names a command, tool or agent of this plugin goes in `SESSION_NOTES` in `contract.ts`, so that the skill still makes sense when it is used alone with mods off.
+### Deep review
 
-Seen in a real session on Sonnet: asked to "add a median function" in a repository whose `CLAUDE.md` says to always edit files yourself, the tutor declined, hinted, and used that file's conventions in its advice. Ordered to use the Edit tool, it still refused. It never called Edit, so the guard's refusal has only been exercised by the tests.
-
-### Reviews
-
-Two kinds of background review, configured separately (DESIGN.md, "Models and settings"):
-
-- **Play-by-play**: one `$.model.complete` request with no tools and no history. Its notes go to the pane's Play-by-play tab. It is given the open notes and the notes the user dismissed in the files it is shown, and `applyReply` drops a new note that makes the same point (same file and topic slug) as either. Dismissed notes live in `$.state` beside the open ones until the tutor is switched off. The lesson memory counts only notes that reached the pane, so a repeat the reviewer sends for an open note is not a second time the idea came up.
-- **Deep review**: a read-only subagent whose written review goes to the pane's Deep review tab. Two independent triggers: after each commit (on by default) and every N minutes (off by default). With both off it runs only on request. A commit-triggered review covers that commit. A timed review covers everything since the previous deep review, and is skipped when nothing has changed.
-
-The deep reviewer is registered by the mod with `$.agent.register({ model, effort, tools })`, not shipped as a file in `plugin/agents/`. A subagent the mod spawns skips the mod's own `turn.step` hooks, so a registered spec is the only way to give it the user's thinking level. Its instructions live in `plugin/prompts/deep-review.md`. It is registered when the tutor is switched on, and an `agent.offer` hook withholds it from the model while the tutor is off.
-
-How a deep review runs:
-
-- Each tick compares the size and modification time of `.git/logs/HEAD` with the last tick's. Only when they differ does it run `git reflog -1`. A `commit`, `commit (amend)`, `commit (merge)` or `commit (initial)` entry is a commit to review. Any other move of HEAD (checkout, pull, reset, rebase) resets where "since the previous review" starts.
-- `$.agent.spawn` resolves as soon as the reviewer has started, with its `agentId`. The answer arrives later as a `turn.complete` event carrying that id, and the hook there puts it in `$.state` for the Deep review tab.
-- One review runs at a time. A commit made meanwhile is queued, latest only, and reviewed when the running one finishes.
-- A timed review covers `git diff <where the previous review ended>` against the working tree, plus untracked files by name. A fingerprint of that scope stops the same uncommitted work from being reviewed twice.
-
-Seen in a real session: a commit was noticed within one tick, the reviewer appeared in Claude Code's footer as a background agent, and its review was in the tab 12 seconds later (on Sonnet at low thinking, set through `--settings`). Nothing was appended to the conversation, then or on the following turn: no notification, no attachment, no turn.
-
-A contested point is the one review that does land in the conversation. The tutor delegates it to the same deep reviewer and reports the verdict in chat, because the user asked there.
-
-### Watcher
-
-The watcher polls git and never calls a model. A play-by-play look needs all of: the working tree still for the quiet time (default 10 s), the minimum gap since the previous look elapsed (default 1 min), a real change (not whitespace-only, not only ignored, binary, generated or lock files), and no look in flight. A look sends the net change since the previous look. Work that was already uncommitted when the tutor was switched on is the baseline, not something to review.
-
-How it is built:
-
-- `watcher.ts` keeps a fingerprint (size and modification time) of every changed file at the last poll and at the last look. What differs is pending. It also keeps each changed file's text from the last look, which is what the next look is diffed against. A file not in that map was clean, so its baseline is `git show HEAD:path`.
-- `collect()` returns the real changes. `settle()` records what a look saw, using the fingerprints from collection time, so a file that changed again while the model was thinking stays pending.
-- A look that gets no answer settles nothing and counts as a failure, and each failure pushes the next look out (30 seconds, doubling, up to 10 minutes). A look whose answer cannot be parsed is settled and dropped, so a bad reply is never retried or shown.
-- The prompt has a size limit. Files that do not fit are not settled and wait for the next look.
-- After a reload of the mod, the watcher starts again from the tree as it stands. Notes survive in `$.state`.
-- `register.tsx` writes `git --no-optional-locks` as a literal in its one `$.process.run` call, so that a reader of that file and the validator's output can both see that git is the only process.
-
-Seen in a real session with the defaults: a file saved with a planted bug got its note 14 seconds later, nothing appeared in the conversation, `e` in the focused pane sent the explain request, and saving the fix cleared the note at the next look. The first live note bundled three problems into five lines, which is why `prompts/play-by-play.md` now says one idea per note and under 40 words.
-
-- Near the plan's usage limit the background work holds back. `tick` reads `$.session.usage().rateLimits` (a free call) at most twice a minute, and only when something is pending. From 80% of the tightest window the minimum gap is four times longer and at least four minutes. From 95% no look or automatic deep review starts, the pane says "Holding back", and "look now" and "review now" still work.
-- Polling is deliberate. Claude Code's `FileChanged` hook watches named files (a matcher of literal filenames, or `watchPaths` set at session start), not a working tree, and native watchers (inotify-tools, fswatch, Watchman) are extra installs. None of them is on the owner's machine. Anthropic's own `diff` mod polls `HEAD` the same way.
-- The poll interval is not a setting. Start around 2 s and stretch it when `git status` is slow.
-- Run every background git command as `git --no-optional-locks ...`. A plain `git status` refreshes the index under a lock and can make the user's own git commands fail.
-- Commits are detected from `HEAD` and the reflog. The reflog subject (`commit:`, `commit (amend):`, `checkout:`, `pull:`, `rebase`) tells a real commit apart from other moves of `HEAD`.
+- A read-only subagent (`Read`, `Grep`, `Glob`) registered with `$.agent.register({ model, effort, tools })`, not a file in `plugin/agents/`. A spawned subagent skips the mod's own `turn.step` hooks, so registration is the only way to give it the user's effort level.
+- Instructions in `prompts/deep-review.md`. Registered at switch-on; `agent.offer` withholds it from the model while off. Re-registered whenever the person text changes, because a spawn can't take parameters.
+- Triggers, independent: after each commit (default on), and every N minutes (default off). With both off, only on request (`r`).
+- Commit detection: each tick compares `.git/logs/HEAD` size and mtime. Only on change does it run `git reflog -1`.
+  - `commit`, `commit (amend)`, `commit (merge)`, `commit (initial)` → review that commit.
+  - Any other HEAD move (checkout, pull, reset, rebase) → reset the "since last review" base.
+  - No git hooks (they would write into the user's repo).
+- A timed review covers `git diff <base>` against the working tree, plus untracked files by name. A scope fingerprint prevents re-reviewing the same uncommitted work; it is skipped when nothing changed.
+- `$.agent.spawn` resolves at start, with `agentId`. The answer arrives as a `turn.complete` carrying that id and goes to state, never the conversation. One review at a time; a commit made meanwhile is queued (latest only). Done → short notice, and the tab is marked new.
+- A contested point is the one review that lands in chat: the tutor delegates it to the same reviewer and reports the verdict.
+- Live: commit noticed within one tick, footer showed a background agent, review in the tab 12 s later. No conversation row, notification or attachment, then or on the next turn. Contested point verdict in chat after 32 s. The 5-min timer with after-commit off reviewed uncommitted work at 5 min.
 
 ### Profiles
 
-DESIGN.md, "What it remembers about you". A profile is one JSON file per subject in the data folder (see "The data folder" below): `profiles/<language>.json` and `profiles/general.json`. It holds the first-run answers, the hushed topics, and the lesson memory (topics explained and topics that recur, with counts).
-
-A subject is in play when it is one of the project's main languages (from `git ls-files` and an extension table) or the user changes a file in it. `personText()` turns the profiles in play into the text that goes into the conversation's system prompt, the play-by-play's system prompt and the deep reviewer's registered prompt. The reviewer is registered again whenever a profile changes, because a spawned subagent cannot be given anything at spawn time.
-
-- **First-run questions** are asked with `$.ui.ask` at the end of switching on, after the pane and the watcher are running, so dismissing them loses nothing. Every subject asked about is marked `isAsked`, answered or not, and is never asked about again unprompted. The Progress tab (once the Profile tab) offers them for every subject in play, as "answer a few questions" or "answer again", and new answers replace the old.
-- **What the user says about themselves in chat** goes through the `record` tool: one of the four answers (`level`, `goals`, `focus`, `knows`) for a language, in their words. It does not set `isAsked`, so a language first mentioned in chat still gets its questions when it first comes into play. Without it, answers could never be changed except by editing the store file.
-- **Every question is single choice.** In Claude Code's dialog a single choice is one keypress. A multi-select needs a toggle, a move to Submit, Enter, and then a "Review your answers" screen. Four of those in a row is not a short questionnaire.
-- **Hushes** arrive through the `hush` tool, which the tutor calls when the user states a preference, or through the `m` key on a note. The tool takes the open note's number when there is one, and then uses the note's own topic and language. In the first live test the model invented its own slug, the note stayed in the pane, and the tutor told the user it was gone. The tool's result now says how many notes left the pane, and the contract tells the tutor to say only what the tool reported.
-- A hush works twice over: the reviewers are told ("Do not bring up"), which catches the idea however it is worded, and a note whose topic slug matches a hush is dropped even if a reviewer sends one.
-- **Lesson memory** counts topics per language: `flagged` when the play-by-play raises one, `explained` when the user presses explain. Three or more flags make a recurring theme.
-
-Seen in real sessions: the four questions appeared with Python detected, and the answers were saved (in the plugin's store at the time, in `profiles/` now). Told "stop telling me to use built-ins instead of my own loops", the tutor called `hush` at once with no permission prompt. In a second project the questions were not asked, and code whose only possible note was that topic got none, while two real bugs beside it were flagged. A contested note went to the deep reviewer, whose verdict came back into the chat 32 seconds later. Esc on the first question skipped all of them and left the tutor running. One chat message ("I have written Python for about six years... what I want most now is performance") produced two `record` calls with no permission prompt, and the Profile tab showed both. A note dismissed with `d` stayed away at the next look, while a new bug in the same file got its own note. With the timer at 5 minutes and the after-commit trigger off, a review of the uncommitted work started five minutes after switching on and was in the tab ten seconds later, with nothing in the conversation.
+- `profiles/<language>.json` and `profiles/general.json` in the data folder: first-run answers, hushes, lesson memory (`flagged` when the play-by-play raises a topic, `explained` when the user presses explain; 3+ flags = recurring).
+- In play: the project's main languages (`git ls-files` + extension table; at least 15% of source files, and the largest always counts) plus any language the user changes a file in.
+- `aboutPerson()` (profiles + progress) goes into the conversation's system prompt, both reviewers and Explain.
+- Questions via `$.ui.ask` at the end of switch-on, after the pane and watcher run, so dismissing loses nothing. Every subject asked is marked `isAsked`, answered or not, and never asked again unprompted. Re-ask from the Progress tab; new answers replace old.
+- All single choice: one keypress each. A multi-select costs a toggle, Submit, Enter and a review screen.
+- `record` tool: one of `level|goals|focus|knows` for a language, in the user's words, from chat. It doesn't set `isAsked`.
+- `hush` tool (the tutor calls it on a stated preference) or `m`: it takes the open note's number when there is one and uses that note's topic and language. (Live, the model once invented a slug and claimed success.) The result reports how many notes left the pane, and the contract says to report only that.
+- A hush works twice: the reviewers are told "Do not bring up" (catches any wording), and a note whose slug matches is dropped regardless.
+- `unhush`, and `profile` (read a language not in play) tools.
+- Live: the four questions appeared with Python detected; Esc skipped all with the tutor running; `hush` and `record` were called with no permission prompt; a hushed topic got no note while two real bugs beside it did; a dismissed note stayed away while a new bug in the same file got its own.
 
 ### Explain
 
-DESIGN.md, "While you read" and "The editor side". The third background job: it explains the code the user is reading, from a cache that is per project.
+- Spot = whichever moved last:
+  - the editor's `focus.json`
+  - `/bsd explain path:line[-end]`
+  - `n`/`p` in the tab
+  - the `lookup` tool
+  - a save, which goes to `firstChange` past blank lines, and doesn't steal focus from an editor active in the last 10 min
+- The tab shows: what, how, why, watch, relies-on, the file outline, and the deep review's insight with its commit.
+- Never-stale, enforced in `knowledge.ts`/`explainer.ts`, not by callers:
+  - A symbol stores a fingerprint of its exact lines and its first line. `freshSymbols` re-finds each in the current file wherever it moved, and drops any whose text changed. Views are built only from those.
+  - An explanation stores the fingerprints of the symbols it relies on. `trusted()` drops it if any changed. Names resolve in the same file, or in another mapped file when exactly one has that name.
+  - `placeSymbols` checks a model outline: each symbol must quote its first line, found at the named line or within 5 lines; otherwise it's dropped.
+  - A lookup reads the file before and after the model call. If the text changed, the answer isn't stored (`stale`; a mapping returns `again` and is redone).
+  - File and outline summaries show only while the file fingerprint matches.
+- `createExplainer(ports)`: reads never wait on a model. `view(spot, intent)` answers from memory and disk and queues what's missing.
 
-**The never-stale rule** is the owner's hardest requirement for it, and it is enforced in `knowledge.ts` and `explainer.ts`, not left to callers:
+  | Intent | From | Priority | Waits to settle | Stops near limit |
+  | --- | --- | --- | --- | --- |
+  | `asked` | `/bsd explain`, `n` `p` `f`, lookup tool | first | no | never |
+  | `browsing` | editor cursor, refresh of a shown spot | first | yes | 95% |
+  | `following` | save | after those | yes | 80% |
+  | ahead | 2 unexplained symbols after a mapping | last | — | 80% |
 
-- A symbol stores a fingerprint of the exact lines it covers, and its first line. `freshSymbols` finds each symbol again in the file as it is now, wherever its lines moved, and leaves out any whose text changed at all. A view is built only from those.
-- An explanation stores the fingerprints of the symbols it said it relies on. `trusted()` drops it when any of them is no longer what it was. Names are resolved in the same file, or in another mapped file when exactly one has a symbol of that name.
-- A model's outline is checked by `placeSymbols`: each symbol must quote its first line, which has to be found at the line it names or within five lines of it. An entry that fails is dropped.
-- A lookup reads the file before and after the model call. An answer for text that changed in between is not stored (`stale`, or `again` for a mapping, which is then redone).
-- The file summary and the outline's one-line summaries are shown only while the file's fingerprint is the one they were written for.
+- `SETTLE_MS` 2.5 s after a file's last change before mapping. Explaining a symbol never waits. Concurrency is 2, plus 1 for a watched spot. `commit()` applies results to the latest state synchronously and writes one at a time (two landing together once lost one). Re-check the cache just before calling the model. Failed lookups aren't retried for `RETRY_MS` (1 min).
+- Setting `explain`: `automatic | on request | off`. Near limits, `automatic` degrades to on-request (saves first, then everything).
+- `register.tsx`: `startExplaining` (in `engage`) builds the ports. `refreshView` builds the focused view into state and writes `view.json`. While the tab is open or an editor is live, `fastPoll` stats the focused file and `focus.json` every 100 ms and refreshes on change, which is why stale text leaves the screen within about 0.1 s. It stops when nobody watches. `readFocus` is the only reader of `focus.json`; `pollFocus` feeds the journal, then Explain (`followEditor`).
+- Live: first explanation in an unseen file in 6.6 s; cached `n`/`p` in 40–80 ms; edit removed the explanation in about 60 ms, new one after 9 s; a script's `focus.json` → `view.json` in 40–80 ms; the tutor called `lookup` with no permission prompt when it hadn't already read the file.
 
-**The engine** (`createExplainer(ports)`) never makes a read wait on a model. `view(spot, intent)` answers from memory and disk and queues what is missing. The intent decides how eagerly:
+### Editor protocol (for future vim and emacs plugins)
 
-| Intent | Who | Priority | Waits for the file to settle | Stops near the plan limit |
-| --- | --- | --- | --- | --- |
-| `asked` | `/bsd explain`, `n`, `p`, `f`, the lookup tool | first | no | never |
-| `browsing` | an editor's cursor, a refresh of a spot already shown | first | yes | at 95% |
-| `following` | a save | after those | yes | at 80% |
-| (ahead) | two unexplained symbols after a file is mapped | last | n/a | at 80% |
+Both files are in the data folder. The editor writes `focus.json` atomically (temp file plus rename) on cursor, selection or field change; a few writes a second is plenty.
 
-- Settling: a file that changed on disk is not mapped for `SETTLE_MS` (2.5 s) after its last change, so that typing with frequent saves costs one mapping. Explaining a symbol never waits, because it is of text that is in the file right now.
-- Two lookups run at once, plus one more for a spot someone is looking at.
-- Lookups for one file land side by side, so `commit()` applies each change to the latest state with nothing awaited in between, and writes the file one write at a time. Before that, two explanations landing together lost one of them.
-- A lookup checks again, right before it calls the model, whether its answer is already there. Two things that noticed the same gap cost one request.
-- A failed lookup is not retried for a minute (`RETRY_MS`).
+```json
+{ "file": "/abs/path/src/stats.py", "line": 12, "endLine": 15, "modified": true,
+  "buffers": ["/abs/..."], "visible": ["/abs/..."], "active": true }
+```
 
-**In `register.tsx`**: `startExplaining` builds the ports and is part of `engage`. `refreshView` makes the view for the spot in focus, puts it in `$.state` for the tab and writes `view.json`. The focus moves with whatever moved last: the editor's `focus.json`, `/bsd explain`, the pane's keys, the lookup tool, or a save (which goes to the first symbol that changed, and does not pull the focus away from an editor that reported its cursor in the last ten minutes).
+- `file` is absolute; files outside the session's repo are ignored, so sessions can share one focus file. `line` is 1-based. `endLine` only while selecting.
+- Explain needs only `file` and `line`. The rest feed the journal: `modified` = unsaved changes in the caret's buffer, `buffers` = open files, `visible` = other files on screen, `active: false` = the editor window lacks the keyboard.
+- The editor never reports durations; the tutor credits time per poll.
 
-While the tab is open or an editor is live, `fastPoll` runs every 100 ms: it stats the focused file and the focus file, and refreshes the view when either changed. That is what takes an old explanation off the screen within a tenth of a second of an edit, instead of at the watcher's next two-second poll. With nobody watching, it stops. `focus.json` is read in one place, `readFocus`, and `pollFocus` hands each new reading to the journal and then to Explain (`followEditor`), so the two never disagree about where the caret is.
+The tutor writes `view.json` in answer and whenever its knowledge of the spot changes: `{ v: 1, at, root, source, spot: {path, line}, status, fileSummary, outline: [{name, kind, startLine, endLine, summary}], isOutlineCurrent, isMappable, target, detail: {what, how, why, watch, uses} }`.
 
-Seen in a real session, on Sonnet at low thinking: `/bsd explain stats.py:11` in a file never seen before showed the full explanation 6.6 seconds later. Stepping through cached symbols with `n` and `p` took 40 to 80 ms each. Editing the function on screen took its explanation off after about 60 ms, and the new one arrived 9 seconds later. A script writing `focus.json` got its answer in `view.json` in 40 to 80 ms. In a fresh conversation, asked what a function does, the tutor called `lookup` with no permission prompt. In a conversation where it had already read the file, it answered from that instead, which is fine.
+- `status`: `fresh | updating | waiting | held | failed | no-file | off`.
+- Everything is already checked against disk, so an editor shows it as is.
+- `target` is null between symbols; `detail` is null until it arrives.
 
-### The animated persona
+### Project cache
 
-DESIGN.md, "The animated persona". A character per voice stands at the top of the Play-by-play and Deep review tabs and says one line at a time. `avatar.ts` holds the art and every rule about it, and `register.tsx` moves it.
+- `projects/<name>-<hash>/`: `project.json` (overview, file roles, insights), `reviews.json` (text of the last 12 reviews), `files/<hash>-<name>.json` (Explain), `journal.json`.
+- Each deep review ends with a fenced `backseat-notes` JSON block (asked for in `deep-review.md`). `splitReview` strips it before the pane, parsed or not. `keepReview` re-reads `project.json`, merges (`withReviewNotes`), and appends to `reviews.json`.
+- Each insight is kept with the fingerprint of its symbol (when mapped) or of its file, and which one it is; one that can't be fingerprinted isn't kept. `insightsFor` (Explain) and `currentInsights` (play-by-play) pass it only while the fingerprint matches. For the play-by-play the file just changed, so file-level insights drop and symbol-level ones survive for unedited symbols.
+- The overview is project-wide and unfingerprintable. It carries its commit, and the reviewer is told to correct it.
+- Survey: `ReviewScope` kind `survey`, run by `maybeSurvey` once per project (`isSurveyed`), from `engage` on a fresh switch-on. Not run when both deep review triggers are off or usage is ≥80%. Its text goes to the tab, not `reviews.json`.
+- `reviewRequest(scope, { overview, earlier })` adds the overview and `reviewDigest` of the last 3 reviews.
+- Live: survey in the tab about 10 s after switch-on, with the overview and roles in `project.json`; a commit review gave 3 insights and no visible notes block; an insight showed beside a function in Explain and vanished 200 ms after an edit.
 
-- **Where its lines come from.** The play-by-play's reply has a `say` field. `prompts/speech-bubble.md` asks for it and goes into the reviewer's system prompt only while the setting is on, and the last line of each request says what the bubble may hold: `insight` normally, `remark` after `QUIET_LOOKS_BEFORE_REMARK` (four) looks in a row that said nothing. Each look's `say` replaces the line, so a quiet look leaves it quiet and it never talks about code that has changed since. A finished deep review gives it the review's last line, which `deep-review.md` makes the one thing most worth doing next. Switching on gives it its `hello`. No line costs a model call of its own.
-- **How it moves.** `say` writes the line to the `speech` atom at `tick` 0 and starts a `$.clock.every(TALK_MS)` timer. Each tick says one more word through `update` with `nextTick`, which is a compare-and-set, so a tick cannot overwrite a newer line. The mouth moves on alternate ticks, and the timer stops when the line is out. A second timer blinks it every `BLINK_MS`, with a `$.clock.after` to open its eyes, only while the mode is `on` and it is not talking. Switching off cancels both and resets the speech. A reload loses the timers, so `startAnimating` marks a half-said line as said.
-- **How it is drawn.** `poseOf` works out the pose at render time from the mode, the watcher and the speech: asleep while paused, talking, eyes up while a look runs, blinking, or at rest. At rest it is drawn dim. The bubble is sized for the whole line from its first word, so the pane does not reflow while it talks, and no wider than the line needs. Above the prompt, or on a surface other than the terminal, it is one line from the `mini` frames.
-- **Art rules.** Every pose of a character has the same height and every line the same width, drawn only with printable ASCII and the block elements Claude Code draws its own mascot with, so that nothing is double width. `avatar.test.ts` checks both. Each character names its `mouth` row, and `bubbleColumn` puts blank rows above the bubble so that its tail is level with it: a tall face otherwise speaks from its hair. The ASCII characters speak in an ASCII bubble (`bubbleStyle`), Claude's mascot in Claude Code's own box lines. The pane drawing in DESIGN.md uses Linus, because GitHub's code font may lack the block elements.
+### Journal
 
-Seen in real sessions on Sonnet at low thinking: switched on, the mascot said its hello word by word in Claude's orange and then dimmed to gray. It blinked, and its eyes turned up while a look ran. Then, arms flapping, it said "Every membership check on a list is a scan; think about what this collection is for." about a list used for membership tests, and paused it slept. With the `primeagen` voice and the `torvalds` engineering persona in a 100-column terminal, the pane sat above the prompt and the character said, in one line, "Factory, abstract base, one square. That's a lot of ceremony for four sides, chat." beside a note asking what each layer of a one-class hierarchy buys. Each of the four caricatures was later seen saying its hello with its mouth moving, blinking, and asleep while paused, with the bubble's tail at its mouth.
-
-### The project cache
-
-DESIGN.md, "What it learns about a project". `projects/<id>/project.json` holds the overview, each file's role and the deep review's insights. `reviews.json` holds the last twelve reviews' text. `files/` is Explain's.
-
-- **The deep review writes it.** `prompts/deep-review.md` asks every review to end with a fenced `backseat-notes` JSON block. `splitReview` takes the block off before the review reaches the pane, whether or not it parses, so the person never sees it. `keepReview` in `register.tsx` reads the project file right before writing it, merges the notes (`withReviewNotes`), and appends the review's text to `reviews.json`.
-- **An insight is tied to code.** It is kept with the fingerprint of the symbol it names (from the explainer, when the file has been mapped) or of the whole file, and with which of the two that is. One that cannot be fingerprinted is not kept. `insightsFor` shows it in Explain only while that fingerprint matches, and `currentInsights` passes it to the play-by-play only on the same condition. In the play-by-play's case the file has just changed, so a file-level insight is dropped and a symbol-level one survives when that symbol was not edited.
-- **The overview** is project-wide and cannot be fingerprinted. It carries the commit it was written at, and the reviewer is given it with an instruction to correct it.
-- **The survey** is a `ReviewScope` of kind `survey`: no change, a request to look around. `maybeSurvey` runs it once per project (`isSurveyed`), from `engage` on a fresh switch-on, and not when both deep review triggers are off or usage is at 80% or more. A survey's text goes to the Deep review tab and is not kept in `reviews.json`.
-- **The next review follows up.** `reviewRequest(scope, { overview, earlier })` gives it the overview and `reviewDigest` of the last three reviews.
-- In the kit, a project counts as surveyed already unless `stubSession(on, { isNewProject: true })`, so that a test's first subagent is its own.
-- Seen in a real session on Sonnet at low thinking, in a fresh two-file project: the survey started on switch-on and was in the Deep review tab about ten seconds later, as plain prose, with the overview and both files' roles in `project.json`. A commit's review landed twelve seconds after the commit, with no notes block in the tab and three insights in the cache. `/bsd explain` on a function then showed the review's insight beside it with its commit, and editing the file took the insight off the screen 200 ms later.
-- **A save moves the Explain focus to where the change began**: `firstChange` between the text the explainer last read and the new one, past blank lines. Before, it went to the first symbol that had changed, which is line 1 when the change is a new function.
-
-### The journal
-
-DESIGN.md, "What you are working on". What the person does in one project's code, in time order, so that every model the tutor calls knows what is going on: `projects/<name>-<hash>/journal.json` in the data folder. `recorder.ts` is the engine, with the disk and the repository as ports. `register.tsx` starts it in `engage` (`startJournal`), feeds it from every watcher tick (`keepJournal`) and from `pollFocus`, and drops it when the tutor is switched off.
-
-- **What goes in.** Each tick hands the recorder the files `git status` saw change since the last poll. It diffs each against its text at the previous save, or at HEAD for a file that was clean, or as it was at switch-on for a file already dirty, so that uncommitted work is not counted as a save. A `save` entry holds the lines added and removed, where (a few merged runs of lines) and the names of the definitions it touched (`enclosing.ts`). Saves of one file under two minutes apart are one run, until a commit or another move of HEAD comes in between. Commits, other moves of HEAD, notes raised, notes dealt with in the code, dismissals, deep reviews, switching on, and what the person says they are working on are entries too. No entry holds code. The diffs of the three files saved last are kept in memory only, for the `activity` tool.
-- **Attention.** An editor writes only where its caret is, in `focus.json`, and never a duration. `attention.ts` credits each poll's time, ten seconds at most so that a laptop that slept adds nothing, to the caret's line, and to the files `visible` beside it. It does so while the editor has written in the last two minutes (`LINGER_MS`) and does not say `active: false`. Every two minutes (`SLICE_MS`) that becomes `focus` entries: up to three regions per file, plus the rest of the file's time. A region is a run of lines within 20 of each other and inside one definition, named after the line the caret stayed on longest. Files beside it get `screen` entries. The definition the caret is in is named at the next tick, so a caret that stays put costs one read of its file however often the editor writes. What `focus.json` said before the tutor was switched on is a baseline, and earns no time until the editor writes again.
-- **Sittings.** An hour with nothing recorded ends a sitting. Whenever the journal is read or written, every sitting that is over is rolled up (`digest`) into its files, its commit titles and what was said, and only the open sitting keeps its entries. The last twenty sittings are kept. One with no save, no commit and under a minute of editor time leaves nothing.
-- **Writing.** The recorder writes at most every 30 seconds while something new has come in, at once when the person says what they are working on, and when the tutor is switched off. Before every write it reads the file again and merges (`sync`). An entry this session never saw is another session's, and is kept. One it saw and no longer holds was rolled up or grew into a run, and is dropped. For what was said and what was inferred, the later wins, and a tie goes to this session. Every entry goes through `parseEntry` before it is held, so that one entry always has the same JSON, which is what `sync` compares.
-- **What reads it.** `glanceText` comes first in every play-by-play prompt and last in every deep review request. It holds what they said they are working on, what the last look made of it while that still fits (`holds`: under an hour old, and the activity still touches a file that look saw), and where the last ten minutes went, by file. A save weighs as much as a minute in the editor, and time beside the file in front a quarter of it. Then come the caret, the sitting so far in order (fourteen lines at most) and the previous sitting. `briefText`, a few lines of the same, goes with every prompt the person types, through `prompt.submit`. The `activity` tool answers with the glance and the latest diffs.
-- **Working on.** The play-by-play's reply has a `working_on` field, which `prompts/play-by-play.md` asks for on every look. It is kept as `inferred`, with the paths that look saw, and a move of HEAD that is not a commit clears it. The pane's line shows what they said, else what was inferred while it holds, else where their activity is (`workingOf`), and it is hidden outside a git repository. `w`, and `/bsd working` with nothing after it, ask "What are you working on right now?" with two answers and free text. The first answer is what Enter gives, and it never loses anything (`workingChoices`). Their words come in through `/bsd working <words>`, the `working` tool or a typed answer. "Let the tutor work it out", `/bsd working clear` and the tool with an empty string take them back.
-- `/bsd forget project` deletes the journal with the project's folder, and `recorder.reset()` drops what the session holds, or the next write would bring it back.
-
-Seen in a real session on Sonnet, with a script writing `focus.json` in place of an editor. The pane said "Working on stats.py, in mean" four seconds after the script put the caret there, with "100% of the last 10 minutes in the editor". Twelve seconds after a save that added a `median`, the look's `working_on` turned the line into "writing a median function in stats.py", beside a note on the even-length case. Asked "why does this give the wrong answer for four numbers?", the tutor knew "this" was `median`. Told "I'm working on the summary stats for the weekly report", it called `working` with no permission prompt. Its first call had no `on` at all, and at the time that cleared the line, which is why a call without `on` now records nothing. `/bsd working clear` brought back the inferred line. `w` showed the dialog with the inferred guess as its second answer, and a typed answer replaced it. A reload of the mod kept everything, because it is read back from the file. A commit was in the file within 30 seconds, and `/bsd off` wrote the last two minutes of editor time. Asked what it had been up to, the tutor called `activity` and summed it up in two accurate lines. The first slice merged eleven seconds in `mean` and two minutes in `median` into one region named `median`, which is why a region now also ends where the definition changes. Only in tests: a sitting rolled up after an hour, two sessions writing one journal, and the deep reviewer reading the journal, because the after-commit review was off in that session.
+- `projects/<id>/journal.json`; engine `recorder.ts` (disk and repo as ports). `register.tsx` starts it in `engage` (`startJournal`), feeds it each tick (`keepJournal`) and from `pollFocus`, and drops it at switch-off. It holds paths, line numbers, definition names, commit titles and user statements, never code.
+- Saves: each tick's changed files are diffed against the last save's text, else HEAD for clean files, else switch-on text for files already dirty (so pre-existing work isn't a save).
+  - A `save` entry holds added and removed counts, merged line runs and touched definitions (`enclosing.ts`).
+  - Saves of one file under 2 min apart form one run, until a commit or HEAD move.
+  - Other entries: commits, HEAD moves, notes raised, notes fixed, dismissals, deep reviews, switch-on, working-on statements.
+  - The last 3 files' diffs stay in memory for the `activity` tool.
+- Attention: `attention.ts` credits each poll's time (max 10 s, so sleep adds nothing) to the caret line and to `visible` files, while the editor wrote within `LINGER_MS` (2 min) and isn't `active: false`.
+  - Every `SLICE_MS` (2 min) → `focus` entries: up to 3 regions per file plus the remainder. A region is lines within 20 of each other inside one definition, named for the line held longest. Visible files get `screen` entries.
+  - The definition name is resolved at the next tick, so one read per caret position.
+  - `focus.json` from before switch-on is a baseline and earns no time until rewritten.
+- Sittings: an hour idle ends one. On every read or write, finished sittings roll up (`digest`: files, commit titles, statements); only the open sitting keeps entries. Keep the last 20. A sitting with no save, no commit and under 1 min of editor time leaves nothing.
+- Writes: at most every 30 s when something is new; at once on a working-on statement; at switch-off.
+  - Every write re-reads and merges (`sync`). An unseen entry is another session's and is kept. A seen-but-gone entry was rolled up or merged, and is dropped.
+  - For said and inferred working-on, later wins; ties go to this session.
+  - Every entry passes `parseEntry` so JSON is canonical for comparison.
+- Readers:
+  - `glanceText` comes first in every play-by-play prompt and last in every deep review request: what they said; what the last look inferred while it `holds` (under 1 h old, and activity still touches a file that look saw); where the last 10 min went by file (a save weighs 1 editor-minute, beside-time ¼); the caret; this sitting, max 14 lines; the previous sitting.
+  - `briefText` goes with every typed prompt.
+  - The `activity` tool returns the glance plus the latest diffs.
+- Working on:
+  - The play-by-play reply's `working_on` is stored as `inferred` with the paths seen; a non-commit HEAD move clears it.
+  - The pane line shows, in order: said, else inferred while it holds, else `workingOf` (where activity is). Hidden outside a git repo.
+  - `w` or bare `/bsd working` asks with two answers plus free text. Enter gives the first, which never loses anything (`workingChoices`).
+  - The user's words come via `/bsd working <words>`, the `working` tool, or a typed answer. Take-back: "Let the tutor work it out", `/bsd working clear`, or the tool with an empty string. A tool call without `on` records nothing (a live call without it once cleared the line).
+- `/bsd forget project` deletes the folder, and `recorder.reset()` stops the next write from restoring it.
+- Live (script as editor): "Working on stats.py, in mean" 4 s after the caret moved; after a save, `working_on` became "writing a median function in stats.py"; "this" in chat resolved to `median`; `working`, `activity` and a commit were written within 30 s; a reload kept everything. Regions now also end where the definition changes (one once merged `mean` and `median`).
 
 ### Progress
 
-DESIGN.md, "How you are doing". The owner's requirements: honest levels (beginner, junior, mid, senior) per language across projects, judged only on the person's own work so that a polished codebase cannot inflate them, able to come back down, in step with the deep reviews, and "worth the token burn".
+- The model observes and code decides. One `$.model.complete` on the deep review model (`prompts/progress.md` rubric) returns observations (skill slug, `shown | missed`, the skill's level, a note), a proposed level, and the report text.
+- `decideLevel` (`progress.ts`):
+  - No level before 5 observations from 2 commits.
+  - The first placement is capped at the highest level with 2 weight of evidence.
+  - One step at a time.
+  - Up: 4 weight of next-level evidence from 2 commits, and the model agrees.
+  - Down: 2 weight of misses at or below the level from 2 commits, and the model proposes lower or the misses outweigh what was shown.
+  - Provisional until 12 observations from 4 commits.
+  - Every change goes in `history` with its reason and the observation count; "since last change" counts from there.
+- Slipping is per commit: shown in an earlier commit, and only missed in the latest commit that touched it. Shown and missed in one commit is mixed. A first placement keeps commits in time order so a skill learned later isn't marked slipping.
+- Whose work (`judge`, `authorship.ts`):
+  - The author email is in `identity` (`git config --get user.email`, plus `--global` when it differs).
+  - Not a merge; no `Co-authored-by` trailer or tool line.
+  - At most 600 added lines and 25 files (otherwise import, vendored or generated).
+  - At least `MIN_LINES` (3) non-blank added lines in one language.
+  - Only added lines are read (`git show --unified=0`); lock files and generated folders never are. The tab's status line says why the last commit didn't count.
+- Weight 1 if the watcher saw at least half the commit's files change before it was made (`watchedPaths`, filled by `tick`, emptied as commits are assessed), else 0.5. First-placement commits are always 0.5.
+- When:
+  - `assessCommit` runs from `turn.complete` after a commit's deep review (with its text, or without on failure), or from `checkHead` when after-commit reviews are off. Not near the plan limit.
+  - `placeFirst` runs on a fresh switch-on for the first 2 languages in play without a level: up to 5 of the user's commits among the last 30, in one request.
+  - `progressQueue` runs one at a time, each re-reading before writing. Full hashes go in `assessed`, so no commit counts twice anywhere.
+- Observations are keyed by full hash (the kit's short hashes are all `0000000`).
+- `aboutPerson()` adds `progressText` to every prompt. The `progress` tool answers "how am I doing?". The reviewer is re-registered after each assessment.
+- The tab's id is still `profile` (`tab-profile`, hotkey 4), labelled Progress; other tests press it.
+- Setting `progress_report` turns it off. Stored in `progress/<language>.json`.
+- Live: in a repo of polished commits by a "Famous Maintainer" plus one 4-line function of the user's, only the user's commit was read ("no level yet: 4 of 5 observations, from 1 of 2 commits"); a watched second commit placed junior (provisional); a `Co-Authored-By: Claude` commit was ruled out; the `progress` tool answered with no permission prompt.
 
-- **Model observes, code decides.** One `$.model.complete` on the deep review model (`prompts/progress.md` holds the rubric) returns observations, each a skill slug, `shown` or `missed`, the level the skill belongs to, and a note, plus a proposed level and the report's text. `decideLevel` in `progress.ts` decides what the level becomes: nothing before five observations from two commits, a first placement capped by the highest level with two observations' worth of evidence, one step at a time, up only on four weight of next-level evidence from two commits with the model agreeing, down on two weight of missed evidence at or below the level from two commits when the model proposes lower or the misses outweigh what was shown. Provisional until twelve observations from four commits. Every change is in `history` with its reason and the observation count it happened at, and "since the last change" is counted from there.
-- **Whose work.** `judge` in `authorship.ts`: the author's email must be in `identity` (`git config --get user.email` in the repository, which falls back to the global one, plus `--global` when it differs), not a merge, no `Co-authored-by` trailer or tool line, at most 600 added lines and 25 files, and at least `MIN_LINES` (3) non-blank added lines in a language. Only added lines are read (`git show --unified=0`). The Progress tab's dim status line says why the last commit did not count.
-- **Weight.** A commit counts 1 when the watcher saw at least half of its files change before it was made (`watchedPaths`, filled from `tick` and emptied as commits are assessed), else 0.5. A first placement's commits are always 0.5.
-- **When.** `assessCommit` runs from `turn.complete` after a commit's deep review (with the review's text, or without it when the review failed), or from `checkHead` when after-commit reviews are off. Not near the plan limit. `placeFirst` runs on a fresh switch-on for each of the first two languages in play that has no level: up to five of the person's commits among the last 30, in one request. `progressQueue` runs one assessment at a time, and each reads the record again right before writing it. A commit's full hash goes in `assessed`, so none counts twice, in any project.
-- **Who is told.** `aboutPerson()` adds `progressText` to the profile text in every prompt: the conversation, both reviewers and Explain. The `progress` tool answers "how am I doing?". The deep reviewer is registered again after each assessment.
-- **Observations are keyed by the full commit hash.** In the kit every commit's short hash is `0000000`, which first made two commits count as one.
-- **Slipping** is decided per commit: a skill is slipping when an earlier commit showed it and the latest commit that touched it only missed it. Showing and missing it in one commit is a mixed result. In the first live run, a commit that handled negative sizes but not strings had the skill marked slipping, which is what led to this rule.
-- **The tab** is still `profile` inside (`tab-profile`, hotkey 4), labelled Progress. Other sessions' tests press that key.
-- In the kit, `session.commit(message, { author, body, isMerge })`, the person's email is `stubSession(on, { email })` (default `me@example.com`, `''` for none), assessments are answered with `session.assess(reply)` and recorded in `session.assessments`.
+### Animated persona
 
-Seen in a real session on Sonnet at low thinking, in a project of two polished commits by a "Famous Maintainer" and one four-line `area` function of the person's: switching on read only the person's commit, said "no level yet: 4 of 5 observations, from 1 of 2 commits", and called the function's `print` and missing validation early habits. A second commit, saved while watched, placed them at junior (provisional), with what mid would need. A commit with a `Co-Authored-By: Claude` line was ruled out in the tab. Asked "how am I doing in Python?", the tutor called the `progress` tool with no permission prompt and gave the same honest answer.
+- `avatar.ts` holds the art and rules; `register.tsx` moves it. It stands at the top of the Play-by-play and Deep review tabs.
+- Lines:
+  - The play-by-play reply's `say` field. `prompts/speech-bubble.md` goes into the reviewer's system prompt only while the setting is on. The request's last line says `insight`, or `remark` after `QUIET_LOOKS_BEFORE_REMARK` (4) silent looks.
+  - Each look's `say` replaces the line, so a quiet look means silence, and it never speaks about outdated code.
+  - A finished deep review gives its last line (`deep-review.md` makes that the one thing to do next).
+  - Switch-on gives `hello`. No line costs a model call.
+- Motion:
+  - `say` writes the `speech` atom at tick 0 and starts `$.clock.every(TALK_MS)`. Each tick reveals one word via `update` with `nextTick` (compare-and-set, so a stale tick can't overwrite a newer line). The mouth moves on alternate ticks; the timer stops when done.
+  - A blink every `BLINK_MS` (with `$.clock.after` to reopen), only while `on` and not talking.
+  - Switch-off cancels both timers and resets the speech. A reload loses the timers, so `startAnimating` marks a half-said line as said.
+- `poseOf` decides at render from the mode, watcher and speech: asleep (paused), talking, eyes up (look running), blinking, rest (drawn dim).
+- The bubble is sized to the whole line from the first word (no reflow) and only as wide as needed. Above the prompt, or off-terminal, it uses one-line `mini` frames.
+- Art rules (`avatar.test.ts` checks them):
+  - Every pose of a character has the same height, and every line the same width.
+  - Only printable ASCII plus the block elements Claude Code's mascot uses (nothing double-width).
+  - Each character names its `mouth` row, and `bubbleColumn` pads above so the bubble's tail meets the mouth.
+  - ASCII characters use the ASCII bubble (`bubbleStyle`); Claude's mascot uses box lines.
+  - The README pane drawing avoids block elements (GitHub's font may lack them).
+- Live: all characters seen saying hello with mouth movement, blinking, sleeping when paused, and with the tail at the mouth. One-line mode at 100 columns.
 
-### Updates and uninstalling
+### Updates and uninstall
 
-DESIGN.md, "Update" and "Uninstall". `update.ts` is pure; `detectInstall`, `checkForUpdate`, `runUpdate`, `removeHome` and `runUninstall` in `register.tsx` hold the effects.
+- `update.ts` is pure. Effects live in `detectInstall`, `checkForUpdate`, `runUpdate`, `removeHome` and `runUninstall` in `register.tsx`.
+- Install kind:
+  - `clone`: `git rev-parse --show-toplevel` from `$.plugin.root` gives a folder whose `plugin/` is the root and which has `.claude-plugin/marketplace.json`. Both conditions guard against a dotfiles repo around `~/.claude`.
+  - `synced`: the root is under `<config>/plugins/synced/` (claude.ai org or directory installs). These self-update and have no `installed_plugins.json` entry.
+  - `installed`: an entry in `<config>/plugins/installed_plugins.json` whose `installPath` contains the root.
+  - `<config>` = `CLAUDE_CONFIG_DIR` or `~/.claude`.
+- Versions and releases:
+  - An installed copy is pinned to `plugin.json` `version`; `claude plugin update` does nothing until it changes.
+  - New installs copy whatever `main` has (the entry is relative `./plugin`). Pointing the entry at a release ref (e.g. a `git-subdir` source with `ref`) is the owner's open decision.
+  - Tags: `backseat-driver--vX.Y.Z` (`claude plugin tag`); `newestRelease` also accepts `vX.Y.Z`.
+  - `scripts/release.sh` refuses a dirty tree, a branch other than main, or being behind origin.
+- Check: on a fresh switch-on, when `update.json` is missing or 6 h old.
+  - `git ls-remote --tags --refs` against the clone's `origin`, Claude Code's own marketplace clone, or the manifest `repository`.
+  - Network git goes through `git(…, isNetwork = true)`: `GIT_TERMINAL_PROMPT=0` and `GIT_SSH_COMMAND=ssh -o BatchMode=yes` (`$.process.run` `env` overlays the host env). It never prompts.
+  - Failure writes nothing and retries at the next switch-on.
+  - Off with the setting or `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`. The notice lives in the `update` state key, under the pane's status line.
+- `/bsd update` (also `/backseat-driver-update`):
+  - clone: `git pull --ff-only`, only if `git status --porcelain --untracked-files=no` is empty. The `--plugin-dir` reload follows, and the mode survives in state.
+  - installed: `claude plugin marketplace update <mp>`, `claude plugin update <id>`, then `$.command.run({ command: 'reload-plugins' })`. Until the reload the old version runs. `$.plugin.root` changes per version (the cache is `cache/<mp>/<plugin>/<version>/`; old versions are deleted 14 days later).
+  - synced: tells the user that updates arrive by themselves.
+  - Says when there was nothing new.
+- `/bsd uninstall`: Keep (Enter), uninstall and erase, or uninstall and keep.
+  - Erase needs the typed phrase. `removeHome` deletes the folder itself only if `isOwnFolder` (only the marker and `REMOVABLE` entries).
+  - Installed: `claude plugin uninstall <id> --yes`. The marketplace stays, and the final line says how to remove it and what settings remain. A clone is told how to remove itself.
+- Marketplace facts (2.1.289): auto-update is off by default for third-party marketplaces (`/plugin` → Marketplaces → enable). npm's `stable` dist-tag of Claude Code was 2.1.285, below the 2.1.287 mods need.
+- Testing the marketplace path without GitHub: `marketplace add` accepts `owner/repo`, https, http or a path, but not `file://`. A path loads in place, so it never exercises update. Plain HTTP fails because the clone is shallow. What works:
+  - Serve a bare clone with `git http-backend` via `python3 -m http.server --cgi` (`cgi-bin/git` exporting `GIT_PROJECT_ROOT`, `GIT_HTTP_EXPORT_ALL`).
+  - `claude plugin marketplace add http://127.0.0.1:<port>/cgi-bin/git/<repo>.git --scope local`, then `claude plugin install … --scope local` from a scratch project.
+  - Clean up: `/bsd uninstall`, `claude plugin marketplace remove backseat-driver --scope local`, and delete `~/.claude/plugins/cache/backseat-driver` (uninstall leaves it).
+- Live: from a 0.1.0 clone against a local upstream with `backseat-driver--v0.2.0`, the notice appeared, update pulled, the mod reloaded and stayed on; a dirty clone wasn't pulled. An installed 0.1.0 (project scope) updated to 0.2.0 via both commands plus reload and stayed on. Uninstall with erase removed the plugin and the data folder.
 
-- **How it was installed** decides everything. `clone`: `git rev-parse --show-toplevel` from `$.plugin.root` names a folder whose `plugin` subfolder is the root and which holds `.claude-plugin/marketplace.json`. Both conditions guard against a dotfiles repository around `~/.claude` being taken for a clone and pulled. `synced`: the root is under `<config>/plugins/synced/`, where claude.ai organizations put plugins; they update themselves and have no `installed_plugins.json` entry. `installed`: an entry in `<config>/plugins/installed_plugins.json` whose `installPath` holds the root. `<config>` is `CLAUDE_CONFIG_DIR`, else `~/.claude`.
-- **Releases.** An installed copy is pinned to the `version` in `plugin.json`: `claude plugin update` does nothing until it changes. New installs copy whatever `main` has, since the marketplace entry is the relative path `./plugin`. Whether to point the entry at a release ref instead is the owner's decision, still open. A release is tagged `backseat-driver--vX.Y.Z` by `claude plugin tag`; `newestRelease` also accepts plain `vX.Y.Z`. `scripts/release.sh patch|minor|major|X.Y.Z [--push]` refuses a dirty tree, a branch other than main, or one behind origin, then bumps, runs `npm run check`, commits and tags.
-- **The check** runs on a fresh switch-on when `update.json` is missing or six hours old: `git ls-remote --tags --refs` against the clone's `origin`, or the manifest's `repository`. Network git calls go through `git(…, isNetwork = true)`, which sets `GIT_TERMINAL_PROMPT=0` and `GIT_SSH_COMMAND=ssh -o BatchMode=yes` (the `env` of `$.process.run` is laid over the host's environment, not in place of it), so a private repository or a passphrase can never stop the session on a prompt. A failed request writes nothing and is tried at the next switch-on. The notice goes in the `update` state key and under the pane's status line.
-- **`/bsd update`.** A clone is pulled with `--ff-only`, and only when `git status --porcelain --untracked-files=no` is empty; the `--plugin-dir` watcher then reloads the mod, and the mode survives in `$.state`. An installed copy runs `claude plugin marketplace update <marketplace>` and `claude plugin update <id>`, then `$.command.run({ command: 'reload-plugins' })`. Until that reload the session keeps running the old version, and `$.plugin.root` changes with each version, because the cache folder is per version.
-- **`/bsd uninstall`.** Keep, uninstall and erase, or uninstall and keep. Erasing takes the typed phrase from `/bsd forget`, and `removeHome` deletes the data folder itself only when `isOwnFolder` says everything directly in it is the marker or one of `REMOVABLE`. An installed copy is removed with `claude plugin uninstall <id> --yes`; the marketplace stays, and the line the person is shown says how to remove it.
-- In the kit: `stubSession(on, { install: 'clone' | 'installed', tags, isCloneDirty })`. A clone's top is the plugin folder's parent. An installed copy gets an `installed_plugins.json` whose `installPath` is `/`, which holds every folder. `session.ran` lists the `claude` commands and the network git commands in order.
-- Seen in real sessions. From a 0.1.0 clone against a local upstream holding `backseat-driver--v0.2.0`: the pane announced 0.2.0, `/bsd update` pulled, the mod reloaded and the tutor stayed on, and a clone with a local change was not pulled. From an install of 0.1.0 scoped to one scratch project: the pane announced 0.2.0 after asking the marketplace's own clone, `/bsd update` ran both `claude plugin` commands and `/reload-plugins`, `installed_plugins.json` then said 0.2.0, and the tutor stayed on. `/bsd uninstall` with erase removed the plugin at local scope and the data folder.
-- **Testing the marketplace path without GitHub.** `claude plugin marketplace add` takes `owner/repo`, `https://…`, `http://…` or a path, but not `file://`. A path is read in place, so it never exercises `claude plugin update`, and plain HTTP fails because Claude Code clones shallow. What worked: a bare clone of this repository served by `git http-backend` through `python3 -m http.server --cgi` (a `cgi-bin/git` script exporting `GIT_PROJECT_ROOT` and `GIT_HTTP_EXPORT_ALL`), then `claude plugin marketplace add http://127.0.0.1:<port>/cgi-bin/git/<repo>.git --scope local` and `claude plugin install … --scope local` from inside a scratch project. Afterwards `/bsd uninstall`, then `claude plugin marketplace remove backseat-driver --scope local`, and delete `~/.claude/plugins/cache/backseat-driver`, which uninstalling leaves behind.
-- Findings from the session that probed installs on 2.1.289, kept here because they shape this: auto-update is off by default for third-party marketplaces (`/plugin`, Marketplaces, enable auto-update); and npm's `stable` dist-tag of Claude Code was 2.1.285, below the 2.1.287 that mods need.
+### Data folder
 
-### The data folder
+`$BACKSEAT_DRIVER_HOME`, else `$XDG_DATA_HOME/backseat-driver`, else `~/.local/share/backseat-driver`. `datahome.ts` builds every path.
 
-Everything the tutor keeps between sessions is a JSON file under one folder: `$BACKSEAT_DRIVER_HOME`, else `$XDG_DATA_HOME/backseat-driver`, else `~/.local/share/backseat-driver`. `datahome.ts` builds every path in it. `scripts/dev-session.sh` sets `BACKSEAT_DRIVER_HOME` to a scratch folder (`BSD_DATA_DIR`), so a live check never touches the owner's real data.
+```text
+.backseat-driver              marker; required before any delete
+profiles/<language>.json      answers, hushes, lesson memory
+progress/<language>.json      evidence, level, report
+projects/<name>-<hash>/       journal.json, project.json, reviews.json, files/
+focus.json                    written by an editor
+view.json                     written by the tutor
+update.json                   last release check
+```
 
-- **Why files and not `$.store`.** Profiles lived in the plugin's store until part two. The store is capped at 4 MiB in total, is a separate file for each way the plugin is installed (`--plugin-dir` and a marketplace install did not share profiles), and is cleared after `cleanupPeriodDays` without use. None of that suits a database that is meant to grow, and future editor plugins need a path they can find. `moveOutOfStore` copies any `subject/<x>` key into `profiles/<x>.json` when the tutor is switched on and deletes the key. A profile already in a file wins.
-- **Why not SQLite.** The hooks module cannot load it, and the `sqlite3` binary is missing from many machines, the owner's included.
-- **Reads and writes** go through a `Disk` (`storage.ts`): four closures that `diskOf($)` in `register.tsx` builds from `$.fs` and `$.process`. Engines take a `Disk` as a port, and tests hand them `memoryDisk()`. A write is the whole file and is not atomic, so `readJson` treats a file that does not parse as missing, and every writer reads right before it writes.
-- **Deleting.** `$.fs` has no delete, so `Disk.remove` runs `rm -rf -- <path>`. It is the only process besides git. Two guards stand in front of it: `isRemovable` accepts only a path under one of the folder's own children (`profiles`, `progress`, `projects`, `focus.json`, `view.json`, `update.json`) with no `.` or `..` segment, and the folder must hold the marker file `.backseat-driver`, which `markHome` writes before the first write. A `BACKSEAT_DRIVER_HOME` that points at somebody's documents therefore loses nothing.
-- **`/bsd forget`** (`forget.ts` for what each scope deletes, `forget()` in `register.tsx` for the dialogs). Every dialog is `$.ui.ask` with "Keep it" first, so Enter keeps. Only the exact answer "Forget it" goes on, and forgetting everything also needs the phrase typed into the dialog's free-text row. The command itself returns at once and the result arrives as a transcript line from `$.ui.log`, which Claude Code already prefixes with the plugin's name. It works while the tutor is off.
+- Not `$.store`: it's capped at 4 MiB total, separate per install method, and cleared after `cleanupPeriodDays`. Editor plugins also need a findable path. `moveOutOfStore` migrates old `subject/<x>` keys at switch-on; a file wins over a key.
+- Not SQLite: the module can't load it, and the `sqlite3` binary is often missing (the owner's machine included).
+- I/O goes through `Disk` (`storage.ts`), four closures built by `diskOf($)` from `$.fs` and `$.process`. Engines take it as a port; tests use `memoryDisk()`. Writes are whole-file and non-atomic, so `readJson` treats unparseable as missing, and every writer re-reads right before writing.
+- Delete: `$.fs` has none, so `Disk.remove` runs `rm -rf -- <path>`. Guarded by `isRemovable` (only under `REMOVABLE` children, no `.` or `..` segments) and by the marker (`markHome` writes it before the first write). A misdirected `BACKSEAT_DRIVER_HOME` loses nothing.
+- `/bsd forget [project|<language>|everything]` (`forget.ts`; dialogs in `forget()`):
+  - Every dialog has "Keep it" first, so Enter keeps. Only the exact "Forget it" proceeds.
+  - Everything also needs the typed phrase "forget everything".
+  - Returns at once; the result is a `$.ui.log` line. Works while off.
+- Live timings: an outside write 8–16 ms, a read or listing 3 ms, a stat 1 ms, `rm` 5 ms. Migration, keep-on-Enter, delete, and forget-everything leaving only the marker were all seen.
 
-Seen in a real session under `--permission-mode default`: a profile seeded in the old store file moved into `profiles/` with the marker beside it and left the store file as `{}`. `/bsd forget python` with Enter kept the file, and with "Forget it" deleted it. Forgetting everything took the typed phrase and left only the marker. Measured there: a write outside the project took 8 to 16 ms, a read or a listing 3 ms, a stat 1 ms and `rm` 5 ms.
+## Invariants
 
-### Invariants
+- Dormant until switched on. While off, every hook passes through with `next(e)`: no pane, model call, prompt change or denial. No reads or writes at session start. Only `/bsd forget`, `/bsd help` (and update or uninstall when asked) act while off.
+- Background reviews never become conversation turns. Only what the user does in chat or the pane does. Verified live for `$.model.complete` and `$.agent.spawn`.
+- Model and effort per job come from `userConfig`; no model id is pinned (aliases only). Defaults: play-by-play `sonnet`/`medium`, deep review `opus`/`high`, Explain `sonnet`/`low`. "Thinking level" = Claude Code effort (`low|medium|high|xhigh|max`).
+- Hard rules are hooks; teaching style is the contract. The edit guard covers only `Edit`, `Write` and `NotebookEdit`; a shell command could still write, which rests on the contract and Claude Code's permission prompts.
+- Footprint (the README's "What it is not" states it to users):
+  - Runs `git`, reads the repo and its own plugin folder, calls models, writes only its data folder, draws a pane.
+  - Other processes only on request: `rm` inside the data folder (forget), `claude plugin` (update, uninstall).
+  - Network of its own: the release check (`git ls-remote`, at most every 6 h, opt-out) and `/bsd update`'s fetch.
+  - No git hooks, never writes the working tree.
+  - Any new kind of call in the validator's `calls:` (`http.fetch`, a write outside the data folder, another process) breaks this and needs the owner's decision plus a README update.
+  - `env reads:` must stay `BACKSEAT_DRIVER_HOME, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, CLAUDE_CONFIG_DIR, HOME, USERPROFILE, XDG_DATA_HOME`.
 
-- **Dormant until switched on.** Claude Code registers a plugin's hooks at session start, whether or not the user ever runs `/backseat-driver`. While the mode is off, every hook passes through with `next(e)`: no pane, no model call, no prompt change, no denied tool call. There is no exception: starting a session with the tutor off reads nothing and writes nothing. `/bsd forget` and `/bsd help` work while it is off, because the user asked.
-- **Background reviews stay out of the conversation.** Neither the play-by-play nor an automatic deep review may become a turn in the user's conversation. Only what the user does in chat or in the pane becomes a turn. Both were checked in real sessions: `$.model.complete` and a subagent started with `$.agent.spawn` leave no row in the conversation.
-- **Model and thinking level are the user's settings.** Both reviews read their model and thinking level from `userConfig`. Nothing is hard-coded and no model id is pinned. Defaults: play-by-play `sonnet` at `medium`, deep review `opus` at `high`. "Thinking level" in DESIGN.md is Claude Code's effort level (`low`, `medium`, `high`, `xhigh`, `max`).
-- **Hard rules are hooks, teaching style is the contract.** "Claude never edits the user's files" is a `tool.call` denial of `Edit`, `Write` and `NotebookEdit`. How to hint and explain lives in the skill, and applies to deep reviews as much as to notes.
-- **Small, auditable footprint.** DESIGN.md ("Limits") promises that the mod runs `git`, reads files inside the repository and its own plugin folder, calls models, keeps what it remembers in its own data folder and draws a pane. Two other programs run only when the user asks: `rm` inside that folder to forget, and `claude plugin` to update or uninstall. Its own network traffic is the release check (`git ls-remote`, at most every six hours, off with a setting or `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`) and the `git pull` of `/bsd update` in a clone. A new kind of call in the validator's `calls:` list (`http.fetch`, a write outside the data folder, another process) breaks the promise and needs a deliberate change to it in DESIGN.md, and to "What it is not" in the README. The validator also prints `env reads:`, which should stay at `BACKSEAT_DRIVER_HOME`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `CLAUDE_CONFIG_DIR`, `HOME`, `USERPROFILE` and `XDG_DATA_HOME`.
-- **No git hooks.** Installing a `post-commit` hook would write into the user's repository, so commits are found by polling.
+## Mod API (early access; last verified 2.1.289; mods need 2.1.287+)
 
-## Working on the mod
+The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above memory and docs; grep it. Load the `plugin-authoring` skill before writing hooks.
 
-The mod API is early access and changes between Claude Code releases. Mods need 2.1.287 or later, and the code was last verified against 2.1.289. Load the `plugin-authoring` skill before writing or debugging hooks. The type declarations in `plugin/.claude-plugin/types/claude-code/index.d.ts` are the authority: they outrank memory, the docs site and the API names in DESIGN.md. Grep them for the name at hand.
+- No Node, no DOM, no `import()`. Everything external goes through `$`.
+- State a drawing reads lives in `$.state`; module variables are lost on reload. A `ui.render` hook reads state but can't write it.
+- `/clear`, `/resume`, `/branch` reset `$.state` without `session.start`; `classic.SessionStart` fires instead.
+- A pane opened by the user's command places at any width; one opened unprompted waits for 144 columns.
+- `prompt.compose` is uncached and can't be invalidated (it runs every render). `prompt.context`, `prompt.section` and `tool.describe` are cached until `$.ui.invalidate` names them.
+- `$.model.complete` takes `effort`. `$.agent.spawn` takes `model`, no effort, and the mod's own `turn.step`/`tool.call` hooks don't see its subagents.
+- `$.model.complete(req, { signal })`: an abort resolves, it doesn't reject.
+- A mod's tool is served by answering `tool.call` without `next`; no permission prompt. Declare inputs under `McpToolInputs` in `plugin/types/index.d.ts`, or matchers won't type-check. A no-input tool is `Record<never, never>` (with `Record<string, never>`, `$.tool.call({ tool })` fails).
+- `update($, atom, fn)` gives a misleading "Atom<…> is not assignable to StateRef" when `fn` returns literal-union fields. Annotate: `(w): Watch => ({ ...w, state: 'looking' })`.
+- `userConfig` `options` pickers work on string fields only. A stored value outside the options reads as the default, with a warning (in tests too). A `/config` change reloads the mod with new options, and the tutor stays on. For the working copy, values go to `~/.claude/settings.json` `pluginConfigs["backseat-driver@inline"]`: restore the owner's settings after a check.
+- `$.ui.ask`: one question, 2–4 options plus free text. It rejects on dismiss (first-run treats that as skip all) and under `claude -p`. In tests it reaches the `tool.call` stub as `AskUserQuestion`.
+- `$.store`: 4 MiB total, per install, expires (unused now). `get`, `set`, `delete`, `keys`.
+- `$.fs`: `read` (≤4 MiB), `write` (makes folders), `list`, `exists`, `stat`, `ancestors`. No delete or rename. `list`/`read` reject on missing. Absolute paths outside the project work without a prompt.
+- `$.env.get` takes a string literal; the validator lists the names.
+- A hook gets 10 s of its own time per dispatch. Time inside `$` calls doesn't count, except `$.clock.sleep` and awaited plain promises. So the `lookup` tool waits ≤6 s, then answers with what it has.
+- A mod's `$` calls go through other plugins' hooks, never its own. `$.prompt.submit` bypasses its own `prompt.submit` hook, so put needed context in the text or a tool.
+- `$.clock.after` is one-shot; `$.clock.every` repeats. Both return a `Timer` with `cancel()`. A reload cancels all.
+- `dimColor` plus `color` on `Text` renders theme gray (it replaces the color). `color` takes a theme key (`claude` = orange) or a terminal color.
+- State-driven redraws and `$.ui.invalidate` are capped at 30/s in the terminal. The persona ticks about 7/s while talking, zero at rest.
+- `e.props.isFocused` in the pane's `ui.render` says whether it has the keyboard; hotkeys are dead until then, and the pane says how to focus.
+- `Text` takes no `key`. Keys go on `Button`, `Input`, `Select`, `Markdown`. Find text via `ui.find({ type: 'Text', text })`; an undefined result after a clean mount usually means this.
 
-Easy to get wrong:
+## Tests
 
-- The hooks module has no Node and no DOM, and may not use `import()`. Everything outside the module goes through `$`.
-- State that a drawing reads belongs in `$.state`. Module variables are lost on reload. A `ui.render` hook can read state but not write it.
-- `/clear`, `/resume` and `/branch` reset `$.state` without firing `session.start` again. `classic.SessionStart` fires instead.
-- A pane opened by the user's own command is placed at any terminal width. One opened unprompted waits for 144 columns.
-- `prompt.compose` is not cached and cannot be invalidated: it runs each time a system prompt is rendered. `prompt.context`, `prompt.section` and `tool.describe` are cached until `$.ui.invalidate` names them.
-- `$.model.complete` takes the thinking level directly, as `effort`. `$.agent.spawn` takes a `model` but no effort, and the mod's own `turn.step` and `tool.call` hooks do not see a subagent the mod spawned.
-- A mod's tool is served by answering `tool.call` without calling `next`, and no permission prompt appears: seen in a real session. Declare the tool's input in `plugin/types/index.d.ts` under `McpToolInputs`, or a matcher on its name does not type-check. Declare a tool with no input as `Record<never, never>`: with `Record<string, never>`, `$.tool.call({ tool })` does not type-check, because the index signature forbids the `tool` field.
-- `update($, atom, fn)` fails to type-check with a misleading "Atom<...> is not assignable to StateRef" when `fn` builds an object whose fields are a union of literals. Annotate the return type: `(watch): Watch => ({ ...watch, state: 'looking' })`.
-- A `userConfig` string field with `options` only ever arrives as one of them: Claude Code reads any other saved value as the field's default and reports it ("option engineering in settings is not one of ..."), in tests too.
-- A `userConfig` picker (`options`) works only on string fields. The timer interval is therefore a string picker and the after-commit trigger a separate boolean. Changing a setting in `/config` reloads the mod with the new `options`. Seen in a real session: each setting is a row there (search for its title), the transcript says "options changed — reloaded", and the tutor stays on with the pane open. For the working copy the value is saved in `~/.claude/settings.json` under `pluginConfigs["backseat-driver@inline"]`, so a check made this way changes the owner's own settings: put the value back afterwards.
-- `$.ui.ask` asks one question per call, with two to four options plus free text. It rejects when the user dismisses the dialog, which the first-run questions treat as "skip the rest", and it rejects under `claude -p`. In tests it reaches the `tool.call` stub as a call to `AskUserQuestion`.
-- `$.store` holds 4 MiB of JSON in total, is per install, and is cleared after `cleanupPeriodDays` without use, which is why nothing is kept there any more. It has `get`, `set`, `delete` and `keys`.
-- `$.fs` has `read` (4 MiB at most), `write` (creates folders), `list`, `exists`, `stat` and `ancestors`. It has no delete and no rename. `list` rejects on a missing folder, and `read` on a missing file. Paths may be absolute and outside the project, and no permission prompt appears.
-- `$.env.get` takes the variable's name as a string literal, and the validator lists the names.
-- A hook has ten seconds of its own time per dispatch. Time spent inside a `$` call does not count, except `$.clock.sleep`, and awaiting a plain promise does. The `lookup` tool therefore waits at most six seconds for an answer and then says what it has.
-- A call a mod makes on `$` goes through every other plugin's hooks and skips its own. A prompt the mod submits with `$.prompt.submit` does not pass its own `prompt.submit` hook, so nothing that hook attaches goes with it. Put what the model needs in the prompt's text, or give it a tool.
-- `$.model.complete(request, { signal })` can be cut short. An aborted call resolves, it does not reject.
-- `$.clock.after(ms, fn)` is a one-shot timer, beside `$.clock.every`. Both return a `Timer` with `cancel()`, and a reload of the mod cancels them all.
-- `dimColor` on a `Text` that also has a `color` draws it in the theme's gray: the color is replaced, not dimmed. `color` takes a theme key such as `claude`, Claude's orange, or a terminal color name.
-- A state write that a drawing read redraws a shown pane at most thirty times a second in the terminal, and `$.ui.invalidate` follows the same limit. The animated persona ticks about seven times a second while it talks and not at all at rest, apart from a blink.
+- `stubSession(on, options)` (`plugin/tests/kit.ts`) is the fake world:
+  - a session, and a git repo at `/work` (`write`, `commit(message, { author, body, isMerge })`, `checkout`)
+  - a clock: `session.clock.advance(ms)` resolves after fired timers and their work settle; `session.clock.settle()`
+  - the model via `session.reply(...)`
+  - subagents finished by `$.turn.complete(session.finish(n, answer))`
+- Options: `email` (default `me@example.com`, `''` = none), `data` (seed the data disk), `isNewProject`, `install: 'clone'|'installed'`, `tags`, `isCloneDirty`, `isCloneCurrent`, `head`. Registers every stub needed to start and switch modes: extend it, don't register a second stub (one stub per event).
+- Data disk: `session.disk` (absolute path → text), `session.data(rel)`, `session.removed` (rm targets). Deletion needs the marker: `session.disk.set(MARKER_PATH, …)` or a prior write.
+- Explain in the kit: `session.lookups`, answered with `session.explain(reply, 'text the prompt contains')`. Order isn't guaranteed. With no answer, a file maps to no symbols. `session.editor(file, line, …, extra)` writes `focus.json`. Journal tests set `explain: 'off'` (a live editor triggers the 100 ms poll and slows minute-scale tests).
+- Progress: `session.assess(reply)`, `session.assessments`. Updates: `session.ran` (claude and network git commands in order). A clone's top is the plugin folder's parent; an installed copy's `installPath` is `/`.
+- `session.logs` = `$.ui.log` output (swallowed errors appear there).
+- Engines with ports are tested without the kit: `explain.test.ts` has `world()`, whose model is answered by hand with `w.answer(request, reply)`, which is how a test changes a file mid-call.
+- `sessionTest` (30 s limit) for anything that starts a session; plain `test` (5 s) for pure functions. All files run in parallel processes, and each test loads the whole mod, so a busy machine takes seconds before the first action.
+- A `$.clock.every` period is one dispatch with 10 s of real time. The 5-min deep-review timer spanning about 150 ticks can exceed it under load ("exceeded 10000ms budget"), failing when several sessions test at once. `await session.clock.settle()` before asserting on timer-started work.
+- `$.command.run` resolves when the hook returns, not when its background work finishes: `await session.clock.settle()` after `/bsd` before touching the repo, or the first save becomes the baseline.
+- `$.agent.spawn` in the kit: the stub gets `subagent_type`, must return `{ model }`, and the returned `agentId` is dropped (the plugin sees `{ model: 'inherit' }`). Hence `register.tsx` falls back to `$.agent.list()` by type (also needed when another mod answers the spawn); the kit stubs `agent.list`.
+- The kit auto-answers `$.ui.invalidate('ui.render')` but not prompt-event invalidations: stub `ui.invalidate`.
+- `test(name, { options: { engineering: 'knuth' } }, body)` sets `userConfig` per test.
+- Nearly every `$` call needs a stub before the test's first `$` call (except `$.state`, `$.ui.invalidate`). `session.start` runs only if fired. The test's own `$` has no `state`: assert via the pane or via sends and logs.
+- Types are strict: `$.command.run` needs `origin` and `presentation` (`typed()` in kit); a `command.register` stub returns `{ value: { command: e.name } }`.
+- Timers move only with the clock: after `/bsd` the hello stays at its first word until advanced by `TALK_MS` per word.
+- Each test starts freshly loaded with default state; `/clear` can only be approximated.
+- Remove debug lines by hand: `git checkout <file>` discards other uncommitted changes too.
 
-In tests:
+## References
 
-- `stubSession(on, options)` in `plugin/tests/kit.ts` is the whole fake world: the session, a git repository under `/work` with `write()`, `commit()` and `checkout()`, a clock (`session.clock.advance(ms)`), a model that answers from `session.reply(...)`, and subagents that finish when the test fires `$.turn.complete(session.finish(n, answer))`. `advance` resolves after the timers it fired and the work they started have settled, so an assertion can follow it directly.
-- A plugin's `$.agent.spawn` behaves differently in the kit than in a session. The `agent.spawn` stub receives the Agent tool's spelling (`subagent_type`, not `subagentType`), has to return `{ model }`, and whatever `agentId` it returns is dropped: the plugin gets `{ model: 'inherit' }`. Claude Code sets the id itself in a real session. So `register.tsx` falls back to `$.agent.list()` to find its reviewer by type, which is also what it needs when another mod answers the spawn, and the kit stubs `agent.list`.
-- `session.logs` holds what the plugin wrote with `$.ui.log`. A swallowed error shows up there.
-- Engines that take ports are tested without the kit. `explain.test.ts` has a `world()` whose model is answered by hand (`w.answer(request, reply)`), which is how a test changes a file while the model is still "thinking".
-- In the kit, Explain's requests are kept apart from the play-by-play's: `session.lookups`, answered with `session.explain(reply, 'text the prompt contains')`. Lookups run side by side, so a test cannot count on their order. With no answer set, a file maps to no symbols. `session.editor(file, line)` writes the focus file as an editor would, and a fourth argument adds the protocol's other fields, such as `buffers`. A test about the journal's time in the editor sets `explain: 'off'`, because a live editor also starts Explain's poll ten times a second, which makes a test that advances minutes slow.
-- Each period of a `$.clock.every` timer is one dispatch, and the kit gives it ten seconds of real time. A timer whose period spans many simulated ticks, such as the five-minute deep review timer over 150 polls, can run out of time on a loaded machine. The engine then reports "test's clock.every hook was skipped: exceeded 10000ms budget", and the interval ends. The deep review timer test fails this way when several sessions run tests at once.
-- The kit has a second disk for everything outside the fake repository: `session.disk` (absolute path to text), seeded with `stubSession(on, { data: { 'profiles/python.json': profile } })` and read back with `session.data('profiles/python.json')`. `session.removed` lists what the plugin deleted with `rm`. Forgetting needs the marker, so a test that expects a deletion sets `session.disk.set(MARKER_PATH, …)` or makes the plugin write something first.
-- A test that starts a session is written with `sessionTest` from `kit.ts`, not `test`. It is the same function with a 30-second limit in place of the default five. Every test file runs at once, each in its own process, and each test loads the whole mod first, so on a busy machine a session test can take four seconds before it has done anything. Tests of pure functions keep `test`.
-- Under heavy load (two sessions running the suite at once), `advance` once resolved before a deep review that the timer had started had finished spawning, and the assertion after it failed. An `await session.clock.settle()` before asserting on what timers started makes that reliable.
-- A stub can be registered only once per event. To see inside a failing test, add what you need to `stubSession` rather than registering a second `ui.log` or `tool.call`.
-- Take temporary debug lines out by hand. `git checkout <file>` also throws away every other uncommitted change in that file.
-
-- `$.command.run` resolves when the command's hook returns, not when work the hook left running has finished. After switching the tutor on, `await session.clock.settle()` before touching the fake repository, or the test's first save lands before the watcher has read the tree and becomes part of the baseline.
-- `e.props.isFocused` in the pane's `ui.render` hook says whether the pane has the keyboard. Hotkeys do nothing until it does (Ctrl+X Tab or a click, Esc to hand it back), so the pane says how while it is not focused.
-
-- `Text` takes no `key`. Give keys to `Button`, `Input`, `Select` and `Markdown`, and find text with `ui.find({ type: 'Text', text })`. A `find` that comes back undefined after a mount that did not reject usually means this.
-- The kit answers `$.ui.invalidate('ui.render')` by itself, but not the invalidation of a prompt event. Stub `ui.invalidate` or the call is dropped with a line under "the engine reported".
-- `test(name, { options: { engineering: 'knuth' } }, body)` sets `userConfig` values for one test.
-- `stubSession(on)` in `plugin/tests/kit.ts` registers every stub the plugin needs to start and switch modes. Use it and add to it.
-
-- Nothing is real. Almost every `$` call the mod makes needs a stub registered with `on(...)` before the test's first call on `$` (`$.state` and `$.ui.invalidate` are the exceptions), and `session.start` runs only if the test fires it.
-- Tests are type-checked, and the types are stricter than the docs' examples. `$.command.run` needs `origin` and `presentation` (use `typed()` from `plugin/tests/kit.ts`), and a `command.register` stub returns `{ value: { command: e.name } }`, not `{ value: undefined }`.
-- A test's own `$` has no `state`. Check state through what the pane draws, or through what the plugin sends and logs.
-- The plugin's timers move only when the test moves the clock. After `/bsd` the animated persona's hello stands at its first word until the test advances by `TALK_MS` a word.
-- Each test starts with the module freshly loaded and `$.state` at its defaults. A test cannot reset `$.state` halfway through, so what `/clear` does can only be approximated.
+Claude Code docs: mods overview, reference, events and API (`code.claude.com/docs/en/plugins/mods/*`); plugins (`/plugins/components`, `/plugins/manifest-reference`, `/plugins/create-marketplace`, `/plugins/host-marketplace`, `/plugins/loading`, `/plugins/publish`). Directory: `claude.com/docs/plugins/submit`, `/plugins/pre-submission-checklist`. Related: Anthropic's `learning-output-style` plugin (Claude writes most of it and leaves pieces for the user; this project leaves all of it to the user).
