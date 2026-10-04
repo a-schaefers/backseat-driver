@@ -212,7 +212,7 @@ test('the hush tool stops a topic at once, for good, and removes its notes', asy
   session.reply({ resolved: [], notes: [{ file: 'stats.py', line: 1, kind: 'idiom', topic: 'type-hints', note: 'Still no type hints.' }] })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
-  expect(session.tools.map(tool => tool.name)).toEqual(['hush', 'unhush', 'profile'])
+  expect(session.tools.map(tool => tool.name)).toEqual(['hush', 'unhush', 'record', 'profile'])
 
   session.write('stats.py', `${MEAN}\ndef total(xs):\n    return sum(xs)\n`)
   await session.clock.advance(14_000)
@@ -359,4 +359,71 @@ test('a note the reviewer repeats while it is still open is counted once in the 
 
   expect(session.requests.length).toBe(2)
   expect(parseProfile(session.store.get(subjectKey('python'))).topics).toEqual({ 'empty-input': { flagged: 1, explained: 0 } })
+})
+
+test('the record tool keeps what the user says about themselves', async ($, on) => {
+  const session = stubSession(on, { head: { 'stats.py': MEAN } })
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+
+  const level = await $.tool.call({ tool: 'mcp__backseat-driver__record', about: 'level', language: 'Python', answer: 'For years, mostly data work' })
+  expect(level).toEqual({
+    result: 'Recorded for Python: "Has written: For years, mostly data work". It is kept across sessions and projects.',
+  })
+  expect(parseProfile(session.store.get(subjectKey('python'))).answers).toEqual({ level: 'For years, mostly data work' })
+
+  // The language they know best is kept once, not once per language.
+  const knows = await $.tool.call({ tool: 'mcp__backseat-driver__record', about: 'knows', language: 'python', answer: 'Go' })
+  expect(String((knows as { result: unknown }).result)).toMatch('Recorded: "Knows best: Go".')
+  expect(parseProfile(session.store.get(subjectKey('general'))).answers).toEqual({ knows: 'Go' })
+
+  // The tutor and the deep reviewer are told.
+  const { sections } = await $.prompt.compose(COMPOSE)
+  expect(sections[sections.length - 1]?.text).toMatch('- Has written: For years, mostly data work')
+  expect(session.agents[session.agents.length - 1]?.prompt).toMatch('- Knows best: Go')
+})
+
+test('the record tool does not count as the first-run questions, and refuses what it cannot file', async ($, on) => {
+  const session = stubSession(on, { head: { 'stats.py': MEAN } })
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+
+  // Rust is not in this project. Its questions are still asked when it first is.
+  await $.tool.call({ tool: 'mcp__backseat-driver__record', about: 'goals', language: 'rust', answer: 'Understand ownership' })
+  expect(parseProfile(session.store.get(subjectKey('rust')))).toEqual({ ...emptyProfile(), answers: { goals: 'Understand ownership' } })
+
+  const before = JSON.stringify([...session.store.entries()])
+  for (const bad of [
+    { about: 'mood', language: 'python', answer: 'fine' },
+    { about: 'constructor', language: 'python', answer: 'x' },
+    { about: 'level', language: 'general', answer: 'some' },
+    { about: 'level', language: 'python', answer: '   ' },
+  ]) {
+    const refused = await $.tool.call({ tool: 'mcp__backseat-driver__record', ...bad })
+    expect(String((refused as { result: unknown }).result)).toMatch('Nothing was recorded')
+  }
+  expect(JSON.stringify([...session.store.entries()])).toBe(before)
+})
+
+test('the questions can be answered again from the Profile tab', async ($, on) => {
+  const session = stubSession(on, { head: { 'stats.py': MEAN } })
+  session.answers.push('Python', 'None yet', 'Understand what happens underneath', 'Idioms and style')
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+  expect(parseProfile(session.store.get(subjectKey('python'))).answers.level).toBe('None yet')
+
+  session.answers.push('Regularly: I build real things in it', 'Design larger programs well', 'Performance')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-profile' })
+  await ui.press({ key: 'ask-python' })
+
+  // Only this language's three questions, and the new answers replace the old.
+  expect(session.asked.length).toBe(7)
+  expect(parseProfile(session.store.get(subjectKey('python'))).answers).toEqual({
+    level: 'Regularly: I build real things in it',
+    goals: 'Design larger programs well',
+    focus: 'Performance',
+  })
+  expect(parseProfile(session.store.get(subjectKey('general'))).answers).toEqual({ knows: 'Python' })
+  await ui.unmount()
 })

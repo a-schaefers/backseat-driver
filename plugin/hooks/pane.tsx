@@ -197,14 +197,12 @@ function profileTab({ Box, Text, Button }: Kit, view: PaneView, actions: PaneAct
             {themes.length > 0 && (
               <Text>Keeps coming back: {themes.map(theme => `${theme.topic} (${theme.times})`).join(', ')}</Text>
             )}
-            {Object.keys(profile.answers).length === 0 && (
-              <Button
-                key={`ask-${subject}`}
-                label="answer a few questions"
-                plain
-                onPress={() => actions.onAsk(subject)}
-              />
-            )}
+            <Button
+              key={`ask-${subject}`}
+              label={Object.keys(profile.answers).length === 0 ? 'answer a few questions' : 'answer again'}
+              plain
+              onPress={() => actions.onAsk(subject)}
+            />
             <Text> </Text>
           </Box>
         )

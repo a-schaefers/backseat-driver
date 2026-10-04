@@ -59,6 +59,14 @@ export function withAnswers(profile: Profile, answers: Record<string, string>): 
   return { ...profile, answers: { ...profile.answers, ...answers }, isAsked: true }
 }
 
+/**
+ * Something the person said about themselves in conversation. Unlike
+ * `withAnswers`, it does not count as having been asked the questions.
+ */
+export function withAnswer(profile: Profile, id: string, answer: string): Profile {
+  return { ...profile, answers: { ...profile.answers, [id]: answer } }
+}
+
 export function withHush(profile: Profile, hush: Hush): Profile {
   return { ...profile, hushed: [...profile.hushed.filter(other => other.topic !== hush.topic), hush] }
 }
@@ -128,6 +136,20 @@ export const ANSWER_LABELS: Record<string, string> = {
   level: 'Has written',
   goals: 'Wants to',
   focus: 'Watch most closely',
+}
+
+/** The language they know best is not about any one language. Every other answer is. */
+const GENERAL_ANSWERS: readonly string[] = ['knows']
+
+/**
+ * Where an answer given in conversation is kept: the subject, or null when
+ * `id` is not one of the questions or a language is needed and none was given.
+ */
+export function answerSubject(id: string, language: string): string | null {
+  if (!Object.keys(ANSWER_LABELS).includes(id)) return null
+  if (GENERAL_ANSWERS.includes(id)) return GENERAL
+
+  return language === GENERAL || language === '' ? null : language
 }
 
 /** One subject's profile as lines of text, or none when there is nothing on record. */

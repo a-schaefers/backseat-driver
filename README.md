@@ -62,6 +62,7 @@ The play-by-play and the deep review are not announcements to be read in silence
 - **Disagree.** Say why you think a note is wrong and the tutor weighs your argument. If you contest the point and the tutor still thinks it stands, it tells you it is sending it to the deep review model for a second opinion. That model reads the code itself, and its verdict comes back into the conversation: it concedes, explains, or says which part each side has right.
 - **Do it your way.** You can always overrule the tutor, and it will not argue the point again. The play-by-play may still flag it.
 - **Tell it to hush.** Say "stop warning me about missing type hints", or press `m` on a note. It stops at once and remembers, in this project and in every other project in that language.
+- **Tell it where you stand.** Say "I have written Python for six years" or "what I want now is performance", and it updates your profile on the spot. You can also answer the first-run questions again from the pane's Profile tab.
 
 ### Stop
 
@@ -82,7 +83,7 @@ A profile holds:
 
 A profile comes into play when you work on a file in that language. In a project that mixes languages several can be active, and your Bash profile stays out of the way until you touch a shell script. The tutor can also look at your other profiles when that helps, for example to explain a Rust idea in terms of Python.
 
-Profiles are saved automatically, on your machine and outside any project, in the store Claude Code gives each plugin: one small JSON file under `~/.claude/plugins/store/`, readable in any editor. They are never written into your repository. The pane's Profile tab shows what the tutor has on record for the languages in play, and has a key beside each thing you hushed to bring it back.
+Profiles are saved automatically, on your machine and outside any project, in the store Claude Code gives each plugin: one small JSON file under `~/.claude/plugins/store/`, readable in any editor. They are never written into your repository. The pane's Profile tab shows what the tutor has on record for the languages in play. Beside each thing you hushed is a key to bring it back, and under each language a key to answer its questions again.
 
 ## Ground rules
 
@@ -181,7 +182,7 @@ The watcher asks git what changed every couple of seconds, and stretches that in
 | Play-by-play review | `$.model.complete` with the chosen model and thinking level: one request, no tools, no conversation history. |
 | Deep review | A read-only subagent (`Read`, `Grep`, `Glob`) that the mod registers with `$.agent.register` on the chosen model and thinking level, and starts with `$.agent.spawn`. A `turn.complete` hook takes its answer to the pane, not into the conversation. |
 | Second opinion on a contested point | The tutor hands the point to the same read-only subagent and reports its verdict in the conversation. |
-| "Stop warning me about that" | A `hush` tool the mod registers with `$.tool.register`. The tutor calls it when you state a preference, and the mod saves it to the profile and drops the matching notes. No permission prompt appears, because the mod answers its own tool. An `unhush` tool undoes it, and a `profile` tool lets the tutor read your profile for a language that is not in play. |
+| "Stop warning me about that" | A `hush` tool the mod registers with `$.tool.register`. The tutor calls it when you state a preference, and the mod saves it to the profile and drops the matching notes. No permission prompt appears, because the mod answers its own tool. An `unhush` tool undoes it, a `record` tool saves what you tell the tutor about yourself, and a `profile` tool lets the tutor read your profile for a language that is not in play. |
 | The pane | `$.ui.open` plus a `ui.render` hook, with Play-by-play, Deep review and Profile tabs. Their contents live in `$.state`, so the pane redraws when they change. Buttons on a note send a question into the conversation with `$.prompt.submit`. |
 | The conversation knows the notes | A `prompt.submit` hook attaches the open notes and the latest review as context. |
 | Settings | `userConfig` in `plugin.json`. Each setting is a row in `/config`, listed under [Models and settings](#models-and-settings). |

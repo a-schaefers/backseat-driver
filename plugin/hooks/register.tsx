@@ -16,18 +16,21 @@ import { backoffMs, shouldLook, slowedGapMs, throttle, usagePressure } from './g
 import type { Throttle } from './gate'
 import { parseStatus } from './git'
 import { DENIAL, isUsersFile } from './guard'
-import { languageOf, mainLanguages } from './languages'
+import { languageName, languageOf, mainLanguages } from './languages'
 import { parseRequest, transition } from './mode'
 import { isNoiseFile } from './noise'
 import { applyReply, parseReply, withDismissed } from './notes'
 import { renderPane, reviewSchedule } from './pane'
 import {
+  ANSWER_LABELS,
+  answerSubject,
   emptyProfile,
   GENERAL,
   isHushed,
   parseProfile,
   personText,
   subjectKey,
+  withAnswer,
   withAnswers,
   withExplained,
   withFlagged,
@@ -326,6 +329,20 @@ async function registerTools($: EngineInterface): Promise<void> {
     name: 'unhush',
     description: 'Backseat Driver: undo a hush, when the user wants to hear about a topic again.',
     inputSchema: { type: 'object', properties: { topic, language }, required: ['topic', 'language'] },
+  })
+  await $.tool.register({
+    name: 'record',
+    description:
+      'Backseat Driver: record what the user tells you about themselves, so that it is kept across sessions and projects: how much of a language they have written (level), what they want from it (goals), what they want watched most closely in their code (focus), or which language they know best (knows). Call it when they tell you. Never record what you only infer from their code.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        about: { type: 'string', enum: ['level', 'goals', 'focus', 'knows'], description: 'Which of the four this is.' },
+        language,
+        answer: { type: 'string', description: "What they said, in a few of the user's own words." },
+      },
+      required: ['about', 'language', 'answer'],
+    },
   })
   await $.tool.register({
     name: 'profile',
@@ -855,6 +872,20 @@ export const register: Register = (on, options) => {
     await saveSubject($, settings, subject, profile => withoutHush(profile, topic))
 
     return { result: `Done. "${topic}" may be brought up again for ${subject}.` }
+  })
+
+  on('tool.call', { tool: 'mcp__backseat-driver__record' }, async ($, e) => {
+    if (mode === 'off') return { result: 'Backseat Driver is off, so nothing was recorded.' }
+    const about = String(e.about ?? '').trim()
+    const answer = String(e.answer ?? '').trim().slice(0, 200)
+    const subject = answerSubject(about, String(e.language ?? '').trim().toLowerCase())
+    if (subject === null || answer === '') {
+      return { result: 'Nothing was recorded: give `about` as level, goals, focus or knows, the language it is about, and the answer.' }
+    }
+    await saveSubject($, settings, subject, profile => withAnswer(profile, about, answer))
+    const where = subject === GENERAL ? '' : ` for ${languageName(subject)}`
+
+    return { result: `Recorded${where}: "${ANSWER_LABELS[about]}: ${answer}". It is kept across sessions and projects.` }
   })
 
   on('tool.call', { tool: 'mcp__backseat-driver__profile' }, async ($, e) => {

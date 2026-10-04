@@ -81,6 +81,7 @@ declare module 'claude-code' {
     'mcp__backseat-driver__hush': { topic: string; language: string; what: string; note?: number }
     'mcp__backseat-driver__unhush': { topic: string; language: string }
     'mcp__backseat-driver__profile': { language: string }
+    'mcp__backseat-driver__record': { about: string; language: string; answer: string }
   }
 
   interface PluginState {
