@@ -32,7 +32,7 @@ So Backseat Driver turns the usual arrangement around. You drive. The AI rides a
 - **People learning a language.** It works out your skill level in each language from the code you write, keeps track of it across all your projects, and explains new ideas by comparison with a language you already know.
 - **Experienced engineers who want a sparring partner**, not a ghostwriter.
 
-It's not for getting code written as fast as possible. For that, use Claude Code normally. `/bsd off` gives it back to you.
+It's not for anyone who wants the AI to write their code. Plenty of tools already do that. This one makes sure you can still do it yourself.
 
 ## How it works
 
