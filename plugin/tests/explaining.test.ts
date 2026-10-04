@@ -130,9 +130,9 @@ test('the outline gives each symbol one line, however long its summary', async (
 
 test('the tabs keep to one line: full names when they fit, short ones when they do not', async () => {
   const seen = { state: 'none', subject: '', text: '', isUnseen: false } as const
-  expect(tabRow({ columns: 76, review: seen })).toEqual({ labels: ['Play-by-play', 'Deep review', 'Explain', 'Profile'], gap: 3 })
-  expect(tabRow({ columns: 58, review: seen }).gap).toBe(3)
-  expect(tabRow({ columns: 57, review: seen })).toEqual({ labels: ['Play', 'Review', 'Explain', 'Profile'], gap: 2 })
+  expect(tabRow({ columns: 76, review: seen })).toEqual({ labels: ['Play-by-play', 'Deep review', 'Explain', 'Progress'], gap: 3 })
+  expect(tabRow({ columns: 59, review: seen }).gap).toBe(3)
+  expect(tabRow({ columns: 58, review: seen })).toEqual({ labels: ['Play', 'Review', 'Explain', 'Progress'], gap: 2 })
   expect(tabRow({ columns: 60, review: { ...seen, isUnseen: true } }).labels[1]).toBe('Review (new)')
   expect(tabRow({ columns: 76, review: { ...seen, isUnseen: true } }).labels[1]).toBe('Deep review (new)')
 })

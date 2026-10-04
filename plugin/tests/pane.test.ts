@@ -7,6 +7,7 @@ import type { PaneView } from '../hooks/pane'
 import { PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const VIEW: PaneView = {
+  progress: { isOn: true, identity: [], records: [], busy: '', skipped: '' },
   mode: 'on',
   tab: 'play',
   persona: { voice: 'default', engineering: 'default' },
@@ -81,7 +82,7 @@ sessionTest('the pane opens on the play-by-play and switches tabs, on every surf
     expect(await ui.find({ type: 'Text', text: 'No deep review yet.' })).toBeDefined()
 
     await ui.press({ key: 'tab-profile' })
-    expect(await ui.find({ type: 'Text', text: 'Nothing on record yet.' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Judged only on commits by me@example.com, and only on the lines they add.' })).toBeDefined()
 
     await ui.press({ key: 'tab-play' })
     await ui.unmount()

@@ -113,6 +113,12 @@
       "description": "How hard the explain model thinks. Lower is faster.",
       "options": ["low", "medium", "high", "xhigh", "max"],
       "default": "low"
+    },
+    "progress_report": {
+      "type": "boolean",
+      "title": "Progress report",
+      "description": "Keep an honest record of your level in each language, judged only on commits that are yours. Each commit of yours costs one request on the deep review model.",
+      "default": true
     }
   }
 }

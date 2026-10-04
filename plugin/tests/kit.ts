@@ -114,7 +114,12 @@ export type StubOptions = {
    * as surveyed already, so that a test's first subagent is its own.
    */
   isNewProject?: boolean
+  /** The email git says is the person's in the fake repository. '' for none. Default: `me@example.com`. */
+  email?: string
 }
+
+/** Who wrote a commit in the fake repository, and anything its message says besides its title. */
+export type CommitOptions = { author?: { name: string; email: string }; body?: string; isMerge?: boolean }
 
 /**
  * Everything the plugin calls: the session, a fake git repository under
@@ -126,10 +131,30 @@ export function stubSession(on: On, options: StubOptions = {}) {
   const mtimes = new Map<string, number>()
   let writes = 0
   /** Every commit, oldest first, with the tree it recorded. The repository starts with one. */
-  const commits = [{ hash: commitHash(1), message: 'Start', tree: { ...head } }]
+  const me = { name: 'Me', email: options.email ?? 'me@example.com' }
+  const commits: { hash: string; message: string; tree: Record<string, string>; author: { name: string; email: string }; body: string; isMerge: boolean }[] = [
+    { hash: commitHash(1), message: 'Start', tree: { ...head }, author: me, body: '', isMerge: false },
+  ]
   /** Every move of HEAD, as the reflog records it. */
   const reflog = [`${commitHash(1)}\0commit (initial): Start`]
-  const tip = () => commits[commits.length - 1] ?? { hash: '', message: '', tree: {} }
+  const tip = () => commits[commits.length - 1] ?? { hash: '', message: '', tree: {}, author: me, body: '', isMerge: false }
+
+  /** What a commit added to each file, as `git show --unified=0` prints it: every line not in the file before. */
+  const patchOf = (index: number): string => {
+    const commit = commits[index]
+    const before = commits[index - 1]?.tree ?? {}
+    if (commit === undefined) return ''
+
+    return Object.entries(commit.tree)
+      .filter(([path, text]) => before[path] !== text)
+      .map(([path, text]) => {
+        const old = new Set((before[path] ?? '').split('\n'))
+        const added = text.split('\n').filter(line => line !== '' && !old.has(line))
+
+        return [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, `@@ -0,0 +1,${added.length} @@`, ...added.map(line => `+${line}`)].join('\n')
+      })
+      .join('\n')
+  }
 
   const session = {
     opened: [] as string[],
@@ -145,6 +170,13 @@ export function stubSession(on: On, options: StubOptions = {}) {
     lookups: [] as ModelCompleteRequest[],
     lookupReplies: [] as string[],
     lookupAnswers: [] as { when: string; reply: string }[],
+    /** The progress assessments the plugin asked for, and the replies queued for them. With none queued, nothing is seen. */
+    assessments: [] as ModelCompleteRequest[],
+    assessmentReplies: [] as string[],
+    /** Queues the reply to the next progress assessment. */
+    assess(reply: unknown) {
+      session.assessmentReplies.push(typeof reply === 'string' ? reply : JSON.stringify(reply))
+    },
     clock: mock.clock(on),
     /** Saves a file in the working tree, as the user's editor would. */
     write(path: string, text: string) {
@@ -188,11 +220,11 @@ export function stubSession(on: On, options: StubOptions = {}) {
     /** What the plugin wrote to the debug log: where a swallowed error shows up. */
     logs: [] as string[],
     /** Commits the working tree, as `git commit -am` would, and returns the new commit's hash. */
-    commit(message = 'Commit') {
+    commit(message = 'Commit', commitOptions: CommitOptions = {}) {
       for (const path of Object.keys(head)) delete head[path]
       Object.assign(head, files)
       const hash = commitHash(commits.length + 1)
-      commits.push({ hash, message, tree: { ...head } })
+      commits.push({ hash, message, tree: { ...head }, author: commitOptions.author ?? me, body: commitOptions.body ?? '', isMerge: commitOptions.isMerge === true })
       reflog.push(`${hash}\0commit: ${message}`)
 
       return hash
@@ -200,7 +232,7 @@ export function stubSession(on: On, options: StubOptions = {}) {
     /** Moves HEAD without a commit, as a checkout or a pull would. */
     checkout() {
       const hash = commitHash(commits.length + 1)
-      commits.push({ hash, message: 'Elsewhere', tree: { ...head } })
+      commits.push({ hash, message: 'Elsewhere', tree: { ...head }, author: me, body: '', isMerge: false })
       reflog.push(`${hash}\0checkout: moving from main to other`)
     },
     /** The id of the nth subagent the plugin spawned, counting from 1. */
@@ -273,6 +305,7 @@ export function stubSession(on: On, options: StubOptions = {}) {
     if (e.path.endsWith('/prompts/play-by-play.md')) return { value: 'PLAY-BY-PLAY INSTRUCTIONS\n' }
     if (e.path.endsWith('/prompts/deep-review.md')) return { value: 'DEEP REVIEW INSTRUCTIONS\n' }
     if (e.path.endsWith('/prompts/explain.md')) return { value: 'EXPLAIN INSTRUCTIONS\n' }
+    if (e.path.endsWith('/prompts/progress.md')) return { value: 'PROGRESS INSTRUCTIONS\n' }
     if (e.path.endsWith('/prompts/speech-bubble.md')) return { value: 'SPEECH BUBBLE INSTRUCTIONS\n' }
     for (const [suffix, text] of Object.entries(options.pluginFiles ?? {})) {
       if (e.path.endsWith(suffix)) return { value: text }
@@ -351,6 +384,35 @@ export function stubSession(on: On, options: StubOptions = {}) {
       return ok(`${tip().hash}\n`)
     }
     if (args[0] === 'reflog') return ok(`${reflog[reflog.length - 1] ?? ''}\n`)
+    if (args[0] === 'config') {
+      if (args.includes('--global')) return ok('')
+      const email = options.email ?? 'me@example.com'
+
+      return email === '' ? failed : ok(`${email}\n`)
+    }
+    if (args[0] === 'show' && args[1] === '-s') {
+      const commit = commits.find(known => known.hash === args[args.length - 1])
+      if (commit === undefined) return failed
+      const index = commits.indexOf(commit)
+      const parents = [commits[index - 1]?.hash ?? '', ...(commit.isMerge ? [commitHash(999)] : [])].filter(hash => hash !== '').join(' ')
+      const message = commit.body === '' ? commit.message : `${commit.message}\n\n${commit.body}`
+
+      return ok(`${commit.hash}\0${parents}\0${commit.author.email}\0${commit.author.name}\0${message}\n`)
+    }
+    if (args[0] === 'show' && args[1] === '--format=') {
+      const index = commits.findIndex(known => known.hash === args[args.length - 1])
+
+      return index === -1 ? failed : ok(patchOf(index))
+    }
+    if (args[0] === 'log' && args[1] === '--no-merges') {
+      return ok(
+        [...commits]
+          .reverse()
+          .filter(commit => !commit.isMerge)
+          .map(commit => `${commit.hash}\0${commit.author.email}`)
+          .join('\n'),
+      )
+    }
     if (args[0] === 'ls-files') return ok(Object.keys(head).map(path => `${path}\0`).join(''))
     if (args[0] === 'log') {
       if (args[1] === '-1') return ok(`${tip().hash}\0commit: ${tip().message}\n`)
@@ -391,6 +453,12 @@ export function stubSession(on: On, options: StubOptions = {}) {
   })
 
   on('model.complete', ($, e) => {
+    if (e.system?.startsWith('PROGRESS INSTRUCTIONS') === true) {
+      session.assessments.push(e)
+      const text = session.assessmentReplies.shift() ?? '{"observations": [], "level": null}'
+
+      return { value: { isAnswered: true, text, usage: USAGE } }
+    }
     if (e.system?.startsWith('EXPLAIN INSTRUCTIONS') === true) {
       session.lookups.push(e)
       const text =

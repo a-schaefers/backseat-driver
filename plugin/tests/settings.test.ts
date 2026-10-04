@@ -19,6 +19,7 @@ test('readSettings applies the documented defaults to empty options', async () =
   expect(readSettings({})).toEqual({
     persona: { voice: 'default', engineering: 'default' },
     isAnimated: true,
+    isProgressOn: true,
     playByPlay: {
       isAutomatic: true,
       quietMs: 10_000,

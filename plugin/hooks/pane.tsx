@@ -1,11 +1,12 @@
 import type { Elements } from 'claude-code'
 
-import type { ExplainView, Mode, Note, OutlineRow, Profile, Profiles, Review, Speech, Tab, Watch, Working } from '../types'
+import type { ExplainView, Mode, Note, OutlineRow, Profile, Profiles, ProgressRecord, ProgressView, Review, Speech, Tab, Watch, Working } from '../types'
 import { bubbleColumn, bubbleWidth, isTalking, poseOf, saidSoFar, wordsSaid } from './avatar'
 import type { Avatar } from './avatar'
 import { languageName } from './languages'
 import { sortNotes } from './notes'
 import { ANSWER_LABELS, explained, GENERAL, recurring } from './profiles'
+import { lately, levelPhrase, skillStates } from './progress'
 import { SURVEY_SUBJECT } from './review'
 import { DEFAULT_PERSONA } from './settings'
 import type { Persona } from './settings'
@@ -31,6 +32,7 @@ export type PaneView = {
   explain: ExplainView
   /** What they are working on: what they said, what a look made of it, and where their activity is. */
   working: Working
+  progress: ProgressView
   /** True while the pane has the keyboard, which is when its keys work. */
   isFocused: boolean
   /** How wide the pane's body is, in columns. */
@@ -68,7 +70,8 @@ const TABS: readonly { tab: Tab; label: string; short: string; hotkey: string }[
   { tab: 'play', label: 'Play-by-play', short: 'Play', hotkey: '1' },
   { tab: 'review', label: 'Deep review', short: 'Review', hotkey: '2' },
   { tab: 'explain', label: 'Explain', short: 'Explain', hotkey: '3' },
-  { tab: 'profile', label: 'Profile', short: 'Profile', hotkey: '4' },
+  // Still `profile` inside: the tab grew from the Profile tab, and its key is what tests and muscle memory press.
+  { tab: 'profile', label: 'Progress', short: 'Progress', hotkey: '4' },
 ]
 
 const NEW = ' (new)'
@@ -390,29 +393,63 @@ function hasRecord(profile: Profile): boolean {
   )
 }
 
-function profileTab({ Box, Text, Button }: Kit, view: PaneView, actions: PaneActions) {
-  const subjects = [GENERAL, ...view.profiles.languages].flatMap(subject => {
+/** Whose commits count, in a line: the first thing to check when a level looks wrong. */
+export function identityLine(progress: ProgressView): string {
+  if (!progress.isOn) return 'The progress report is switched off. Its setting is in /config.'
+  if (progress.identity.length === 0) return 'Git has no user.email here, so no commit can be confirmed as yours and nothing is scored.'
+
+  return `Judged only on commits by ${progress.identity.join(' or ')}, and only on the lines they add.`
+}
+
+/** One language's progress, as the tab shows it. */
+function progressSection({ Box, Text }: Kit, record: ProgressRecord) {
+  const { report } = record
+  const states = skillStates(record)
+  const recent = lately(record, 3)
+
+  return (
+    <Box flexDirection="column">
+      <Text>{`Level: ${levelPhrase(record)}`}</Text>
+      {report !== null && report.why !== '' && <Text>{report.why}</Text>}
+      {report !== null && report.next !== '' && <Text>{`Next level: ${report.next}`}</Text>}
+      {report !== null && report.working.length > 0 && <Text>{`Working on: ${report.working.join('; ')}`}</Text>}
+      {states.shown.length > 0 && <Text dimColor>{`Shown: ${states.shown.join(', ')}`}</Text>}
+      {states.slipping.length > 0 && <Text>{`Slipping: ${states.slipping.join(', ')}`}</Text>}
+      {recent.length > 0 && <Text dimColor>Lately</Text>}
+      {recent.map(line => (
+        <Text dimColor>{`- ${line}`}</Text>
+      ))}
+      {report !== null && report.encouragement !== '' && <Text>{report.encouragement}</Text>}
+    </Box>
+  )
+}
+
+function profileTab(kit: Kit, view: PaneView, actions: PaneActions) {
+  const { Box, Text, Button } = kit
+  const subjects = [...view.profiles.languages, GENERAL].flatMap(subject => {
     const profile = view.profiles.subjects[subject]
 
     return profile === undefined ? [] : [{ subject, profile }]
   })
+  const { progress } = view
 
   return (
     <Box flexDirection="column">
-      {subjects.every(({ profile }) => !hasRecord(profile)) && (
-        <Text dimColor>Nothing on record yet. It fills in as you work, and it is the same in every project.</Text>
-      )}
+      <Text dimColor>{identityLine(progress)}</Text>
+      {progress.busy !== '' && <Text dimColor>{progress.busy}</Text>}
+      {progress.skipped !== '' && <Text dimColor>{progress.skipped}</Text>}
+      <Text> </Text>
       {subjects.map(({ subject, profile }) => {
         const themes = recurring(profile)
         const covered = explained(profile)
+        const record = progress.records.find(candidate => candidate.language === subject)
 
         return (
           <Box flexDirection="column">
             <Text bold>{languageName(subject)}</Text>
+            {progress.isOn && record !== undefined && progressSection(kit, record)}
             {Object.entries(profile.answers).map(([id, answer]) => (
-              <Text>
-                {ANSWER_LABELS[id] ?? id}: {answer}
-              </Text>
+              <Text dimColor>{`${ANSWER_LABELS[id] ?? id}: ${answer}`}</Text>
             ))}
             {profile.hushed.map(hush => (
               <Box flexDirection="row" columnGap={1}>
@@ -422,14 +459,15 @@ function profileTab({ Box, Text, Button }: Kit, view: PaneView, actions: PaneAct
                   plain
                   onPress={() => actions.onUnhush(subject, hush.topic)}
                 />
-                <Text>Not bringing up: {hush.text}</Text>
+                <Text>{`Not bringing up: ${hush.text}`}</Text>
               </Box>
             ))}
-            {covered.length > 0 && <Text>Explained so far: {covered.join(', ')}</Text>}
+            {covered.length > 0 && <Text dimColor>{`Explained so far: ${covered.join(', ')}`}</Text>}
             {themes.length > 0 && (
-              <Text>Keeps coming back: {themes.map(theme => `${theme.topic} (${theme.times})`).join(', ')}</Text>
+              <Text dimColor>{`Keeps coming back: ${themes.map(theme => `${theme.topic} (${theme.times})`).join(', ')}`}</Text>
             )}
             {Object.keys(profile.answers).length === 0 && <Text dimColor>No answers yet.</Text>}
+            {subject === GENERAL && !hasRecord(profile) && <Text dimColor>It fills in as you work, and it is the same in every project.</Text>}
             <Text> </Text>
           </Box>
         )

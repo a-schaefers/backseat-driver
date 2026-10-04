@@ -18,6 +18,8 @@ export type Settings = {
   persona: Persona
   /** Whether the pane shows the voice's animated character, and the reviewers write its lines. */
   isAnimated: boolean
+  /** Whether the tutor keeps a record of the person's level in each language, from their own commits. */
+  isProgressOn: boolean
   playByPlay: {
     isAutomatic: boolean
     quietMs: number
@@ -75,6 +77,7 @@ export function readSettings(options: PluginOptions): Settings {
       engineering: personaName(options.engineering),
     },
     isAnimated: options.animated_persona !== false,
+    isProgressOn: options.progress_report !== false,
     playByPlay: {
       isAutomatic: options.play_by_play !== 'on request',
       quietMs: durationMs(options.quiet_time, 10_000),

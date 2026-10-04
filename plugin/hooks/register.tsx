@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteResult, Register, Timer } from 'claude-code'
 
-import type { Hush, Mode, Note, Profile, Profiles, Review, Spot, Tab, Watch, Working } from '../types'
+import type { Hush, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, Spot, Tab, Watch, Working } from '../types'
 import {
   avatarFor,
   BLINK_MS,
@@ -26,6 +26,19 @@ import {
 } from './avatar'
 import { personaPrompt, reframeInstructions, SESSION_NOTES, stripFrontmatter, tutorSections } from './contract'
 import {
+  addedLines,
+  byLanguage,
+  commitInfoArgs,
+  commitPatchArgs,
+  identityOf,
+  judge,
+  MIN_LINES,
+  parseCommitInfo,
+  parseRecent,
+  RECENT_COMMITS_ARGS,
+  sizeOf,
+} from './authorship'
+import {
   dataHome,
   fileEntryPath,
   focusPath,
@@ -34,6 +47,7 @@ import {
   MARKER,
   MARKER_TEXT,
   profilePath,
+  progressPath,
   projectDir,
   projectId,
 } from './datahome'
@@ -67,6 +81,8 @@ import { NO_ACTIVITY } from './glance'
 import { DENIAL, isUsersFile } from './guard'
 import { languageName, languageOf, mainLanguages } from './languages'
 import { sourcePrint } from './knowledge'
+import { assessmentRequest, emptyRecord, parseAssessment, parseRecord, progressText, recordText, withAssessment } from './progress'
+import type { AssessedCommit, CommitForAssessment } from './progress'
 import { helpText, isModeRequest, parseRequest, transition } from './mode'
 import { isNoiseFile } from './noise'
 import { applyReply, parseReply, withDismissed } from './notes'
@@ -153,6 +169,8 @@ const watchAtom = atom({ plugin: 'backseat-driver', key: 'watch' } as const, IDL
 const reviewAtom = atom({ plugin: 'backseat-driver', key: 'review' } as const, NO_REVIEW)
 const profilesAtom = atom({ plugin: 'backseat-driver', key: 'profiles' } as const, NO_PROFILES)
 const explainAtom = atom({ plugin: 'backseat-driver', key: 'explain' } as const, NO_VIEW)
+const NO_PROGRESS: ProgressView = { isOn: true, identity: [], records: [], busy: '', skipped: '' }
+const progressAtom = atom({ plugin: 'backseat-driver', key: 'progress' } as const, NO_PROGRESS)
 const speechAtom = atom({ plugin: 'backseat-driver', key: 'speech' } as const, SILENT)
 const workingAtom = atom({ plugin: 'backseat-driver', key: 'working' } as const, NO_WORKING)
 
@@ -248,6 +266,17 @@ const USAGE_READ_MS = 30_000
  * and the other two jobs read, and the deep review's own recent reviews.
  */
 let project: ProjectKnowledge | null = null
+
+/**
+ * Progress: whose commits count, the files the watcher saw change since the
+ * last commit (work it watched arrive counts in full), the records of the
+ * languages in play, and the queue that runs one assessment at a time.
+ */
+let identity: string[] = []
+const watchedPaths = new Set<string>()
+const records = new Map<string, ProgressRecord>()
+let progressQueue: Promise<void> = Promise.resolve()
+let progressInstructions = ''
 let reviews: ReviewRecord[] = []
 
 /** The deep review's working state. */
@@ -276,11 +305,12 @@ async function loadTutor($: EngineInterface, chosen: Persona): Promise<void> {
   const root = $.plugin.root
   const file = (path: string): Promise<string> => $.fs.read(`${root}/${path}`)
   // Read side by side: `/bsd` waits for these, and nothing else.
-  const [skill, lookText, reviewText, explainText, bubbleText, engineering, voice] = await Promise.all([
+  const [skill, lookText, reviewText, explainText, progressFile, bubbleText, engineering, voice] = await Promise.all([
     file('skills/tutor/SKILL.md'),
     file('prompts/play-by-play.md'),
     file('prompts/deep-review.md'),
     file('prompts/explain.md'),
+    file('prompts/progress.md'),
     file('prompts/speech-bubble.md'),
     readPersona($, 'engineering', chosen.engineering),
     readPersona($, 'voice', chosen.voice),
@@ -290,6 +320,7 @@ async function loadTutor($: EngineInterface, chosen: Persona): Promise<void> {
   lookInstructions = lookText.trim()
   reviewInstructions = reviewText.trim()
   explainInstructions = explainText.trim()
+  progressInstructions = progressFile.trim()
   bubbleInstructions = bubbleText.trim()
   persona = personaPrompt({ engineering, voice })
 }
@@ -603,7 +634,7 @@ async function registerReviewer($: EngineInterface, settings: Settings): Promise
   await $.agent.register({
     name: 'deep-reviewer',
     description: REVIEWER_DESCRIPTION,
-    prompt: reviewerSystem(reviewInstructions, [personText(profiles)], persona),
+    prompt: reviewerSystem(reviewInstructions, [aboutPerson()], persona),
     tools: ['Read', 'Grep', 'Glob'],
     model: settings.deepReview.model,
     effort: settings.deepReview.thinking,
@@ -636,6 +667,8 @@ async function bringIntoPlay($: EngineInterface, languages: readonly string[]): 
   for (const language of added) subjects[language] = await loadSubject($, language)
   profiles = { languages: [...profiles.languages, ...added], subjects }
   await update($, profilesAtom, () => profiles)
+  for (const language of added) records.set(language, await loadRecord($, language))
+  await setProgress($, { records: profiles.languages.map(language => records.get(language) ?? emptyRecord(language)) })
 }
 
 /**
@@ -755,6 +788,12 @@ async function registerTools($: EngineInterface): Promise<void> {
     },
   })
   await $.tool.register({
+    name: 'progress',
+    description:
+      "Backseat Driver: the user's observed level in a language (beginner, junior, mid or senior), why, what the next level needs, what they are working on and what they have done lately, from their own commits only. Call it when they ask how they are doing, or what to work on next.",
+    inputSchema: { type: 'object', properties: { language }, required: ['language'] },
+  })
+  await $.tool.register({
     name: 'profile',
     description:
       'Backseat Driver: read what is on record about the user for a language that is not in play in this project, for example to explain an idea by comparison with a language they know.',
@@ -838,7 +877,7 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
       effort: settings.playByPlay.thinking,
       system: reviewerSystem(
         lookInstructions,
-        [bubble === null ? '' : bubbleInstructions, personText(profiles)],
+        [bubble === null ? '' : bubbleInstructions, aboutPerson()],
         persona,
       ),
       prompt,
@@ -1100,7 +1139,11 @@ async function checkHead($: EngineInterface, settings: Settings): Promise<void> 
     return
   }
   recorder?.add({ at: movedAt, kind: 'commit', hash: entry.hash, text: commitTitle(entry) })
-  if (!settings.deepReview.isAfterCommit) return
+  if (!settings.deepReview.isAfterCommit) {
+    if (!(await readSlowdown($, await $.clock.now())).isHeld) queueProgress($, () => assessCommit($, settings, entry.hash, ''))
+
+    return
+  }
   if ((await readSlowdown($, await $.clock.now())).isHeld) {
     await setReview($, {
       state: 'failed',
@@ -1136,7 +1179,10 @@ async function tick($: EngineInterface, settings: Settings): Promise<void> {
     // Usage is only looked up when there is something to look at.
     // Read before a save is followed, so that what the save sets going knows how close the limit is.
     const held = hasPendingChange || hasChanged || (explainer?.pending() ?? 0) > 0 ? await readSlowdown($, now) : slowdown
-    if (hasChanged) await followSaves($, active.changed(), now)
+    if (hasChanged) {
+      for (const path of active.changed()) watchedPaths.add(path)
+      await followSaves($, active.changed(), now)
+    }
     await explainer?.tick()
     // Until an editor has written its focus file, looking for it this often is enough.
     if (focusTimer === null) await pollFocus($)
@@ -1171,6 +1217,7 @@ function stopWatching(): void {
   focusTimer = null
   explainer?.stop()
   explainer = null
+  watchedPaths.clear()
   project = null
   reviews = []
   focus = null
@@ -1415,7 +1462,7 @@ async function startExplaining($: EngineInterface, settings: Settings, run: numb
         {
           model: settings.explain.model,
           effort: settings.explain.thinking,
-          system: reviewerSystem(explainInstructions, [personText(profiles)], persona),
+          system: reviewerSystem(explainInstructions, [aboutPerson()], persona),
           prompt,
           maxTokens,
           timeoutMs: 90_000,
@@ -1492,6 +1539,170 @@ async function lookUp($: EngineInterface, spot: Spot): Promise<string> {
   return [known === '' && more === '' ? `Nothing is known about ${describeSpot(spot)} yet.` : known, more].filter(part => part !== '').join('\n\n')
 }
 
+/** What every prompt is told about the person: their profile, and what has been seen of their own work. */
+function aboutPerson(): string {
+  const seen = profiles.languages.map(language => records.get(language)).filter(record => record !== undefined)
+
+  return [personText(profiles), progressText(seen)].filter(part => part !== '').join('\n\n')
+}
+
+/** Runs one piece of progress work after the ones before it, so that two never write one record at once. */
+function queueProgress($: EngineInterface, work: () => Promise<void>): void {
+  progressQueue = progressQueue.then(work).catch(error => {
+    $.ui.log(`progress failed: ${String(error)}`, { to: 'debug' })
+  })
+}
+
+async function setProgress($: EngineInterface, change: Partial<ProgressView>): Promise<void> {
+  await update($, progressAtom, (view): ProgressView => ({ ...view, ...change }))
+}
+
+/** The Progress tab shows the records of the languages in play, main ones first. */
+async function showProgress($: EngineInterface, settings: Settings): Promise<void> {
+  const shown = profiles.languages.map(language => records.get(language) ?? emptyRecord(language))
+  await setProgress($, { isOn: settings.isProgressOn, identity, records: shown })
+}
+
+async function loadRecord($: EngineInterface, language: string): Promise<ProgressRecord> {
+  if (dataRoot === '') return emptyRecord(language)
+
+  return parseRecord(await readJson(diskOf($), progressPath(dataRoot, language)), language)
+}
+
+/** Whose commits count, and the records of the languages in play. */
+async function setUpProgress($: EngineInterface, settings: Settings): Promise<void> {
+  const where = repoRoot === '' ? undefined : repoRoot
+  // `git config` answers the repository's own setting, else the global one in ~/.gitconfig.
+  const effective = (await git($, where, ['config', '--get', 'user.email'])).stdout
+  const global = (await git($, where, ['config', '--global', '--get', 'user.email'])).stdout
+  identity = identityOf(effective, global)
+  records.clear()
+  for (const language of profiles.languages) records.set(language, await loadRecord($, language))
+  await showProgress($, settings)
+}
+
+/** What they said about themselves in one language, in a line. It is never evidence. */
+function saidAbout(language: string): string {
+  const answers = { ...profiles.subjects[GENERAL]?.answers, ...profiles.subjects[language]?.answers }
+
+  return Object.entries(answers)
+    .map(([id, answer]) => `${ANSWER_LABELS[id] ?? id}: ${answer}`)
+    .join('; ')
+}
+
+/**
+ * One assessment: the person's own lines from these commits go to the deep
+ * review model, and what it saw is added to the record under the rules in
+ * `progress.ts`. Commits already assessed add nothing.
+ */
+async function assess(
+  $: EngineInterface,
+  settings: Settings,
+  language: string,
+  commits: readonly (AssessedCommit & CommitForAssessment)[],
+  review: string,
+): Promise<void> {
+  const before = await loadRecord($, language)
+  const fresh = commits.filter(commit => !before.assessed.includes(commit.hash))
+  if (fresh.length === 0) return
+  const name = projectId(repoRoot).replace(/-[0-9a-f]{8}$/, '')
+  const subject = fresh.length === 1 ? `commit ${fresh[0]?.short ?? ''}` : `${fresh.length} of your recent commits`
+  await setProgress($, { busy: `Looking at ${subject} for your ${languageName(language)} progress.` })
+  try {
+    const result = await $.model.complete({
+      model: settings.deepReview.model,
+      effort: settings.deepReview.thinking,
+      system: progressInstructions,
+      prompt: assessmentRequest({ language, project: name, record: before, said: saidAbout(language), commits: fresh, review }),
+      maxTokens: 3000,
+      timeoutMs: 240_000,
+    })
+    const assessment = result.isAnswered ? parseAssessment(result.text) : null
+    if (assessment === null) {
+      await setProgress($, { skipped: `The look at ${subject} did not finish. Nothing was recorded.` })
+
+      return
+    }
+    // Read again right before writing: another session may have added to this record meanwhile.
+    const latest = await loadRecord($, language)
+    const { record, change } = withAssessment(latest, assessment, fresh, name, await $.clock.now())
+    await markHome($)
+    await writeJson(diskOf($), progressPath(dataRoot, language), record)
+    records.set(language, record)
+    await setProgress($, { skipped: '' })
+    await showProgress($, settings)
+    await registerReviewer($, settings)
+    if (change !== null) $.ui.toast(`${languageName(language)}: ${change.to}${record.isProvisional ? ' (provisional)' : ''}. See the Progress tab.`)
+  } finally {
+    await setProgress($, { busy: '' })
+  }
+}
+
+/** A commit of the person's, once it has been reviewed or made: the lines it added, by language, if it is theirs. */
+async function assessCommit($: EngineInterface, settings: Settings, hash: string, review: string): Promise<void> {
+  if (!settings.isProgressOn || repoRoot === '' || dataRoot === '' || mode === 'off') return
+  const info = parseCommitInfo((await git($, repoRoot, commitInfoArgs(hash))).stdout)
+  if (info === null) return
+  const files = addedLines((await git($, repoRoot, commitPatchArgs(hash))).stdout)
+  const verdict = judge(info, identity, files)
+  const short = shortHash(info.hash)
+  if (!verdict.isYours) {
+    await setProgress($, { skipped: `Commit ${short} does not count toward your progress: ${verdict.reason}.` })
+
+    return
+  }
+  // Work the tutor watched arrive in saves counts in full. Work it did not see counts half.
+  const watched = verdict.files.filter(file => watchedPaths.has(file.path)).length
+  const weight = watched * 2 >= verdict.files.length ? 1 : 0.5
+  for (const file of verdict.files) watchedPaths.delete(file.path)
+  const title = info.message.split('\n')[0] ?? ''
+  const languages = [...byLanguage(verdict.files)].filter(([, group]) => sizeOf(group) >= MIN_LINES).slice(0, 2)
+  if (languages.length === 0) {
+    await setProgress($, { skipped: `Commit ${short} is too small to say anything about your progress.` })
+
+    return
+  }
+  for (const [language, group] of languages) {
+    await assess($, settings, language, [{ hash: info.hash, short, weight, title, files: group }], review)
+  }
+}
+
+/** How many of the person's recent commits a first placement looks through, and how many it uses. */
+const PLACEMENT_SCAN = 30
+const PLACEMENT_COMMITS = 5
+
+/**
+ * A language with no level yet gets a first placement from up to five of the
+ * person's recent commits in this project, read in one request. They count
+ * half, because the tutor did not watch that work arrive.
+ */
+async function placeFirst($: EngineInterface, settings: Settings, run: number): Promise<void> {
+  if (!settings.isProgressOn || identity.length === 0 || repoRoot === '' || dataRoot === '') return
+  const held = await readSlowdown($, await $.clock.now())
+  if (held.isHeld || held.gapFactor !== 1) return
+  const mine = parseRecent((await git($, repoRoot, [...RECENT_COMMITS_ARGS])).stdout)
+    .filter(commit => identity.includes(commit.email))
+    .slice(0, PLACEMENT_SCAN)
+  if (mine.length === 0) return
+
+  for (const language of profiles.languages.slice(0, 2)) {
+    const record = await loadRecord($, language)
+    if (record.level !== null || run !== engagement) continue
+    const picked: (AssessedCommit & CommitForAssessment)[] = []
+    for (const commit of mine) {
+      if (picked.length >= PLACEMENT_COMMITS || run !== engagement) break
+      if (record.assessed.includes(commit.hash)) continue
+      const info = parseCommitInfo((await git($, repoRoot, commitInfoArgs(commit.hash))).stdout)
+      if (info === null) continue
+      const verdict = judge(info, identity, addedLines((await git($, repoRoot, commitPatchArgs(commit.hash))).stdout))
+      const group = verdict.isYours ? byLanguage(verdict.files).get(language) : undefined
+      if (group === undefined || sizeOf(group) < MIN_LINES) continue
+      picked.push({ hash: info.hash, short: shortHash(info.hash), weight: 0.5, title: info.message.split('\n')[0] ?? '', files: group })
+    }
+    if (picked.length > 0 && run === engagement) await assess($, settings, language, picked, '')
+  }
+}
+
 /**
  * Everything the tutor needs once it is on: the watcher, the profiles, the
  * reviewer and the tools. `/bsd` does not wait for this, so that it answers
@@ -1509,10 +1720,12 @@ async function engage($: EngineInterface, settings: Settings, run: number, isFre
     await moveOutOfStore($)
     const main = await setUpProfiles($)
     await loadProject($)
+    await setUpProgress($, settings)
     await registerReviewer($, settings)
     await registerTools($)
     await startExplaining($, settings, run)
     if (isFresh) void maybeSurvey($, settings, run)
+    if (isFresh) queueProgress($, () => placeFirst($, settings, run))
     // Last, so that everything already works if the questions are dismissed.
     if (isFresh && run === engagement) await ask($, settings, unasked(main))
   } catch (error) {
@@ -1641,6 +1854,7 @@ async function forget($: EngineInterface, settings: Settings, named: Scope | nul
     }
     if (scope.kind !== 'project' && mode !== 'off') {
       await setUpProfiles($)
+      await setUpProgress($, settings)
       await registerReviewer($, settings)
     }
     $.ui.log(`Forgot ${describeScope(scope, projectName)}.`)
@@ -1761,7 +1975,7 @@ export const register: Register = (on, options) => {
     if (mode === 'off' || contract === '') return composed
 
     return {
-      sections: tutorSections(composed.sections, { contract, extras: [SESSION_NOTES, personText(profiles)], persona }),
+      sections: tutorSections(composed.sections, { contract, extras: [SESSION_NOTES, aboutPerson()], persona }),
     }
   })
 
@@ -1817,8 +2031,11 @@ export const register: Register = (on, options) => {
       if (settings.isAnimated) await say($, `${scope.kind === 'survey' ? "I've had a look around." : "Review's in."} ${closingLine(shown)}`)
       // What it said may be about the spot the Explain tab is on.
       void refreshView($)
+      // A commit's review is also when the person's progress is brought up to date, with the review for context.
+      if (scope.kind === 'commit') queueProgress($, () => assessCommit($, settings, scope.hash, shown))
     } else {
       await setReview($, { state: 'failed', text: e.reason === 'answer' ? 'the reviewer said nothing' : e.reason })
+      if (scope !== null && scope.kind === 'commit') queueProgress($, () => assessCommit($, settings, scope.hash, ''))
     }
 
     const queued = queuedCommit
@@ -1886,6 +2103,16 @@ export const register: Register = (on, options) => {
     return { result: await lookUp($, { path, line: Number.isFinite(line) && line >= 1 ? line : 1 }) }
   })
 
+  on('tool.call', { tool: 'mcp__backseat-driver__progress' }, async ($, e) => {
+    if (mode === 'off') return { result: 'Backseat Driver is off.' }
+    if (!settings.isProgressOn) return { result: 'The progress report is switched off in /config.' }
+    const language = String(e.language ?? '').trim().toLowerCase()
+    const record = records.get(language) ?? (await loadRecord($, language))
+    const whose = identity.length === 0 ? 'Git has no user.email here, so no commit can be confirmed as theirs.' : `Only commits by ${identity.join(' or ')} count.`
+
+    return { result: record.observations.length === 0 ? `Nothing is on record for ${language} yet. ${whose}` : `${recordText(record)}\n\n${whose}` }
+  })
+
   on('tool.call', { tool: 'mcp__backseat-driver__profile' }, async ($, e) => {
     if (mode === 'off') return { result: 'Backseat Driver is off.' }
     const subject = String(e.language ?? GENERAL).trim().toLowerCase() || GENERAL
@@ -1940,6 +2167,7 @@ export const register: Register = (on, options) => {
       profiles: await read($, profilesAtom),
       explain: await read($, explainAtom),
       working: await read($, workingAtom),
+      progress: await read($, progressAtom),
       isFocused: e.props.isFocused,
       columns: e.props.bodyColumns,
       character: settings.isAnimated

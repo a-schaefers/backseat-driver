@@ -146,6 +146,72 @@ export type Working = {
   share: string
 }
 
+/** How far along someone is in a language, as the tutor has seen it in their own work. */
+export type Level = 'beginner' | 'junior' | 'mid' | 'senior'
+
+/** One thing the tutor saw in a commit of theirs: a skill shown, or one missed. */
+export type Observation = {
+  /** The commit's full hash. Two commits can share a short one. */
+  commit: string
+  /** The project it was seen in. */
+  project: string
+  at: number
+  /** A short slug for the skill, such as `error-handling`. */
+  skill: string
+  verdict: 'shown' | 'missed'
+  /** The level this skill belongs to. */
+  level: Level
+  /** 1 for work the tutor watched arrive, 0.5 for other commits of theirs. */
+  weight: number
+  note: string
+}
+
+export type LevelChange = {
+  at: number
+  from: Level | null
+  to: Level
+  reason: string
+  /** How many observations there were when it changed: what came after is new evidence. */
+  observationCount: number
+}
+
+/** What the Progress tab says about one language, as last written. */
+export type Report = {
+  why: string
+  next: string
+  working: string[]
+  encouragement: string
+  at: number
+}
+
+/** Everything the tutor has seen of someone's own work in one language, across projects. */
+export type ProgressRecord = {
+  v: 1
+  language: string
+  /** Null until there is enough to go on. */
+  level: Level | null
+  /** True until the level rests on enough work to be more than a first impression. */
+  isProvisional: boolean
+  observations: Observation[]
+  history: LevelChange[]
+  report: Report | null
+  /** Full hashes of the commits already assessed, so that none counts twice, in any project. */
+  assessed: string[]
+}
+
+/** The Progress tab's view: the records of the languages in play, and whose commits count. */
+export type ProgressView = {
+  /** Off when the setting is off. */
+  isOn: boolean
+  /** The email addresses whose commits count. Empty when git has none. */
+  identity: string[]
+  records: ProgressRecord[]
+  /** What is being assessed right now, in a few words, or ''. */
+  busy: string
+  /** Why the last commit did not count, or ''. */
+  skipped: string
+}
+
 declare module 'claude-code' {
   /** The tools this plugin registers for the tutor, so that a `tool.call` hook on one is typed. */
   interface McpToolInputs {
@@ -156,6 +222,7 @@ declare module 'claude-code' {
     'mcp__backseat-driver__lookup': { file: string; line?: number }
     'mcp__backseat-driver__working': { on: string }
     'mcp__backseat-driver__activity': Record<never, never>
+    'mcp__backseat-driver__progress': { language: string }
   }
 
   interface PluginState {
@@ -172,6 +239,7 @@ declare module 'claude-code' {
       profiles: Profiles
       /** What the Explain tab shows about the spot in focus. */
       explain: ExplainView
+      progress: ProgressView
       /** The animated persona's line, while the animation is on. */
       speech: Speech
       /** What they are working on, for the line under the status line. */

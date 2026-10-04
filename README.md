@@ -23,9 +23,9 @@ Backseat Driver works out the project's main languages from its tracked files.
 - For a language it already knows you in, it picks up where you left off, even if that was in a different project.
 - For a new one it asks a few quick questions, one keypress each: which language you know best, how much of this one you have written, what you most want from it, and what to watch most closely. That is four questions the first time, three for each language after that, and never more than ten. Press Esc to skip them. It then starts from sensible defaults and learns from your code instead.
 
-You can answer the questions again whenever your answers change: `/bsd questions`, or `q` in the pane's Profile tab.
+You can answer the questions again whenever your answers change: `/bsd questions`, or `q` in the pane's Progress tab.
 
-A language you only touch later, such as the one shell script in a Python project, never interrupts you with questions. The tutor uses defaults for it and offers the questions in the pane's Profile tab for when you have a minute. The pane is already open and watching while the questions are on screen, so skipping them costs nothing.
+A language you only touch later, such as the one shell script in a Python project, never interrupts you with questions. The tutor uses defaults for it and offers the questions in the pane's Progress tab for when you have a minute. The pane is already open and watching while the questions are on screen, so skipping them costs nothing.
 
 ### While you work
 
@@ -38,7 +38,7 @@ A language you only touch later, such as the one shell script in a Python projec
 
 ```text
 ┌─ conversation ─────────────────────────┬─ Backseat ────────────────────────────────────┐
-│                                        │ 1: Play  2: Review  3: Explain  4: Profile    │
+│                                        │ 1: Play  2: Review  3: Explain  4: Progress   │
 │ > /backseat-driver                     │ On. Watching for your next save. Voice:       │
 │   Backseat Driver is on. You drive.    │ torvalds.                                     │
 │                                        │ w: Working on adding an async cache           │
@@ -132,7 +132,7 @@ The play-by-play and the deep review are not announcements to be read in silence
 - **Disagree.** Say why you think a note is wrong and the tutor weighs your argument. If you contest the point and the tutor still thinks it stands, it tells you it is sending it to the deep review model for a second opinion. That model reads the code itself, and its verdict comes back into the conversation: it concedes, explains, or says which part each side has right.
 - **Do it your way.** You can always overrule the tutor, and it will not argue the point again. The play-by-play may still flag it.
 - **Tell it to hush.** Say "stop warning me about missing type hints", or press `m` on a note. It stops at once and remembers, in this project and in every other project in that language.
-- **Tell it where you stand.** Say "I have written Python for six years" or "what I want now is performance", and it updates your profile on the spot. You can also answer the first-run questions again from the pane's Profile tab.
+- **Tell it where you stand.** Say "I have written Python for six years" or "what I want now is performance", and it updates your profile on the spot. You can also answer the first-run questions again from the pane's Progress tab.
 - **Say what you are working on**, when the pane has it wrong. The tutor records your words, and the reviewers go by them too.
 
 ### Forget
@@ -162,7 +162,7 @@ A profile holds:
 
 A profile comes into play when you work on a file in that language. In a project that mixes languages several can be active, and your Bash profile stays out of the way until you touch a shell script. The tutor can also look at your other profiles when that helps, for example to explain a Rust idea in terms of Python.
 
-Profiles are saved automatically, on your machine and outside any project, as plain JSON files in one folder: `~/.local/share/backseat-driver/`, or under `$XDG_DATA_HOME` when that is set. They are never written into your repository. It is the same folder however the plugin was installed, and nothing in it expires. The pane's Profile tab shows what the tutor has on record for the languages in play. Beside each thing you hushed is a key to bring it back, and under each language a key to answer its questions again.
+Profiles are saved automatically, on your machine and outside any project, as plain JSON files in one folder: `~/.local/share/backseat-driver/`, or under `$XDG_DATA_HOME` when that is set. They are never written into your repository. It is the same folder however the plugin was installed, and nothing in it expires. The pane's Progress tab shows what the tutor has on record for the languages in play. Beside each thing you hushed is a key to bring it back, and under each language a key to answer its questions again.
 
 ## What it learns about a project
 
@@ -184,6 +184,42 @@ The never-stale rule holds here too. An insight is kept with a fingerprint of th
 Beside the cache sits the project's journal: what you have been doing in the code, in order, and what you are working on. The cache is about the code, and the journal is about your work on it. See [What you are working on](#what-you-are-working-on).
 
 All of it is plain JSON in the data folder, under `projects/<name>-<hash>/`. `/bsd forget project` erases it.
+
+## How you are doing
+
+The fourth tab, Progress, keeps an honest record of your level in each language, the same in every project. For each language in play it shows:
+
+- **A level**: beginner, junior, mid or senior, and a few sentences on why, citing your work.
+- **What the next level needs**, concretely.
+- **What you are working on**, the skills you have shown, and any that are slipping.
+- **What you have been up to lately**: the last few things it saw, with the project and commit.
+- **A word of encouragement**, kept apart from the level so that it can never soften it.
+
+Your answers to the first-run questions and everything you have hushed are under each language, as before.
+
+It is brought up to date after the deep review of each commit of yours, with the review for context, or as soon as you commit when deep reviews after commits are off. One request on the deep review model reads the lines you added and says which skills they show or miss. Rules in code, not the model, decide what that adds up to.
+
+**Only your own work counts.**
+
+- A commit counts when its author's email is yours: the one git uses in that repository, which is your `~/.gitconfig` one unless the repository sets its own. The tab says which email it is going by.
+- A merge does not count, nor does a commit that names a co-author or says a tool wrote it, such as one with a `Co-Authored-By: Claude` line.
+- Nor does a commit that adds more than 600 lines or touches more than 25 files at once, which reads as an import, a vendored library or generated code. Lock files and generated folders are never read.
+- Only the lines a commit adds are judged, never the code around them. A small change in an excellent codebase shows exactly as much as the small change. In a real session in a project whose history was mostly a maintainer's polished, documented code, only the one modest commit of the person's own was read, and the report said plainly that a four-line function with a print in it was all there was to go on.
+- A change of three lines or fewer says too little about anyone, so it is not assessed. The tab says so.
+
+**Levels move slowly, and can come back down.**
+
+- No level is shown before five observations from two commits.
+- Work the tutor watched arrive, saved while it was on, counts in full. Other commits of yours count half.
+- The first placement never outruns the evidence. When the tutor first meets a language in a project, it reads up to five of your recent commits there in one request, so that you do not start from nothing.
+- A level moves one step at a time. A step up needs four observations' worth of new evidence at the next level, from at least two commits, and the model has to see it too. One good afternoon is not a level.
+- A step down needs two observations' worth of missing what the current level assumes, from at least two commits. One bad commit is not a level either. A skill you showed once and then miss is marked slipping, which is how a level given too early comes back down.
+- A level stays provisional until it rests on twelve observations from four commits. Every change is recorded with its reason.
+- What you said about yourself in the questions is not evidence. It sets the tone until there is something to go on.
+
+The tutor knows your observed level too. It goes into every prompt, so that notes, reviews and answers are pitched at what your code shows. Ask "how am I doing?" and the tutor looks the report up instead of guessing.
+
+The report is one JSON file per language, `progress/<language>.json` in the data folder. `/bsd forget python` erases it, with the rest of what is on record for that language. A setting turns the report off.
 
 ## Ground rules
 
@@ -289,7 +325,7 @@ The watcher asks git what changed every couple of seconds, and stretches that in
 | Deep review | A read-only subagent (`Read`, `Grep`, `Glob`) that the mod registers with `$.agent.register` on the chosen model and thinking level, and starts with `$.agent.spawn`. A `turn.complete` hook takes its answer to the pane, not into the conversation. |
 | Second opinion on a contested point | The tutor hands the point to the same read-only subagent and reports its verdict in the conversation. |
 | "Stop warning me about that" | A `hush` tool the mod registers with `$.tool.register`. The tutor calls it when you state a preference, and the mod saves it to the profile and drops the matching notes. No permission prompt appears, because the mod answers its own tool. An `unhush` tool undoes it, a `record` tool saves what you tell the tutor about yourself, and a `profile` tool lets the tutor read your profile for a language that is not in play. |
-| The pane | `$.ui.open` plus a `ui.render` hook, with Play-by-play, Deep review, Explain and Profile tabs. Their contents live in `$.state`, so the pane redraws when they change. Buttons on a note send a question into the conversation with `$.prompt.submit`. |
+| The pane | `$.ui.open` plus a `ui.render` hook, with Play-by-play, Deep review, Explain and Progress tabs. Their contents live in `$.state`, so the pane redraws when they change. Buttons on a note send a question into the conversation with `$.prompt.submit`. |
 | The conversation knows the notes | A `prompt.submit` hook attaches the open notes, the latest review, the character's last line and a few lines from the journal as context. |
 | Settings | `userConfig` in `plugin.json`. Each setting is a row in `/config`, listed under [Models and settings](#models-and-settings). |
 
@@ -325,6 +361,7 @@ Everything is configured in `/config`, and the three background jobs have separa
 | Explain | `automatic`, `on request`, `off` | `automatic` |
 | Explain model | `haiku`, `sonnet`, `opus`, `fable` | `sonnet` |
 | Explain thinking level | `low`, `medium`, `high`, `xhigh`, `max` | `low` |
+| Progress report | on, off | on |
 
 The quiet time is how long the working tree must be still before the play-by-play looks, and the minimum gap is the shortest time between two looks. Lower both for commentary that keeps closer to your typing, or raise them for fewer interruptions and less usage. Set the play-by-play to "on request" and it looks only when you ask for a look from the pane.
 
@@ -446,23 +483,6 @@ To use the working copy in a project of your own, start Claude Code there with `
 
 Everything above this heading exists. What is under it is decided and is being built in the order the [roadmap](#roadmap) gives. A feature here does not exist until its line in the roadmap is checked.
 
-### Progress
-
-A report per language, the same in every project, built from what the tutor has seen you do. It shows:
-
-- A level: beginner, junior, mid or senior, with a paragraph on why.
-- What you would have to show to reach the next level.
-- What you are working on, and what you have been up to lately.
-- A word of encouragement, kept apart from the level so that it cannot soften it.
-
-It updates after each deep review of a commit of yours. It is meant to be honest:
-
-- **Only your own work counts.** A commit counts when its author is you, going by the email in the repository's git config, or in `~/.gitconfig` when the repository sets none. Merges, bulk imports, generated files and commits with an AI co-author line never count.
-- **Only the lines you added are judged**, never the code around them. Working inside an excellent codebase says nothing about you except what your own change shows.
-- **Work the tutor watched arrive counts most.** Code that appeared in small saves while the tutor was on counts in full. Other commits of yours count half.
-- **Levels move slowly and can come back down.** No level is shown before five observations from two commits. A level moves one step at a time. A step up needs four new observations in its favour across two commits. Something you once showed and later fumble is marked as slipping, and two such observations can take a level back down. Every change is recorded with its reason.
-- **What you said about yourself is not evidence.** Your answers to the questions set the tone until there is something to go on, and no longer.
-
 ### Staying up to date
 
 While the tutor is on, it checks at most every six hours whether a newer release is on GitHub, and says so in the pane. `/bsd update` (or `/backseat-driver-update`) fetches it, and the tutor comes back on by itself afterwards. A setting turns the check off.
@@ -478,7 +498,7 @@ The data folder that holds your profiles, and each project's journal and cache, 
 ```text
 ~/.local/share/backseat-driver/
   profiles/<language>.json      answers, hushes, lesson memory
-  progress/<language>.json      evidence, level, report                  (planned)
+  progress/<language>.json      evidence, level, report
   projects/<name>-<hash>/
     journal.json                what you have been doing, and what you are working on
     project.json                overview, what each file is for, insights
@@ -558,7 +578,7 @@ Part two:
 - [x] **Animated persona.** A small character for each voice at the top of the pane, which talks at the critical and decision points a look finds, passes on a deep review's takeaway, and jokes now and then. A setting turns it off.
 - [x] **One cache for all three jobs.** Deep reviews write overviews and insights into the project's cache, a first look at each new project, and the play-by-play and Explain read from it, under the same never-stale rule.
 - [x] **Journal.** A record per project of what you do in the code, read by every model the tutor calls, the "Working on" line in the pane with `w` and `/bsd working`, the editor's buffers and attention in `focus.json`, and the `working` and `activity` tools for the tutor.
-- [ ] **Progress.** Whose work it is, the evidence ledger, the rules for moving a level, the Progress tab and a first placement from past commits.
+- [x] **Progress.** Whose work it is, the evidence ledger, the rules for moving a level, the Progress tab, a first placement from past commits, and the observed level in every prompt.
 - [ ] **Updates and uninstall.** Release tags, the update notice, `/bsd update` and `/bsd uninstall`.
 - [ ] **Usability, second pass.** Every screen and command walked through in a real session.
 
