@@ -16,7 +16,7 @@ The owner's reasons, which every other decision here serves:
 
 So the arrangement is turned around: you drive, and the AI rides along, watches the road, and speaks up when it matters.
 
-The project takes a side on this. The AI is never in the driver's seat, and neither the tutor nor these documents ever suggest handing the code back to it, not for speed and not for convenience.
+The project takes a side on this. While the tutor is on, the AI is never in the driver's seat, and nothing here presents handing the code to it as the faster or better way. Saying plainly that `/bsd off` puts Claude Code back to normal is fine.
 
 > **Status: part one built, part two under way.** Everything described here is built, except what is under [Part two](#part-two-being-built), which is being added now. Each part was tried in a real session on Claude Code 2.1.289, but only in short scripted ones. Nobody has done real work with it yet, so expect the prompts and defaults to need adjusting. Three things have only been run in tests: the slow-down near plan limits, the hook that refuses edits (the tutor declined before it was ever needed), and the deep review on its default model, because the live runs used a cheaper one. So have three parts of the journal: rolling up a sitting after an hour, two sessions keeping one journal, and the deep review reading it. The editor's side of it was tried with a script standing in for an editor. Installing from the marketplace has not been tried.
 
