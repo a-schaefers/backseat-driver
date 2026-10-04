@@ -6,7 +6,7 @@ Backseat Driver is a plugin for [Claude Code](https://claude.com/claude-code). S
 
 You learn by building whatever you want to build. The tutor sets no exercises and runs no quizzes. It chimes in from the background, and how often, how deeply and in what voice is yours to tune.
 
-> **Status: built, not yet lived with.** Everything described here is built, and the [roadmap](#roadmap) is complete. Each part was tried in a real session on Claude Code 2.1.289, but only in short scripted ones. Nobody has done real work with it yet, so expect the prompts and defaults to need adjusting. The slow-down near plan limits is covered by tests only, and installing from the marketplace has not been tried.
+> **Status: built, not yet lived with.** Everything described here is built, and the [roadmap](#roadmap) is complete. Each part was tried in a real session on Claude Code 2.1.289, but only in short scripted ones. Nobody has done real work with it yet, so expect the prompts and defaults to need adjusting. Three things have only been run in tests: the slow-down near plan limits, the hook that refuses edits (the tutor declined before it was ever needed), and the deep review on its default model, because the live runs used a cheaper one. Installing from the marketplace has not been tried.
 
 ## Using it
 
