@@ -79,12 +79,12 @@ claude plugin marketplace add a-schaefers/backseat-driver
 claude plugin install backseat-driver@backseat-driver
 ```
 
-> **Pre-release.** Everything is built and tested, but nobody has installed it from the marketplace yet. If that fails, run it from a clone:
->
-> ```bash
-> git clone https://github.com/a-schaefers/backseat-driver
-> claude --plugin-dir ./backseat-driver/plugin
-> ```
+Or run it straight from a clone:
+
+```bash
+git clone https://github.com/a-schaefers/backseat-driver
+claude --plugin-dir ./backseat-driver/plugin
+```
 
 ## Use it
 

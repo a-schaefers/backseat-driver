@@ -8,7 +8,7 @@ These are standing instructions from the repository's owner. Follow them without
 
 - **Keep this file current.** Whenever a change adds, removes or alters something this file describes (commands, layout, architecture, invariants, API gotchas), update this file in the same commit. Do the same when you learn something about the mod API that the next session would otherwise have to rediscover.
 - **Write product decisions down as they are made.** When the owner states a requirement or a preference for the product, record it in `DESIGN.md`, which is the design spec, in the same session.
-- **Keep the README short and human.** `README.md` says what the plugin is, why it was made, who it is for, how to get it and how to use it, and nothing more. Detail goes in `DESIGN.md`, and the README links to it. A new feature gets at most a line in the README.
+- **Keep the README short and human.** `README.md` says what the plugin is, why it was made, who it is for, how to get it and how to use it, and nothing more. Detail goes in `DESIGN.md`, and the README links to it. A new feature gets at most a line in the README. The README never reports internal status, such as what has or has not been tried, tested or installed: the owner called that invasive. That belongs in DESIGN.md's Status note.
 - **Commit and push when a piece of work is complete.** Push to `origin main` without waiting to be asked. This does not cover force-pushing or rewriting pushed history. Ask before either.
 
 ## Status
@@ -17,7 +17,7 @@ Part one is built and not yet lived with. Part two (DESIGN.md, "Part two, being 
 
 `DESIGN.md` is the design spec: the user flow, what the tutor remembers, the ground rules, a table mapping each behavior to a Claude Code mechanism, the settings and their defaults, limits, the file layout and the roadmap. Read it before changing anything.
 
-`DESIGN.md` also makes statements about the present: the Status note, what Install says has and has not been tried, the layout tree and the roadmap checkboxes. So does the README, more briefly: its pre-release note, the install commands and the minimum Claude Code version in its text and badge. Update them in the same change that makes them false.
+`DESIGN.md` also makes statements about the present: the Status note, what Install says has and has not been tried, the layout tree and the roadmap checkboxes. So does the README, more briefly: the install commands and the minimum Claude Code version in its text and badge. Update them in the same change that makes them false.
 
 ## What this repository is
 
