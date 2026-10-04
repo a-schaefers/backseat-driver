@@ -150,6 +150,7 @@ test('the first time in a project, the questions are asked and the answers are s
   session.answers.push('JavaScript or TypeScript', 'A little: tutorials and small scripts', 'Write idiomatic code without looking things up', 'Bugs and risky code')
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   expect(session.asked.length).toBe(4)
   expect(session.asked[1]).toBe('How much Python have you written?')
@@ -171,6 +172,7 @@ test('dismissing the questions skips them for good, and the tutor works without 
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
   const started = await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   expect(started.text).toBe('Backseat Driver is on. You drive.')
   expect(session.asked.length).toBe(1)
@@ -178,6 +180,7 @@ test('dismissing the questions skips them for good, and the tutor works without 
 
   await $.command.run(typed('bsd', 'off'))
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
   expect(session.asked.length).toBe(1)
 })
 
@@ -189,6 +192,7 @@ test('a language already on record is not asked about again, in any project', as
   })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   expect(session.asked).toEqual([])
   const { sections } = await $.prompt.compose(COMPOSE)
@@ -212,6 +216,7 @@ test('the hush tool stops a topic at once, for good, and removes its notes', asy
   session.reply({ resolved: [], notes: [{ file: 'stats.py', line: 1, kind: 'idiom', topic: 'type-hints', note: 'Still no type hints.' }] })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
   expect(session.tools.map(tool => tool.name)).toEqual(['hush', 'unhush', 'record', 'profile'])
 
   session.write('stats.py', `${MEAN}\ndef total(xs):\n    return sum(xs)\n`)
@@ -243,6 +248,7 @@ test('a hush that names a note uses the note\'s own topic, whatever the model ca
   session.reply({ resolved: [], notes: [{ file: 'stats.py', line: 5, kind: 'tip', topic: 'builtin-sum', note: 'A built-in does this.' }] })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
   session.write('stats.py', `${MEAN}# more\n`)
   await session.clock.advance(14_000)
 
@@ -270,6 +276,7 @@ test('"m" on a note hushes its topic, and the Profile tab can undo it', async ($
   session.reply({ resolved: [], notes: [{ file: 'stats.py', line: 1, kind: 'idiom', topic: 'type-hints', note: 'No type hints.' }] })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
   session.write('stats.py', `${MEAN}# more\n`)
   await session.clock.advance(14_000)
 
@@ -289,6 +296,7 @@ test('what the play-by-play raises and what gets explained goes into the lesson 
   session.reply({ resolved: [], notes: [{ file: 'stats.py', line: 2, kind: 'bug', topic: 'empty-input', note: 'Empty list?' }] })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
   session.write('stats.py', `${MEAN}# more\n`)
   await session.clock.advance(14_000)
   expect(parseProfile(session.store.get(subjectKey('python'))).topics).toEqual({ 'empty-input': { flagged: 1, explained: 0 } })
@@ -305,6 +313,7 @@ test('a language first met mid-session comes into play without questions', async
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
   const askedAtStart = session.asked.length
 
   session.write('deploy.sh', '#!/bin/sh\nrm -rf $DIR/*\n')
@@ -316,15 +325,17 @@ test('a language first met mid-session comes into play without questions', async
   expect(await ui.find({ type: 'Text', text: 'Shell scripting' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: 'shell scripting' })).toBeDefined()
   // The questions are offered there, for when the user has a minute.
-  expect(await ui.find({ key: 'ask-shell' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'No answers yet.' })).toBeDefined()
+  expect(await ui.find({ key: 'questions' })).toBeDefined()
   await ui.unmount()
 })
 
 test('the profile tool reads a language that is not in play', async ($, on) => {
   const rust = withHush(withAnswers(emptyProfile(), { level: 'None yet' }), { topic: 'lifetimes', text: 'lifetime elision' })
-  stubSession(on, { head: { 'stats.py': MEAN }, store: { [subjectKey('rust')]: rust } })
+  const session = stubSession(on, { head: { 'stats.py': MEAN }, store: { [subjectKey('rust')]: rust } })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   const known = await $.tool.call({ tool: 'mcp__backseat-driver__profile', language: 'rust' })
   expect(String((known as { result: unknown }).result)).toMatch('Rust:\n- Has written: None yet')
@@ -337,6 +348,7 @@ test('while the tutor is off, its tools change nothing', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
   await $.command.run(typed('bsd', 'off'))
 
   const answer = await $.tool.call({ tool: 'mcp__backseat-driver__hush', topic: 'x', language: 'python', what: 'x' })
@@ -351,6 +363,7 @@ test('a note the reviewer repeats while it is still open is counted once in the 
   session.reply(sameNote)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   session.write('stats.py', `${MEAN}# more\n`)
   await session.clock.advance(14_000)
@@ -365,6 +378,7 @@ test('the record tool keeps what the user says about themselves', async ($, on) 
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   const level = await $.tool.call({ tool: 'mcp__backseat-driver__record', about: 'level', language: 'Python', answer: 'For years, mostly data work' })
   expect(level).toEqual({
@@ -387,6 +401,7 @@ test('the record tool does not count as the first-run questions, and refuses wha
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   // Rust is not in this project. Its questions are still asked when it first is.
   await $.tool.call({ tool: 'mcp__backseat-driver__record', about: 'goals', language: 'rust', answer: 'Understand ownership' })
@@ -410,20 +425,21 @@ test('the questions can be answered again from the Profile tab', async ($, on) =
   session.answers.push('Python', 'None yet', 'Understand what happens underneath', 'Idioms and style')
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
   expect(parseProfile(session.store.get(subjectKey('python'))).answers.level).toBe('None yet')
 
-  session.answers.push('Regularly: I build real things in it', 'Design larger programs well', 'Performance')
+  session.answers.push('JavaScript or TypeScript', 'Regularly: I build real things in it', 'Design larger programs well', 'Performance')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-profile' })
-  await ui.press({ key: 'ask-python' })
+  await ui.press({ key: 'questions' })
 
-  // Only this language's three questions, and the new answers replace the old.
-  expect(session.asked.length).toBe(7)
+  // All four again, and the new answers replace the old.
+  expect(session.asked.length).toBe(8)
   expect(parseProfile(session.store.get(subjectKey('python'))).answers).toEqual({
     level: 'Regularly: I build real things in it',
     goals: 'Design larger programs well',
     focus: 'Performance',
   })
-  expect(parseProfile(session.store.get(subjectKey('general'))).answers).toEqual({ knows: 'Python' })
+  expect(parseProfile(session.store.get(subjectKey('general'))).answers).toEqual({ knows: 'JavaScript or TypeScript' })
   await ui.unmount()
 })

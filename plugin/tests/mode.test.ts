@@ -1,16 +1,25 @@
 import { expect, test } from 'claude-code/testing'
 
-import { parseRequest, transition, USAGE } from '../hooks/mode'
+import { HELP, helpText, isModeRequest, parseRequest, transition } from '../hooks/mode'
+import { parseProfile, subjectKey } from '../hooks/profiles'
 import { SESSION, stubSession, typed } from './kit'
 
 test('parseRequest: no argument means on, an unknown word means help', async () => {
-  expect(parseRequest('')).toBe('on')
-  expect(parseRequest('  ON ')).toBe('on')
-  expect(parseRequest('off')).toBe('off')
-  expect(parseRequest('pause')).toBe('pause')
-  expect(parseRequest('resume')).toBe('resume')
-  expect(parseRequest('status')).toBe('status')
-  expect(parseRequest('faster')).toBe('help')
+  expect(parseRequest('')).toEqual({ request: 'on', rest: '' })
+  expect(parseRequest('  ON ').request).toBe('on')
+  for (const word of ['off', 'pause', 'resume', 'status', 'questions', 'help'] as const) {
+    expect(parseRequest(word).request).toBe(word)
+  }
+  expect(parseRequest('faster please')).toEqual({ request: 'help', rest: 'please', unknown: 'faster' })
+  expect(parseRequest('questions  now ')).toEqual({ request: 'questions', rest: 'now' })
+  expect(isModeRequest('pause')).toBe(true)
+  expect(isModeRequest('questions')).toBe(false)
+})
+
+test('helpText lists every command, and names a word that is not one', async () => {
+  for (const word of ['off', 'pause', 'resume', 'status', 'questions', 'help']) expect(HELP).toMatch(`/bsd ${word}`)
+  expect(helpText()).toBe(HELP)
+  expect(helpText('faster')).toMatch('There is no /bsd faster.')
 })
 
 test('transition: pause and resume do nothing while the tutor is off', async () => {
@@ -22,19 +31,20 @@ test('transition: pause and resume do nothing while the tutor is off', async () 
   expect(transition('paused', 'off').to).toBe('off')
 })
 
-test('transition: status and help never change the mode', async () => {
+test('transition: status never changes the mode', async () => {
   expect(transition('paused', 'status')).toEqual({ to: 'paused', text: 'Backseat Driver is paused.' })
-  expect(transition('on', 'help')).toEqual({ to: 'on', text: USAGE })
 })
 
 test('/bsd and /backseat-driver switch the same tutor', async ($, on) => {
-  stubSession(on)
+  const session = stubSession(on)
   await $.session.start(SESSION)
 
   const started = await $.command.run(typed('bsd'))
+  await session.clock.settle()
   expect(started.text).toBe('Backseat Driver is on. You drive.')
 
   const again = await $.command.run(typed('backseat-driver'))
+  await session.clock.settle()
   expect(again.text).toBe('Backseat Driver is already on.')
 
   const paused = await $.command.run(typed('bsd', 'pause'))
@@ -53,6 +63,7 @@ test('the pane opens with the tutor, closes with it, and stays through a pause',
   expect(calls.opened).toEqual([])
 
   await $.command.run(typed('bsd'))
+  await calls.clock.settle()
   expect(calls.opened).toEqual(['backseat-driver'])
 
   await $.command.run(typed('bsd', 'pause'))
@@ -62,6 +73,7 @@ test('the pane opens with the tutor, closes with it, and stays through a pause',
 
   // Asking for "on" again brings back a pane the user closed by hand.
   await $.command.run(typed('bsd'))
+  await calls.clock.settle()
   expect(calls.opened).toEqual(['backseat-driver', 'backseat-driver'])
 
   await $.command.run(typed('bsd', 'off'))
@@ -69,11 +81,75 @@ test('the pane opens with the tutor, closes with it, and stays through a pause',
 })
 
 test('the tutor is still on after /clear', async ($, on) => {
-  stubSession(on)
+  const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
   await $.classic.SessionStart({ source: 'clear' })
 
   const status = await $.command.run(typed('bsd', 'status'))
   expect(status.text).toBe('Backseat Driver is on. Persona: none.')
+})
+
+test('/bsd answers before its setup has finished', async ($, on) => {
+  const session = stubSession(on, { head: { 'stats.py': 'x = 1\n' } })
+  await $.session.start(SESSION)
+
+  const started = await $.command.run(typed('bsd'))
+  expect(started.text).toBe('Backseat Driver is on. You drive.')
+  // The pane is up and the contract is in force. The questions have not been asked yet.
+  expect(session.opened).toEqual(['backseat-driver'])
+  expect(session.asked).toEqual([])
+
+  await session.clock.settle()
+  expect(session.asked.length).toBe(1)
+  expect(session.tools.length > 0).toBe(true)
+})
+
+test('switching off while the tutor is still starting leaves nothing running', async ($, on) => {
+  const session = stubSession(on)
+  await $.session.start(SESSION)
+
+  await $.command.run(typed('bsd'))
+  await $.command.run(typed('bsd', 'off'))
+  await session.clock.settle()
+
+  session.write('stats.py', 'def mean(xs):\n    return sum(xs) / len(xs)\n')
+  await session.clock.advance(60_000)
+  expect(session.requests).toEqual([])
+  expect(session.asked).toEqual([])
+})
+
+test('/bsd help and an unknown word print the commands, and change nothing', async ($, on) => {
+  const session = stubSession(on)
+  await $.session.start(SESSION)
+
+  expect((await $.command.run(typed('bsd', 'help'))).text).toMatch('/bsd questions')
+  expect((await $.command.run(typed('bsd', 'faster'))).text).toMatch('There is no /bsd faster.')
+  expect(session.opened).toEqual([])
+})
+
+test('/bsd questions asks again, about everything in play', async ($, on) => {
+  const session = stubSession(on, { head: { 'stats.py': 'x = 1\n' } })
+  expect((await $.command.run(typed('bsd', 'questions'))).text).toBe('Backseat Driver is off. Run /bsd to start it.')
+
+  await $.session.start(SESSION)
+  session.answers.push('Python', 'None yet', 'Understand what happens underneath', 'Idioms and style')
+  await $.command.run(typed('bsd'))
+  await session.clock.settle()
+  expect(session.asked.length).toBe(4)
+
+  session.answers.push('C, C++ or Rust', 'Regularly: I build real things in it')
+  const again = await $.command.run(typed('bsd', 'questions'))
+  expect(again.text).toMatch('Here are the questions again.')
+  await session.clock.settle()
+
+  // All four are asked again. The two answered replace the old answers, and the dialog was then dismissed.
+  expect(session.asked.length).toBe(7)
+  expect(parseProfile(session.store.get(subjectKey('general'))).answers).toEqual({ knows: 'C, C++ or Rust' })
+  expect(parseProfile(session.store.get(subjectKey('python'))).answers).toEqual({
+    level: 'Regularly: I build real things in it',
+    goals: 'Understand what happens underneath',
+    focus: 'Idioms and style',
+  })
 })

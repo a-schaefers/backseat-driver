@@ -79,6 +79,7 @@ test('a commit is reviewed by the registered reviewer, and the review lands in t
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   // Registered with the default deep review model and thinking level, and read-only tools.
   const reviewer = session.agents[session.agents.length - 1]
@@ -114,6 +115,7 @@ test('a finished review is announced when the tab is not open', async ($, on) =>
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
   session.write('stats.py', MEAN)
   session.commit('Add mean')
   await session.clock.advance(2000)
@@ -131,6 +133,7 @@ test('the chosen model and thinking level are what the reviewer is registered wi
   const session = stubSession(on, { pluginFiles: { '/personas/knuth.md': '# Persona: knuth\n' } })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   const reviewer = session.agents[session.agents.length - 1]
   expect(reviewer?.model).toBe('fable')
@@ -142,6 +145,7 @@ test('a checkout is not a commit, and deep reviews start afresh after it', async
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   session.checkout()
   await session.clock.advance(10_000)
@@ -152,6 +156,7 @@ test('with "after each commit" off, a commit is not reviewed', { options: { deep
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   session.write('stats.py', MEAN)
   session.commit('Add mean')
@@ -168,6 +173,7 @@ test('the timer reviews everything since the previous review, and skips when not
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   // Nothing has changed: the first tick of the timer does nothing.
   await session.clock.advance(300_000)
@@ -191,6 +197,7 @@ test('"review now" works without waiting for a commit or the timer', async ($, o
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-review' })
@@ -212,6 +219,7 @@ test('a commit made while a review runs is reviewed next', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   session.write('stats.py', MEAN)
   session.commit('Add mean')
@@ -230,6 +238,7 @@ test('a review that fails says so in the pane', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
   session.write('stats.py', MEAN)
   session.commit('Add mean')
   await session.clock.advance(2000)
@@ -245,13 +254,14 @@ test("another subagent's answer is left alone", async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   expect(await $.turn.complete(finished('someone-else', 'unrelated'))).toEqual({ text: '' })
   expect(session.toasts).toEqual([])
 })
 
 test('the reviewer is offered to the model only while the tutor is on', async ($, on) => {
-  stubSession(on)
+  const session = stubSession(on)
   await $.session.start(SESSION)
   const offer = {
     agent: 'backseat-driver:deep-reviewer',
@@ -262,6 +272,7 @@ test('the reviewer is offered to the model only while the tutor is on', async ($
 
   expect(await $.agent.offer(offer)).toEqual({ isOffered: false })
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
   expect(await $.agent.offer(offer)).toEqual({ isOffered: true })
 })
 
@@ -270,6 +281,7 @@ test('at the plan limit, a commit is not reviewed until the user asks', async ($
   session.limits.push({ kind: 'five_hour', percentUsed: 96 })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   session.write('stats.py', MEAN)
   session.commit('Add mean')

@@ -6,7 +6,7 @@ Backseat Driver is a plugin for [Claude Code](https://claude.com/claude-code). S
 
 You learn by building whatever you want to build. The tutor sets no exercises and runs no quizzes. It chimes in from the background, and how often, how deeply and in what voice is yours to tune.
 
-> **Status: built, not yet lived with.** Everything described here is built, and the [roadmap](#roadmap) is complete. Each part was tried in a real session on Claude Code 2.1.289, but only in short scripted ones. Nobody has done real work with it yet, so expect the prompts and defaults to need adjusting. Three things have only been run in tests: the slow-down near plan limits, the hook that refuses edits (the tutor declined before it was ever needed), and the deep review on its default model, because the live runs used a cheaper one. Installing from the marketplace has not been tried.
+> **Status: part one built, part two under way.** Everything described here is built, except what is under [Part two](#part-two-being-built), which is being added now. Each part was tried in a real session on Claude Code 2.1.289, but only in short scripted ones. Nobody has done real work with it yet, so expect the prompts and defaults to need adjusting. Three things have only been run in tests: the slow-down near plan limits, the hook that refuses edits (the tutor declined before it was ever needed), and the deep review on its default model, because the live runs used a cheaper one. Installing from the marketplace has not been tried.
 
 ## Using it
 
@@ -14,7 +14,7 @@ One command starts it, and after that there is nothing to manage. Every setting 
 
 ### Start
 
-Run `claude` in a terminal next to your editor and type `/backseat-driver`, or `/bsd` for short. A Backseat pane opens beside the conversation.
+Run `claude` in a terminal next to your editor and type `/backseat-driver`, or `/bsd` for short. A Backseat pane opens beside the conversation, at once: the tutor finishes getting ready in the background. `/bsd help` lists every command and key.
 
 ### The first time
 
@@ -22,6 +22,8 @@ Backseat Driver works out the project's main languages from its tracked files.
 
 - For a language it already knows you in, it picks up where you left off, even if that was in a different project.
 - For a new one it asks a few quick questions, one keypress each: which language you know best, how much of this one you have written, what you most want from it, and what to watch most closely. That is four questions the first time, three for each language after that, and never more than ten. Press Esc to skip them. It then starts from sensible defaults and learns from your code instead.
+
+You can answer the questions again whenever your answers change: `/bsd questions`, or `q` in the pane's Profile tab.
 
 A language you only touch later, such as the one shell script in a Python project, never interrupts you with questions. The tutor uses defaults for it and offers the questions in the pane's Profile tab for when you have a minute. The pane is already open and watching while the questions are on screen, so skipping them costs nothing.
 
@@ -52,7 +54,7 @@ A language you only touch later, such as the one shell script in a Python projec
 └────────────────────────────────────────┴───────────────────────────────────────────────┘
 ```
 
-In a narrow terminal the pane sits above the prompt instead of beside the conversation.
+In a narrow terminal the pane sits above the prompt instead of beside the conversation. The keys in the pane work once it has the keyboard: press Ctrl+X Tab or click it, and Esc to go back to the prompt. The pane says so while it does not have it.
 
 ### Talk back
 
@@ -302,6 +304,62 @@ scripts/dev-session.sh  # try the working copy in a real session, inside tmux
 
 To use the working copy in a project of your own, start Claude Code there with `claude --plugin-dir /path/to/backseat-driver/plugin`. That loads the plugin for that session only and reloads the mod whenever one of its files is saved.
 
+## Part two, being built
+
+Everything above this heading exists. What is under it is decided and is being built in the order the [roadmap](#roadmap) gives. A feature here does not exist until its line in the roadmap is checked.
+
+### Three jobs, three questions
+
+| Job | The question it answers | When it speaks |
+| --- | --- | --- |
+| Play-by-play | What should I look at in what I just wrote? | While you hack |
+| Deep review | How was the work I just finished? | After a commit |
+| Explain | What is this code I am looking at? | While you read |
+
+**Explain** is for browsing. It shows what the tutor knows about the spot you are on: what a function does, how, why it is there, what to watch for, what it relies on, and what the last deep review said about it. It gets a tab of its own in the pane, and its own model and thinking level. Answers come from a local cache and appear at once. What is missing is fetched in the background while you keep reading.
+
+The cache is kept per project, unlike your profile, which is per language. All three jobs share it:
+
+- The deep review writes into it: an overview of the project, what each file is for, and insights on specific functions. A new project gets one survey by the deep review model to start it off.
+- The play-by-play reads from it, so the faster model can keep to the detail of what you just typed with the bigger picture in front of it.
+- Explain reads and writes it, one file and one function at a time.
+
+**It is never stale.** Every explanation records a fingerprint of the exact text it explains and of the things it says it relies on. Nothing is shown unless the fingerprint matches the file as it is on disk at that moment. When it does not match, the old text is hidden, the spot says it is updating, and a fresh answer is fetched first in the queue. An answer that arrives for text that has since changed is thrown away. Where freshness and speed pull apart, freshness wins.
+
+**Editors come later.** Plugins for vim and emacs are not part of this. What is built now is the side they will talk to: an editor writes where the cursor is to a small file, and the tutor writes what it knows about that spot to another. Until then, Explain follows the file you last saved, or the place you name with `/bsd explain`.
+
+### Progress
+
+A report per language, the same in every project, built from what the tutor has seen you do. It shows:
+
+- A level: beginner, junior, mid or senior, with a paragraph on why.
+- What you would have to show to reach the next level.
+- What you are working on, and what you have been up to lately.
+- A word of encouragement, kept apart from the level so that it cannot soften it.
+
+It updates after each deep review of a commit of yours. It is meant to be honest:
+
+- **Only your own work counts.** A commit counts when its author is you, going by the email in the repository's git config, or in `~/.gitconfig` when the repository sets none. Merges, bulk imports, generated files and commits with an AI co-author line never count.
+- **Only the lines you added are judged**, never the code around them. Working inside an excellent codebase says nothing about you except what your own change shows.
+- **Work the tutor watched arrive counts most.** Code that appeared in small saves while the tutor was on counts in full. Other commits of yours count half.
+- **Levels move slowly and can come back down.** No level is shown before five observations from two commits. A level moves one step at a time. A step up needs four new observations in its favour across two commits. Something you once showed and later fumble is marked as slipping, and two such observations can take a level back down. Every change is recorded with its reason.
+- **What you said about yourself is not evidence.** Your answers to the questions set the tone until there is something to go on, and no longer.
+
+### Staying up to date
+
+While the tutor is on, it checks at most every six hours whether a newer release is on GitHub, and says so in the pane. `/bsd update` (or `/backseat-driver-update`) fetches it, and the tutor comes back on by itself afterwards. A setting turns the check off.
+
+### Forgetting, and uninstalling
+
+The tutor will keep a growing record, so there are deliberate ways to erase it and no accidental ones.
+
+- `/bsd forget` asks what to forget: this project's cache, one language's profile and progress, or everything. Each asks again, with keeping as the default, and forgetting everything also needs the words typed out.
+- `/bsd uninstall` forgets everything, removes the plugin, and says what is left in your settings.
+
+### Where it will be kept
+
+One folder, `~/.local/share/backseat-driver/`, holds the profiles, the progress records and each project's cache as plain JSON files. Profiles move there from Claude Code's plugin store, which is capped in size, is separate for each way the plugin is installed, and is cleared after a period without use.
+
 ## Roadmap
 
 - [x] **Scaffold.** Plugin manifest, marketplace entry, settings, the `/backseat-driver` and `/bsd` commands, validation, tests and type checking.
@@ -311,6 +369,16 @@ To use the working copy in a project of your own, start Claude Code there with `
 - [x] **Profiles.** Language detection, the first-run questions, one profile per language shared across projects, hushing in chat or by key, lesson memory and the Profile tab.
 - [x] **Follow-through.** Explain and dismiss on each note, notes and reviews shared with the conversation, second opinions on contested points.
 - [x] **Tuning.** Holding back near plan limits, keeping a dismissed note from coming back, telling the reviewers which language each file is in, and feeding the lesson memory into every prompt so that an idea already explained is referred back to.
+
+Part two:
+
+- [x] **Usability, first pass.** `/bsd` answers at once and sets up in the background, `/bsd help`, `/bsd questions` and the `q` key, and a line in the pane on how to give it the keyboard.
+- [ ] **Data home and forgetting.** State in `~/.local/share/backseat-driver/`, profiles moved out of the plugin store, and `/bsd forget`.
+- [ ] **Explain.** The lookup engine and its queue, the never-stale rule, the Explain tab, `/bsd explain`, the files an editor will read and write, and a lookup tool for the tutor.
+- [ ] **One cache for all three jobs.** Deep reviews write overviews and insights into the cache, a survey for each new project, and both reviewers read from it.
+- [ ] **Progress.** Whose work it is, the evidence ledger, the rules for moving a level, the Progress tab and a first placement from past commits.
+- [ ] **Updates and uninstall.** Release tags, the update notice, `/bsd update` and `/bsd uninstall`.
+- [ ] **Usability, second pass.** Every screen and command walked through in a real session.
 
 ## Related
 

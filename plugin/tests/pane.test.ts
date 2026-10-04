@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Note } from '../types'
-import { currentNote, statusLine } from '../hooks/pane'
+import { currentNote, KEYBOARD_HINT, statusLine } from '../hooks/pane'
 import type { PaneView } from '../hooks/pane'
 import { PANE, SESSION, stubSession, typed } from './kit'
 
@@ -16,6 +16,7 @@ const VIEW: PaneView = {
   review: { state: 'none', subject: '', text: '', isUnseen: false },
   reviewSchedule: 'after each commit',
   profiles: { languages: [], subjects: {} },
+  isFocused: true,
 }
 
 const note = (id: number, overrides: Partial<Note> = {}): Note => ({
@@ -50,9 +51,10 @@ test('currentNote is the selected note while it is open, otherwise the most impo
 })
 
 test('the pane opens on the play-by-play and switches tabs, on every surface that draws panes', async ($, on) => {
-  stubSession(on)
+  const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -71,12 +73,32 @@ test('the pane opens on the play-by-play and switches tabs, on every surface tha
 })
 
 test('the pane shows a pause', async ($, on) => {
-  stubSession(on)
+  const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
   await $.command.run(typed('bsd', 'pause'))
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: 'Paused' })).toBeDefined()
   await ui.unmount()
+})
+
+test('the pane says how to give it the keyboard, until it has it', async ($, on) => {
+  const session = stubSession(on)
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+  await session.clock.settle()
+
+  const away = await $.ui.mount({ ...PANE, props: { ...PANE.props, isFocused: false }, surface: 'terminal' })
+  expect(await away.find({ type: 'Text', text: KEYBOARD_HINT })).toBeDefined()
+  await away.unmount()
+
+  const focused = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await focused.findAll({ type: 'Text', text: KEYBOARD_HINT })).length).toBe(0)
+  await focused.unmount()
+})
+
+test('just switched on, the pane says it is getting ready', async () => {
+  expect(statusLine({ ...VIEW, watch: { state: 'starting', lastLookAt: null, detail: '' } })).toBe('On. Getting ready.')
 })

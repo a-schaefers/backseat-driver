@@ -1,20 +1,65 @@
 import type { Mode } from '../types'
 
-export type Request = 'on' | 'off' | 'pause' | 'resume' | 'status' | 'help'
+/** The requests that change or report the mode. */
+export type ModeRequest = 'on' | 'off' | 'pause' | 'resume' | 'status'
 
-/** What `/bsd <args>` asks for. No argument means on. */
-export function parseRequest(args: string): Request {
-  const word = args.trim().toLowerCase()
-  if (word === '' || word === 'on') return 'on'
-  if (word === 'off' || word === 'pause' || word === 'resume' || word === 'status') return word
+/** Everything `/bsd <word>` can ask for. */
+export type Request = ModeRequest | 'questions' | 'help'
 
-  return 'help'
+const WORDS: readonly Request[] = ['on', 'off', 'pause', 'resume', 'status', 'questions', 'help']
+
+export type Parsed = {
+  request: Request
+  /** What followed the first word. */
+  rest: string
+  /** The first word when it is not a request, in which case `request` is `help`. */
+  unknown?: string
 }
 
-export const USAGE = 'Usage: /bsd [off | pause | resume | status]. With no argument it turns the tutor on.'
+/** What `/bsd <args>` asks for. No argument means on. */
+export function parseRequest(args: string): Parsed {
+  const [first = '', ...others] = args.trim().split(/\s+/)
+  const word = first.toLowerCase()
+  const rest = others.join(' ')
+  if (word === '') return { request: 'on', rest }
+  const request = WORDS.find(known => known === word)
+
+  return request === undefined ? { request: 'help', rest, unknown: first } : { request, rest }
+}
+
+export function isModeRequest(request: Request): request is ModeRequest {
+  return request !== 'questions' && request !== 'help'
+}
+
+/** Every command and key, as `/bsd help` prints it. */
+export const HELP = [
+  'A tutor that reviews your code while you write it yourself.',
+  '',
+  '  /bsd             turn it on (also /backseat-driver)',
+  '  /bsd off         turn it off: Claude Code is back to normal',
+  '  /bsd pause       stop the background commentary and keep the pane',
+  '  /bsd resume      carry on',
+  '  /bsd status      whether it is on, and in which voice',
+  '  /bsd questions   answer the first-run questions again',
+  '  /bsd help        this list',
+  '',
+  'In the pane. Ctrl+X Tab or a click gives it the keyboard, and Esc gives it back:',
+  '  1 2 3   switch tabs',
+  '  e d m   explain, dismiss or mute the selected note',
+  '  l       look at your changes now',
+  '  r       run a deep review now',
+  '  q       answer the questions again',
+  '',
+  'Models, thinking levels, pacing and the persona are in /config: search for "backseat".',
+].join('\n')
+
+/** What `/bsd help` prints, with a first line about a word that is not a command. */
+export function helpText(unknown?: string): string {
+  return unknown === undefined ? HELP : `There is no /bsd ${unknown}.\n\n${HELP}`
+}
 
 /** The mode a request leads to from `from`, and the line the command prints. */
-export function transition(from: Mode, request: Request): { to: Mode; text: string } {
+export function transition(from: Mode, request: ModeRequest): { to: Mode; text: string } {
   switch (request) {
     case 'on':
       if (from === 'on') return { to: 'on', text: 'Backseat Driver is already on.' }
@@ -35,7 +80,5 @@ export function transition(from: Mode, request: Request): { to: Mode; text: stri
       return { to: 'on', text: 'Backseat Driver is on again.' }
     case 'status':
       return { to: from, text: `Backseat Driver is ${from}.` }
-    case 'help':
-      return { to: from, text: USAGE }
   }
 }

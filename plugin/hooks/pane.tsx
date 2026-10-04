@@ -23,6 +23,8 @@ export type PaneView = {
   /** When a deep review runs without being asked, in a few words: "after each commit". */
   reviewSchedule: string
   profiles: Profiles
+  /** True while the pane has the keyboard, which is when its keys work. */
+  isFocused: boolean
 }
 
 /** What the pane's controls do. The closures come from register.tsx. */
@@ -36,8 +38,8 @@ export type PaneActions = {
   onLook: () => void
   onReview: () => void
   onUnhush: (subject: string, topic: string) => void
-  /** Ask the first-run questions for a subject now. */
-  onAsk: (subject: string) => void
+  /** Ask the first-run questions again, for everything in play. */
+  onQuestions: () => void
 }
 
 const TABS: readonly { tab: Tab; label: string; hotkey: string }[] = [
@@ -46,9 +48,14 @@ const TABS: readonly { tab: Tab; label: string; hotkey: string }[] = [
   { tab: 'profile', label: 'Profile', hotkey: '3' },
 ]
 
+/** Shown while the pane does not have the keyboard: its keys do nothing until it does. */
+export const KEYBOARD_HINT = 'Ctrl+X Tab or a click to use these keys. Esc to go back.'
+
 function watching(view: PaneView): string {
   if (view.mode === 'paused') return 'Paused. /bsd resume to continue.'
   switch (view.watch.state) {
+    case 'starting':
+      return 'On. Getting ready.'
     case 'no-git':
       return 'On. This folder is not a git repository, so there is no play-by-play.'
     case 'looking':
@@ -197,16 +204,18 @@ function profileTab({ Box, Text, Button }: Kit, view: PaneView, actions: PaneAct
             {themes.length > 0 && (
               <Text>Keeps coming back: {themes.map(theme => `${theme.topic} (${theme.times})`).join(', ')}</Text>
             )}
-            <Button
-              key={`ask-${subject}`}
-              label={Object.keys(profile.answers).length === 0 ? 'answer a few questions' : 'answer again'}
-              plain
-              onPress={() => actions.onAsk(subject)}
-            />
+            {Object.keys(profile.answers).length === 0 && <Text dimColor>No answers yet.</Text>}
             <Text> </Text>
           </Box>
         )
       })}
+      <Button
+        key="questions"
+        label={subjects.some(({ profile }) => Object.keys(profile.answers).length > 0) ? 'answer the questions again' : 'answer a few questions'}
+        hotkey="q"
+        plain
+        onPress={() => actions.onQuestions()}
+      />
     </Box>
   )
 }
@@ -233,6 +242,7 @@ export function renderPane(kit: Kit, view: PaneView, actions: PaneActions) {
       {view.tab === 'play' && playByPlay(kit, view, actions)}
       {view.tab === 'review' && deepReview(kit, view, actions)}
       {view.tab === 'profile' && profileTab(kit, view, actions)}
+      {!view.isFocused && <Text dimColor>{KEYBOARD_HINT}</Text>}
     </Box>
   )
 }

@@ -17,7 +17,7 @@ import type { Throttle } from './gate'
 import { parseStatus } from './git'
 import { DENIAL, isUsersFile } from './guard'
 import { languageName, languageOf, mainLanguages } from './languages'
-import { parseRequest, transition } from './mode'
+import { helpText, isModeRequest, parseRequest, transition } from './mode'
 import { isNoiseFile } from './noise'
 import { applyReply, parseReply, withDismissed } from './notes'
 import { renderPane, reviewSchedule } from './pane'
@@ -68,6 +68,7 @@ const SLOW_POLL_MS = 250
 const MAX_SKIPPED_TICKS = 15
 
 const IDLE: Watch = { state: 'idle', lastLookAt: null, detail: '' }
+const STARTING: Watch = { state: 'starting', lastLookAt: null, detail: '' }
 const NO_REVIEW: Review = { state: 'none', subject: '', text: '', isUnseen: false }
 const NO_PROFILES: Profiles = { languages: [], subjects: {} }
 
@@ -86,6 +87,13 @@ const profilesAtom = atom({ plugin: 'backseat-driver', key: 'profiles' } as cons
  * and /branch. This variable survives those but not a reload.
  */
 let mode: Mode = 'off'
+
+/**
+ * Counts the times the tutor has been switched on or off. Setup runs in the
+ * background, so each piece of it checks that its switch is still the latest
+ * before it leaves anything behind.
+ */
+let engagement = 0
 
 /** Text read from the plugin's own folder when the tutor is first needed. */
 let contract = ''
@@ -627,8 +635,8 @@ function stopWatching(): void {
   queuedCommit = null
 }
 
-/** Starts the watcher from the working tree as it stands now. */
-async function startWatching($: EngineInterface, settings: Settings): Promise<void> {
+/** Starts the watcher from the working tree as it stands now. `run` is the switch-on this belongs to. */
+async function startWatching($: EngineInterface, settings: Settings, run: number): Promise<void> {
   stopWatching()
   lastChangeAt = null
   lastLookAt = null
@@ -638,6 +646,7 @@ async function startWatching($: EngineInterface, settings: Settings): Promise<vo
   slowdownReadAt = 0
 
   const top = await git($, undefined, ['rev-parse', '--show-toplevel'])
+  if (run !== engagement) return
   const root = top.stdout.trim()
   if (top.exitCode !== 0 || root === '') {
     repoRoot = ''
@@ -667,14 +676,19 @@ async function startWatching($: EngineInterface, settings: Settings): Promise<vo
     },
   })
   await started.start()
+  const gitDir = (await git($, root, ['rev-parse', '--absolute-git-dir'])).stdout.trim()
+  const log = gitDir === '' ? '' : `${gitDir}/logs/HEAD`
+  const stamp = await fileStamp($, log)
+  const tip = (await git($, root, ['rev-parse', '--verify', '--quiet', 'HEAD'])).stdout.trim()
+  // Switched off, or on again, while git was answering: this start is no longer wanted.
+  if (run !== engagement) return
+
   watcher = started
   await setWatch($, IDLE)
-
   repoRoot = root
-  const gitDir = (await git($, root, ['rev-parse', '--absolute-git-dir'])).stdout.trim()
-  headLog = gitDir === '' ? '' : `${gitDir}/logs/HEAD`
-  headLogStamp = await fileStamp($, headLog)
-  lastHead = (await git($, root, ['rev-parse', '--verify', '--quiet', 'HEAD'])).stdout.trim()
+  headLog = log
+  headLogStamp = stamp
+  lastHead = tip
   // Deep reviews cover what happens from now on, not the history so far.
   reviewedHead = lastHead
   reviewedPrint = ''
@@ -688,26 +702,44 @@ async function startWatching($: EngineInterface, settings: Settings): Promise<vo
   }
 }
 
+/**
+ * Everything the tutor needs once it is on: the watcher, the profiles, the
+ * reviewer and the tools. `/bsd` does not wait for this, so that it answers
+ * at once however slow git is. `isFresh` is false when the tutor was already
+ * on and the module reloaded, in which case no questions are asked.
+ */
+async function engage($: EngineInterface, settings: Settings, run: number, isFresh: boolean): Promise<void> {
+  try {
+    await startWatching($, settings, run)
+    if (run !== engagement) return
+    const main = await setUpProfiles($)
+    await registerReviewer($, settings)
+    await registerTools($)
+    // Last, so that everything already works if the questions are dismissed.
+    if (isFresh && run === engagement) await ask($, settings, unasked(main))
+  } catch (error) {
+    $.ui.log(`could not finish starting: ${String(error)}`, { to: 'debug' })
+  }
+}
+
 /** Moves to `next`, with everything that has to change along with the mode. */
 async function switchTo($: EngineInterface, next: Mode, settings: Settings): Promise<void> {
   const wasEngaged = mode !== 'off'
   const isEngaged = next !== 'off'
+  // Awaited, because the contract has to be in force from the first prompt after the command.
   if (isEngaged && contract === '') await loadTutor($, settings.persona)
 
   mode = next
   await update($, modeAtom, () => next)
 
   if (wasEngaged === isEngaged) return
+  engagement += 1
   // The instruction files are framed differently while the tutor is on.
   $.ui.invalidate('prompt.context')
   if (isEngaged) {
+    await setWatch($, STARTING)
     await openPane($)
-    await startWatching($, settings)
-    const main = await setUpProfiles($)
-    await registerReviewer($, settings)
-    await registerTools($)
-    // Last, so that everything already works if the questions are dismissed.
-    await ask($, settings, unasked(main))
+    void engage($, settings, engagement, true)
   } else {
     stopWatching()
     await update($, notesAtom, () => [])
@@ -744,18 +776,16 @@ export const register: Register = (on, options) => {
       }
       await loadTutor($, settings.persona)
       await openPane($)
-      await startWatching($, settings)
-      await setUpProfiles($)
-      await registerReviewer($, settings)
-      await registerTools($)
+      engagement += 1
+      await engage($, settings, engagement, false)
     }
 
     for (const name of COMMANDS) {
       try {
         await $.command.register({
           name,
-          description: 'Turn the Backseat Driver tutor on, or off, pause, resume, status',
-          argumentHint: '[off | pause | resume | status]',
+          description: 'Turn the Backseat Driver tutor on. /bsd help lists the rest',
+          argumentHint: '[off | pause | resume | status | questions | help]',
           immediate: true,
         })
       } catch (error) {
@@ -776,7 +806,17 @@ export const register: Register = (on, options) => {
 
   // Spelled out so that `claude plugin validate` can print which commands this answers.
   on('command.run', { command: ['backseat-driver', 'bsd'] }, async ($, e) => {
-    const request = parseRequest(e.args)
+    const { request, unknown } = parseRequest(e.args)
+    if (request === 'help') return { text: helpText(unknown) }
+    if (request === 'questions') {
+      if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
+      // Not awaited: the dialog stays open for as long as the person takes.
+      void ask($, settings, firstRunQuestions(profiles.languages, false))
+
+      return { text: 'Here are the questions again. Esc stops at any point, and the answers so far are kept.' }
+    }
+    if (!isModeRequest(request)) return { text: helpText() }
+
     const { to, text } = transition(mode, request)
     if (to !== mode) await switchTo($, to, settings)
     // Asking for "on" again brings back a pane the user closed by hand.
@@ -916,6 +956,7 @@ export const register: Register = (on, options) => {
       review: await read($, reviewAtom),
       reviewSchedule: reviewSchedule(settings.deepReview.isAfterCommit, settings.deepReview.everyMs),
       profiles: await read($, profilesAtom),
+      isFocused: e.props.isFocused,
     }
 
     return renderPane($.ui.resolve(e), view, {
@@ -938,8 +979,8 @@ export const register: Register = (on, options) => {
       onUnhush: (subject: string, topic: string) => {
         void saveSubject($, settings, subject, profile => withoutHush(profile, topic))
       },
-      onAsk: (subject: string) => {
-        void ask($, settings, firstRunQuestions(subject === GENERAL ? [] : [subject], subject !== GENERAL))
+      onQuestions: () => {
+        void ask($, settings, firstRunQuestions(profiles.languages, false))
       },
       onDismiss: (note: Note) => {
         void update($, notesAtom, open => open.filter(other => other.id !== note.id))

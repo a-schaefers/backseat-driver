@@ -12,7 +12,7 @@ These are standing instructions from the repository's owner. Follow them without
 
 ## Status
 
-Built, not yet lived with. Every milestone on the README's roadmap is done and was checked in a short real session, with these exceptions. Tests only: the slow-down near plan limits (a real session cannot be put at 95% of its plan on demand), the edit guard (the tutor declined to edit before the hook was needed), and the deep review on its default model and thinking level (live runs used Sonnet at low thinking to keep them cheap). Never run at all: the `primeagen` and `eli5-tldr-kiss-terse` personas, and installing from the marketplace. Nobody has done real work with the tutor yet, so the prompts in `plugin/prompts/` and `plugin/skills/tutor/SKILL.md` are the part most likely to need changing. The README's roadmap lists the milestones in build order and which are done. The approved build plan is in `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine.
+Part one is built and not yet lived with. Part two (README, "Part two, being built") is under way: its milestones are the unchecked lines of the README's roadmap, built in that order. Every checked milestone was seen working in a short real session, with these exceptions. Tests only: the slow-down near plan limits (a real session cannot be put at 95% of its plan on demand), the edit guard (the tutor declined to edit before the hook was needed), and the deep review on its default model and thinking level (live runs used Sonnet at low thinking to keep them cheap). Never run at all: the `primeagen` and `eli5-tldr-kiss-terse` personas, and installing from the marketplace. Nobody has done real work with the tutor yet, so the prompts in `plugin/prompts/` and `plugin/skills/tutor/SKILL.md` are the part most likely to need changing. The README's roadmap lists the milestones in build order and which are done. The approved plan for part two is in `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine. It lists nine decisions the owner approved and the risks to probe at the start of each milestone.
 
 The README is the design spec: the user flow, what the tutor remembers, the ground rules, a table mapping each behavior to a Claude Code mechanism, the settings and their defaults, limits, the file layout and the roadmap. Read it before changing anything.
 
@@ -36,6 +36,13 @@ Decided by the owner. Do not re-propose what was rejected, and do not design aro
 - **The user has the last word.** Pushback in chat is weighed. A contested point goes to the deep review model for a second opinion, and the user is told that is happening. "Do it my way" always stands. The play-by-play may keep flagging the point until the user says to hush, and a hush is saved to that language's profile at once.
 - **Play-by-play is the pane's default view.** The deep review and the profile are other tabs.
 - **First-run questions are few and single choice.** One about the language they know best, asked once ever, then three per new language, and never more than ten in one go.
+- **Three jobs, each with its own model and thinking level.** The play-by-play comments while the user hacks. The deep review checks up on what they committed. Explain helps them read the codebase. Explain's cache is per project, where profiles are per language, and all three jobs feed it and read it.
+- **Explain is never stale.** Where freshness and speed pull apart, freshness wins. Nothing is shown unless it matches the file on disk at that moment.
+- **No editor plugins yet.** Plugins for vim and emacs come later. Build only the side they will talk to.
+- **Progress is honest.** One report per language across projects, with a level (beginner, junior, mid, senior), why, what the next level needs, recent notes and encouragement. Only the user's own work counts, so that hacking on someone else's excellent code cannot inflate it. A level can come back down. It stays in step with the deep reviews. The owner said it is worth the token burn.
+- **State is never cleared by accident.** Clearing is deliberate and confirmed: one project, one language, or everything. Uninstalling clears everything.
+- **Users stay up to date.** A newer release upstream is announced in the pane, one command fetches it, and the tutor comes back on by itself.
+- **Everything feels instant.** No command waits on git or a model. The questions can be answered again in an obvious way.
 - **Personas are style only.** A persona sets teaching style, voice and emphasis in notes, deep reviews and conversation. It never overrides the contract. A persona named after a real person is "in the spirit of": the tutor never claims to be that person or to quote them, and it is hard on the code, never on the user.
 
 ## Commands
@@ -92,7 +99,7 @@ Current files:
 | File | What it holds |
 | --- | --- |
 | `settings.ts` | The `/config` values as typed settings |
-| `mode.ts` | What a `/bsd` argument asks for and which mode it leads to |
+| `mode.ts` | What a `/bsd` argument asks for, which mode it leads to, and the text of `/bsd help` |
 | `contract.ts` | What goes into the system prompt and how instruction files are reframed |
 | `guard.ts` | Which paths count as the user's files |
 | `git.ts`, `noise.ts`, `diff.ts` | Parsing `git status`, which files and edits never deserve a look, a line diff |
@@ -107,7 +114,9 @@ Current files:
 
 ### The mode
 
-`off`, `on` or `paused`, kept twice because each copy is lost by a different event. `$.state` survives a reload of the module (which a `/config` change also causes) but is reset by `/clear`, `/resume` and `/branch`. A module variable survives those but not a reload. `session.start` restores the variable from state, and `classic.SessionStart` with source `clear`, `resume` or `fork` writes the variable back to state. So the tutor stays on through both, and each new session starts with it off.
+Switching on answers at once. `switchTo` loads the contract, sets the mode and opens the pane, and those are awaited, because the contract has to be in force from the first prompt after the command. Everything else (the watcher, the profiles, the reviewer, the tools, the first-run questions) runs in `engage`, which the command does not wait for. `engagement` counts switches, and each step of `engage` and `startWatching` checks it after every await, so that switching off while git is still answering leaves nothing running. In a real session `/bsd` printed its line 190 ms after Enter and the pane was up at 250 ms.
+
+The mode is `off`, `on` or `paused`, kept twice because each copy is lost by a different event. `$.state` survives a reload of the module (which a `/config` change also causes) but is reset by `/clear`, `/resume` and `/branch`. A module variable survives those but not a reload. `session.start` restores the variable from state, and `classic.SessionStart` with source `clear`, `resume` or `fork` writes the variable back to state. So the tutor stays on through both, and each new session starts with it off.
 
 ### Tutor mode
 
@@ -219,6 +228,9 @@ In tests:
 - Each test has 5 seconds. Advancing the clock by minutes runs every 2-second tick in between, so a test that advances far needs `timeoutMs` in its options.
 - A stub can be registered only once per event. To see inside a failing test, add what you need to `stubSession` rather than registering a second `ui.log` or `tool.call`.
 - Take temporary debug lines out by hand. `git checkout <file>` also throws away every other uncommitted change in that file.
+
+- `$.command.run` resolves when the command's hook returns, not when work the hook left running has finished. After switching the tutor on, `await session.clock.settle()` before touching the fake repository, or the test's first save lands before the watcher has read the tree and becomes part of the baseline.
+- `e.props.isFocused` in the pane's `ui.render` hook says whether the pane has the keyboard. Hotkeys do nothing until it does (Ctrl+X Tab or a click, Esc to hand it back), so the pane says how while it is not focused.
 
 - `Text` takes no `key`. Give keys to `Button`, `Input`, `Select` and `Markdown`, and find text with `ui.find({ type: 'Text', text })`. A `find` that comes back undefined after a mount that did not reject usually means this.
 - The kit answers `$.ui.invalidate('ui.render')` by itself, but not the invalidation of a prompt event. Stub `ui.invalidate` or the call is dropped with a line under "the engine reported".

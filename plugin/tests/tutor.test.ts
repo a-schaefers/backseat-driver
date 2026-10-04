@@ -18,9 +18,10 @@ test('while the tutor is off, the plugin changes nothing', async ($, on) => {
 })
 
 test('while the tutor is on, the system prompt carries the contract', async ($, on) => {
-  stubSession(on)
+  const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   const { sections } = await $.prompt.compose(COMPOSE)
   expect(sections.find(section => section.id === 'doing_tasks')?.text).toBe(TUTOR_TASKS)
@@ -32,9 +33,10 @@ test('while the tutor is on, the system prompt carries the contract', async ($, 
 })
 
 test('the chosen persona follows the contract', { options: { persona: 'knuth' } }, async ($, on) => {
-  stubSession(on, { pluginFiles: { '/personas/knuth.md': '# Persona: knuth\n\nPatient and precise.\n' } })
+  const session = stubSession(on, { pluginFiles: { '/personas/knuth.md': '# Persona: knuth\n\nPatient and precise.\n' } })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   const { sections } = await $.prompt.compose(COMPOSE)
   expect(sections[sections.length - 1]?.text).toBe(
@@ -43,9 +45,10 @@ test('the chosen persona follows the contract', { options: { persona: 'knuth' } 
 })
 
 test('while the tutor is on, instruction files yield to the contract', async ($, on) => {
-  stubSession(on)
+  const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   const { blocks } = await $.prompt.context({ blocks: [] })
   expect(blocks[0]?.text.startsWith(INSTRUCTIONS_PREAMBLE)).toBe(true)
@@ -54,9 +57,10 @@ test('while the tutor is on, instruction files yield to the contract', async ($,
 })
 
 test("while the tutor is on, Claude cannot edit the user's files", async ($, on) => {
-  stubSession(on)
+  const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
 
   expect(await $.tool.call(EDIT)).toEqual({ deny: DENIAL })
   expect(await $.tool.call({ tool: 'Write', file_path: 'notes.txt', content: 'x' })).toEqual({ deny: DENIAL })
@@ -70,9 +74,10 @@ test("while the tutor is on, Claude cannot edit the user's files", async ($, on)
 })
 
 test('a paused tutor still does not edit, and switching off restores everything', async ($, on) => {
-  stubSession(on)
+  const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
+  await session.clock.settle()
   await $.command.run(typed('bsd', 'pause'))
   expect(await $.tool.call(EDIT)).toEqual({ deny: DENIAL })
 
