@@ -173,7 +173,9 @@ sessionTest('with "after each commit" off, a commit is not reviewed', { options:
   await ui.unmount()
 })
 
-sessionTest('the timer reviews everything since the previous review, and skips when nothing changed', { options: { deep_review_after_commit: false, deep_review_every: '5 minutes', play_by_play: 'on request' } }, async ($, on) => {
+// The animated persona is off here. One 5-minute period of the review timer has to run every poll tick in
+// it within one hook's ten seconds, which a busy machine has overrun, and the character's blinks add to them.
+sessionTest('the timer reviews everything since the previous review, and skips when nothing changed', { options: { deep_review_after_commit: false, deep_review_every: '5 minutes', play_by_play: 'on request', animated_persona: false } }, async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
