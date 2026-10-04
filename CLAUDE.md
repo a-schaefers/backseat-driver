@@ -42,7 +42,7 @@ Decided by the owner. Do not re-propose what was rejected, and do not design aro
 - **First-run questions are few and single choice.** One about the language they know best, asked once ever, then three per new language, and never more than ten in one go.
 - **Three jobs, each with its own model and thinking level.** The play-by-play comments while the user hacks. The deep review checks up on what they committed. Explain helps them read the codebase. Explain's cache is per project, where profiles are per language, and all three jobs feed it and read it.
 - **Explain is never stale.** Where freshness and speed pull apart, freshness wins. Nothing is shown unless it matches the file on disk at that moment.
-- **No editor plugins yet.** Plugins for vim and emacs come later. Build only the side they will talk to.
+- **No editor plugins yet.** Plugins for vim and emacs come later. Build only the side they will talk to. The docs do not suggest autosave as a way to make the tutor closer to live: the owner rejected that, because the editor plugins are the answer.
 - **Progress is honest.** One report per language across projects, with a level (beginner, junior, mid, senior), why, what the next level needs, recent notes and encouragement. Only the user's own work counts, so that hacking on someone else's excellent code cannot inflate it. A level can come back down. It stays in step with the deep reviews. The owner said it is worth the token burn.
 - **State is never cleared by accident.** Clearing is deliberate and confirmed: one project, one language, or everything. Uninstalling clears everything.
 - **Users stay up to date.** A newer release upstream is announced in the pane, one command fetches it, and the tutor comes back on by itself.

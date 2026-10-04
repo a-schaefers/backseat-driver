@@ -105,7 +105,7 @@ Run `claude` in a terminal next to your editor and type `/bsd`. That's it. The f
 
 ## Good to know
 
-- **It sees saves, not keystrokes.** Autosave in your editor makes it close to live.
+- **It reads what you save.** It looks at files on disk, not at unsaved changes in your editor.
 - **It costs usage.** Each look and each review is a model call on your plan. It waits for pauses in your work, backs off near your plan's limits, and can be set to look only when you ask.
 - **It stays in its lane.** It runs git, reads your repository, keeps its memory in its own folder and draws a pane. It installs no git hooks and never writes to your working tree. [DESIGN.md](DESIGN.md#limits) has the full list.
 - **Mods are new.** Claude Code's mod API is in early access. Panes draw in the terminal and in the desktop app's Code tab, not in the VS Code chat panel. In VS Code, use `claude` in the integrated terminal.

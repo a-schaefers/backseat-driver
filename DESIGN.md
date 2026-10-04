@@ -432,7 +432,7 @@ A look with nothing worth saying leaves it quiet, so what it says is always abou
 
 ## Limits
 
-- **It sees saves, not keystrokes.** The plugin reads files on disk, not your editor's unsaved buffer. With autosave on, that is close to live.
+- **It sees saves, not keystrokes.** The plugin reads files on disk, not your editor's unsaved buffer.
 - **It sees what you read only through an editor.** Without an editor plugin, the journal knows what you saved and committed, not where you were looking, and what you are working on is worked out from your saves alone.
 - **It needs git.** Changes are found by diffing the working tree, and files that git ignores are never sent.
 - **Explain is only as good as its model's reading.** It is told to say only what the code shown supports, and line numbers it gets wrong are caught, because every symbol has to quote its own first line. What it says about a function can still be mistaken. It knows the file it is in, and other files only once they have been mapped.
