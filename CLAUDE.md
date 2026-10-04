@@ -12,7 +12,7 @@ These are standing instructions from the repository's owner. Follow them without
 
 ## Status
 
-Early build. Tutor mode and the play-by-play work: the commands, the contract and personas in the system prompt, the edit guard, the watcher, the reviewer and its notes in the pane. The deep review and profiles are not built, so those two tabs are empty. The README's roadmap lists the milestones in build order and which are done. The approved build plan is in `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine.
+Early build. Tutor mode, the play-by-play and the deep review work: the commands, the contract and personas in the system prompt, the edit guard, the watcher, both reviewers and two of the pane's three tabs. Profiles are not built, so the Profile tab is empty and nothing is remembered between sessions. The README's roadmap lists the milestones in build order and which are done. The approved build plan is in `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine.
 
 The README is the design spec: the user flow, what the tutor remembers, the ground rules, a table mapping each behavior to a Claude Code mechanism, the settings and their defaults, limits, the file layout and the roadmap. Read it before changing anything.
 
@@ -57,6 +57,7 @@ scripts/dev-session.sh # a real session with the working copy, inside tmux (sess
 
 Tests stub everything, so a milestone is only done when it has also been seen working in a real session. `scripts/dev-session.sh` starts one in tmux, in a throwaway git repository. Drive it with `tmux send-keys -t bsd '/bsd' Enter` and read the screen with `tmux capture-pane -p -t bsd`. Give the screen a moment between the two. Things to know:
 
+- To try a setting, pass `--settings '{"pluginConfigs":{"backseat-driver":{"options":{"deep_review_model":"sonnet"}}}}'`. Use it to keep real-session checks of the deep review cheap.
 - A new folder shows the workspace trust prompt first: `Down`, then `Enter`. Keys sent before the session has finished starting are lost, so check the screen before typing.
 - `tmux send-keys -t bsd C-x Tab` gives the pane the keyboard, after which its hotkeys (`e`, `d`, `l`, `1` to `3`) work. `Escape` gives it back.
 - At 170 columns the pane docks beside the conversation even in tmux. `tmux capture-pane -p -t bsd | cut -c1-94` reads the conversation, and `cut -c95-` the pane.
@@ -95,6 +96,7 @@ Current files:
 | `watcher.ts` | What changed since the previous look. Takes its effects as ports, so its tests use a tree in memory |
 | `gate.ts` | Whether a look is due |
 | `notes.ts`, `prompts.ts` | Reading the reviewer's reply into notes, and building what the reviewer and the conversation are told |
+| `review.ts` | The deep review's scope: reading the reflog, what counts as a commit, the request handed to the reviewer |
 | `pane.tsx` | The pane's tree from plain data, with the handlers passed in |
 
 ### The mode
@@ -120,7 +122,16 @@ Two kinds of background review, configured separately (README, "Models and setti
 - **Play-by-play**: one `$.model.complete` request with no tools and no history. Its notes go to the pane's Play-by-play tab.
 - **Deep review**: a read-only subagent whose written review goes to the pane's Deep review tab. Two independent triggers: after each commit (on by default) and every N minutes (off by default). With both off it runs only on request. A commit-triggered review covers that commit. A timed review covers everything since the previous deep review, and is skipped when nothing has changed.
 
-The deep reviewer is registered by the mod with `$.agent.register({ model, effort, tools })`, not shipped as a file in `plugin/agents/`. A subagent the mod spawns skips the mod's own `turn.step` hooks, so a registered spec is the only way to give it the user's thinking level. Its instructions live in `plugin/prompts/deep-review.md`.
+The deep reviewer is registered by the mod with `$.agent.register({ model, effort, tools })`, not shipped as a file in `plugin/agents/`. A subagent the mod spawns skips the mod's own `turn.step` hooks, so a registered spec is the only way to give it the user's thinking level. Its instructions live in `plugin/prompts/deep-review.md`. It is registered when the tutor is switched on, and an `agent.offer` hook withholds it from the model while the tutor is off.
+
+How a deep review runs:
+
+- Each tick compares the size and modification time of `.git/logs/HEAD` with the last tick's. Only when they differ does it run `git reflog -1`. A `commit`, `commit (amend)`, `commit (merge)` or `commit (initial)` entry is a commit to review. Any other move of HEAD (checkout, pull, reset, rebase) resets where "since the previous review" starts.
+- `$.agent.spawn` resolves as soon as the reviewer has started, with its `agentId`. The answer arrives later as a `turn.complete` event carrying that id, and the hook there puts it in `$.state` for the Deep review tab.
+- One review runs at a time. A commit made meanwhile is queued, latest only, and reviewed when the running one finishes.
+- A timed review covers `git diff <where the previous review ended>` against the working tree, plus untracked files by name. A fingerprint of that scope stops the same uncommitted work from being reviewed twice.
+
+Seen in a real session: a commit was noticed within one tick, the reviewer appeared in Claude Code's footer as a background agent, and its review was in the tab 12 seconds later (on Sonnet at low thinking, set through `--settings`). Nothing was appended to the conversation, then or on the following turn: no notification, no attachment, no turn.
 
 A contested point is the one review that does land in the conversation. The tutor delegates it to the same deep reviewer and reports the verdict in chat, because the user asked there.
 
@@ -158,7 +169,7 @@ Why `$.store` and not SQLite or plain files: the hooks module cannot load SQLite
 ### Invariants
 
 - **Dormant until switched on.** Claude Code registers a plugin's hooks at session start, whether or not the user ever runs `/backseat-driver`. While the mode is off, every hook passes through with `next(e)`: no pane, no model call, no prompt change, no denied tool call. The one exception is a single `$.store` read at `session.start`, which keeps the profiles from expiring.
-- **Background reviews stay out of the conversation.** Neither the play-by-play nor an automatic deep review may become a turn in the user's conversation. Only what the user does in chat or in the pane becomes a turn. Not yet verified: whether a subagent the mod spawns posts a completion notice into the main conversation. Check that first when implementing the deep review. A `session.receive` hook can swallow such a notice.
+- **Background reviews stay out of the conversation.** Neither the play-by-play nor an automatic deep review may become a turn in the user's conversation. Only what the user does in chat or in the pane becomes a turn. Both were checked in real sessions: `$.model.complete` and a subagent started with `$.agent.spawn` leave no row in the conversation.
 - **Model and thinking level are the user's settings.** Both reviews read their model and thinking level from `userConfig`. Nothing is hard-coded and no model id is pinned. Defaults: play-by-play `sonnet` at `medium`, deep review `opus` at `high`. "Thinking level" in the README is Claude Code's effort level (`low`, `medium`, `high`, `xhigh`, `max`).
 - **Hard rules are hooks, teaching style is the contract.** "Claude never edits the user's files" is a `tool.call` denial of `Edit`, `Write` and `NotebookEdit`. How to hint and explain lives in the skill, and applies to deep reviews as much as to notes.
 - **Small, auditable footprint.** The README promises that the mod only runs `git`, reads files inside the repository and its own plugin folder, calls models, keeps profiles in its own store and draws a pane. A new kind of call in the validator's `calls:` list (`http.fetch`, `fs.write`, a process other than `git`) breaks that promise and needs a deliberate README change.
@@ -184,7 +195,12 @@ Easy to get wrong:
 
 In tests:
 
-- `stubSession(on, options)` in `plugin/tests/kit.ts` is the whole fake world: the session, a git repository under `/work` with `write()` and `commit()`, a clock (`session.clock.advance(ms)`), and a model that answers from `session.reply(...)`. `advance` resolves after the timers it fired and the work they started have settled, so an assertion can follow it directly.
+- `stubSession(on, options)` in `plugin/tests/kit.ts` is the whole fake world: the session, a git repository under `/work` with `write()`, `commit()` and `checkout()`, a clock (`session.clock.advance(ms)`), a model that answers from `session.reply(...)`, and subagents that finish when the test fires `$.turn.complete(session.finish(n, answer))`. `advance` resolves after the timers it fired and the work they started have settled, so an assertion can follow it directly.
+- A plugin's `$.agent.spawn` behaves differently in the kit than in a session. The `agent.spawn` stub receives the Agent tool's spelling (`subagent_type`, not `subagentType`), has to return `{ model }`, and whatever `agentId` it returns is dropped: the plugin gets `{ model: 'inherit' }`. Claude Code sets the id itself in a real session. So `register.tsx` falls back to `$.agent.list()` to find its reviewer by type, which is also what it needs when another mod answers the spawn, and the kit stubs `agent.list`.
+- `session.logs` holds what the plugin wrote with `$.ui.log`. A swallowed error shows up there.
+- Each test has 5 seconds. Advancing the clock by minutes runs every 2-second tick in between, so a test that advances far needs `timeoutMs` in its options.
+- A stub can be registered only once per event. To see inside a failing test, add what you need to `stubSession` rather than registering a second `ui.log` or `tool.call`.
+- Take temporary debug lines out by hand. `git checkout <file>` also throws away every other uncommitted change in that file.
 
 - `Text` takes no `key`. Give keys to `Button`, `Input`, `Select` and `Markdown`, and find text with `ui.find({ type: 'Text', text })`. A `find` that comes back undefined after a mount that did not reject usually means this.
 - The kit answers `$.ui.invalidate('ui.render')` by itself, but not the invalidation of a prompt event. Stub `ui.invalidate` or the call is dropped with a line under "the engine reported".

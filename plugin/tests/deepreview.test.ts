@@ -1,0 +1,265 @@
+import { expect, test } from 'claude-code/testing'
+
+import { reviewSchedule } from '../hooks/pane'
+import { paneContext } from '../hooks/prompts'
+import {
+  commitTitle,
+  fitReview,
+  isCommit,
+  isEmptyScope,
+  parseReflog,
+  reviewRequest,
+  scopePrint,
+  scopeSubject,
+} from '../hooks/review'
+import type { ReviewScope } from '../hooks/review'
+import { commitHash, finished, PANE, SESSION, stubSession, typed } from './kit'
+
+const MEAN = 'def mean(xs):\n    return sum(xs) / len(xs)\n'
+const HASH = commitHash(2)
+
+test('parseReflog and isCommit tell a commit from other moves of HEAD', async () => {
+  const commit = parseReflog(`${HASH}\0commit: Add mean\n`)
+  expect(commit).toEqual({ hash: HASH, subject: 'commit: Add mean' })
+  if (commit === null) return
+
+  expect(isCommit(commit)).toBe(true)
+  expect(commitTitle(commit)).toBe('Add mean')
+  expect(isCommit({ hash: HASH, subject: 'commit (amend): Add mean' })).toBe(true)
+  expect(isCommit({ hash: HASH, subject: 'commit (initial): Start' })).toBe(true)
+  for (const subject of ['checkout: moving from main to x', 'pull: Fast-forward', 'rebase (finish): returning', 'reset: moving to HEAD~1']) {
+    expect(isCommit({ hash: HASH, subject })).toBe(false)
+  }
+  expect(parseReflog('')).toBe(null)
+  expect(parseReflog('not a hash\0commit: x')).toBe(null)
+})
+
+test('a review request carries the scope, and a huge patch is cut', async () => {
+  const commit: ReviewScope = { kind: 'commit', hash: HASH, title: 'Add mean', patch: 'PATCH' }
+  expect(scopeSubject(commit)).toBe('commit 0000000: Add mean')
+  expect(reviewRequest(commit)).toMatch('Review this commit.')
+  expect(reviewRequest(commit)).toMatch('PATCH')
+
+  const since: ReviewScope = { kind: 'since', from: HASH, log: '', diff: 'DIFF', untracked: ['new.py'] }
+  expect(scopeSubject(since)).toBe('your uncommitted work')
+  expect(scopeSubject({ ...since, log: 'abc1234 Add median' })).toBe('your work since 0000000')
+  expect(reviewRequest(since)).toMatch('Commits since then:\n(none)')
+  expect(reviewRequest(since)).toMatch('- new.py')
+
+  const huge = reviewRequest({ ...commit, patch: 'x'.repeat(100_000) })
+  expect(huge.length < 62_000).toBe(true)
+  expect(huge).toMatch('Cut here: 40000 more characters')
+})
+
+test('an empty scope and an unchanged scope are told apart from new work', async () => {
+  const since: ReviewScope = { kind: 'since', from: HASH, log: '', diff: '', untracked: [] }
+  expect(isEmptyScope(since)).toBe(true)
+  expect(isEmptyScope({ ...since, untracked: ['new.py'] })).toBe(false)
+  expect(scopePrint({ ...since, diff: 'a' })).toBe(scopePrint({ ...since, diff: 'a' }))
+  expect(scopePrint({ ...since, diff: 'a' })).not.toBe(scopePrint({ ...since, diff: 'b' }))
+})
+
+test('fitReview and reviewSchedule', async () => {
+  expect(fitReview('  ok  ')).toBe('ok')
+  expect(fitReview('x'.repeat(20_000)).length < 10_000).toBe(true)
+  expect(reviewSchedule(true, 0)).toBe('after each commit')
+  expect(reviewSchedule(true, 900_000)).toBe('after each commit and every 15 minutes')
+  expect(reviewSchedule(false, 300_000)).toBe('every 5 minutes')
+  expect(reviewSchedule(false, 0)).toBe('only when you ask')
+})
+
+test('paneContext tells the conversation about a finished review', async () => {
+  const none = { state: 'none', subject: '', text: '', isUnseen: false } as const
+  expect(paneContext([], none)).toBe('')
+  expect(paneContext([], { state: 'done', subject: 'commit abc: X', text: 'REVIEW', isUnseen: true })).toMatch('REVIEW')
+  expect(paneContext([], { state: 'running', subject: 'commit abc: X', text: '', isUnseen: false })).toBe('')
+})
+
+test('a commit is reviewed by the registered reviewer, and the review lands in the pane', async ($, on) => {
+  const session = stubSession(on)
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+
+  // Registered with the default deep review model and thinking level, and read-only tools.
+  expect(session.agents.length).toBe(1)
+  expect(session.agents[0]?.name).toBe('deep-reviewer')
+  expect(session.agents[0]?.model).toBe('opus')
+  expect(session.agents[0]?.effort).toBe('high')
+  expect(session.agents[0]?.tools).toEqual(['Read', 'Grep', 'Glob'])
+  expect(session.agents[0]?.prompt).toBe('DEEP REVIEW INSTRUCTIONS')
+
+  session.write('stats.py', MEAN)
+  const hash = session.commit('Add mean')
+  await session.clock.advance(2000)
+
+  expect(session.spawned.length).toBe(1)
+  expect(session.spawned[0]?.type).toBe('backseat-driver:deep-reviewer')
+  expect(session.spawned[0]?.prompt).toMatch('Review this commit.')
+  expect(session.spawned[0]?.prompt).toMatch(`commit ${hash}`)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-review' })
+  expect(await ui.find({ type: 'Text', text: 'Reviewing commit 0000000: Add mean.' })).toBeDefined()
+
+  await $.turn.complete(session.finish(1, 'Good change. `mean` fails on an empty list.'))
+  expect(await ui.find({ type: 'Markdown', text: '`mean` fails on an empty list.' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'commit 0000000: Add mean' })).toBeDefined()
+  await ui.unmount()
+
+  // Nothing went into the conversation.
+  expect(session.submitted).toEqual([])
+})
+
+test('a finished review is announced when the tab is not open', async ($, on) => {
+  const session = stubSession(on)
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+  session.write('stats.py', MEAN)
+  session.commit('Add mean')
+  await session.clock.advance(2000)
+  await $.turn.complete(session.finish(1, 'Looks fine.'))
+
+  expect(session.toasts).toEqual(['Deep review ready: commit 0000000: Add mean'])
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ key: 'tab-review', text: 'Deep review (new)' })).toBeDefined()
+  await ui.press({ key: 'tab-review' })
+  expect(await ui.find({ key: 'tab-review', text: 'Deep review (new)' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('the chosen model and thinking level are what the reviewer is registered with', { options: { deep_review_model: 'fable', deep_review_thinking: 'max', persona: 'knuth' } }, async ($, on) => {
+  const session = stubSession(on, { pluginFiles: { '/personas/knuth.md': '# Persona: knuth\n' } })
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+
+  expect(session.agents[0]?.model).toBe('fable')
+  expect(session.agents[0]?.effort).toBe('max')
+  expect(session.agents[0]?.prompt).toBe('DEEP REVIEW INSTRUCTIONS\n\n# Persona: knuth')
+})
+
+test('a checkout is not a commit, and deep reviews start afresh after it', async ($, on) => {
+  const session = stubSession(on)
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+
+  session.checkout()
+  await session.clock.advance(10_000)
+  expect(session.spawned).toEqual([])
+})
+
+test('with "after each commit" off, a commit is not reviewed', { options: { deep_review_after_commit: false } }, async ($, on) => {
+  const session = stubSession(on)
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+
+  session.write('stats.py', MEAN)
+  session.commit('Add mean')
+  await session.clock.advance(60_000)
+  expect(session.spawned).toEqual([])
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-review' })
+  expect(await ui.find({ type: 'Text', text: 'One runs only when you ask.' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the timer reviews everything since the previous review, and skips when nothing changed', { options: { deep_review_after_commit: false, deep_review_every: '5 minutes', play_by_play: 'on request' }, timeoutMs: 30_000 }, async ($, on) => {
+  const session = stubSession(on, { head: { 'stats.py': MEAN } })
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+
+  // Nothing has changed: the first tick of the timer does nothing.
+  await session.clock.advance(300_000)
+  expect(session.spawned).toEqual([])
+
+  session.write('stats.py', `${MEAN}\ndef total(xs):\n    return sum(xs)\n`)
+  session.write('fresh.py', 'x = 1\n')
+  await session.clock.advance(300_000)
+  expect(session.spawned.length).toBe(1)
+  expect(session.spawned[0]?.prompt).toMatch('Review the work done since your previous review.')
+  expect(session.spawned[0]?.prompt).toMatch('def total(xs):')
+  expect(session.spawned[0]?.prompt).toMatch('- fresh.py')
+
+  await $.turn.complete(session.finish(1, 'Fine.'))
+  // The same uncommitted work is not reviewed twice.
+  await session.clock.advance(300_000)
+  expect(session.spawned.length).toBe(1)
+})
+
+test('"review now" works without waiting for a commit or the timer', async ($, on) => {
+  const session = stubSession(on, { head: { 'stats.py': MEAN } })
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-review' })
+  expect(await ui.find({ type: 'Text', text: 'No deep review yet. One runs after each commit.' })).toBeDefined()
+
+  // With nothing new, it reviews the last commit.
+  await ui.press({ key: 'review-now' })
+  expect(session.spawned.length).toBe(1)
+  expect(session.spawned[0]?.prompt).toMatch('Review this commit.')
+
+  // While one runs, asking again does not start a second.
+  await ui.press({ key: 'review-now' })
+  expect(session.spawned.length).toBe(1)
+  expect(session.toasts).toEqual(['A deep review is already running.'])
+  await ui.unmount()
+})
+
+test('a commit made while a review runs is reviewed next', async ($, on) => {
+  const session = stubSession(on)
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+
+  session.write('stats.py', MEAN)
+  session.commit('Add mean')
+  await session.clock.advance(2000)
+  session.write('stats.py', `${MEAN}# more\n`)
+  session.commit('Add a comment')
+  await session.clock.advance(2000)
+  expect(session.spawned.length).toBe(1)
+
+  await $.turn.complete(session.finish(1, 'First review.'))
+  expect(session.spawned.length).toBe(2)
+  expect(session.spawned[1]?.prompt).toMatch('Add a comment')
+})
+
+test('a review that fails says so in the pane', async ($, on) => {
+  const session = stubSession(on)
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+  session.write('stats.py', MEAN)
+  session.commit('Add mean')
+  await session.clock.advance(2000)
+
+  await $.turn.complete(session.finish(1, '', 'error'))
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-review' })
+  expect(await ui.find({ type: 'Text', text: 'did not finish: error' })).toBeDefined()
+  await ui.unmount()
+})
+
+test("another subagent's answer is left alone", async ($, on) => {
+  const session = stubSession(on)
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+
+  expect(await $.turn.complete(finished('someone-else', 'unrelated'))).toEqual({ text: '' })
+  expect(session.toasts).toEqual([])
+})
+
+test('the reviewer is offered to the model only while the tutor is on', async ($, on) => {
+  stubSession(on)
+  await $.session.start(SESSION)
+  const offer = {
+    agent: 'backseat-driver:deep-reviewer',
+    description: 'reviewer',
+    source: 'plugin',
+    provider: { plugin: 'backseat-driver', tier: 'user' },
+  } as const
+
+  expect(await $.agent.offer(offer)).toEqual({ isOffered: false })
+  await $.command.run(typed('bsd'))
+  expect(await $.agent.offer(offer)).toEqual({ isOffered: true })
+})

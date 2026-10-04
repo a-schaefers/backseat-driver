@@ -6,7 +6,7 @@ Backseat Driver is a plugin for [Claude Code](https://claude.com/claude-code). S
 
 You learn by building whatever you want to build. The tutor sets no exercises and runs no quizzes. It chimes in from the background, and how often, how deeply and in what voice is yours to tune.
 
-> **Status: early build.** Tutor mode and the play-by-play work: `/bsd` turns Claude into a tutor that cannot edit your files, and notes about what you save appear in the pane on the model and thinking level you choose. The deep review and profiles are not built yet, so those two tabs are empty, and nothing is remembered between sessions. The rest of this README is the plan. The [roadmap](#roadmap) tracks what exists.
+> **Status: early build.** Tutor mode, the play-by-play and the deep review work: `/bsd` turns Claude into a tutor that cannot edit your files, notes about what you save appear in the pane, and each commit gets a written review in its own tab, all on the models and thinking levels you choose. Profiles are not built yet, so nothing is remembered between sessions and the first-run questions are not asked. The rest of this README is the plan. The [roadmap](#roadmap) tracks what exists.
 
 ## Using it
 
@@ -171,12 +171,12 @@ The watcher asks git what changed every couple of seconds, and stretches that in
 | Tutor persona | One Markdown style sheet per persona in `plugin/personas/`. The chosen one is added to the system prompt and to both review prompts. |
 | The contract outranks the project's `CLAUDE.md` | A `prompt.context` hook keeps the project's instruction files loaded but reframes them as background that yields to the contract. |
 | Claude never edits your files | A `tool.call` hook refuses `Edit`, `Write` and `NotebookEdit` while the mode is on. The only paths it lets through are Claude Code's own: its folder under your home directory, where it keeps its notes, and its scratch folder. |
-| Noticing saves and commits | A `$.clock.every` timer runs `git` through `$.process.run`: status and diff for saves, `HEAD` and the reflog for commits. |
+| Noticing saves and commits | A `$.clock.every` timer runs `git status` through `$.process.run` for saves. For commits it checks the reflog file's size and modification time, and runs `git reflog` only when that changes. |
 | Finding the project's languages | `git ls-files` and a table of file extensions. |
 | First-run questions | `$.ui.ask`, the same question dialog Claude uses. |
 | Profiles | `$.store`, the key-value store Claude Code gives each plugin: one small JSON document per language. |
 | Play-by-play review | `$.model.complete` with the chosen model and thinking level: one request, no tools, no conversation history. |
-| Deep review | A read-only subagent that the mod registers with `$.agent.register` on the chosen model and thinking level, and starts with `$.agent.spawn`. Its review goes to the pane, not into the conversation. |
+| Deep review | A read-only subagent (`Read`, `Grep`, `Glob`) that the mod registers with `$.agent.register` on the chosen model and thinking level, and starts with `$.agent.spawn`. A `turn.complete` hook takes its answer to the pane, not into the conversation. |
 | Second opinion on a contested point | The tutor hands the point to the same read-only subagent and reports its verdict in the conversation. |
 | "Stop warning me about that" | A tool the mod registers with `$.tool.register`. The tutor calls it when you state a preference, and the mod saves it to the profile and drops the matching notes. |
 | The pane | `$.ui.open` plus a `ui.render` hook, with Play-by-play, Deep review and Profile tabs. Their contents live in `$.state`, so the pane redraws when they change. Buttons on a note send a question into the conversation with `$.prompt.submit`. |
@@ -221,7 +221,7 @@ What a deep review covers depends on what triggered it:
 - **After a commit**: that commit.
 - **On the timer**: everything since the previous deep review, meaning any commits made in between plus the uncommitted work on top of the last commit. A timed review is skipped when nothing has changed.
 
-A deep review follows the same ground rules as a note. It explains and points, and it does not rewrite your code.
+A deep review follows the same ground rules as a note. It explains and points, and it does not rewrite your code. While one runs, Claude Code's footer lists it as a background agent. When it finishes, a short notice appears and the tab is marked as new until you open it. One review runs at a time, and a commit made in the meantime is reviewed next.
 
 Models are addressed by alias, so each setting follows the current model of that family. Thinking levels are Claude Code's effort levels. Everything runs through your existing Claude Code login. There is no API key to set up, and usage counts against the same plan.
 
@@ -304,7 +304,7 @@ To use the working copy in a project of your own, start Claude Code there with `
 - [x] **Scaffold.** Plugin manifest, marketplace entry, settings, the `/backseat-driver` and `/bsd` commands, validation, tests and type checking.
 - [x] **Tutor mode.** The contract as a skill, the `/backseat-driver` and `/bsd` switch, the system-prompt override, the edit guard, the personas and the pane with its three tabs. Useful by itself as a conversational tutor.
 - [x] **Play-by-play.** Watcher, gate, reviewer on the chosen model and thinking level, and the Play-by-play tab with explain, dismiss and look now.
-- [ ] **Deep review.** Commit detection, the timer, the read-only reviewer with its own model and thinking level, and the Deep review tab.
+- [x] **Deep review.** Commit detection, the timer, the read-only reviewer with its own model and thinking level, and the Deep review tab with review now.
 - [ ] **Profiles.** Language detection, the first-run questions, one profile per language shared across projects, hushing in chat or by key, lesson memory and the Profile tab.
 - [ ] **Follow-through.** Explain and dismiss on each note, notes and reviews shared with the conversation, second opinions on contested points.
 - [ ] **Tuning.** Fewer repeated notes, usage back-off and per-language guidance.

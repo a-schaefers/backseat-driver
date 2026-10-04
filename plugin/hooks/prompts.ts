@@ -1,4 +1,4 @@
-import type { Note } from '../types'
+import type { Note, Review } from '../types'
 import { formatHunks, splitLines } from './diff'
 import type { Hunk } from './diff'
 import { listNotes } from './notes'
@@ -92,12 +92,28 @@ export function reviewerSystem(instructions: string, extras: readonly string[], 
   return [instructions, ...extras, persona].filter(part => part !== '').join('\n\n')
 }
 
-/** What the conversation is told about the pane, attached to each prompt while there are notes. */
+/** What the conversation is told about the notes, attached to each prompt while there are any. */
 export function notesContext(notes: readonly Note[]): string {
   return [
     'Backseat Driver: these play-by-play notes are open in the pane beside this conversation. The user can see them and may refer to them by number.',
     listNotes(notes),
   ].join('\n')
+}
+
+/** Everything the pane shows that the conversation should know about, or '' when it shows nothing. */
+export function paneContext(notes: readonly Note[], review: Review): string {
+  const parts: string[] = []
+  if (notes.length > 0) parts.push(notesContext(notes))
+  if (review.state === 'done') {
+    parts.push(
+      [
+        `Backseat Driver: the pane also shows this deep review of ${review.subject}. The user has it in front of them and may ask about it or contest it.`,
+        review.text,
+      ].join('\n'),
+    )
+  }
+
+  return parts.join('\n\n')
 }
 
 /**

@@ -29,6 +29,17 @@ export type Watch = {
   detail: string
 }
 
+/** The latest deep review, for the pane's Deep review tab. */
+export type Review = {
+  state: 'none' | 'running' | 'done' | 'failed'
+  /** What is or was under review, in a few words: "commit a1b2c3d: Fix the parser". */
+  subject: string
+  /** The review as Markdown when done, or why it failed. */
+  text: string
+  /** True until the user has opened the tab since this review arrived. */
+  isUnseen: boolean
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'backseat-driver': {
@@ -38,6 +49,7 @@ declare module 'claude-code' {
       /** The id of the note the pane's keys act on, or null for the first one. */
       selected: number | null
       watch: Watch
+      review: Review
     }
   }
 }

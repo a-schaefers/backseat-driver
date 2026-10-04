@@ -1,10 +1,10 @@
 import type { Elements } from 'claude-code'
 
-import type { Mode, Note, Tab, Watch } from '../types'
+import type { Mode, Note, Review, Tab, Watch } from '../types'
 import { sortNotes } from './notes'
 
 /** The elements the pane is built from. Every surface that draws panes has them. */
-export type Kit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
+export type Kit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdown'>
 
 /** Everything the pane shows, as plain data. */
 export type PaneView = {
@@ -17,6 +17,9 @@ export type PaneView = {
   watch: Watch
   /** False when the play-by-play only looks on request. */
   isAutomatic: boolean
+  review: Review
+  /** When a deep review runs without being asked, in a few words: "after each commit". */
+  reviewSchedule: string
 }
 
 /** What the pane's controls do. The closures come from register.tsx. */
@@ -26,6 +29,7 @@ export type PaneActions = {
   onExplain: (note: Note) => void
   onDismiss: (note: Note) => void
   onLook: () => void
+  onReview: () => void
 }
 
 const TABS: readonly { tab: Tab; label: string; hotkey: string }[] = [
@@ -60,9 +64,37 @@ export function currentNote(view: Pick<PaneView, 'notes' | 'selected'>): Note | 
   return sorted.find(note => note.id === view.selected) ?? sorted[0]
 }
 
-const NOT_BUILT: Record<Exclude<Tab, 'play'>, string> = {
-  review: 'The deep review is not built yet.',
-  profile: 'Profiles are not built yet.',
+/** When deep reviews run by themselves, from the two trigger settings. */
+export function reviewSchedule(isAfterCommit: boolean, everyMs: number): string {
+  const minutes = Math.round(everyMs / 60_000)
+  const timer = minutes === 1 ? 'every minute' : `every ${minutes} minutes`
+  if (isAfterCommit) return everyMs > 0 ? `after each commit and ${timer}` : 'after each commit'
+
+  return everyMs > 0 ? timer : 'only when you ask'
+}
+
+function tabLabel(tab: Tab, label: string, view: PaneView): string {
+  return tab === 'review' && view.review.isUnseen ? `${label} (new)` : label
+}
+
+function deepReview({ Box, Text, Button, Markdown }: Kit, view: PaneView, actions: PaneActions) {
+  const { review } = view
+
+  return (
+    <Box flexDirection="column">
+      {review.state === 'none' && <Text dimColor>No deep review yet. One runs {view.reviewSchedule}.</Text>}
+      {review.state === 'running' && <Text dimColor>Reviewing {review.subject}.</Text>}
+      {review.state === 'failed' && (
+        <Text>
+          The review of {review.subject} did not finish: {review.text}
+        </Text>
+      )}
+      {review.state === 'done' && <Text bold>{review.subject}</Text>}
+      {review.state === 'done' && <Markdown key="review" text={review.text} />}
+      <Text> </Text>
+      <Button key="review-now" label="review now" hotkey="r" plain onPress={() => actions.onReview()} />
+    </Box>
+  )
 }
 
 function playByPlay({ Box, Text, Button }: Kit, view: PaneView, actions: PaneActions) {
@@ -114,7 +146,7 @@ export function renderPane(kit: Kit, view: PaneView, actions: PaneActions) {
         {TABS.map(({ tab, label, hotkey }) => (
           <Button
             key={`tab-${tab}`}
-            label={label}
+            label={tabLabel(tab, label, view)}
             hotkey={hotkey}
             plain
             dimColor={view.tab !== tab}
@@ -124,7 +156,9 @@ export function renderPane(kit: Kit, view: PaneView, actions: PaneActions) {
       </Box>
       <Text dimColor>{statusLine(view)}</Text>
       <Text> </Text>
-      {view.tab === 'play' ? playByPlay(kit, view, actions) : <Text>{NOT_BUILT[view.tab]}</Text>}
+      {view.tab === 'play' && playByPlay(kit, view, actions)}
+      {view.tab === 'review' && deepReview(kit, view, actions)}
+      {view.tab === 'profile' && <Text>Profiles are not built yet.</Text>}
     </Box>
   )
 }

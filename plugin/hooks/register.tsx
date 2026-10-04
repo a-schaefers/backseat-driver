@@ -10,14 +10,30 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteResult, Register, Timer } from 'claude-code'
 
-import type { Mode, Note, Tab, Watch } from '../types'
+import type { Mode, Note, Review, Tab, Watch } from '../types'
 import { reframeInstructions, SESSION_NOTES, stripFrontmatter, tutorSections } from './contract'
 import { backoffMs, shouldLook } from './gate'
+import { parseStatus } from './git'
 import { DENIAL, isUsersFile } from './guard'
 import { parseRequest, transition } from './mode'
+import { isNoiseFile } from './noise'
 import { applyReply, parseReply } from './notes'
-import { renderPane } from './pane'
-import { explainRequest, notesContext, playByPlayPrompt, reviewerSystem } from './prompts'
+import { renderPane, reviewSchedule } from './pane'
+import { explainRequest, paneContext, playByPlayPrompt, reviewerSystem } from './prompts'
+import {
+  commitTitle,
+  fitReview,
+  isCommit,
+  isEmptyScope,
+  parseReflog,
+  REFLOG_ARGS,
+  REVIEWER_DESCRIPTION,
+  reviewRequest,
+  scopePrint,
+  scopeSubject,
+  showCommitArgs,
+} from './review'
+import type { ReflogEntry, ReviewScope } from './review'
 import { readSettings } from './settings'
 import type { Settings } from './settings'
 import { createWatcher } from './watcher'
@@ -32,12 +48,14 @@ const SLOW_POLL_MS = 250
 const MAX_SKIPPED_TICKS = 15
 
 const IDLE: Watch = { state: 'idle', lastLookAt: null, detail: '' }
+const NO_REVIEW: Review = { state: 'none', subject: '', text: '', isUnseen: false }
 
 const modeAtom = atom({ plugin: 'backseat-driver', key: 'mode' } as const, 'off')
 const tabAtom = atom({ plugin: 'backseat-driver', key: 'tab' } as const, 'play')
 const notesAtom = atom({ plugin: 'backseat-driver', key: 'notes' } as const, [])
 const selectedAtom = atom({ plugin: 'backseat-driver', key: 'selected' } as const, null)
 const watchAtom = atom({ plugin: 'backseat-driver', key: 'watch' } as const, IDLE)
+const reviewAtom = atom({ plugin: 'backseat-driver', key: 'review' } as const, NO_REVIEW)
 
 /**
  * The mode is kept twice, because each copy is lost by a different event.
@@ -50,6 +68,7 @@ let mode: Mode = 'off'
 let contract = ''
 let persona = ''
 let lookInstructions = ''
+let reviewInstructions = ''
 /** The user's home directory, for telling their files from Claude Code's own. */
 let home = ''
 
@@ -64,10 +83,28 @@ let isPolling = false
 let ticksToSkip = 0
 let failures = 0
 
+/** The deep review's working state. */
+let repoRoot = ''
+/** The reflog file, whose fingerprint changes whenever HEAD moves. Empty outside a repository. */
+let headLog = ''
+let headLogStamp = ''
+/** The commit HEAD pointed at when it was last looked at. */
+let lastHead = ''
+/** Where the previous deep review ended, and a fingerprint of what the previous timed review saw. */
+let reviewedHead = ''
+let reviewedPrint = ''
+/** The running review's subagent and what it is reviewing. One review runs at a time. */
+let reviewAgentId: string | null = null
+let reviewScope: ReviewScope | null = null
+/** A commit made while a review was running. Only the latest is kept. */
+let queuedCommit: ReflogEntry | null = null
+let reviewTimer: Timer | null = null
+
 async function loadTutor($: EngineInterface, personaName: string): Promise<void> {
   const root = $.plugin.root
   contract = stripFrontmatter(await $.fs.read(`${root}/skills/tutor/SKILL.md`))
   lookInstructions = (await $.fs.read(`${root}/prompts/play-by-play.md`)).trim()
+  reviewInstructions = (await $.fs.read(`${root}/prompts/deep-review.md`)).trim()
   persona = ''
   if (personaName !== 'none') {
     try {
@@ -86,6 +123,22 @@ async function openPane($: EngineInterface): Promise<void> {
 /** Changes what the pane's status line says about the watcher. */
 async function setWatch($: EngineInterface, change: Partial<Watch>): Promise<void> {
   await update($, watchAtom, (watch): Watch => ({ ...watch, ...change }))
+}
+
+async function setReview($: EngineInterface, change: Partial<Review>): Promise<void> {
+  await update($, reviewAtom, (review): Review => ({ ...review, ...change }))
+}
+
+/** A file's size and modification time as one string, or '' when it is not there. */
+async function fileStamp($: EngineInterface, path: string): Promise<string> {
+  if (path === '') return ''
+  try {
+    const stat = await $.fs.stat(path)
+
+    return `${stat.size}:${stat.mtimeMs}`
+  } catch {
+    return ''
+  }
 }
 
 /** Git in `cwd`, never taking the index lock that the user's own git commands need. */
@@ -162,6 +215,111 @@ async function look($: EngineInterface, settings: Settings): Promise<void> {
   }
 }
 
+/**
+ * The id of the reviewer a spawn started. Claude Code sets it on the spawn's
+ * result. When another mod answered the spawn in Claude Code's place, the
+ * result has no id, and the reviewer it started, if any, is found by its type.
+ */
+async function startedReviewer($: EngineInterface, spawnedId: string | undefined): Promise<string | undefined> {
+  if (spawnedId !== undefined) return spawnedId
+  try {
+    const running = (await $.agent.list()).filter(
+      agent => agent.type === 'backseat-driver:deep-reviewer' && (agent.status === 'pending' || agent.status === 'running'),
+    )
+
+    return running[running.length - 1]?.id
+  } catch {
+    return undefined
+  }
+}
+
+/** Hands a scope to the deep reviewer. Its answer arrives later, at `turn.complete`. */
+async function startReview($: EngineInterface, scope: ReviewScope): Promise<void> {
+  const subject = scopeSubject(scope)
+  await setReview($, { state: 'running', subject, text: '', isUnseen: false })
+  try {
+    const spawned = await $.agent.spawn({
+      subagentType: 'backseat-driver:deep-reviewer',
+      description: `Deep review of ${subject}`,
+      prompt: reviewRequest(scope),
+    })
+    const agentId = spawned.deny === undefined ? await startedReviewer($, spawned.agentId) : undefined
+    if (agentId === undefined) {
+      await setReview($, { state: 'failed', text: spawned.deny ?? 'the reviewer did not start' })
+
+      return
+    }
+    reviewAgentId = agentId
+    reviewScope = scope
+  } catch (error) {
+    $.ui.log(`deep review did not start: ${String(error)}`, { to: 'debug' })
+    await setReview($, { state: 'failed', text: 'the reviewer did not start' })
+  }
+}
+
+async function reviewCommit($: EngineInterface, entry: ReflogEntry): Promise<void> {
+  if (reviewAgentId !== null) {
+    queuedCommit = entry
+
+    return
+  }
+  const shown = await git($, repoRoot, showCommitArgs(entry.hash))
+  await startReview($, { kind: 'commit', hash: entry.hash, title: commitTitle(entry), patch: shown.stdout })
+}
+
+/**
+ * Reviews everything since the previous deep review, committed or not. The
+ * timer calls this, and so does "review now" in the pane. Asked for by hand
+ * with nothing new, it reviews the last commit again.
+ */
+async function reviewSince($: EngineInterface, isAsked: boolean): Promise<void> {
+  if (mode === 'off' || (mode === 'paused' && !isAsked)) return
+  if (reviewAgentId !== null) {
+    if (isAsked) $.ui.toast('A deep review is already running.')
+
+    return
+  }
+  if (repoRoot === '' || reviewedHead === '') {
+    if (isAsked) $.ui.toast('A deep review needs a git repository with at least one commit.')
+
+    return
+  }
+
+  const log = await git($, repoRoot, ['log', '--no-color', '--oneline', `${reviewedHead}..HEAD`])
+  const diff = await git($, repoRoot, ['diff', '--no-color', reviewedHead])
+  const status = await git($, repoRoot, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])
+  const untracked = parseStatus(status.stdout)
+    .filter(entry => entry.index === '?' && !isNoiseFile(entry.path))
+    .map(entry => entry.path)
+  const scope: ReviewScope = { kind: 'since', from: reviewedHead, log: log.stdout, diff: diff.stdout, untracked }
+
+  if (!isEmptyScope(scope) && scopePrint(scope) !== reviewedPrint) {
+    await startReview($, scope)
+  } else if (isAsked) {
+    const last = parseReflog((await git($, repoRoot, ['log', '-1', '--format=%H%x00commit: %s'])).stdout)
+    if (last !== null) await reviewCommit($, last)
+  }
+}
+
+/** Notices when HEAD has moved, and starts a review when the move was a commit. */
+async function checkHead($: EngineInterface, settings: Settings): Promise<void> {
+  const stamp = await fileStamp($, headLog)
+  if (stamp === headLogStamp) return
+  headLogStamp = stamp
+
+  const entry = parseReflog((await git($, repoRoot, REFLOG_ARGS)).stdout)
+  if (entry === null || entry.hash === lastHead) return
+  lastHead = entry.hash
+  if (!isCommit(entry)) {
+    // A checkout, pull, reset or rebase is not new work. Deep reviews start afresh from here.
+    reviewedHead = entry.hash
+    reviewedPrint = ''
+
+    return
+  }
+  if (settings.deepReview.isAfterCommit) await reviewCommit($, entry)
+}
+
 /** One poll of the working tree. A poll never calls a model: it only decides whether a look is due. */
 async function tick($: EngineInterface, settings: Settings): Promise<void> {
   const active = watcher
@@ -191,6 +349,7 @@ async function tick($: EngineInterface, settings: Settings): Promise<void> {
       backoffMs: backoffMs(failures),
     })
     if (settings.playByPlay.isAutomatic && isDue) void look($, settings)
+    await checkHead($, settings)
   } catch (error) {
     $.ui.log(`poll failed: ${String(error)}`, { to: 'debug' })
   } finally {
@@ -201,7 +360,13 @@ async function tick($: EngineInterface, settings: Settings): Promise<void> {
 function stopWatching(): void {
   timer?.cancel()
   timer = null
+  reviewTimer?.cancel()
+  reviewTimer = null
   watcher = null
+  // A review still running finishes in the background, and its answer is ignored.
+  reviewAgentId = null
+  reviewScope = null
+  queuedCommit = null
 }
 
 /** Starts the watcher from the working tree as it stands now. */
@@ -215,6 +380,8 @@ async function startWatching($: EngineInterface, settings: Settings): Promise<vo
   const top = await git($, undefined, ['rev-parse', '--show-toplevel'])
   const root = top.stdout.trim()
   if (top.exitCode !== 0 || root === '') {
+    repoRoot = ''
+    headLog = ''
     await setWatch($, { state: 'no-git', lastLookAt: null, detail: '' })
 
     return
@@ -242,9 +409,34 @@ async function startWatching($: EngineInterface, settings: Settings): Promise<vo
   await started.start()
   watcher = started
   await setWatch($, IDLE)
+
+  repoRoot = root
+  const gitDir = (await git($, root, ['rev-parse', '--absolute-git-dir'])).stdout.trim()
+  headLog = gitDir === '' ? '' : `${gitDir}/logs/HEAD`
+  headLogStamp = await fileStamp($, headLog)
+  lastHead = (await git($, root, ['rev-parse', '--verify', '--quiet', 'HEAD'])).stdout.trim()
+  // Deep reviews cover what happens from now on, not the history so far.
+  reviewedHead = lastHead
+  reviewedPrint = ''
+  // Registered here, with the user's model and thinking level, because a
+  // subagent this mod spawns cannot be given either at spawn time.
+  await $.agent.register({
+    name: 'deep-reviewer',
+    description: REVIEWER_DESCRIPTION,
+    prompt: reviewerSystem(reviewInstructions, [], persona),
+    tools: ['Read', 'Grep', 'Glob'],
+    model: settings.deepReview.model,
+    effort: settings.deepReview.thinking,
+  })
+
   timer = $.clock.every(POLL_MS, () => {
     void tick($, settings)
   })
+  if (settings.deepReview.everyMs > 0) {
+    reviewTimer = $.clock.every(settings.deepReview.everyMs, () => {
+      void reviewSince($, false)
+    })
+  }
 }
 
 /** Moves to `next`, with everything that has to change along with the mode. */
@@ -266,6 +458,7 @@ async function switchTo($: EngineInterface, next: Mode, settings: Settings): Pro
     stopWatching()
     await update($, notesAtom, () => [])
     await update($, selectedAtom, () => null)
+    await update($, reviewAtom, () => NO_REVIEW)
     await $.ui.close({ id: 'backseat-driver' })
   }
 }
@@ -279,6 +472,10 @@ export const register: Register = (on, options) => {
     if (mode !== 'off') {
       const open = await read($, notesAtom)
       nextNoteId = open.reduce((highest, note) => Math.max(highest, note.id), 0) + 1
+      // A review that was running when the module reloaded can no longer be collected.
+      if ((await read($, reviewAtom)).state === 'running') {
+        await setReview($, { state: 'failed', text: 'the plugin reloaded while it was running' })
+      }
       await loadTutor($, settings.persona)
       await openPane($)
       await startWatching($, settings)
@@ -341,11 +538,40 @@ export const register: Register = (on, options) => {
   // The conversation is told what the pane shows, so "explain note 2" means something.
   on('prompt.submit', async ($, e, next) => {
     if (mode === 'off') return next(e)
-    const open = await read($, notesAtom)
-    if (open.length === 0) return next(e)
+    const shown = paneContext(await read($, notesAtom), await read($, reviewAtom))
+    if (shown === '') return next(e)
 
-    return next({ ...e, context: [...(e.context ?? []), notesContext(open)] })
+    return next({ ...e, context: [...(e.context ?? []), shown] })
   })
+
+  // The deep reviewer's answer. It goes to the pane, never into the conversation.
+  on('turn.complete', async ($, e, next) => {
+    if (e.agentId === undefined || e.agentId !== reviewAgentId) return next(e)
+    const scope = reviewScope
+    reviewAgentId = null
+    reviewScope = null
+
+    if (e.reason === 'answer' && e.answer.trim() !== '' && scope !== null) {
+      reviewedHead = scope.kind === 'commit' ? scope.hash : lastHead
+      reviewedPrint = scope.kind === 'commit' ? '' : scopePrint(scope)
+      const isUnseen = (await read($, tabAtom)) !== 'review'
+      await setReview($, { state: 'done', text: fitReview(e.answer), isUnseen })
+      if (isUnseen) $.ui.toast(`Deep review ready: ${scopeSubject(scope)}`)
+    } else {
+      await setReview($, { state: 'failed', text: e.reason === 'answer' ? 'the reviewer said nothing' : e.reason })
+    }
+
+    const queued = queuedCommit
+    queuedCommit = null
+    if (queued !== null && mode === 'on') await reviewCommit($, queued)
+
+    return next(e)
+  })
+
+  // The reviewer is only offered to the model while the tutor is on.
+  on('agent.offer', { agent: 'backseat-driver:deep-reviewer' }, ($, e, next) =>
+    mode === 'off' ? { isOffered: false } : next(e),
+  )
 
   // The one rule that does not rest on the model: Claude cannot edit the user's files.
   on('tool.call', { tool: ['Edit', 'Write', 'NotebookEdit'] }, ($, e, next) => {
@@ -364,11 +590,14 @@ export const register: Register = (on, options) => {
       selected: await read($, selectedAtom),
       watch: await read($, watchAtom),
       isAutomatic: settings.playByPlay.isAutomatic,
+      review: await read($, reviewAtom),
+      reviewSchedule: reviewSchedule(settings.deepReview.isAfterCommit, settings.deepReview.everyMs),
     }
 
     return renderPane($.ui.resolve(e), view, {
       onTab: (tab: Tab) => {
         void update($, tabAtom, () => tab)
+        if (tab === 'review') void setReview($, { isUnseen: false })
       },
       onSelect: (id: number) => {
         void update($, selectedAtom, () => id)
@@ -382,6 +611,9 @@ export const register: Register = (on, options) => {
       },
       onLook: () => {
         if (mode === 'on') void look($, settings)
+      },
+      onReview: () => {
+        void reviewSince($, true)
       },
     })
   })
