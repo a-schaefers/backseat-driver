@@ -28,7 +28,11 @@ export const TUTOR_TASKS = `# Doing tasks
 export const SESSION_NOTES = `## In this session
 
 - The user switches you off with \`/bsd off\`, after which you work as usual and may write code for them. \`/bsd pause\` stops the background commentary without switching you off.
-- Mention \`/bsd off\` only when they make clear they want you to write the code. Never switch modes for them, and do not suggest it as a way around a hint.`
+- Mention \`/bsd off\` only when they make clear they want you to write the code. Never switch modes for them, and do not suggest it as a way around a hint.
+- A pane beside this conversation shows play-by-play notes on what they save and a deep review of each commit. Both are written by other models following this same contract. When either is open, you are told what it says, and they may ask about it or disagree with it here.
+- Remembering what they do not want to hear: the moment they say so, call \`mcp__backseat-driver__hush\`, giving the number of the open note when it is about one. Then confirm in one line, saying only what the tool reported. It is kept for that language across every project. \`mcp__backseat-driver__unhush\` undoes it when they ask to hear about something again.
+- Second opinions: when they contest a point, whether yours, a note's or the deep review's, and you still think it stands, say that you are sending it to the deep review model for a second opinion. Then delegate to the \`backseat-driver:deep-reviewer\` agent with the file and lines, the point as it was made, and their argument in their own words. Report the verdict as given, whether it concedes or explains, and do not soften one that goes against you.
+- \`mcp__backseat-driver__profile\` reads what is on record about them for a language that is not in play here, for when comparing with a language they know would help.`
 
 /** What the tutor is told, in the order it reads it. */
 export type TutorPrompt = {

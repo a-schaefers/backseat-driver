@@ -12,7 +12,7 @@ These are standing instructions from the repository's owner. Follow them without
 
 ## Status
 
-Early build. Tutor mode, the play-by-play and the deep review work: the commands, the contract and personas in the system prompt, the edit guard, the watcher, both reviewers and two of the pane's three tabs. Profiles are not built, so the Profile tab is empty and nothing is remembered between sessions. The README's roadmap lists the milestones in build order and which are done. The approved build plan is in `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine.
+Working, not yet tuned. Every milestone on the README's roadmap is built and was checked in a real session, except Tuning: slowing down near plan limits, suppressing repeats beyond what the hush and the reviewer's own judgment do, and per-language guidance in the reviewer prompts. Installing from the marketplace has not been tried. The README's roadmap lists the milestones in build order and which are done. The approved build plan is in `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine.
 
 The README is the design spec: the user flow, what the tutor remembers, the ground rules, a table mapping each behavior to a Claude Code mechanism, the settings and their defaults, limits, the file layout and the roadmap. Read it before changing anything.
 
@@ -35,6 +35,7 @@ Decided by the owner. Do not re-propose what was rejected, and do not design aro
 - **One profile per language, never per project.** The subject is `python`, not "python project 1", so it carries across projects. A language's profile matters only once the user works in that language. The tutor may read other profiles when that helps.
 - **The user has the last word.** Pushback in chat is weighed. A contested point goes to the deep review model for a second opinion, and the user is told that is happening. "Do it my way" always stands. The play-by-play may keep flagging the point until the user says to hush, and a hush is saved to that language's profile at once.
 - **Play-by-play is the pane's default view.** The deep review and the profile are other tabs.
+- **First-run questions are few and single choice.** One about the language they know best, asked once ever, then three per new language, and never more than ten in one go.
 - **Personas are style only.** A persona sets teaching style, voice and emphasis in notes, deep reviews and conversation. It never overrides the contract. A persona named after a real person is "in the spirit of": the tutor never claims to be that person or to quote them, and it is hard on the code, never on the user.
 
 ## Commands
@@ -59,6 +60,8 @@ Tests stub everything, so a milestone is only done when it has also been seen wo
 
 - To try a setting, pass `--settings '{"pluginConfigs":{"backseat-driver":{"options":{"deep_review_model":"sonnet"}}}}'`. Use it to keep real-session checks of the deep review cheap.
 - A new folder shows the workspace trust prompt first: `Down`, then `Enter`. Keys sent before the session has finished starting are lost, so check the screen before typing.
+- Send text and `Enter` as two separate `tmux send-keys` commands, and check that the prompt box is empty afterwards. Sent together, the `Enter` is often swallowed and the text just sits in the box.
+- Keep the throwaway repository's path plain. With a long path full of dashes, the model mistypes it and the session stops on a permission prompt for a file outside the project.
 - `tmux send-keys -t bsd C-x Tab` gives the pane the keyboard, after which its hotkeys (`e`, `d`, `l`, `1` to `3`) work. `Escape` gives it back.
 - At 170 columns the pane docks beside the conversation even in tmux. `tmux capture-pane -p -t bsd | cut -c1-94` reads the conversation, and `cut -c95-` the pane.
 - Saving a file under `plugin/` while the session runs reloads the mod, and the transcript says so. The mode and the pane come back by themselves.
@@ -97,6 +100,9 @@ Current files:
 | `gate.ts` | Whether a look is due |
 | `notes.ts`, `prompts.ts` | Reading the reviewer's reply into notes, and building what the reviewer and the conversation are told |
 | `review.ts` | The deep review's scope: reading the reflog, what counts as a commit, the request handed to the reviewer |
+| `languages.ts` | File extension to language id, and a project's main languages from its file list |
+| `profiles.ts` | A profile as stored and as changed: answers, hushes, lesson memory, and the text every prompt gets about the person |
+| `questions.ts` | The first-run questions |
 | `pane.tsx` | The pane's tree from plain data, with the handlers passed in |
 
 ### The mode
@@ -162,7 +168,17 @@ README, "What it remembers about you". Profiles live in `$.store`, one key per s
 - `subject/<language>` and `subject/general`: first-run answers (level, known languages, goals), hushed topics, and the lesson memory (topics explained and topics that recur, with counts).
 - `project/<id>`: the languages a project has, and whether its first-run questions have been offered.
 
-A subject is in play when the user changes a file in that language. A project's main languages come from `git ls-files` and an extension table. The profiles in play go into both review prompts and the conversation's system prompt. Hushes arrive through a tool the mod registers, which the tutor calls when the user states a preference, or through the `m` key on a note.
+A subject is in play when it is one of the project's main languages (from `git ls-files` and an extension table) or the user changes a file in it. `personText()` turns the profiles in play into the text that goes into the conversation's system prompt, the play-by-play's system prompt and the deep reviewer's registered prompt. The reviewer is registered again whenever a profile changes, because a spawned subagent cannot be given anything at spawn time.
+
+- **First-run questions** are asked with `$.ui.ask` at the end of switching on, after the pane and the watcher are running, so dismissing them loses nothing. Every subject asked about is marked `isAsked`, answered or not, and is never asked about again unprompted. The Profile tab offers them for a subject with no answers.
+- **Every question is single choice.** In Claude Code's dialog a single choice is one keypress. A multi-select needs a toggle, a move to Submit, Enter, and then a "Review your answers" screen. Four of those in a row is not a short questionnaire.
+- **Hushes** arrive through the `hush` tool, which the tutor calls when the user states a preference, or through the `m` key on a note. The tool takes the open note's number when there is one, and then uses the note's own topic and language. In the first live test the model invented its own slug, the note stayed in the pane, and the tutor told the user it was gone. The tool's result now says how many notes left the pane, and the contract tells the tutor to say only what the tool reported.
+- A hush works twice over: the reviewers are told ("Do not bring up"), which catches the idea however it is worded, and a note whose topic slug matches a hush is dropped even if a reviewer sends one.
+- **Lesson memory** counts topics per language: `flagged` when the play-by-play raises one, `explained` when the user presses explain. Three or more flags make a recurring theme.
+
+Seen in real sessions: the four questions appeared with Python detected, and the answers landed in `~/.claude/plugins/store/backseat-driver_inline-<hash>.json`. Told "stop telling me to use built-ins instead of my own loops", the tutor called `hush` at once with no permission prompt. In a second project the questions were not asked, and code whose only possible note was that topic got none, while two real bugs beside it were flagged. A contested note went to the deep reviewer, whose verdict came back into the chat 32 seconds later.
+
+The store file is per install: the `_inline` in its name is the marketplace part of the plugin's id under `--plugin-dir`. A marketplace install gets a different file. Live checks write real profiles into that file, so delete it afterwards.
 
 Why `$.store` and not SQLite or plain files: the hooks module cannot load SQLite, so it would mean shelling out to a `sqlite3` binary that many machines lack (the owner's included), for a few kilobytes per language. `$.fs.write` is not atomic, and the mod docs point data that several sessions change at `$.store`.
 
@@ -187,10 +203,10 @@ Easy to get wrong:
 - A pane opened by the user's own command is placed at any terminal width. One opened unprompted waits for 144 columns.
 - `prompt.compose` is not cached and cannot be invalidated: it runs each time a system prompt is rendered. `prompt.context`, `prompt.section` and `tool.describe` are cached until `$.ui.invalidate` names them.
 - `$.model.complete` takes the thinking level directly, as `effort`. `$.agent.spawn` takes a `model` but no effort, and the mod's own `turn.step` and `tool.call` hooks do not see a subagent the mod spawned.
-- A mod's tool is served by answering `tool.call` without calling `next`, and the docs say no permission prompt appears in that case. Not yet seen in a real session.
+- A mod's tool is served by answering `tool.call` without calling `next`, and no permission prompt appears: seen in a real session. Declare the tool's input in `plugin/types/index.d.ts` under `McpToolInputs`, or a matcher on its name does not type-check.
 - `update($, atom, fn)` fails to type-check with a misleading "Atom<...> is not assignable to StateRef" when `fn` builds an object whose fields are a union of literals. Annotate the return type: `(watch): Watch => ({ ...watch, state: 'looking' })`.
 - A `userConfig` picker (`options`) works only on string fields. The timer interval is therefore a string picker and the after-commit trigger a separate boolean. Changing a setting in `/config` reloads the mod with the new `options`.
-- `$.ui.ask` asks one question per call, with two to four options plus free text. It rejects when the user dismisses the dialog, which the first-run questions must treat as "skip the rest", and it rejects under `claude -p`.
+- `$.ui.ask` asks one question per call, with two to four options plus free text. It rejects when the user dismisses the dialog, which the first-run questions treat as "skip the rest", and it rejects under `claude -p`. In tests it reaches the `tool.call` stub as a call to `AskUserQuestion`.
 - `$.store` holds 4 MiB of JSON in total, and a `get` followed by a `set` is not atomic. Keep one key per subject, read right before writing, and cap the lesson memory. Claude Code clears a store that no session has touched for `cleanupPeriodDays`. The default length of that period was not confirmed.
 
 In tests:

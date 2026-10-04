@@ -81,12 +81,12 @@ test('a commit is reviewed by the registered reviewer, and the review lands in t
   await $.command.run(typed('bsd'))
 
   // Registered with the default deep review model and thinking level, and read-only tools.
-  expect(session.agents.length).toBe(1)
-  expect(session.agents[0]?.name).toBe('deep-reviewer')
-  expect(session.agents[0]?.model).toBe('opus')
-  expect(session.agents[0]?.effort).toBe('high')
-  expect(session.agents[0]?.tools).toEqual(['Read', 'Grep', 'Glob'])
-  expect(session.agents[0]?.prompt).toBe('DEEP REVIEW INSTRUCTIONS')
+  const reviewer = session.agents[session.agents.length - 1]
+  expect(reviewer?.name).toBe('deep-reviewer')
+  expect(reviewer?.model).toBe('opus')
+  expect(reviewer?.effort).toBe('high')
+  expect(reviewer?.tools).toEqual(['Read', 'Grep', 'Glob'])
+  expect(reviewer?.prompt).toBe('DEEP REVIEW INSTRUCTIONS')
 
   session.write('stats.py', MEAN)
   const hash = session.commit('Add mean')
@@ -132,9 +132,10 @@ test('the chosen model and thinking level are what the reviewer is registered wi
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
 
-  expect(session.agents[0]?.model).toBe('fable')
-  expect(session.agents[0]?.effort).toBe('max')
-  expect(session.agents[0]?.prompt).toBe('DEEP REVIEW INSTRUCTIONS\n\n# Persona: knuth')
+  const reviewer = session.agents[session.agents.length - 1]
+  expect(reviewer?.model).toBe('fable')
+  expect(reviewer?.effort).toBe('max')
+  expect(reviewer?.prompt).toBe('DEEP REVIEW INSTRUCTIONS\n\n# Persona: knuth')
 })
 
 test('a checkout is not a commit, and deep reviews start afresh after it', async ($, on) => {

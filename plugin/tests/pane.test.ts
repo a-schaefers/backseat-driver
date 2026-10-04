@@ -15,6 +15,7 @@ const VIEW: PaneView = {
   isAutomatic: true,
   review: { state: 'none', subject: '', text: '', isUnseen: false },
   reviewSchedule: 'after each commit',
+  profiles: { languages: [], subjects: {} },
 }
 
 const note = (id: number, overrides: Partial<Note> = {}): Note => ({
@@ -62,7 +63,7 @@ test('the pane opens on the play-by-play and switches tabs, on every surface tha
     expect(await ui.find({ type: 'Text', text: 'No deep review yet.' })).toBeDefined()
 
     await ui.press({ key: 'tab-profile' })
-    expect(await ui.find({ type: 'Text', text: 'Profiles are not built' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Nothing on record yet.' })).toBeDefined()
 
     await ui.press({ key: 'tab-play' })
     await ui.unmount()

@@ -6,7 +6,7 @@ Backseat Driver is a plugin for [Claude Code](https://claude.com/claude-code). S
 
 You learn by building whatever you want to build. The tutor sets no exercises and runs no quizzes. It chimes in from the background, and how often, how deeply and in what voice is yours to tune.
 
-> **Status: early build.** Tutor mode, the play-by-play and the deep review work: `/bsd` turns Claude into a tutor that cannot edit your files, notes about what you save appear in the pane, and each commit gets a written review in its own tab, all on the models and thinking levels you choose. Profiles are not built yet, so nothing is remembered between sessions and the first-run questions are not asked. The rest of this README is the plan. The [roadmap](#roadmap) tracks what exists.
+> **Status: working, not yet tuned.** Everything described here is built and has been tried in real sessions, except the items under Tuning in the [roadmap](#roadmap): the play-by-play does not yet slow down near your plan's limits. So far it has only been exercised in scripted test sessions, on Claude Code 2.1.289. Nobody has done real work with it yet, and installing it from the marketplace has not been tried.
 
 ## Using it
 
@@ -21,9 +21,9 @@ Run `claude` in a terminal next to your editor and type `/backseat-driver`, or `
 Backseat Driver works out the project's main languages from its tracked files.
 
 - For a language it already knows you in, it picks up where you left off, even if that was in a different project.
-- For a new one it asks up to ten quick multiple-choice questions: how much of the language you have written, which languages you already know, and where you want to get to. Press Esc to skip them. It then starts from sensible defaults and learns from your code instead.
+- For a new one it asks a few quick questions, one keypress each: which language you know best, how much of this one you have written, what you most want from it, and what to watch most closely. That is four questions the first time, three for each language after that, and never more than ten. Press Esc to skip them. It then starts from sensible defaults and learns from your code instead.
 
-A language you only touch later, such as the one shell script in a Python project, never interrupts you with questions. The tutor uses defaults for it and offers the questions in the pane for when you have a minute.
+A language you only touch later, such as the one shell script in a Python project, never interrupts you with questions. The tutor uses defaults for it and offers the questions in the pane's Profile tab for when you have a minute. The pane is already open and watching while the questions are on screen, so skipping them costs nothing.
 
 ### While you work
 
@@ -45,8 +45,8 @@ A language you only touch later, such as the one shell script in a Python projec
 │   is still alive when you reach the    │     This match only changes the Some case.    │
 │   .await on line 47. While this task   │     Option has a method for exactly that.     │
 │   is parked there, what can every      │                                               │
-│   other task that wants the cache do?  │ e: explain   d: dismiss   m: mute             │
-│                                        │ l: look now   r: deep review                  │
+│   other task that wants the cache do?  │ e: explain  d: dismiss  m: mute  l: look now  │
+│                                        │                                               │
 │ >                                      │                                               │
 └────────────────────────────────────────┴───────────────────────────────────────────────┘
 ```
@@ -58,7 +58,7 @@ In a narrow terminal the pane sits above the prompt instead of beside the conver
 The play-by-play and the deep review are not announcements to be read in silence. The prompt is a normal conversation, and the tutor has seen your recent changes, its own notes and the latest review.
 
 - **Ask anything**, about a note, a review or the language in general.
-- **Disagree.** Say why you think a note is wrong and the tutor weighs your argument. If you are contesting the point, it tells you it is sending it to the deep review model for a second opinion, and that model either concedes or explains.
+- **Disagree.** Say why you think a note is wrong and the tutor weighs your argument. If you contest the point and the tutor still thinks it stands, it tells you it is sending it to the deep review model for a second opinion. That model reads the code itself, and its verdict comes back into the conversation: it concedes, explains, or says which part each side has right.
 - **Do it your way.** You can always overrule the tutor, and it will not argue the point again. The play-by-play may still flag it.
 - **Tell it to hush.** Say "stop warning me about missing type hints", or press `m` on a note. It stops at once and remembers, in this project and in every other project in that language.
 
@@ -74,14 +74,14 @@ Backseat Driver keeps one profile per language, not per project. Your Python pro
 
 A profile holds:
 
-- **Where you are.** Your answers to the first-run questions, such as how much of the language you have written and which languages you know well. "Rust, coming from Python" means Rust idioms get explained by comparison with the Python you already know.
+- **Where you are.** Your answers to the first-run questions, such as how much of the language you have written and which language you know best. "Rust, coming from Python" means Rust idioms get explained by comparison with the Python you already know.
 - **Where you want to get to.** Your goals for that language.
 - **What you don't want to hear about.** Everything you have told it to hush about.
 - **What you have covered.** The ideas it has explained to you and the mistakes that keep coming back, so it stops repeating itself, builds on earlier lessons and can show you your recurring themes.
 
 A profile comes into play when you work on a file in that language. In a project that mixes languages several can be active, and your Bash profile stays out of the way until you touch a shell script. The tutor can also look at your other profiles when that helps, for example to explain a Rust idea in terms of Python.
 
-Profiles are saved automatically, on your machine and outside any project, in the store Claude Code gives each plugin. They are never written into your repository. The pane's Profile tab shows what the tutor has on record for the languages in play, and you can remove any line of it.
+Profiles are saved automatically, on your machine and outside any project, in the store Claude Code gives each plugin: one small JSON file under `~/.claude/plugins/store/`, readable in any editor. They are never written into your repository. The pane's Profile tab shows what the tutor has on record for the languages in play, and has a key beside each thing you hushed to bring it back.
 
 ## Ground rules
 
@@ -172,13 +172,13 @@ The watcher asks git what changed every couple of seconds, and stretches that in
 | The contract outranks the project's `CLAUDE.md` | A `prompt.context` hook keeps the project's instruction files loaded but reframes them as background that yields to the contract. |
 | Claude never edits your files | A `tool.call` hook refuses `Edit`, `Write` and `NotebookEdit` while the mode is on. The only paths it lets through are Claude Code's own: its folder under your home directory, where it keeps its notes, and its scratch folder. |
 | Noticing saves and commits | A `$.clock.every` timer runs `git status` through `$.process.run` for saves. For commits it checks the reflog file's size and modification time, and runs `git reflog` only when that changes. |
-| Finding the project's languages | `git ls-files` and a table of file extensions. |
+| Finding the project's languages | `git ls-files` and a table of file extensions. A language counts as a main one when it holds at least 15% of the source files, and the biggest always counts. |
 | First-run questions | `$.ui.ask`, the same question dialog Claude uses. |
 | Profiles | `$.store`, the key-value store Claude Code gives each plugin: one small JSON document per language. |
 | Play-by-play review | `$.model.complete` with the chosen model and thinking level: one request, no tools, no conversation history. |
 | Deep review | A read-only subagent (`Read`, `Grep`, `Glob`) that the mod registers with `$.agent.register` on the chosen model and thinking level, and starts with `$.agent.spawn`. A `turn.complete` hook takes its answer to the pane, not into the conversation. |
 | Second opinion on a contested point | The tutor hands the point to the same read-only subagent and reports its verdict in the conversation. |
-| "Stop warning me about that" | A tool the mod registers with `$.tool.register`. The tutor calls it when you state a preference, and the mod saves it to the profile and drops the matching notes. |
+| "Stop warning me about that" | A `hush` tool the mod registers with `$.tool.register`. The tutor calls it when you state a preference, and the mod saves it to the profile and drops the matching notes. No permission prompt appears, because the mod answers its own tool. An `unhush` tool undoes it, and a `profile` tool lets the tutor read your profile for a language that is not in play. |
 | The pane | `$.ui.open` plus a `ui.render` hook, with Play-by-play, Deep review and Profile tabs. Their contents live in `$.state`, so the pane redraws when they change. Buttons on a note send a question into the conversation with `$.prompt.submit`. |
 | The conversation knows the notes | A `prompt.submit` hook attaches the open notes and the latest review as context. |
 | Settings | `userConfig` in `plugin.json`. Each setting is a row in `/config`, listed under [Models and settings](#models-and-settings). |
@@ -248,10 +248,11 @@ A persona changes how the tutor talks and what it dwells on. It never changes th
 - **A mod is code that runs with your permissions.** This one is meant to stay small and auditable: it runs `git`, reads files inside the repository and its own plugin folder, calls models, keeps your profiles in its own store and draws a pane. It makes no network requests of its own, installs no git hooks and never writes to your working tree. `claude plugin validate` lists every event a mod hooks and every call it makes, so you can check that before installing.
 - **The edit guard covers the editing tools.** A shell command can still write a file, so that part rests on the contract and on Claude Code's normal permission prompts.
 - **Profiles last as long as you keep using Claude Code.** Claude Code clears a plugin's store once no session has touched it for its retention period (the `cleanupPeriodDays` setting). Backseat Driver touches its store whenever Claude Code starts, so a long break from the tutor alone does not lose your profiles.
+- **Profiles belong to one install.** Claude Code keeps a separate store for each way a plugin is loaded, so a working copy loaded with `--plugin-dir` and a copy installed from the marketplace do not share profiles.
 
 ## Install
 
-Not through a marketplace yet. To try what exists, load the working copy as described under [Repository layout](#repository-layout). This repository is its own plugin marketplace, so once the roadmap is further along, installing it will be:
+The dependable way today is to load the working copy, as described under [Repository layout](#repository-layout). This repository is also its own plugin marketplace, and its manifests validate, but installing from it has not been tried yet. It should be:
 
 ```bash
 claude plugin marketplace add a-schaefers/backseat-driver
@@ -305,8 +306,8 @@ To use the working copy in a project of your own, start Claude Code there with `
 - [x] **Tutor mode.** The contract as a skill, the `/backseat-driver` and `/bsd` switch, the system-prompt override, the edit guard, the personas and the pane with its three tabs. Useful by itself as a conversational tutor.
 - [x] **Play-by-play.** Watcher, gate, reviewer on the chosen model and thinking level, and the Play-by-play tab with explain, dismiss and look now.
 - [x] **Deep review.** Commit detection, the timer, the read-only reviewer with its own model and thinking level, and the Deep review tab with review now.
-- [ ] **Profiles.** Language detection, the first-run questions, one profile per language shared across projects, hushing in chat or by key, lesson memory and the Profile tab.
-- [ ] **Follow-through.** Explain and dismiss on each note, notes and reviews shared with the conversation, second opinions on contested points.
+- [x] **Profiles.** Language detection, the first-run questions, one profile per language shared across projects, hushing in chat or by key, lesson memory and the Profile tab.
+- [x] **Follow-through.** Explain and dismiss on each note, notes and reviews shared with the conversation, second opinions on contested points.
 - [ ] **Tuning.** Fewer repeated notes, usage back-off and per-language guidance.
 
 ## Related

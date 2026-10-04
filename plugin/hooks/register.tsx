@@ -10,16 +10,32 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteResult, Register, Timer } from 'claude-code'
 
-import type { Mode, Note, Review, Tab, Watch } from '../types'
+import type { Hush, Mode, Note, Profile, Profiles, Review, Tab, Watch } from '../types'
 import { reframeInstructions, SESSION_NOTES, stripFrontmatter, tutorSections } from './contract'
 import { backoffMs, shouldLook } from './gate'
 import { parseStatus } from './git'
 import { DENIAL, isUsersFile } from './guard'
+import { languageOf, mainLanguages } from './languages'
 import { parseRequest, transition } from './mode'
 import { isNoiseFile } from './noise'
 import { applyReply, parseReply } from './notes'
 import { renderPane, reviewSchedule } from './pane'
+import {
+  emptyProfile,
+  GENERAL,
+  isHushed,
+  parseProfile,
+  personText,
+  subjectKey,
+  withAnswers,
+  withExplained,
+  withFlagged,
+  withHush,
+  withoutHush,
+} from './profiles'
 import { explainRequest, paneContext, playByPlayPrompt, reviewerSystem } from './prompts'
+import { firstRunQuestions, groupAnswers } from './questions'
+import type { Question } from './questions'
 import {
   commitTitle,
   fitReview,
@@ -49,6 +65,7 @@ const MAX_SKIPPED_TICKS = 15
 
 const IDLE: Watch = { state: 'idle', lastLookAt: null, detail: '' }
 const NO_REVIEW: Review = { state: 'none', subject: '', text: '', isUnseen: false }
+const NO_PROFILES: Profiles = { languages: [], subjects: {} }
 
 const modeAtom = atom({ plugin: 'backseat-driver', key: 'mode' } as const, 'off')
 const tabAtom = atom({ plugin: 'backseat-driver', key: 'tab' } as const, 'play')
@@ -56,6 +73,7 @@ const notesAtom = atom({ plugin: 'backseat-driver', key: 'notes' } as const, [])
 const selectedAtom = atom({ plugin: 'backseat-driver', key: 'selected' } as const, null)
 const watchAtom = atom({ plugin: 'backseat-driver', key: 'watch' } as const, IDLE)
 const reviewAtom = atom({ plugin: 'backseat-driver', key: 'review' } as const, NO_REVIEW)
+const profilesAtom = atom({ plugin: 'backseat-driver', key: 'profiles' } as const, NO_PROFILES)
 
 /**
  * The mode is kept twice, because each copy is lost by a different event.
@@ -82,6 +100,14 @@ let isLooking = false
 let isPolling = false
 let ticksToSkip = 0
 let failures = 0
+
+/**
+ * The profiles in play, as last read from the store. Kept here as well as in
+ * `$.state` so that every prompt can use them without a round trip.
+ */
+let profiles: Profiles = NO_PROFILES
+/** The model's tools are registered the first time the tutor is switched on, and only then. */
+let areToolsRegistered = false
 
 /** The deep review's working state. */
 let repoRoot = ''
@@ -155,6 +181,153 @@ async function git(
   }
 }
 
+async function loadSubject($: EngineInterface, subject: string): Promise<Profile> {
+  try {
+    return parseProfile(await $.store.get(subjectKey(subject)))
+  } catch {
+    return emptyProfile()
+  }
+}
+
+/**
+ * Registers the deep reviewer, with the user's model and thinking level and
+ * what is on record about them. A subagent this mod spawns cannot be given
+ * any of that at spawn time, so it is registered again whenever a profile changes.
+ */
+async function registerReviewer($: EngineInterface, settings: Settings): Promise<void> {
+  if (repoRoot === '') return
+  await $.agent.register({
+    name: 'deep-reviewer',
+    description: REVIEWER_DESCRIPTION,
+    prompt: reviewerSystem(reviewInstructions, [personText(profiles)], persona),
+    tools: ['Read', 'Grep', 'Glob'],
+    model: settings.deepReview.model,
+    effort: settings.deepReview.thinking,
+  })
+}
+
+/** Changes one subject's profile in the store and everywhere it is shown or used. */
+async function saveSubject(
+  $: EngineInterface,
+  settings: Settings,
+  subject: string,
+  change: (profile: Profile) => Profile,
+): Promise<void> {
+  // Read right before writing: another session may have changed this subject since it was loaded.
+  const next = change(await loadSubject($, subject))
+  await $.store.set(subjectKey(subject), next)
+  profiles = { ...profiles, subjects: { ...profiles.subjects, [subject]: next } }
+  await update($, profilesAtom, () => profiles)
+  await registerReviewer($, settings)
+}
+
+/** Loads the profiles of languages that have just come into play. */
+async function bringIntoPlay($: EngineInterface, languages: readonly string[]): Promise<void> {
+  const added = [...new Set(languages)].filter(language => !profiles.languages.includes(language))
+  if (added.length === 0) return
+  const subjects = { ...profiles.subjects }
+  for (const language of added) subjects[language] = await loadSubject($, language)
+  profiles = { languages: [...profiles.languages, ...added], subjects }
+  await update($, profilesAtom, () => profiles)
+}
+
+/**
+ * Asks the first-run questions in Claude Code's own question dialog.
+ * Dismissing it skips the rest. Every subject asked about is marked as asked,
+ * answered or not, so the questions never come back unprompted.
+ */
+async function ask($: EngineInterface, settings: Settings, questions: readonly Question[]): Promise<void> {
+  if (questions.length === 0) return
+  const answers: string[] = []
+  for (const question of questions) {
+    try {
+      answers.push(await $.ui.ask(question.question, { options: question.options, header: question.header }))
+    } catch {
+      break
+    }
+  }
+  for (const [subject, given] of Object.entries(groupAnswers(questions, answers))) {
+    await saveSubject($, settings, subject, profile => withAnswers(profile, given))
+  }
+}
+
+/** Finds the project's main languages and loads their profiles. */
+async function setUpProfiles($: EngineInterface): Promise<string[]> {
+  const listed = repoRoot === '' ? '' : (await git($, repoRoot, ['ls-files', '-z'])).stdout
+  const main = mainLanguages(listed.split('\0'))
+  profiles = { languages: [], subjects: { [GENERAL]: await loadSubject($, GENERAL) } }
+  await bringIntoPlay($, main)
+  await update($, profilesAtom, () => profiles)
+
+  return main
+}
+
+/** The first-run questions for whichever of these languages, and the background, have never been asked. */
+function unasked(languages: readonly string[]): Question[] {
+  return firstRunQuestions(
+    languages.filter(language => profiles.subjects[language]?.isAsked !== true),
+    profiles.subjects[GENERAL]?.isAsked === true,
+  )
+}
+
+/**
+ * Stops the tutor bringing something up, now and in every later session.
+ * Resolves to how many open notes that removed from the pane.
+ */
+async function hush($: EngineInterface, settings: Settings, subject: string, entry: Hush): Promise<number> {
+  await saveSubject($, settings, subject, profile => withHush(profile, entry))
+  const open = await read($, notesAtom)
+  const kept = open.filter(
+    note => note.topic !== entry.topic || (subject !== GENERAL && languageOf(note.file) !== subject),
+  )
+  await update($, notesAtom, () => kept)
+
+  return open.length - kept.length
+}
+
+/** The tools the tutor uses to remember what the user tells it. Answered by the `tool.call` hooks below. */
+async function registerTools($: EngineInterface): Promise<void> {
+  if (areToolsRegistered) return
+  areToolsRegistered = true
+  const language = {
+    type: 'string',
+    description: 'The language id it applies to, lowercase, such as python, rust or typescript. Use "general" when it is not about one language.',
+  }
+  const topic = {
+    type: 'string',
+    description: 'A short slug for the idea, lowercase with dashes. For an open note, use the topic shown in parentheses on that note.',
+  }
+  await $.tool.register({
+    name: 'hush',
+    description:
+      'Backseat Driver: record that the user does not want to hear about something again. Call it as soon as they say so ("stop warning me about X", "I don\'t care about Y"). It is remembered across sessions and projects, and matching notes leave the pane at once.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        note: {
+          type: 'number',
+          description: 'The number of the open note they mean, when they mean one. Its topic and language are then taken from the note.',
+        },
+        topic,
+        language,
+        what: { type: 'string', description: "What not to bring up, in a few of the user's own words." },
+      },
+      required: ['topic', 'language', 'what'],
+    },
+  })
+  await $.tool.register({
+    name: 'unhush',
+    description: 'Backseat Driver: undo a hush, when the user wants to hear about a topic again.',
+    inputSchema: { type: 'object', properties: { topic, language }, required: ['topic', 'language'] },
+  })
+  await $.tool.register({
+    name: 'profile',
+    description:
+      'Backseat Driver: read what is on record about the user for a language that is not in play in this project, for example to explain an idea by comparison with a language they know.',
+    inputSchema: { type: 'object', properties: { language }, required: ['language'] },
+  })
+}
+
 function describeFailure(result: Exclude<ModelCompleteResult, { isAnswered: true }>): string {
   if (result.reason === 'api-error') return String(result.error).replaceAll('_', ' ')
 
@@ -175,11 +348,15 @@ async function look($: EngineInterface, settings: Settings): Promise<void> {
     }
 
     await setWatch($, { state: 'looking' })
+    await bringIntoPlay(
+      $,
+      changes.map(change => languageOf(change.path)).filter(language => language !== null),
+    )
     const { prompt, shown } = playByPlayPrompt(changes, await read($, notesAtom))
     const result = await $.model.complete({
       model: settings.playByPlay.model,
       effort: settings.playByPlay.thinking,
-      system: reviewerSystem(lookInstructions, [], persona),
+      system: reviewerSystem(lookInstructions, [personText(profiles)], persona),
       prompt,
       maxTokens: 2000,
       timeoutMs: 120_000,
@@ -198,12 +375,27 @@ async function look($: EngineInterface, settings: Settings): Promise<void> {
     failures = 0
     // What was shown has been looked at, whether or not the reply can be used.
     active.settle(shown)
-    const reply = parseReply(result.text)
-    if (reply !== null) {
+    const parsed = parseReply(result.text)
+    if (parsed !== null) {
+      // The reviewer is told what was hushed. This makes sure of it.
+      const reply = {
+        ...parsed,
+        notes: parsed.notes.filter(note => !isHushed(profiles, languageOf(note.file), note.topic)),
+      }
       const firstId = nextNoteId
       nextNoteId += reply.notes.length
       const paths = shown.map(change => change.path)
       await update($, notesAtom, open => applyReply(open, reply, paths, firstId).notes)
+
+      // Lesson memory: which ideas came up, by language.
+      const raised = new Map<string, string[]>()
+      for (const note of reply.notes) {
+        const subject = languageOf(note.file) ?? GENERAL
+        raised.set(subject, [...(raised.get(subject) ?? []), note.topic])
+      }
+      for (const [subject, topics] of raised) {
+        await saveSubject($, settings, subject, profile => withFlagged(profile, topics))
+      }
     }
     await setWatch($, { state: 'idle', lastLookAt: now, detail: '' })
   } catch (error) {
@@ -418,17 +610,6 @@ async function startWatching($: EngineInterface, settings: Settings): Promise<vo
   // Deep reviews cover what happens from now on, not the history so far.
   reviewedHead = lastHead
   reviewedPrint = ''
-  // Registered here, with the user's model and thinking level, because a
-  // subagent this mod spawns cannot be given either at spawn time.
-  await $.agent.register({
-    name: 'deep-reviewer',
-    description: REVIEWER_DESCRIPTION,
-    prompt: reviewerSystem(reviewInstructions, [], persona),
-    tools: ['Read', 'Grep', 'Glob'],
-    model: settings.deepReview.model,
-    effort: settings.deepReview.thinking,
-  })
-
   timer = $.clock.every(POLL_MS, () => {
     void tick($, settings)
   })
@@ -454,11 +635,18 @@ async function switchTo($: EngineInterface, next: Mode, settings: Settings): Pro
   if (isEngaged) {
     await openPane($)
     await startWatching($, settings)
+    const main = await setUpProfiles($)
+    await registerReviewer($, settings)
+    await registerTools($)
+    // Last, so that everything already works if the questions are dismissed.
+    await ask($, settings, unasked(main))
   } else {
     stopWatching()
     await update($, notesAtom, () => [])
     await update($, selectedAtom, () => null)
     await update($, reviewAtom, () => NO_REVIEW)
+    profiles = NO_PROFILES
+    await update($, profilesAtom, () => NO_PROFILES)
     await $.ui.close({ id: 'backseat-driver' })
   }
 }
@@ -467,6 +655,15 @@ export const register: Register = (on, options) => {
   const settings = readSettings(options)
 
   on('session.start', async ($, e, next) => {
+    // The one thing the plugin does while switched off: Claude Code clears a
+    // store that no session has touched for a while, and this read keeps the
+    // profiles from expiring.
+    try {
+      await $.store.get(subjectKey(GENERAL))
+    } catch {
+      // No store, no profiles. The tutor works without them.
+    }
+
     // After a reload, `$.state` still holds the mode and the notes.
     mode = await read($, modeAtom)
     if (mode !== 'off') {
@@ -479,6 +676,9 @@ export const register: Register = (on, options) => {
       await loadTutor($, settings.persona)
       await openPane($)
       await startWatching($, settings)
+      await setUpProfiles($)
+      await registerReviewer($, settings)
+      await registerTools($)
     }
 
     for (const name of COMMANDS) {
@@ -521,7 +721,9 @@ export const register: Register = (on, options) => {
     const composed = await next(e)
     if (mode === 'off' || contract === '') return composed
 
-    return { sections: tutorSections(composed.sections, { contract, extras: [SESSION_NOTES], persona }) }
+    return {
+      sections: tutorSections(composed.sections, { contract, extras: [SESSION_NOTES, personText(profiles)], persona }),
+    }
   })
 
   on('prompt.context', async ($, e, next) => {
@@ -573,6 +775,44 @@ export const register: Register = (on, options) => {
     mode === 'off' ? { isOffered: false } : next(e),
   )
 
+  // The tutor's own tools. Answering here, without `next`, runs no other tool and raises no permission prompt.
+  on('tool.call', { tool: 'mcp__backseat-driver__hush' }, async ($, e) => {
+    if (mode === 'off') return { result: 'Backseat Driver is off, so nothing was recorded.' }
+    // The model fills these in, so none of them is taken on trust. When it
+    // names an open note, the note's own topic is used: that is the slug the
+    // reviewer will use again, and the model's guess at it rarely matches.
+    const noted = (await read($, notesAtom)).find(note => note.id === Number(e.note))
+    const topic = noted?.topic ?? String(e.topic ?? '').trim()
+    const subject =
+      noted === undefined
+        ? String(e.language ?? GENERAL).trim().toLowerCase() || GENERAL
+        : (languageOf(noted.file) ?? GENERAL)
+    if (topic === '') return { result: 'Nothing was recorded: give the topic as a short slug.' }
+    const removed = await hush($, settings, subject, { topic, text: String(e.what ?? topic).trim() || topic })
+    const pane = removed === 0 ? 'No open note matched, so the pane is unchanged.' : `Removed from the pane: ${removed}.`
+
+    return {
+      result: `Recorded. "${topic}" will not be brought up again for ${subject}, in this project or any other. ${pane}`,
+    }
+  })
+
+  on('tool.call', { tool: 'mcp__backseat-driver__unhush' }, async ($, e) => {
+    if (mode === 'off') return { result: 'Backseat Driver is off, so nothing was changed.' }
+    const topic = String(e.topic ?? '').trim()
+    const subject = String(e.language ?? GENERAL).trim().toLowerCase() || GENERAL
+    await saveSubject($, settings, subject, profile => withoutHush(profile, topic))
+
+    return { result: `Done. "${topic}" may be brought up again for ${subject}.` }
+  })
+
+  on('tool.call', { tool: 'mcp__backseat-driver__profile' }, async ($, e) => {
+    if (mode === 'off') return { result: 'Backseat Driver is off.' }
+    const subject = String(e.language ?? GENERAL).trim().toLowerCase() || GENERAL
+    const text = personText({ languages: [subject], subjects: { [subject]: await loadSubject($, subject) } })
+
+    return { result: text === '' ? `Nothing is on record for ${subject}.` : text }
+  })
+
   // The one rule that does not rest on the model: Claude cannot edit the user's files.
   on('tool.call', { tool: ['Edit', 'Write', 'NotebookEdit'] }, ($, e, next) => {
     if (mode === 'off') return next(e)
@@ -592,6 +832,7 @@ export const register: Register = (on, options) => {
       isAutomatic: settings.playByPlay.isAutomatic,
       review: await read($, reviewAtom),
       reviewSchedule: reviewSchedule(settings.deepReview.isAfterCommit, settings.deepReview.everyMs),
+      profiles: await read($, profilesAtom),
     }
 
     return renderPane($.ui.resolve(e), view, {
@@ -605,6 +846,17 @@ export const register: Register = (on, options) => {
       onExplain: (note: Note) => {
         // Not awaited: it resolves when the turn starts, which may be after the one now running.
         void $.prompt.submit({ text: explainRequest(note), asUser: true })
+        void saveSubject($, settings, languageOf(note.file) ?? GENERAL, profile => withExplained(profile, note.topic))
+      },
+      onMute: (note: Note) => {
+        const entry = { topic: note.topic, text: note.topic.replaceAll('-', ' ') }
+        void hush($, settings, languageOf(note.file) ?? GENERAL, entry)
+      },
+      onUnhush: (subject: string, topic: string) => {
+        void saveSubject($, settings, subject, profile => withoutHush(profile, topic))
+      },
+      onAsk: (subject: string) => {
+        void ask($, settings, firstRunQuestions(subject === GENERAL ? [] : [subject], subject !== GENERAL))
       },
       onDismiss: (note: Note) => {
         void update($, notesAtom, open => open.filter(other => other.id !== note.id))

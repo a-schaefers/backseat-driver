@@ -1,7 +1,9 @@
 import type { Elements } from 'claude-code'
 
-import type { Mode, Note, Review, Tab, Watch } from '../types'
+import type { Mode, Note, Profile, Profiles, Review, Tab, Watch } from '../types'
+import { languageName } from './languages'
 import { sortNotes } from './notes'
+import { ANSWER_LABELS, explained, GENERAL, recurring } from './profiles'
 
 /** The elements the pane is built from. Every surface that draws panes has them. */
 export type Kit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdown'>
@@ -20,6 +22,7 @@ export type PaneView = {
   review: Review
   /** When a deep review runs without being asked, in a few words: "after each commit". */
   reviewSchedule: string
+  profiles: Profiles
 }
 
 /** What the pane's controls do. The closures come from register.tsx. */
@@ -28,8 +31,13 @@ export type PaneActions = {
   onSelect: (id: number) => void
   onExplain: (note: Note) => void
   onDismiss: (note: Note) => void
+  /** Stop bringing up this kind of note, for good. */
+  onMute: (note: Note) => void
   onLook: () => void
   onReview: () => void
+  onUnhush: (subject: string, topic: string) => void
+  /** Ask the first-run questions for a subject now. */
+  onAsk: (subject: string) => void
 }
 
 const TABS: readonly { tab: Tab; label: string; hotkey: string }[] = [
@@ -131,8 +139,74 @@ function playByPlay({ Box, Text, Button }: Kit, view: PaneView, actions: PaneAct
       <Box flexDirection="row" columnGap={3}>
         <Button key="explain" label="explain" hotkey="e" plain onPress={() => actions.onExplain(current)} />
         <Button key="dismiss" label="dismiss" hotkey="d" plain onPress={() => actions.onDismiss(current)} />
+        <Button key="mute" label="mute" hotkey="m" plain onPress={() => actions.onMute(current)} />
         <Button key="look" label="look now" hotkey="l" plain onPress={() => actions.onLook()} />
       </Box>
+    </Box>
+  )
+}
+
+/** Whether anything at all is on record for a subject. */
+function hasRecord(profile: Profile): boolean {
+  return (
+    Object.keys(profile.answers).length > 0 ||
+    profile.hushed.length > 0 ||
+    explained(profile).length > 0 ||
+    recurring(profile).length > 0
+  )
+}
+
+function profileTab({ Box, Text, Button }: Kit, view: PaneView, actions: PaneActions) {
+  const subjects = [GENERAL, ...view.profiles.languages].flatMap(subject => {
+    const profile = view.profiles.subjects[subject]
+
+    return profile === undefined ? [] : [{ subject, profile }]
+  })
+
+  return (
+    <Box flexDirection="column">
+      {subjects.every(({ profile }) => !hasRecord(profile)) && (
+        <Text dimColor>Nothing on record yet. It fills in as you work, and it is the same in every project.</Text>
+      )}
+      {subjects.map(({ subject, profile }) => {
+        const themes = recurring(profile)
+        const covered = explained(profile)
+
+        return (
+          <Box flexDirection="column">
+            <Text bold>{languageName(subject)}</Text>
+            {Object.entries(profile.answers).map(([id, answer]) => (
+              <Text>
+                {ANSWER_LABELS[id] ?? id}: {answer}
+              </Text>
+            ))}
+            {profile.hushed.map(hush => (
+              <Box flexDirection="row" columnGap={1}>
+                <Button
+                  key={`unhush-${subject}-${hush.topic}`}
+                  label="x"
+                  plain
+                  onPress={() => actions.onUnhush(subject, hush.topic)}
+                />
+                <Text>Not bringing up: {hush.text}</Text>
+              </Box>
+            ))}
+            {covered.length > 0 && <Text>Explained so far: {covered.join(', ')}</Text>}
+            {themes.length > 0 && (
+              <Text>Keeps coming back: {themes.map(theme => `${theme.topic} (${theme.times})`).join(', ')}</Text>
+            )}
+            {Object.keys(profile.answers).length === 0 && (
+              <Button
+                key={`ask-${subject}`}
+                label="answer a few questions"
+                plain
+                onPress={() => actions.onAsk(subject)}
+              />
+            )}
+            <Text> </Text>
+          </Box>
+        )
+      })}
     </Box>
   )
 }
@@ -158,7 +232,7 @@ export function renderPane(kit: Kit, view: PaneView, actions: PaneActions) {
       <Text> </Text>
       {view.tab === 'play' && playByPlay(kit, view, actions)}
       {view.tab === 'review' && deepReview(kit, view, actions)}
-      {view.tab === 'profile' && <Text>Profiles are not built yet.</Text>}
+      {view.tab === 'profile' && profileTab(kit, view, actions)}
     </Box>
   )
 }

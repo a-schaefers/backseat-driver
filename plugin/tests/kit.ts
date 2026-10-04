@@ -2,7 +2,7 @@
  * Shared inputs and stubs for the tests. In a test nothing is real: each
  * stub here answers in Claude Code's place.
  */
-import type { AgentSpec, ModelCompleteRequest, On } from 'claude-code'
+import type { AgentSpec, ModelCompleteRequest, On, ToolSpec } from 'claude-code'
 import { mock } from 'claude-code/testing'
 
 /** A `/name args` typed at the prompt of a wide fullscreen terminal. */
@@ -81,6 +81,8 @@ export type StubOptions = {
   head?: Record<string, string>
   /** False for a folder that is not a git repository. */
   isRepository?: boolean
+  /** What the plugin's store holds before the session, by key. */
+  store?: Record<string, unknown>
 }
 
 /**
@@ -121,6 +123,15 @@ export function stubSession(on: On, options: StubOptions = {}) {
     /** Ids of subagents a test has reported finished, through `finish()`. */
     finishedAgents: [] as string[],
     toasts: [] as string[],
+    /** The plugin's store, which outlives the session. */
+    store: new Map<string, unknown>(Object.entries(options.store ?? {})),
+    /** Every key the plugin read from its store, in order. */
+    storeReads: [] as string[],
+    /** Tools the plugin registered for the model. */
+    tools: [] as Required<ToolSpec>[],
+    /** The questions the plugin put to the user, and the answers still queued. With none queued, the dialog is dismissed. */
+    asked: [] as string[],
+    answers: [] as string[],
     /** What the plugin wrote to the debug log: where a swallowed error shows up. */
     logs: [] as string[],
     /** Commits the working tree, as `git commit -am` would, and returns the new commit's hash. */
@@ -217,6 +228,7 @@ export function stubSession(on: On, options: StubOptions = {}) {
       return ok(`${tip().hash}\n`)
     }
     if (args[0] === 'reflog') return ok(`${reflog[reflog.length - 1] ?? ''}\n`)
+    if (args[0] === 'ls-files') return ok(Object.keys(head).map(path => `${path}\0`).join(''))
     if (args[0] === 'log') {
       if (args[1] === '-1') return ok(`${tip().hash}\0commit: ${tip().message}\n`)
       const from = String(args[args.length - 1]).replace(/\.\.HEAD$/, '')
@@ -309,7 +321,35 @@ export function stubSession(on: On, options: StubOptions = {}) {
       { name: 'currentDate', text: "Today's date is 2026-10-04." },
     ],
   }))
-  on('tool.call', () => ({ result: 'edited' }))
+  on('store.get', ($, e) => {
+    session.storeReads.push(e.key)
+
+    return { value: session.store.get(e.key) }
+  })
+  on('store.set', ($, e) => {
+    // As the real store does: what comes back is what JSON keeps.
+    session.store.set(e.key, JSON.parse(JSON.stringify(e.value)))
+
+    return { value: undefined }
+  })
+  on('tool.register', ($, e) => {
+    session.tools.push(e)
+
+    return { value: { tool: `mcp__backseat-driver__${e.name}` } }
+  })
+
+  on('tool.call', ($, e) => {
+    // `$.ui.ask` reaches a test as a call to the question tool.
+    if (e.tool === 'AskUserQuestion') {
+      const question = e.questions[0]?.question ?? ''
+      session.asked.push(question)
+      const answer = session.answers.shift()
+
+      return answer === undefined ? { deny: 'dismissed' } : { result: { answers: { [question]: answer } } }
+    }
+
+    return { result: 'edited' }
+  })
 
   return session
 }
