@@ -77,7 +77,7 @@ export function finished(agentId: string, answer: string) {
 }
 
 export type StubOptions = {
-  /** Extra files of the plugin itself, by path suffix: persona style sheets. */
+  /** Extra files of the plugin itself, by path suffix: `/personas/voice/knuth.md`. */
   pluginFiles?: Record<string, string>
   /** What is committed in the fake repository, by path from its root. */
   head?: Record<string, string>

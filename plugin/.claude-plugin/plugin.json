@@ -11,12 +11,19 @@
   "keywords": ["tutor", "learning", "code-review", "mod"],
   "types": "./types/index.d.ts",
   "userConfig": {
-    "persona": {
+    "voice": {
       "type": "string",
-      "title": "Tutor persona",
-      "description": "The tutor's teaching style, voice and emphasis. It never changes the ground rules.",
-      "options": ["none", "torvalds", "knuth", "primeagen", "eli5-tldr-kiss-terse"],
-      "default": "none"
+      "title": "Voice persona",
+      "description": "How the tutor talks: its tone, wording and teaching style. It never changes what the tutor recommends, or the ground rules.",
+      "options": ["default", "torvalds", "knuth", "primeagen", "eli5-tldr-kiss-terse"],
+      "default": "default"
+    },
+    "engineering": {
+      "type": "string",
+      "title": "Engineering persona",
+      "description": "Whose engineering judgment the tutor reviews with: what it values, what it flags and which approach it recommends. \"default\" is Claude's own judgment, not tilted toward anyone's. It never changes the ground rules.",
+      "options": ["default", "torvalds", "knuth", "primeagen"],
+      "default": "default"
     },
     "play_by_play": {
       "type": "string",

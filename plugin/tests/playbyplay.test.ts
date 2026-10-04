@@ -204,8 +204,8 @@ test('"on request" looks only when asked from the pane', { options: { play_by_pl
   await ui.unmount()
 })
 
-test('the chosen model and thinking level are what the look uses', { options: { play_by_play_model: 'haiku', play_by_play_thinking: 'low', quiet_time: '5 seconds', persona: 'knuth' } }, async ($, on) => {
-  const session = stubSession(on, { pluginFiles: { '/personas/knuth.md': '# Persona: knuth\n' } })
+test('the chosen model and thinking level are what the look uses', { options: { play_by_play_model: 'haiku', play_by_play_thinking: 'low', quiet_time: '5 seconds', engineering: 'knuth' } }, async ($, on) => {
+  const session = stubSession(on, { pluginFiles: { '/personas/engineering/knuth.md': '# Engineering: knuth\n' } })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
   await session.clock.settle()
@@ -215,7 +215,7 @@ test('the chosen model and thinking level are what the look uses', { options: { 
   expect(session.requests.length).toBe(1)
   expect(session.requests[0]?.model).toBe('haiku')
   expect(session.requests[0]?.effort).toBe('low')
-  expect(session.requests[0]?.system).toBe('PLAY-BY-PLAY INSTRUCTIONS\n\n# Persona: knuth')
+  expect(session.requests[0]?.system).toBe('PLAY-BY-PLAY INSTRUCTIONS\n\n# Engineering: knuth')
 })
 
 test('outside a git repository the pane says why there is no play-by-play', async ($, on) => {

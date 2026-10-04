@@ -78,7 +78,7 @@ It works whether the tutor is on or off.
 
 `/bsd pause` silences it without closing anything. `/bsd off` ends the ride, and Claude Code behaves normally again. Each new session starts with it off. Clearing the conversation with `/clear` does not switch it off.
 
-Nothing needs configuring, but the models, thinking levels, pacing and the tutor's persona are all yours to change. See [Models and settings](#models-and-settings).
+Nothing needs configuring, but the models, thinking levels, pacing, and the tutor's voice and engineering persona are all yours to change. See [Models and settings](#models-and-settings).
 
 ## What it remembers about you
 
@@ -182,7 +182,7 @@ The watcher asks git what changed every couple of seconds, and stretches that in
 | --- | --- |
 | `/backseat-driver` and `/bsd` | Two commands the mod registers with `$.command.register`, answered by the same hook. They run at once, without a model turn. |
 | The tutor contract | `plugin/skills/tutor/SKILL.md`. While the mode is on, a `prompt.compose` hook adds it, and the profiles in play, to the system prompt. The same hook replaces Claude Code's own "Doing tasks" section, which tells Claude to find the code and modify it. |
-| Tutor persona | One Markdown style sheet per persona in `plugin/personas/`. The chosen one is added to the system prompt and to both review prompts. |
+| Voice and engineering persona | One Markdown file per voice in `plugin/personas/voice/`, and one per engineering persona in `plugin/personas/engineering/`. The chosen ones are added to the system prompt and to both review prompts, the engineering half first. |
 | The contract outranks the project's `CLAUDE.md` | A `prompt.context` hook keeps the project's instruction files loaded but reframes them as background that yields to the contract. |
 | Claude never edits your files | A `tool.call` hook refuses `Edit`, `Write` and `NotebookEdit` while the mode is on. The only paths it lets through are Claude Code's own: its folder under your home directory, where it keeps its notes, and its scratch folder. |
 | Noticing saves and commits | A `$.clock.every` timer runs `git status` through `$.process.run` for saves. For commits it checks the reflog file's size and modification time, and runs `git reflog` only when that changes. |
@@ -213,7 +213,8 @@ Everything is configured in `/config`, and the two background jobs have separate
 
 | Setting | Choices | Default |
 | --- | --- | --- |
-| Tutor persona | `none`, `torvalds`, `knuth`, `primeagen`, `eli5-tldr-kiss-terse` | `none` |
+| Voice persona | `default`, `torvalds`, `knuth`, `primeagen`, `eli5-tldr-kiss-terse` | `default` |
+| Engineering persona | `default`, `torvalds`, `knuth`, `primeagen` | `default` |
 | Play-by-play | automatic, on request | automatic |
 | Play-by-play quiet time | 5, 10, 20, 30 or 60 seconds | 10 seconds |
 | Play-by-play minimum gap | none, 30 seconds, 1, 2 or 5 minutes | 1 minute |
@@ -241,17 +242,31 @@ Models are addressed by alias, so each setting follows the current model of that
 
 ### Personas
 
-A persona sets the tutor's teaching style, voice and emphasis, in the notes, the deep reviews and the conversation alike. You can switch it at any time.
+A persona shapes the notes, the deep reviews and the conversation alike. It comes in two halves, and you choose each on its own:
 
-| Persona | Voice and emphasis |
+- **The voice** is how the tutor talks: its tone, its wording and its teaching style. It changes how a point is put, never which points are made.
+- **The engineering persona** is whose judgment the tutor reviews with: what it values in code, what it flags, and which way it leans when there is more than one reasonable approach. `default` is Claude's own judgment, not tilted toward anyone's.
+
+So `eli5-tldr-kiss-terse` can explain what `knuth` would worry about, or `torvalds` can deliver Claude's own verdicts in his manner. Choose the same name for both halves to get the whole persona. Both can be switched at any time.
+
+| Voice | How it talks |
 | --- | --- |
-| `none` | The default. Plain, calm and to the point. |
-| `torvalds` | Blunt and exacting. Cares about good taste: simple code, the right data structure, no needless abstraction. Hard on the code, never on you. |
-| `knuth` | Patient and precise. Cares about correctness, edge cases, and why an algorithm works and what it costs. |
-| `primeagen` | Fast, energetic and funny. Cares about fundamentals, performance and not hiding behind a framework. |
+| `default` | Plain, calm and to the point. |
+| `torvalds` | Blunt and plain. Says what is wrong in the first sentence, with no padding. Hard on the code, never on you. |
+| `knuth` | Patient, precise and gently playful. Often nudges with a small case to trace by hand. |
+| `primeagen` | Fast, energetic and funny. Nudges with a challenge, and celebrates a good fix in one line. |
 | `eli5-tldr-kiss-terse` | The shortest plain-words version. One idea per note, and no jargon without a definition. |
 
-A persona changes how the tutor talks and what it dwells on. It never changes the ground rules. The personas named after people are styles in their spirit: the tutor does not claim to be them or to quote them.
+| Engineering persona | What it values and which way it leans |
+| --- | --- |
+| `default` | Claude's own engineering judgment. |
+| `torvalds` | Data structures first, and the version of the code in which the special case disappears. Against abstraction until it pays for itself, against breaking what works, and for practice over theory. |
+| `knuth` | Correctness you can explain, the edge cases, and knowing what an algorithm costs. Optimizes only where measuring says it matters, and counts a comment that states an invariant as part of the program. |
+| `primeagen` | Knowing what the machine does: no needless allocation or copying, the right data structure, plain functions over layers, errors handled as values, and few dependencies. |
+
+The engineering personas disagree in useful ways. Shown a linear search through a list inside a loop, `primeagen` asks for a set at once, `knuth` asks how large the list can grow, and `torvalds` lets it pass unless it sits on a path that runs all the time.
+
+Neither half changes the ground rules. The personas named after people are in their spirit: the tutor does not claim to be them or to quote them, and a voice does not bring its namesake's opinions about code along with it.
 
 ## Limits
 
@@ -284,7 +299,9 @@ backseat-driver/
 │   │   └── plugin.json         manifest and the settings shown in /config
 │   ├── skills/
 │   │   └── tutor/SKILL.md      the tutor contract
-│   ├── personas/               one style sheet per tutor persona
+│   ├── personas/
+│   │   ├── voice/              how the tutor talks, one file per voice
+│   │   └── engineering/        whose judgment it reviews with, one file per persona
 │   ├── prompts/                instructions for the reviewers
 │   ├── hooks/
 │   │   ├── hooks.json          points Claude Code at the mod
@@ -386,6 +403,7 @@ Part two:
 
 - [x] **Usability, first pass.** `/bsd` answers at once and sets up in the background, `/bsd help`, `/bsd questions` and the `q` key, and a line in the pane on how to give it the keyboard.
 - [x] **Data home and forgetting.** State in `~/.local/share/backseat-driver/`, profiles moved out of the plugin store, and `/bsd forget`.
+- [x] **Persona in two halves.** The voice and the engineering persona as separate settings, so that how the tutor talks and whose judgment it reviews with are chosen apart.
 - [ ] **Explain.** The lookup engine and its queue, the never-stale rule, the Explain tab, `/bsd explain`, the files an editor will read and write, and a lookup tool for the tutor.
 - [ ] **One cache for all three jobs.** Deep reviews write overviews and insights into the cache, a survey for each new project, and both reviewers read from it.
 - [ ] **Progress.** Whose work it is, the evidence ledger, the rules for moving a level, the Progress tab and a first placement from past commits.

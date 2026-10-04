@@ -4,6 +4,8 @@ import type { Mode, Note, Profile, Profiles, Review, Tab, Watch } from '../types
 import { languageName } from './languages'
 import { sortNotes } from './notes'
 import { ANSWER_LABELS, explained, GENERAL, recurring } from './profiles'
+import { DEFAULT_PERSONA } from './settings'
+import type { Persona } from './settings'
 
 /** The elements the pane is built from. Every surface that draws panes has them. */
 export type Kit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdown'>
@@ -12,7 +14,7 @@ export type Kit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdo
 export type PaneView = {
   mode: Mode
   tab: Tab
-  persona: string
+  persona: Persona
   notes: readonly Note[]
   /** The id of the note the keys act on, or null for the first one. */
   selected: number | null
@@ -69,9 +71,20 @@ function watching(view: PaneView): string {
   }
 }
 
-/** The one line under the tabs: whether the tutor is looking, and in what voice. */
+/** The persona in a few words, leaving out a half that is the default. '' when both are. */
+export function personaLine({ voice, engineering }: Persona): string {
+  if (voice === engineering) return voice === DEFAULT_PERSONA ? '' : `Voice and engineering: ${voice}.`
+  if (engineering === DEFAULT_PERSONA) return `Voice: ${voice}.`
+  if (voice === DEFAULT_PERSONA) return `Engineering: ${engineering}.`
+
+  return `Voice: ${voice}. Engineering: ${engineering}.`
+}
+
+/** The one line under the tabs: whether the tutor is looking, in what voice and with whose judgment. */
 export function statusLine(view: PaneView): string {
-  return view.persona === 'none' ? watching(view) : `${watching(view)} Persona: ${view.persona}.`
+  const persona = personaLine(view.persona)
+
+  return persona === '' ? watching(view) : `${watching(view)} ${persona}`
 }
 
 /** The note the keys act on: the selected one if it is still open, otherwise the first. */

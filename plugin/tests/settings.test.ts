@@ -17,7 +17,7 @@ test('durationMs falls back on anything it does not recognise', async () => {
 
 test('readSettings applies the documented defaults to empty options', async () => {
   expect(readSettings({})).toEqual({
-    persona: 'none',
+    persona: { voice: 'default', engineering: 'default' },
     playByPlay: {
       isAutomatic: true,
       quietMs: 10_000,
@@ -36,7 +36,8 @@ test('readSettings applies the documented defaults to empty options', async () =
 
 test('readSettings takes what the user chose', async () => {
   const settings = readSettings({
-    persona: 'knuth',
+    voice: 'eli5-tldr-kiss-terse',
+    engineering: 'knuth',
     play_by_play: 'on request',
     quiet_time: '30 seconds',
     minimum_gap: 'none',
@@ -48,7 +49,7 @@ test('readSettings takes what the user chose', async () => {
     deep_review_thinking: 'max',
   })
 
-  expect(settings.persona).toBe('knuth')
+  expect(settings.persona).toEqual({ voice: 'eli5-tldr-kiss-terse', engineering: 'knuth' })
   expect(settings.playByPlay).toEqual({
     isAutomatic: false,
     quietMs: 30_000,
@@ -62,4 +63,12 @@ test('readSettings takes what the user chose', async () => {
     model: 'fable',
     thinking: 'max',
   })
+})
+
+test('readSettings treats a persona that could not name a file as the default', async () => {
+  expect(readSettings({ voice: '../../secrets', engineering: 'Knuth' }).persona).toEqual({
+    voice: 'default',
+    engineering: 'default',
+  })
+  expect(readSettings({ voice: '', engineering: 3 }).persona).toEqual({ voice: 'default', engineering: 'default' })
 })

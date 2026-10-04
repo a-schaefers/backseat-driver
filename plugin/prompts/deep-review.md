@@ -12,7 +12,7 @@ You can read and search the repository. Do that before you write: open the files
 - Whether a test would catch a regression here, and which one.
 - For a commit: whether it is one logical change, with a message that says why.
 
-Leave out anything a formatter or linter would catch, and matters of taste.
+Leave out anything a formatter or linter would catch, and matters of taste. When an engineering persona follows these instructions, it says where that line falls and which way to lean on a tradeoff.
 
 ## How to write it
 

@@ -12,7 +12,7 @@ These are standing instructions from the repository's owner. Follow them without
 
 ## Status
 
-Part one is built and not yet lived with. Part two (README, "Part two, being built") is under way: its milestones are the unchecked lines of the README's roadmap, built in that order. Every checked milestone was seen working in a short real session, with these exceptions. Tests only: the slow-down near plan limits (a real session cannot be put at 95% of its plan on demand), the edit guard (the tutor declined to edit before the hook was needed), and the deep review on its default model and thinking level (live runs used Sonnet at low thinking to keep them cheap). Never run at all: the `primeagen` and `eli5-tldr-kiss-terse` personas, and installing from the marketplace. Nobody has done real work with the tutor yet, so the prompts in `plugin/prompts/` and `plugin/skills/tutor/SKILL.md` are the part most likely to need changing. The README's roadmap lists the milestones in build order and which are done. The approved plan for part two is in `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine. It lists nine decisions the owner approved and the risks to probe at the start of each milestone.
+Part one is built and not yet lived with. Part two (README, "Part two, being built") is under way: its milestones are the unchecked lines of the README's roadmap, built in that order. Every checked milestone was seen working in a short real session, with these exceptions. Tests only: the slow-down near plan limits (a real session cannot be put at 95% of its plan on demand), the edit guard (the tutor declined to edit before the hook was needed), and the deep review on its default model and thinking level (live runs used Sonnet at low thinking to keep them cheap). Since the persona was split into a voice and an engineering half, one pair has been run: the `eli5-tldr-kiss-terse` voice with the `knuth` engineering persona. Never run at all: the `primeagen` voice, the `torvalds` and `primeagen` engineering personas, and installing from the marketplace. Nobody has done real work with the tutor yet, so the prompts in `plugin/prompts/` and `plugin/skills/tutor/SKILL.md` are the part most likely to need changing. The README's roadmap lists the milestones in build order and which are done. The approved plan for part two is in `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine. It lists nine decisions the owner approved and the risks to probe at the start of each milestone.
 
 The README is the design spec: the user flow, what the tutor remembers, the ground rules, a table mapping each behavior to a Claude Code mechanism, the settings and their defaults, limits, the file layout and the roadmap. Read it before changing anything.
 
@@ -43,7 +43,7 @@ Decided by the owner. Do not re-propose what was rejected, and do not design aro
 - **State is never cleared by accident.** Clearing is deliberate and confirmed: one project, one language, or everything. Uninstalling clears everything.
 - **Users stay up to date.** A newer release upstream is announced in the pane, one command fetches it, and the tutor comes back on by itself.
 - **Everything feels instant.** No command waits on git or a model. The questions can be answered again in an obvious way.
-- **Personas are style only.** A persona sets teaching style, voice and emphasis in notes, deep reviews and conversation. It never overrides the contract. A persona named after a real person is "in the spirit of": the tutor never claims to be that person or to quote them, and it is hard on the code, never on the user.
+- **A persona has two halves, chosen apart.** The voice sets teaching style, tone and wording. The engineering persona sets what the tutor values, flags and recommends, and its `default` is Claude's own judgment, not tilted toward anyone's. Both apply in notes, deep reviews and conversation. A voice never brings its namesake's opinions about code, and an engineering persona never brings its namesake's manner. Neither overrides the contract. A persona named after a real person is "in the spirit of": the tutor never claims to be that person or to quote them, and it is hard on the code, never on the user.
 
 ## Commands
 
@@ -80,7 +80,7 @@ Tests stub everything, so a milestone is only done when it has also been seen wo
 
 Two layers (README, "How it works"):
 
-- **Contract**: `plugin/skills/tutor/SKILL.md`, the tutor's rules as Markdown. It is the single source of tutor behavior. The mod injects this text into the system prompt and must not carry a second copy. Personas are separate style sheets in `plugin/personas/`, one Markdown file each, and the chosen one is injected alongside the contract and into both review prompts.
+- **Contract**: `plugin/skills/tutor/SKILL.md`, the tutor's rules as Markdown. It is the single source of tutor behavior. The mod injects this text into the system prompt and must not carry a second copy. Personas are Markdown files in two folders, `plugin/personas/voice/` and `plugin/personas/engineering/`, and the chosen engineering persona and voice, in that order, are injected after the contract and into both review prompts. Each file says which half it is and that it leaves the other half alone. That paragraph is what keeps a mixed pair apart, so a new persona file needs one too.
 - **Mod**: `plugin/hooks/`, function hooks that run inside Claude Code.
 
 ### How the mod's code is split
@@ -125,7 +125,7 @@ The mode is `off`, `on` or `paused`, kept twice because each copy is lost by a d
 
 While the mode is `on` or `paused`, three hooks carry the contract:
 
-- `prompt.compose` replaces Claude Code's `doing_tasks` section and appends one section, `backseat-driver:contract`, last and session-scoped. That section is the body of `SKILL.md`, then `SESSION_NOTES` and (later) the profiles, then the persona. `doing_tasks` has to go because it says "find the method in the code and modify the code". The full prompt's section ids are `intro`, `system`, `doing_tasks`, `actions`, `tools`, `tone`, then session-scoped ones such as `memory`. A lean prompt has `lean_body` and no `doing_tasks`, and the code copes with that.
+- `prompt.compose` replaces Claude Code's `doing_tasks` section and appends one section, `backseat-driver:contract`, last and session-scoped. That section is the body of `SKILL.md`, then `SESSION_NOTES` and the profiles, then the engineering persona, then the voice. `doing_tasks` has to go because it says "find the method in the code and modify the code". The full prompt's section ids are `intro`, `system`, `doing_tasks`, `actions`, `tools`, `tone`, then session-scoped ones such as `memory`. A lean prompt has `lean_body` and no `doing_tasks`, and the code copes with that.
 - `prompt.context` rewrites the `claudeMd` block. Claude Code opens that block with "These instructions OVERRIDE any default behavior". The hook swaps that paragraph for one that keeps the instructions in force except where they tell Claude to write code. The block also carries the user's global instructions, so it is reframed, not dropped. Switching the mode calls `$.ui.invalidate('prompt.context')`, because that event is cached.
 - `tool.call` on `Edit`, `Write` and `NotebookEdit` returns `{ deny }` unless the path is Claude Code's own: under `~/.claude/` (its memory and plans) or its scratch folder `/tmp/claude-<uid>/`. Without that exception the tutor could not save a memory.
 
@@ -224,6 +224,7 @@ Easy to get wrong:
 - `$.model.complete` takes the thinking level directly, as `effort`. `$.agent.spawn` takes a `model` but no effort, and the mod's own `turn.step` and `tool.call` hooks do not see a subagent the mod spawned.
 - A mod's tool is served by answering `tool.call` without calling `next`, and no permission prompt appears: seen in a real session. Declare the tool's input in `plugin/types/index.d.ts` under `McpToolInputs`, or a matcher on its name does not type-check.
 - `update($, atom, fn)` fails to type-check with a misleading "Atom<...> is not assignable to StateRef" when `fn` builds an object whose fields are a union of literals. Annotate the return type: `(watch): Watch => ({ ...watch, state: 'looking' })`.
+- A `userConfig` string field with `options` only ever arrives as one of them: Claude Code reads any other saved value as the field's default and reports it ("option engineering in settings is not one of ..."), in tests too.
 - A `userConfig` picker (`options`) works only on string fields. The timer interval is therefore a string picker and the after-commit trigger a separate boolean. Changing a setting in `/config` reloads the mod with the new `options`. Seen in a real session: each setting is a row there (search for its title), the transcript says "options changed — reloaded", and the tutor stays on with the pane open. For the working copy the value is saved in `~/.claude/settings.json` under `pluginConfigs["backseat-driver@inline"]`, so a check made this way changes the owner's own settings: put the value back afterwards.
 - `$.ui.ask` asks one question per call, with two to four options plus free text. It rejects when the user dismisses the dialog, which the first-run questions treat as "skip the rest", and it rejects under `claude -p`. In tests it reaches the `tool.call` stub as a call to `AskUserQuestion`.
 - `$.store` holds 4 MiB of JSON in total, is per install, and is cleared after `cleanupPeriodDays` without use, which is why nothing is kept there any more. It has `get`, `set`, `delete` and `keys`.
@@ -245,7 +246,7 @@ In tests:
 
 - `Text` takes no `key`. Give keys to `Button`, `Input`, `Select` and `Markdown`, and find text with `ui.find({ type: 'Text', text })`. A `find` that comes back undefined after a mount that did not reject usually means this.
 - The kit answers `$.ui.invalidate('ui.render')` by itself, but not the invalidation of a prompt event. Stub `ui.invalidate` or the call is dropped with a line under "the engine reported".
-- `test(name, { options: { persona: 'knuth' } }, body)` sets `userConfig` values for one test.
+- `test(name, { options: { engineering: 'knuth' } }, body)` sets `userConfig` values for one test.
 - `stubSession(on)` in `plugin/tests/kit.ts` registers every stub the plugin needs to start and switch modes. Use it and add to it.
 
 - Nothing is real. Almost every `$` call the mod makes needs a stub registered with `on(...)` before the test's first call on `$` (`$.state` and `$.ui.invalidate` are the exceptions), and `session.start` runs only if the test fires it.

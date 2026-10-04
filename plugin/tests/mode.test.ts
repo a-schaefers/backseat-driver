@@ -51,7 +51,7 @@ test('/bsd and /backseat-driver switch the same tutor', async ($, on) => {
   expect(paused.text).toMatch('paused')
 
   const status = await $.command.run(typed('backseat-driver', 'status'))
-  expect(status.text).toBe('Backseat Driver is paused. Persona: none.')
+  expect(status.text).toBe('Backseat Driver is paused. Voice: default. Engineering: default.')
 
   const stopped = await $.command.run(typed('bsd', 'off'))
   expect(stopped.text).toBe('Backseat Driver is off. Claude Code is back to normal.')
@@ -88,7 +88,7 @@ test('the tutor is still on after /clear', async ($, on) => {
   await $.classic.SessionStart({ source: 'clear' })
 
   const status = await $.command.run(typed('bsd', 'status'))
-  expect(status.text).toBe('Backseat Driver is on. Persona: none.')
+  expect(status.text).toBe('Backseat Driver is on. Voice: default. Engineering: default.')
 })
 
 test('/bsd answers before its setup has finished', async ($, on) => {

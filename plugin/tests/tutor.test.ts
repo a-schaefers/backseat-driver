@@ -32,16 +32,49 @@ test('while the tutor is on, the system prompt carries the contract', async ($, 
   })
 })
 
-test('the chosen persona follows the contract', { options: { persona: 'knuth' } }, async ($, on) => {
-  const session = stubSession(on, { pluginFiles: { '/personas/knuth.md': '# Persona: knuth\n\nPatient and precise.\n' } })
+const PERSONA_FILES = {
+  '/personas/voice/eli5-tldr-kiss-terse.md': '# Voice: eli5-tldr-kiss-terse\n\nShort and plain.\n',
+  '/personas/voice/knuth.md': '# Voice: knuth\n\nPatient and precise.\n',
+  '/personas/engineering/knuth.md': '# Engineering: knuth\n\nThe edges, every time.\n',
+}
+
+test('the persona follows the contract: its engineering half, then its voice', { options: { voice: 'eli5-tldr-kiss-terse', engineering: 'knuth' } }, async ($, on) => {
+  const session = stubSession(on, { pluginFiles: PERSONA_FILES })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
   await session.clock.settle()
 
   const { sections } = await $.prompt.compose(COMPOSE)
   expect(sections[sections.length - 1]?.text).toBe(
-    `# Contract\n\nThe user writes the code.\n\n${SESSION_NOTES}\n\n# Persona: knuth\n\nPatient and precise.`,
+    `# Contract\n\nThe user writes the code.\n\n${SESSION_NOTES}\n\n# Engineering: knuth\n\nThe edges, every time.\n\n# Voice: eli5-tldr-kiss-terse\n\nShort and plain.`,
   )
+  const status = await $.command.run(typed('bsd', 'status'))
+  expect(status.text).toBe('Backseat Driver is on. Voice: eli5-tldr-kiss-terse. Engineering: knuth.')
+})
+
+test("a voice alone leaves the engineering judgment Claude's own", { options: { voice: 'knuth' } }, async ($, on) => {
+  const session = stubSession(on, { pluginFiles: PERSONA_FILES })
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+  await session.clock.settle()
+
+  const { sections } = await $.prompt.compose(COMPOSE)
+  expect(sections[sections.length - 1]?.text).toBe(
+    `# Contract\n\nThe user writes the code.\n\n${SESSION_NOTES}\n\n# Voice: knuth\n\nPatient and precise.`,
+  )
+})
+
+test('a persona half whose file is missing is left out, and the debug log says so', { options: { voice: 'torvalds', engineering: 'knuth' } }, async ($, on) => {
+  const session = stubSession(on, { pluginFiles: PERSONA_FILES })
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+  await session.clock.settle()
+
+  const { sections } = await $.prompt.compose(COMPOSE)
+  expect(sections[sections.length - 1]?.text).toBe(
+    `# Contract\n\nThe user writes the code.\n\n${SESSION_NOTES}\n\n# Engineering: knuth\n\nThe edges, every time.`,
+  )
+  expect(session.logs).toContain('no voice persona called "torvalds"')
 })
 
 test('while the tutor is on, instruction files yield to the contract', async ($, on) => {

@@ -129,8 +129,10 @@ test('a finished review is announced when the tab is not open', async ($, on) =>
   await ui.unmount()
 })
 
-test('the chosen model and thinking level are what the reviewer is registered with', { options: { deep_review_model: 'fable', deep_review_thinking: 'max', persona: 'knuth' } }, async ($, on) => {
-  const session = stubSession(on, { pluginFiles: { '/personas/knuth.md': '# Persona: knuth\n' } })
+test('the chosen model and thinking level are what the reviewer is registered with', { options: { deep_review_model: 'fable', deep_review_thinking: 'max', voice: 'torvalds', engineering: 'knuth' } }, async ($, on) => {
+  const session = stubSession(on, {
+    pluginFiles: { '/personas/voice/torvalds.md': '# Voice: torvalds\n', '/personas/engineering/knuth.md': '# Engineering: knuth\n' },
+  })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
   await session.clock.settle()
@@ -138,7 +140,7 @@ test('the chosen model and thinking level are what the reviewer is registered wi
   const reviewer = session.agents[session.agents.length - 1]
   expect(reviewer?.model).toBe('fable')
   expect(reviewer?.effort).toBe('max')
-  expect(reviewer?.prompt).toBe('DEEP REVIEW INSTRUCTIONS\n\n# Persona: knuth')
+  expect(reviewer?.prompt).toBe('DEEP REVIEW INSTRUCTIONS\n\n# Engineering: knuth\n\n# Voice: torvalds')
 })
 
 test('a checkout is not a commit, and deep reviews start afresh after it', async ($, on) => {

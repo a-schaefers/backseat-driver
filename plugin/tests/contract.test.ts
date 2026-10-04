@@ -3,6 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import {
   CONTRACT_ID,
   INSTRUCTIONS_PREAMBLE,
+  personaPrompt,
   reframeInstructions,
   stripFrontmatter,
   TUTOR_TASKS,
@@ -23,6 +24,13 @@ test('tutorSections replaces "Doing tasks" and puts the contract last', async ()
   expect(sections[1]).toEqual({ id: 'doing_tasks', text: TUTOR_TASKS, scope: 'shared' })
   // The persona comes after the contract and what is known about the person.
   expect(sections[4]).toEqual({ id: CONTRACT_ID, text: 'CONTRACT\n\nPROFILE\n\nPERSONA', scope: 'session' })
+})
+
+test('personaPrompt puts the engineering half before the voice, and leaves out a default', async () => {
+  expect(personaPrompt({ engineering: 'ENGINEERING', voice: 'VOICE' })).toBe('ENGINEERING\n\nVOICE')
+  expect(personaPrompt({ engineering: '', voice: 'VOICE' })).toBe('VOICE')
+  expect(personaPrompt({ engineering: 'ENGINEERING', voice: '' })).toBe('ENGINEERING')
+  expect(personaPrompt({ engineering: '', voice: '' })).toBe('')
 })
 
 test('tutorSections never adds the contract twice', async () => {

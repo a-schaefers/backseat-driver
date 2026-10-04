@@ -2,9 +2,20 @@ import type { PluginOptions } from 'claude-code'
 
 export type Thinking = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
+/** What a persona half is called when none is chosen: Claude's own voice, or its own engineering judgment. */
+export const DEFAULT_PERSONA = 'default'
+
+/** The persona's two halves, chosen apart. Each is a file name in `personas/voice/` or `personas/engineering/`, or `default`. */
+export type Persona = {
+  /** How the tutor talks: tone, wording and teaching style. */
+  voice: string
+  /** Whose engineering judgment it reviews with: what it values, flags and recommends. */
+  engineering: string
+}
+
 /** The plugin's `/config` rows as the code uses them: durations in milliseconds, defaults applied. */
 export type Settings = {
-  persona: string
+  persona: Persona
   playByPlay: {
     isAutomatic: boolean
     quietMs: number
@@ -43,10 +54,18 @@ function thinking(value: unknown, fallback: Thinking): Thinking {
   return THINKING.find(level => level === value) ?? fallback
 }
 
+/** A persona half as set in /config. Anything that could not name a file in `personas/` is the default. */
+function personaName(value: unknown): string {
+  return typeof value === 'string' && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(value) ? value : DEFAULT_PERSONA
+}
+
 /** Keys are the `userConfig` fields in plugin.json. */
 export function readSettings(options: PluginOptions): Settings {
   return {
-    persona: text(options.persona, 'none'),
+    persona: {
+      voice: personaName(options.voice),
+      engineering: personaName(options.engineering),
+    },
     playByPlay: {
       isAutomatic: options.play_by_play !== 'on request',
       quietMs: durationMs(options.quiet_time, 10_000),

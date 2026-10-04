@@ -35,13 +35,22 @@ export const SESSION_NOTES = `## In this session
 - Remembering where they stand: when they tell you how much of a language they have written, what they want from it, what they want watched most closely, or which language they know best, call \`mcp__backseat-driver__record\` and confirm in one line. Record what they say, never what you infer from their code. They can also answer the first-run questions again from the pane's Profile tab.
 - \`mcp__backseat-driver__profile\` reads what is on record about them for a language that is not in play here, for when comparing with a language they know would help.`
 
+/**
+ * The persona as every prompt carries it: the engineering half, which says
+ * what to think of the code, then the voice, which says how to put it. Either
+ * is '' when it is the default.
+ */
+export function personaPrompt(halves: { engineering: string; voice: string }): string {
+  return [halves.engineering, halves.voice].filter(part => part !== '').join('\n\n')
+}
+
 /** What the tutor is told, in the order it reads it. */
 export type TutorPrompt = {
   /** The body of skills/tutor/SKILL.md. */
   contract: string
   /** Mechanisms this session offers and what is known about the person. */
   extras: readonly string[]
-  /** The chosen persona's style sheet, or '' for none. */
+  /** The chosen persona, as `personaPrompt` puts it, or '' when both halves are the default. */
   persona: string
 }
 

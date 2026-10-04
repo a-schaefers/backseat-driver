@@ -1,14 +1,14 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Note } from '../types'
-import { currentNote, KEYBOARD_HINT, statusLine } from '../hooks/pane'
+import { currentNote, KEYBOARD_HINT, personaLine, statusLine } from '../hooks/pane'
 import type { PaneView } from '../hooks/pane'
 import { PANE, SESSION, stubSession, typed } from './kit'
 
 const VIEW: PaneView = {
   mode: 'on',
   tab: 'play',
-  persona: 'none',
+  persona: { voice: 'default', engineering: 'default' },
   notes: [],
   selected: null,
   watch: { state: 'idle', lastLookAt: null, detail: '' },
@@ -29,9 +29,11 @@ const note = (id: number, overrides: Partial<Note> = {}): Note => ({
   ...overrides,
 })
 
-test('statusLine says what the watcher is doing and in what voice', async () => {
+test('statusLine says what the watcher is doing, in what voice and with whose judgment', async () => {
   expect(statusLine(VIEW)).toBe('On. Watching for your next save.')
-  expect(statusLine({ ...VIEW, persona: 'knuth' })).toBe('On. Watching for your next save. Persona: knuth.')
+  expect(statusLine({ ...VIEW, persona: { voice: 'eli5-tldr-kiss-terse', engineering: 'knuth' } })).toBe(
+    'On. Watching for your next save. Voice: eli5-tldr-kiss-terse. Engineering: knuth.',
+  )
   expect(statusLine({ ...VIEW, isAutomatic: false })).toBe('On. Looking only when you ask.')
   expect(statusLine({ ...VIEW, mode: 'paused' })).toBe('Paused. /bsd resume to continue.')
   expect(statusLine({ ...VIEW, watch: { ...VIEW.watch, state: 'looking' } })).toBe('On. Looking at your changes.')
@@ -39,6 +41,14 @@ test('statusLine says what the watcher is doing and in what voice', async () => 
   expect(statusLine({ ...VIEW, watch: { state: 'failed', lastLookAt: 1, detail: 'rate limit' } })).toBe(
     'On. The last look failed (rate limit). It will try again.',
   )
+})
+
+test('personaLine leaves out a half that is the default, and names a persona chosen for both once', async () => {
+  expect(personaLine({ voice: 'default', engineering: 'default' })).toBe('')
+  expect(personaLine({ voice: 'torvalds', engineering: 'default' })).toBe('Voice: torvalds.')
+  expect(personaLine({ voice: 'default', engineering: 'primeagen' })).toBe('Engineering: primeagen.')
+  expect(personaLine({ voice: 'knuth', engineering: 'knuth' })).toBe('Voice and engineering: knuth.')
+  expect(personaLine({ voice: 'torvalds', engineering: 'knuth' })).toBe('Voice: torvalds. Engineering: knuth.')
 })
 
 test('currentNote is the selected note while it is open, otherwise the most important one', async () => {

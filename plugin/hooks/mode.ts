@@ -39,7 +39,7 @@ export const HELP = [
   '  /bsd off         turn it off: Claude Code is back to normal',
   '  /bsd pause       stop the background commentary and keep the pane',
   '  /bsd resume      carry on',
-  '  /bsd status      whether it is on, and in which voice',
+  '  /bsd status      whether it is on, its voice and its engineering persona',
   '  /bsd questions   answer the first-run questions again',
   '  /bsd forget      erase what it remembers: this project, one language, or everything',
   '  /bsd help        this list',
@@ -51,7 +51,7 @@ export const HELP = [
   '  r       run a deep review now',
   '  q       answer the questions again',
   '',
-  'Models, thinking levels, pacing and the persona are in /config: search for "backseat".',
+  'Models, thinking levels, pacing, the voice and the engineering persona are in /config: search for "backseat".',
 ].join('\n')
 
 /** What `/bsd help` prints, with a first line about a word that is not a command. */

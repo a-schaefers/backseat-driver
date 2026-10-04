@@ -11,7 +11,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteResult, Register, Timer } from 'claude-code'
 
 import type { Hush, Mode, Note, Profile, Profiles, Review, Tab, Watch } from '../types'
-import { reframeInstructions, SESSION_NOTES, stripFrontmatter, tutorSections } from './contract'
+import { personaPrompt, reframeInstructions, SESSION_NOTES, stripFrontmatter, tutorSections } from './contract'
 import { dataHome, isRemovable, MARKER, MARKER_TEXT, profilePath, projectId } from './datahome'
 import {
   confirmQuestion,
@@ -74,8 +74,8 @@ import {
   showCommitArgs,
 } from './review'
 import type { ReflogEntry, ReviewScope } from './review'
-import { readSettings } from './settings'
-import type { Settings } from './settings'
+import { DEFAULT_PERSONA, readSettings } from './settings'
+import type { Persona, Settings } from './settings'
 import { readJson, writeJson } from './storage'
 import type { Disk } from './storage'
 import { createWatcher } from './watcher'
@@ -119,6 +119,7 @@ let engagement = 0
 
 /** Text read from the plugin's own folder when the tutor is first needed. */
 let contract = ''
+/** The chosen persona's engineering half, then its voice. '' when both are the default. */
 let persona = ''
 let lookInstructions = ''
 let reviewInstructions = ''
@@ -170,20 +171,28 @@ let reviewScope: ReviewScope | null = null
 let queuedCommit: ReflogEntry | null = null
 let reviewTimer: Timer | null = null
 
-async function loadTutor($: EngineInterface, personaName: string): Promise<void> {
+async function loadTutor($: EngineInterface, chosen: Persona): Promise<void> {
   const root = $.plugin.root
   contract = stripFrontmatter(await $.fs.read(`${root}/skills/tutor/SKILL.md`))
   lookInstructions = (await $.fs.read(`${root}/prompts/play-by-play.md`)).trim()
   reviewInstructions = (await $.fs.read(`${root}/prompts/deep-review.md`)).trim()
-  persona = ''
-  if (personaName !== 'none') {
-    try {
-      persona = stripFrontmatter(await $.fs.read(`${root}/personas/${personaName}.md`))
-    } catch {
-      $.ui.log(`no style sheet for persona "${personaName}"`, { to: 'debug' })
-    }
-  }
+  persona = personaPrompt({
+    engineering: await readPersona($, 'engineering', chosen.engineering),
+    voice: await readPersona($, 'voice', chosen.voice),
+  })
   await resolveHome($)
+}
+
+/** One half of the persona, from `personas/<half>/<name>.md`, or '' for the default. */
+async function readPersona($: EngineInterface, half: 'voice' | 'engineering', name: string): Promise<string> {
+  if (name === DEFAULT_PERSONA) return ''
+  try {
+    return stripFrontmatter(await $.fs.read(`${$.plugin.root}/personas/${half}/${name}.md`))
+  } catch {
+    $.ui.log(`no ${half} persona called "${name}"`, { to: 'debug' })
+
+    return ''
+  }
 }
 
 /** Works out the user's home directory and the tutor's data folder. */
@@ -1011,7 +1020,7 @@ export const register: Register = (on, options) => {
     else if (request === 'on') await openPane($)
     if (request !== 'status') return { text }
 
-    return { text: `${text} Persona: ${settings.persona}.` }
+    return { text: `${text} Voice: ${settings.persona.voice}. Engineering: ${settings.persona.engineering}.` }
   })
 
   on('prompt.compose', async ($, e, next) => {

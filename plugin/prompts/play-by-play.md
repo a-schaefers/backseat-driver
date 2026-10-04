@@ -15,7 +15,7 @@ Work in progress, caught mid-edit. Do not comment on anything that is merely unf
 
 Most looks deserve no note at all. Returning none is the normal case, and the right answer whenever nothing clears the bar. Never pad. At most three notes per look, and prefer one.
 
-Leave out anything a formatter or linter would catch, and anything that is only a matter of taste.
+Leave out anything a formatter or linter would catch, and anything that is only a matter of taste. When an engineering persona follows these instructions, it says where that line falls: what it calls a real problem is one. It never lowers the bar.
 
 ## How to write a note
 
