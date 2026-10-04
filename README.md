@@ -12,15 +12,29 @@
 
 </div>
 
-A [Claude Code](https://claude.com/claude-code) plugin that turns Claude into a coding tutor. You write the code, and it watches, comments and answers.
+A [Claude Code](https://claude.com/claude-code) plugin that makes Claude your tutor, not your ghostwriter. You write the code. It watches, comments and answers.
 
 Inspired by the ideas discussed in the [Enchant Games Journal](https://enchant.games/?slug=journal).
 
 ## Why
 
-AI can write most of the code now. But skills you don't use fade, and an engineer who only reviews generated code slowly loses the ability to write it, or to tell when it's wrong. We don't want to find out what the industry looks like when that happens to everyone.
+> We built machines to obey us.
+>
+> Now we ask them to think instead of us.
 
-And we love this stuff: the puzzle, the craft, the moment it clicks. We want AI to make us better at it, not take it away. Let's make coding human again.
+First they took the environment. Then the tools. Then the stack. Now, in 2026, we're told not to write code at all. Use Claude. Use Codex. Use Copilot. Leave your brain at home, kids.
+
+Good grief.
+
+The skills you don't use, you lose. One developer who handed their job to the AI said they forgot everything in two or three months. Juniors aren't getting the reps at all. And the whole time, the people steering the agent think they're in the driver's seat.
+
+It's not about speed. If it takes me longer, but I grok it, that matters. **It's about ownership of understanding.**
+
+And I love this stuff: the puzzle, the craft, the moment it clicks. I'm in it for the love of the game, and I'm not handing that to a guessing machine.
+
+So yes, this is a Claude plugin, and yes, I see the irony. Backseat Driver puts the machine where it belongs: in the back seat. You drive. It watches the road and speaks up when it matters. Iron sharpens iron.
+
+Let's make coding human again.
 
 ## What it is
 
@@ -42,26 +56,26 @@ And we love this stuff: the puzzle, the craft, the moment it clicks. We want AI 
 └────────────────────────────────────────┴───────────────────────────────────────────────┘
 ```
 
-- **Play-by-play.** When you save and pause, a fast model reads the change. If something matters, a short note appears in the pane: a bug, a risky pattern, a better idiom. A note is a hint, not a fix. It clears when you fix the code.
-- **Deep review.** After each commit, a stronger model reviews the commit in context.
-- **Explain.** It says what the code under your cursor does, how it does it and why. Edit the code, and the old explanation is gone.
-- **Progress.** An honest level for each language, from beginner to senior, judged only on commits you wrote. It follows you from project to project, and it can go down as well as up.
-- **Conversation.** Ask anything. Push back on a note, and a contested point gets a second opinion. Tell it to drop a topic, and it never brings it up again. You have the last word.
+- **Play-by-play.** Save, pause, and a fast model reads what changed. If it's worth saying, a short note lands in the pane: a bug, a risky pattern, a better idiom. A hint, never a fix. Fix the code and the note goes away.
+- **Deep review.** Commit, and a stronger model reviews it in context.
+- **Explain.** What the code under your cursor does, how and why. Edit the code and the old explanation is gone.
+- **Progress.** An honest level per language, beginner to senior, judged only on commits you wrote. It follows you across projects, and it can go down.
+- **Conversation.** Ask anything. Push back, and a contested point gets a second opinion. Tell it to drop a topic, and it's dropped for good. You have the last word.
 
 ## What it is not
 
-- **Not a code writer.** While it's on, Claude does not edit your files. A hook blocks its editing tools, so this doesn't depend on the model behaving.
-- **Not a course.** There are no exercises and no quizzes. The project you chose to build is the lesson.
+- **Not a ghostwriter.** While it's on, Claude does not edit your files. A hook blocks its editing tools, so this doesn't hang on the model behaving.
+- **Not a course.** No exercises, no quizzes. The project you chose to build is the lesson.
 - **Not a linter.** It stays quiet unless something matters.
-- **Not in your repository.** It installs no git hooks and never writes to your working tree. What it remembers stays in `~/.local/share/backseat-driver/`. Its only network request of its own is a check for a newer release, at most every six hours.
+- **Not in your repository.** No git hooks, and it never writes to your working tree. What it remembers stays in `~/.local/share/backseat-driver/`. Its only network request of its own is a check for a newer release, at most every six hours.
 
 ## Who it's for
 
-- **Anyone who wants to keep writing their own code** and get better at it.
-- **People learning a language.** It explains new ideas in terms of a language you already know.
-- **Experienced engineers** who want a sparring partner, not a ghostwriter.
+- **Anyone who writes their own code** and wants to get better at it.
+- **Learners.** It's a great time to learn the art of programming. It works out your level in each language from your own code, and explains new ideas in terms of a language you already know.
+- **Seniors** who want a sparring partner, not a robot-babysitting job.
 
-It's not for anyone who wants Claude to write their code. `/bsd off` gives you Claude Code back as it was.
+Want the machine to write it for you? That's fine. Be you. `/bsd off` gives you Claude Code back.
 
 ## How to use it
 
@@ -85,3 +99,9 @@ Type `/bsd` in Claude Code. The first time you work in a language, it asks a few
 `Ctrl+X Tab` focuses the pane, and `Esc` leaves it. `1` to `4` switch tabs. The pane draws in the terminal and in the desktop app's Code tab. Models, pacing and persona (`torvalds`, `knuth`, `primeagen`, `eli5-tldr-kiss-terse`) are set in `/config`.
 
 The full design is in [DESIGN.md](DESIGN.md).
+
+---
+
+If you made it this far, you're probably already one of us.
+
+— [Adam Schaefers](https://adamschaefers.com), [Land of Enchantment Games](https://enchant.games)

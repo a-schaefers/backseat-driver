@@ -8,11 +8,12 @@ You learn by building whatever you want to build. The tutor sets no exercises an
 
 ## Why it exists
 
-The owner's reasons, which every other decision here serves:
+The owner's reasons, which every other decision here serves. They are argued at length in the owner's [Enchant Games Journal](https://enchant.games/?slug=journal):
 
-- **Outsourcing all of our thinking to AI has a long-term cost.** Skills that go unused fade. An engineer who only reviews generated code slowly loses the ability to write it, and to tell when it is wrong. An industry full of such engineers is fragile.
-- **We want to stay in the driver's seat.** AI should make the person at the keyboard sharper, not replace the part of the work that keeps them sharp.
-- **We love learning, and we are in it for the love of the game.** The puzzle and the craft are the point. A tutor that does the work for you takes the best part away.
+- **Ownership of understanding.** It is not about speed. Code you did not write and do not understand is not yours, however fast it arrived. Taking longer and grokking it is the point.
+- **The progressive surrender of technical autonomy.** Engineers gave up control of their environment, then their tools, then their stack, and are now told not to write code at all. Skills that go unused fade, and someone steering an agent can believe they are in the driver's seat while the machine does the thinking.
+- **The love of the game.** The puzzle and the craft are the point. A tutor that does the work for you takes the best part away.
+- **Iron sharpens iron.** Mentorship, with a beginner's mind. The tutor is there to make the person sharper, the way a good mentor does.
 
 So the arrangement is turned around: you drive, and the AI rides along, watches the road, and speaks up when it matters.
 
