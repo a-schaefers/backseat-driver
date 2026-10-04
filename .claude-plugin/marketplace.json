@@ -1,0 +1,15 @@
+{
+  "name": "backseat-driver",
+  "description": "Backseat Driver, a coding tutor that rides along while you write the code yourself.",
+  "owner": {
+    "name": "Adam Schaefers",
+    "url": "https://github.com/a-schaefers"
+  },
+  "plugins": [
+    {
+      "name": "backseat-driver",
+      "source": "./plugin",
+      "description": "A coding tutor for Claude Code. It watches your saves, comments in a side pane, reviews commits in depth, and never edits your files."
+    }
+  ]
+}

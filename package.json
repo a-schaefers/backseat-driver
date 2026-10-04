@@ -1,0 +1,14 @@
+{
+  "name": "backseat-driver-dev",
+  "private": true,
+  "description": "Development tooling for the Backseat Driver plugin. Nothing here ships to users: the plugin is the plugin/ folder.",
+  "scripts": {
+    "validate": "claude plugin validate . --strict && claude plugin validate ./plugin --strict",
+    "test": "claude plugin test ./plugin",
+    "typecheck": "tsc -p plugin/tsconfig.json",
+    "check": "npm run validate && npm run test && npm run typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

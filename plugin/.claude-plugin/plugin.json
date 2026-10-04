@@ -1,0 +1,84 @@
+{
+  "name": "backseat-driver",
+  "displayName": "Backseat Driver",
+  "version": "0.1.0",
+  "description": "A coding tutor that rides along while you write the code yourself. It watches your saves, comments in a side pane, reviews commits in depth, and never edits your files.",
+  "author": {
+    "name": "Adam Schaefers",
+    "url": "https://github.com/a-schaefers"
+  },
+  "repository": "https://github.com/a-schaefers/backseat-driver",
+  "keywords": ["tutor", "learning", "code-review", "mod"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "persona": {
+      "type": "string",
+      "title": "Tutor persona",
+      "description": "The tutor's teaching style, voice and emphasis. It never changes the ground rules.",
+      "options": ["none", "torvalds", "knuth", "primeagen", "eli5-tldr-kiss-terse"],
+      "default": "none"
+    },
+    "play_by_play": {
+      "type": "string",
+      "title": "Play-by-play",
+      "description": "Whether the running commentary looks at your changes by itself or only when you ask.",
+      "options": ["automatic", "on request"],
+      "default": "automatic"
+    },
+    "quiet_time": {
+      "type": "string",
+      "title": "Play-by-play quiet time",
+      "description": "How long the working tree must be still before the play-by-play looks.",
+      "options": ["5 seconds", "10 seconds", "20 seconds", "30 seconds", "60 seconds"],
+      "default": "10 seconds"
+    },
+    "minimum_gap": {
+      "type": "string",
+      "title": "Play-by-play minimum gap",
+      "description": "The shortest time between two play-by-play looks.",
+      "options": ["none", "30 seconds", "1 minute", "2 minutes", "5 minutes"],
+      "default": "1 minute"
+    },
+    "play_by_play_model": {
+      "type": "string",
+      "title": "Play-by-play model",
+      "description": "The model that writes the running commentary.",
+      "options": ["haiku", "sonnet", "opus", "fable"],
+      "default": "sonnet"
+    },
+    "play_by_play_thinking": {
+      "type": "string",
+      "title": "Play-by-play thinking level",
+      "description": "How hard the play-by-play model thinks about each look.",
+      "options": ["low", "medium", "high", "xhigh", "max"],
+      "default": "medium"
+    },
+    "deep_review_after_commit": {
+      "type": "boolean",
+      "title": "Deep review after each commit",
+      "description": "Review each commit in depth as soon as you make it.",
+      "default": true
+    },
+    "deep_review_every": {
+      "type": "string",
+      "title": "Deep review every",
+      "description": "Also run a deep review on a timer, covering everything since the previous one.",
+      "options": ["none", "5 minutes", "15 minutes", "30 minutes", "45 minutes", "60 minutes", "90 minutes", "180 minutes"],
+      "default": "none"
+    },
+    "deep_review_model": {
+      "type": "string",
+      "title": "Deep review model",
+      "description": "The model that writes deep reviews and gives second opinions.",
+      "options": ["haiku", "sonnet", "opus", "fable"],
+      "default": "opus"
+    },
+    "deep_review_thinking": {
+      "type": "string",
+      "title": "Deep review thinking level",
+      "description": "How hard the deep review model thinks.",
+      "options": ["low", "medium", "high", "xhigh", "max"],
+      "default": "high"
+    }
+  }
+}

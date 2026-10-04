@@ -1,0 +1,5 @@
+# Dev tooling only: TypeScript for type checking
+node_modules/
+
+# Written by Claude Code each time it loads the plugin from this folder
+plugin/.claude-plugin/types/

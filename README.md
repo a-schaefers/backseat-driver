@@ -6,7 +6,7 @@ Backseat Driver is a plugin for [Claude Code](https://claude.com/claude-code). S
 
 You learn by building whatever you want to build. The tutor sets no exercises and runs no quizzes. It chimes in from the background, and how often, how deeply and in what voice is yours to tune.
 
-> **Status: design stage.** Nothing is implemented yet. This README is the plan: what the project is for and how it will be built. The [roadmap](#roadmap) tracks what exists.
+> **Status: early build.** Only the scaffold exists: the plugin loads, and `/bsd` switches a mode on and off that does nothing yet. The rest of this README is the plan: what the project is for and how it will be built. The [roadmap](#roadmap) tracks what exists.
 
 ## Using it
 
@@ -64,7 +64,7 @@ The play-by-play and the deep review are not announcements to be read in silence
 
 ### Stop
 
-`/bsd pause` silences it without closing anything. `/bsd off` ends the ride, and Claude Code behaves normally again. Each new session starts with it off.
+`/bsd pause` silences it without closing anything. `/bsd off` ends the ride, and Claude Code behaves normally again. Each new session starts with it off. Clearing the conversation with `/clear` does not switch it off.
 
 Nothing needs configuring, but the models, thinking levels, pacing and the tutor's persona are all yours to change. See [Models and settings](#models-and-settings).
 
@@ -176,7 +176,7 @@ The watcher asks git what changed every couple of seconds, and stretches that in
 | First-run questions | `$.ui.ask`, the same question dialog Claude uses. |
 | Profiles | `$.store`, the key-value store Claude Code gives each plugin: one small JSON document per language. |
 | Play-by-play review | `$.model.complete` with the chosen model and thinking level: one request, no tools, no conversation history. |
-| Deep review | A read-only subagent defined in `plugin/agents/`, started with `$.agent.spawn` on the chosen model and thinking level. Its review goes to the pane, not into the conversation. |
+| Deep review | A read-only subagent that the mod registers with `$.agent.register` on the chosen model and thinking level, and starts with `$.agent.spawn`. Its review goes to the pane, not into the conversation. |
 | Second opinion on a contested point | The tutor hands the point to the same read-only subagent and reports its verdict in the conversation. |
 | "Stop warning me about that" | A tool the mod registers with `$.tool.register`. The tutor calls it when you state a preference, and the mod saves it to the profile and drops the matching notes. |
 | The pane | `$.ui.open` plus a `ui.render` hook, with Play-by-play, Deep review and Profile tabs. Their contents live in `$.state`, so the pane redraws when they change. Buttons on a note send a question into the conversation with `$.prompt.submit`. |
@@ -251,7 +251,7 @@ A persona changes how the tutor talks and what it dwells on. It never changes th
 
 ## Install
 
-Not yet. Once the scaffold milestone lands, this repository will double as its own plugin marketplace:
+Not yet: only the scaffold exists. This repository is its own plugin marketplace, so once the tutor is usable, installing it will be:
 
 ```bash
 claude plugin marketplace add a-schaefers/backseat-driver
@@ -262,7 +262,7 @@ Mods need Claude Code 2.1.287 or later. The design targets the mod API as of 2.1
 
 ## Repository layout
 
-Planned. Only `README.md` and `CLAUDE.md` exist so far.
+Entries marked "planned" do not exist yet.
 
 ```text
 backseat-driver/
@@ -270,35 +270,38 @@ backseat-driver/
 │   └── marketplace.json        lets this repository be added as a marketplace
 ├── plugin/                     the plugin itself: everything a user installs
 │   ├── .claude-plugin/
-│   │   └── plugin.json         manifest and user settings
+│   │   └── plugin.json         manifest and the settings shown in /config
 │   ├── skills/
-│   │   └── tutor/SKILL.md      the tutor contract
-│   ├── personas/               one style sheet per tutor persona
-│   ├── agents/
-│   │   └── deep-reviewer.md    read-only reviewer for deep reviews
+│   │   └── tutor/SKILL.md      the tutor contract (planned)
+│   ├── personas/               one style sheet per tutor persona (planned)
+│   ├── prompts/                instructions for the two reviewers (planned)
 │   ├── hooks/
 │   │   ├── hooks.json          points Claude Code at the mod
-│   │   └── register.tsx        the mod: switch, watcher, reviews, profiles, pane, guard
+│   │   ├── register.tsx        the mod: every effect the plugin has
+│   │   └── *.ts                pure logic that register.tsx calls
 │   ├── types/index.d.ts        types for the state the pane reads
 │   └── tests/                  run with `claude plugin test`
+├── scripts/dev-session.sh      start a real session with the working copy, in tmux
+├── package.json                dev tooling only: TypeScript for type checking
 ├── CLAUDE.md                   guidance for Claude Code when working on this repository
 └── README.md
 ```
 
-The development loop, once there is code:
+The development loop:
 
 ```bash
-claude plugin validate . --strict          # check the marketplace manifest
-claude plugin validate ./plugin --strict   # check the plugin, list what the mod hooks and calls
-claude plugin test ./plugin                # run the tests
-claude --plugin-dir /path/to/backseat-driver/plugin   # in another project: load this working copy
+npm install             # once: TypeScript, the only dev dependency
+npm run check           # validate both manifests, run the tests, type-check
+scripts/dev-session.sh  # try the working copy in a real session, inside tmux
 ```
 
-`--plugin-dir` loads the plugin for that session only and reloads the mod whenever one of its files is saved.
+`npm run check` runs `claude plugin validate`, which also lists every event the mod hooks and every call it makes, then `claude plugin test`, then `tsc`. The type check needs the API types that Claude Code writes into `plugin/.claude-plugin/types/` the first time it loads the plugin, so run `scripts/dev-session.sh` once before it.
+
+To use the working copy in a project of your own, start Claude Code there with `claude --plugin-dir /path/to/backseat-driver/plugin`. That loads the plugin for that session only and reloads the mod whenever one of its files is saved.
 
 ## Roadmap
 
-- [ ] **Scaffold.** Plugin manifest, marketplace entry, validation and a first test.
+- [x] **Scaffold.** Plugin manifest, marketplace entry, settings, the `/backseat-driver` and `/bsd` commands, validation, tests and type checking.
 - [ ] **Tutor mode.** The contract as a skill, the `/backseat-driver` and `/bsd` switch, the system-prompt override, the edit guard and the personas. Useful by itself as a conversational tutor.
 - [ ] **Play-by-play.** Watcher, gate, reviewer on the chosen model and thinking level, and the Play-by-play tab.
 - [ ] **Deep review.** Commit detection, the timer, the read-only reviewer with its own model and thinking level, and the Deep review tab.
