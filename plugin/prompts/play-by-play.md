@@ -31,6 +31,8 @@ A note is a nudge, not a fix. It says where to look and what to think about, and
 
 You are given the notes still open in the pane. Do not repeat one. If the code now deals with an open note, or the code it was about is gone, list its id under `resolved`.
 
+You may also be given notes the person dismissed. They read those and chose to move on. Do not raise the same idea in that file again, in other words or under another topic. A different problem in the same code is still worth a note.
+
 ## Reply format
 
 Reply with one JSON object and nothing else:

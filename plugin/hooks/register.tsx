@@ -19,7 +19,7 @@ import { DENIAL, isUsersFile } from './guard'
 import { languageOf, mainLanguages } from './languages'
 import { parseRequest, transition } from './mode'
 import { isNoiseFile } from './noise'
-import { applyReply, parseReply } from './notes'
+import { applyReply, parseReply, withDismissed } from './notes'
 import { renderPane, reviewSchedule } from './pane'
 import {
   emptyProfile,
@@ -71,6 +71,7 @@ const NO_PROFILES: Profiles = { languages: [], subjects: {} }
 const modeAtom = atom({ plugin: 'backseat-driver', key: 'mode' } as const, 'off')
 const tabAtom = atom({ plugin: 'backseat-driver', key: 'tab' } as const, 'play')
 const notesAtom = atom({ plugin: 'backseat-driver', key: 'notes' } as const, [])
+const dismissedAtom = atom({ plugin: 'backseat-driver', key: 'dismissed' } as const, [])
 const selectedAtom = atom({ plugin: 'backseat-driver', key: 'selected' } as const, null)
 const watchAtom = atom({ plugin: 'backseat-driver', key: 'watch' } as const, IDLE)
 const reviewAtom = atom({ plugin: 'backseat-driver', key: 'review' } as const, NO_REVIEW)
@@ -376,7 +377,7 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
       $,
       changes.map(change => languageOf(change.path)).filter(language => language !== null),
     )
-    const { prompt, shown } = playByPlayPrompt(changes, await read($, notesAtom))
+    const { prompt, shown } = playByPlayPrompt(changes, await read($, notesAtom), await read($, dismissedAtom))
     const result = await $.model.complete({
       model: settings.playByPlay.model,
       effort: settings.playByPlay.thinking,
@@ -409,11 +410,15 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
       const firstId = nextNoteId
       nextNoteId += reply.notes.length
       const paths = shown.map(change => change.path)
-      await update($, notesAtom, open => applyReply(open, reply, paths, firstId).notes)
+      // Read again: a note dismissed while this look ran must not come back with it.
+      const dismissed = await read($, dismissedAtom)
+      await update($, notesAtom, open => applyReply(open, reply, paths, firstId, dismissed).notes)
 
-      // Lesson memory: which ideas came up, by language.
+      // Lesson memory: which ideas reached the pane, by language. A repeat
+      // of a note that is already open is not a second time it came up.
+      const added = (await read($, notesAtom)).filter(note => note.id >= firstId)
       const raised = new Map<string, string[]>()
-      for (const note of reply.notes) {
+      for (const note of added) {
         const subject = languageOf(note.file) ?? GENERAL
         raised.set(subject, [...(raised.get(subject) ?? []), note.topic])
       }
@@ -689,6 +694,7 @@ async function switchTo($: EngineInterface, next: Mode, settings: Settings): Pro
   } else {
     stopWatching()
     await update($, notesAtom, () => [])
+    await update($, dismissedAtom, () => [])
     await update($, selectedAtom, () => null)
     await update($, reviewAtom, () => NO_REVIEW)
     profiles = NO_PROFILES
@@ -906,6 +912,8 @@ export const register: Register = (on, options) => {
       },
       onDismiss: (note: Note) => {
         void update($, notesAtom, open => open.filter(other => other.id !== note.id))
+        // Remembered, so that the next look does not bring the same point back.
+        void update($, dismissedAtom, dismissed => withDismissed(dismissed, note))
       },
       onLook: () => {
         if (mode === 'on') void look($, settings, true)

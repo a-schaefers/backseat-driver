@@ -16,7 +16,7 @@ Built, not yet lived with. Every milestone on the README's roadmap is done and w
 
 The README is the design spec: the user flow, what the tutor remembers, the ground rules, a table mapping each behavior to a Claude Code mechanism, the settings and their defaults, limits, the file layout and the roadmap. Read it before changing anything.
 
-The README also makes statements about the present (the Status note, "Not yet" under Install, "planned" marks in the layout tree, roadmap checkboxes). Update them in the same change that makes them false.
+The README also makes statements about the present: the Status note, what Install says has and has not been tried, the layout tree and the roadmap checkboxes. Update them in the same change that makes them false.
 
 ## What this repository is
 
@@ -125,7 +125,7 @@ Seen in a real session on Sonnet: asked to "add a median function" in a reposito
 
 Two kinds of background review, configured separately (README, "Models and settings"):
 
-- **Play-by-play**: one `$.model.complete` request with no tools and no history. Its notes go to the pane's Play-by-play tab.
+- **Play-by-play**: one `$.model.complete` request with no tools and no history. Its notes go to the pane's Play-by-play tab. It is given the open notes and the notes the user dismissed in the files it is shown, and `applyReply` drops a new note that makes the same point (same file and topic slug) as either. Dismissed notes live in `$.state` beside the open ones until the tutor is switched off. The lesson memory counts only notes that reached the pane, so a repeat the reviewer sends for an open note is not a second time the idea came up.
 - **Deep review**: a read-only subagent whose written review goes to the pane's Deep review tab. Two independent triggers: after each commit (on by default) and every N minutes (off by default). With both off it runs only on request. A commit-triggered review covers that commit. A timed review covers everything since the previous deep review, and is skipped when nothing has changed.
 
 The deep reviewer is registered by the mod with `$.agent.register({ model, effort, tools })`, not shipped as a file in `plugin/agents/`. A subagent the mod spawns skips the mod's own `turn.step` hooks, so a registered spec is the only way to give it the user's thinking level. Its instructions live in `plugin/prompts/deep-review.md`. It is registered when the tutor is switched on, and an `agent.offer` hook withholds it from the model while the tutor is off.
@@ -177,7 +177,7 @@ A subject is in play when it is one of the project's main languages (from `git l
 - A hush works twice over: the reviewers are told ("Do not bring up"), which catches the idea however it is worded, and a note whose topic slug matches a hush is dropped even if a reviewer sends one.
 - **Lesson memory** counts topics per language: `flagged` when the play-by-play raises one, `explained` when the user presses explain. Three or more flags make a recurring theme.
 
-Seen in real sessions: the four questions appeared with Python detected, and the answers landed in `~/.claude/plugins/store/backseat-driver_inline-<hash>.json`. Told "stop telling me to use built-ins instead of my own loops", the tutor called `hush` at once with no permission prompt. In a second project the questions were not asked, and code whose only possible note was that topic got none, while two real bugs beside it were flagged. A contested note went to the deep reviewer, whose verdict came back into the chat 32 seconds later.
+Seen in real sessions: the four questions appeared with Python detected, and the answers landed in `~/.claude/plugins/store/backseat-driver_inline-<hash>.json`. Told "stop telling me to use built-ins instead of my own loops", the tutor called `hush` at once with no permission prompt. In a second project the questions were not asked, and code whose only possible note was that topic got none, while two real bugs beside it were flagged. A contested note went to the deep reviewer, whose verdict came back into the chat 32 seconds later. Esc on the first question skipped all of them and left the tutor running. A note dismissed with `d` stayed away at the next look, while a new bug in the same file got its own note.
 
 The store file is per install: the `_inline` in its name is the marketplace part of the plugin's id under `--plugin-dir`. A marketplace install gets a different file. Live checks write real profiles into that file, so delete it afterwards.
 

@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Note } from '../types'
 import { diffLines } from '../hooks/diff'
-import { applyReply, listNotes, MAX_OPEN_NOTES, parseReply, sortNotes } from '../hooks/notes'
+import { applyReply, listNotes, MAX_DISMISSED, MAX_OPEN_NOTES, parseReply, sortNotes, withDismissed } from '../hooks/notes'
 import { excerpt, notesContext, playByPlayPrompt, reviewerSystem } from '../hooks/prompts'
 
 const note = (id: number, overrides: Partial<Note> = {}): Note => ({
@@ -153,4 +153,38 @@ test('playByPlayPrompt leaves out files that do not fit, but never the first', a
 test('reviewerSystem puts the persona after the instructions and what is known about the person', async () => {
   expect(reviewerSystem('INSTRUCTIONS', ['PROFILE', ''], 'PERSONA')).toBe('INSTRUCTIONS\n\nPROFILE\n\nPERSONA')
   expect(reviewerSystem('INSTRUCTIONS', [], '')).toBe('INSTRUCTIONS')
+})
+
+test('applyReply does not bring back a point the person dismissed in that file', async () => {
+  const dismissed = [note(1, { topic: 'empty-input' })]
+  const reply = {
+    resolved: [],
+    notes: [
+      { file: 'a.py', line: 9, kind: 'bug' as const, topic: 'empty-input', text: 'the dismissed point again' },
+      { file: 'b.py', line: 2, kind: 'bug' as const, topic: 'empty-input', text: 'the same idea in another file' },
+      { file: 'a.py', line: 4, kind: 'risk' as const, topic: 'shadowed-name', text: 'a different point' },
+    ],
+  }
+  const { notes } = applyReply([], reply, ['a.py', 'b.py'], 2, dismissed)
+
+  expect(notes.map(open => `${open.file}:${open.topic}`)).toEqual(['b.py:empty-input', 'a.py:shadowed-name'])
+})
+
+test('withDismissed keeps one entry per point and forgets the oldest', async () => {
+  const once = withDismissed([note(1)], note(7, { topic: 'topic-1', text: 'later wording' }))
+  expect(once).toEqual([note(7, { topic: 'topic-1', text: 'later wording' })])
+
+  const many = Array.from({ length: MAX_DISMISSED + 5 }, (_, i) => note(i + 1)).reduce(withDismissed, [] as Note[])
+  expect(many.length).toBe(MAX_DISMISSED)
+  expect(many[0]?.id).toBe(6)
+})
+
+test('playByPlayPrompt tells the reviewer what was dismissed in the files it is shown', async () => {
+  const change = { path: 'a.py', before: '', after: 'x = 1\n', hunks: diffLines('', 'x = 1\n') }
+  const dismissed = [note(1, { text: 'seen and waved off' }), note(2, { file: 'other.py', text: 'not in this look' })]
+  const { prompt } = playByPlayPrompt([change], [], dismissed)
+
+  expect(prompt).toMatch('Notes they dismissed. Do not raise these again:\n- a.py (topic-1) seen and waved off\n')
+  expect(prompt.includes('not in this look')).toBe(false)
+  expect(playByPlayPrompt([change], [], []).prompt.includes('dismissed')).toBe(false)
 })

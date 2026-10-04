@@ -343,3 +343,20 @@ test('while the tutor is off, its tools change nothing', async ($, on) => {
   expect(answer).toEqual({ result: 'Backseat Driver is off, so nothing was recorded.' })
   expect(session.store.get(subjectKey('python'))).toBeUndefined()
 })
+
+test('a note the reviewer repeats while it is still open is counted once in the lesson memory', { timeoutMs: 20_000 }, async ($, on) => {
+  const session = stubSession(on, { head: { 'stats.py': MEAN } })
+  const sameNote = { resolved: [], notes: [{ file: 'stats.py', line: 2, kind: 'bug', topic: 'empty-input', note: 'Empty list?' }] }
+  session.reply(sameNote)
+  session.reply(sameNote)
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+
+  session.write('stats.py', `${MEAN}# more\n`)
+  await session.clock.advance(14_000)
+  session.write('stats.py', `${MEAN}# more\n# and more\n`)
+  await session.clock.advance(80_000)
+
+  expect(session.requests.length).toBe(2)
+  expect(parseProfile(session.store.get(subjectKey('python'))).topics).toEqual({ 'empty-input': { flagged: 1, explained: 0 } })
+})

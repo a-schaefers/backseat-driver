@@ -29,6 +29,7 @@ A language you only touch later, such as the one shell script in a Python projec
 
 - **You write code in your own editor.** Each time you save and then pause for a few seconds, a fast model reads what changed. If something deserves a comment, a note appears in the pane: a bug, a risky pattern, a more idiomatic way to say it in this language, or a standard-library or tooling feature that would have done the job. This running commentary is the play-by-play, and it is what the pane shows by default.
 - **Notes are nudges, not patches.** A note says where to look and what to think about. You can ask for the concept behind it, and then for a small example. Typing the fix stays your job.
+- **A note leaves when you deal with it.** Fix the code and the note clears itself at the next look. Press `d` to dismiss one you have read: it goes, and the same point is not raised about that file again until you switch the tutor off. To silence a whole topic for good, press `m` or say so (see [Talk back](#talk-back)).
 - **Commits get a deeper review.** After each commit, a stronger model reads the whole commit together with the code around it and writes a longer review in the pane's Deep review tab. It can also run on a timer, or only when you ask.
 
 ```text
@@ -265,8 +266,6 @@ Mods need Claude Code 2.1.287 or later. The design targets the mod API as of 2.1
 
 ## Repository layout
 
-Entries marked "planned" do not exist yet.
-
 ```text
 backseat-driver/
 ├── .claude-plugin/
@@ -310,7 +309,7 @@ To use the working copy in a project of your own, start Claude Code there with `
 - [x] **Deep review.** Commit detection, the timer, the read-only reviewer with its own model and thinking level, and the Deep review tab with review now.
 - [x] **Profiles.** Language detection, the first-run questions, one profile per language shared across projects, hushing in chat or by key, lesson memory and the Profile tab.
 - [x] **Follow-through.** Explain and dismiss on each note, notes and reviews shared with the conversation, second opinions on contested points.
-- [x] **Tuning.** Holding back near plan limits, telling the reviewers which language each file is in, and feeding the lesson memory into every prompt so that an idea already explained is referred back to.
+- [x] **Tuning.** Holding back near plan limits, keeping a dismissed note from coming back, telling the reviewers which language each file is in, and feeding the lesson memory into every prompt so that an idea already explained is referred back to.
 
 ## Related
 

@@ -301,3 +301,34 @@ test('the reviewer is told which language each file is in', async ($, on) => {
   expect(session.requests[0]?.prompt).toMatch('=== stats.py (Python) ===')
   expect(session.requests[0]?.prompt).toMatch('=== notes.txt ===')
 })
+
+test('a dismissed note does not come back on the next save', { timeoutMs: 20_000 }, async ($, on) => {
+  const session = stubSession(on)
+  session.reply(EMPTY_LIST)
+  // The reviewer raises the same point again, and one new one.
+  session.reply({
+    resolved: [],
+    notes: [
+      ...EMPTY_LIST.notes,
+      { file: 'stats.py', line: 5, kind: 'idiom', topic: 'builtin-sum', note: 'There is a built-in for this.' },
+    ],
+  })
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+  session.write('stats.py', MEAN)
+  await session.clock.advance(14_000)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'dismiss' })
+  expect(await ui.find({ type: 'Text', text: 'No notes. Keep going.' })).toBeDefined()
+
+  session.write('stats.py', `${MEAN}\ndef total(xs):\n    return 0\n`)
+  await session.clock.advance(80_000)
+  expect(session.requests.length).toBe(2)
+  // The reviewer was told, and the pane holds the line even though it repeated itself.
+  expect(session.requests[1]?.prompt).toMatch('Notes they dismissed. Do not raise these again:')
+  expect(session.requests[1]?.prompt).toMatch('- stats.py (empty-input) What does this do for an empty list?')
+  expect(await ui.find({ type: 'Text', text: 'There is a built-in for this.' })).toBeDefined()
+  expect((await ui.findAll({ type: 'Text', text: 'What does this do for an empty list?' })).length).toBe(0)
+  await ui.unmount()
+})

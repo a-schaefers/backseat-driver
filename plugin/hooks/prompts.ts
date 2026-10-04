@@ -2,7 +2,7 @@ import type { Note, Review } from '../types'
 import { formatHunks, splitLines } from './diff'
 import type { Hunk } from './diff'
 import { languageName, languageOf } from './languages'
-import { listNotes } from './notes'
+import { listDismissed, listNotes } from './notes'
 
 /** One file's change since the previous look. */
 export type FileChange = {
@@ -67,11 +67,15 @@ function fileSection(change: FileChange): string {
 export function playByPlayPrompt<Change extends FileChange>(
   changes: readonly Change[],
   open: readonly Note[],
+  dismissed: readonly Note[] = [],
 ): { prompt: string; shown: Change[] } {
+  // Only what was dismissed in the files of this look: the rest cannot come up.
+  const gone = dismissed.filter(note => changes.some(change => change.path === note.file))
   const head = [
     'Notes still open in the pane:',
     open.length === 0 ? '(none)' : listNotes(open),
     '',
+    ...(gone.length === 0 ? [] : ['Notes they dismissed. Do not raise these again:', listDismissed(gone), '']),
     'Changes since your last look:',
   ].join('\n')
 

@@ -12,6 +12,8 @@ const KINDS: readonly NoteKind[] = ['bug', 'risk', 'idiom', 'tip']
 export const MAX_OPEN_NOTES = 8
 /** One look adds at most this many. */
 export const MAX_NEW_NOTES = 3
+/** How many dismissed notes are remembered. Past that, the oldest are forgotten. */
+export const MAX_DISMISSED = 30
 const MAX_NOTE_CHARS = 600
 
 function slug(text: string): string {
@@ -79,22 +81,34 @@ export function sortNotes(notes: readonly Note[]): Note[] {
   )
 }
 
+function isSamePoint(a: Pick<Note, 'file' | 'topic'>, b: Pick<Note, 'file' | 'topic'>): boolean {
+  return a.file === b.file && a.topic === b.topic
+}
+
+/** The dismissed notes with one more. The same point about the same file is kept once. */
+export function withDismissed(dismissed: readonly Note[], note: Note): Note[] {
+  return [...dismissed.filter(other => !isSamePoint(other, note)), note].slice(-MAX_DISMISSED)
+}
+
 /**
  * The open notes after a look: resolved ones gone, new ones numbered and
- * added. A new note is skipped when its file was not part of the look or an
- * open note already makes the same point about the same file.
+ * added. A new note is skipped when its file was not part of the look, when
+ * an open note already makes the same point about the same file, or when the
+ * person dismissed that point about that file.
  */
 export function applyReply(
   open: readonly Note[],
   reply: ReviewReply,
   lookedAt: readonly string[],
   nextId: number,
+  dismissed: readonly Note[] = [],
 ): { notes: Note[]; nextId: number } {
   const notes = open.filter(note => !reply.resolved.includes(note.id))
   let id = nextId
   for (const added of reply.notes) {
     if (!lookedAt.includes(added.file)) continue
-    if (notes.some(note => note.file === added.file && note.topic === added.topic)) continue
+    if (notes.some(note => isSamePoint(note, added))) continue
+    if (dismissed.some(note => isSamePoint(note, added))) continue
     notes.push({ ...added, id })
     id += 1
   }
@@ -103,6 +117,11 @@ export function applyReply(
   const kept = sortNotes(notes).slice(0, MAX_OPEN_NOTES)
 
   return { notes: kept, nextId: id }
+}
+
+/** The dismissed notes as the reviewer reads them. No line numbers: the code has moved on since. */
+export function listDismissed(notes: readonly Note[]): string {
+  return notes.map(note => `- ${note.file} (${note.topic}) ${note.text}`).join('\n')
 }
 
 /** The open notes as the conversation and the reviewer read them. */

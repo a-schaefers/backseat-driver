@@ -88,6 +88,8 @@ declare module 'claude-code' {
       mode: Mode
       tab: Tab
       notes: Note[]
+      /** Notes dismissed since the tutor was switched on. The same idea is not raised again in that file. */
+      dismissed: Note[]
       /** The id of the note the pane's keys act on, or null for the first one. */
       selected: number | null
       watch: Watch
