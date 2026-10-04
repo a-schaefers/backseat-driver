@@ -27,6 +27,32 @@ export function shouldLook(input: GateInput): boolean {
   return input.now - input.lastLookAt >= input.minGapMs + input.backoffMs
 }
 
+/** How much of the tightest usage window is spent, 0 to 100. 0 when Claude Code reports none. */
+export function usagePressure(limits: readonly { percentUsed: number }[]): number {
+  return limits.reduce((highest, limit) => Math.max(highest, limit.percentUsed), 0)
+}
+
+/** How the background work holds back as a plan's usage limit gets close. */
+export type Throttle = {
+  /** The minimum gap between looks is multiplied by this. */
+  gapFactor: number
+  /** True when nothing runs unless the user asks for it. */
+  isHeld: boolean
+}
+
+/** From 80% of a usage window, looks are spaced four times further apart. From 95%, they wait to be asked for. */
+export function throttle(pressure: number): Throttle {
+  if (pressure >= 95) return { gapFactor: 1, isHeld: true }
+  if (pressure >= 80) return { gapFactor: 4, isHeld: false }
+
+  return { gapFactor: 1, isHeld: false }
+}
+
+/** The minimum gap while slowed down: the setting stretched, and never under four minutes. */
+export function slowedGapMs(minGapMs: number, gapFactor: number): number {
+  return gapFactor === 1 ? minGapMs : Math.max(minGapMs, 60_000) * gapFactor
+}
+
 /** How long failed looks hold the next one back: 30 seconds, doubling, up to 10 minutes. */
 export function backoffMs(failures: number): number {
   if (failures <= 0) return 0

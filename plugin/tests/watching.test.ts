@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { backoffMs, shouldLook } from '../hooks/gate'
+import { backoffMs, shouldLook, slowedGapMs, throttle, usagePressure } from '../hooks/gate'
 import { dirtyPaths, parseStatus } from '../hooks/git'
 import { isNoiseFile, isTrivialChange, looksBinary } from '../hooks/noise'
 import { createWatcher } from '../hooks/watcher'
@@ -220,4 +220,17 @@ test('outside a git repository the watcher does not start', async () => {
 
   expect(await watcher.start()).toBe(false)
   expect(await watcher.poll()).toBe(false)
+})
+
+test('usagePressure is the tightest window, and throttle holds back from 80% and stops at 95%', async () => {
+  expect(usagePressure([])).toBe(0)
+  expect(usagePressure([{ percentUsed: 12 }, { percentUsed: 81.5 }])).toBe(81.5)
+  expect(throttle(50)).toEqual({ gapFactor: 1, isHeld: false })
+  expect(throttle(80)).toEqual({ gapFactor: 4, isHeld: false })
+  expect(throttle(95)).toEqual({ gapFactor: 1, isHeld: true })
+  expect(slowedGapMs(60_000, 1)).toBe(60_000)
+  expect(slowedGapMs(60_000, 4)).toBe(240_000)
+  // "None" as the minimum gap still means four minutes while slowed down.
+  expect(slowedGapMs(0, 4)).toBe(240_000)
+  expect(slowedGapMs(300_000, 4)).toBe(1_200_000)
 })

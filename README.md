@@ -6,7 +6,7 @@ Backseat Driver is a plugin for [Claude Code](https://claude.com/claude-code). S
 
 You learn by building whatever you want to build. The tutor sets no exercises and runs no quizzes. It chimes in from the background, and how often, how deeply and in what voice is yours to tune.
 
-> **Status: working, not yet tuned.** Everything described here is built and has been tried in real sessions, except the items under Tuning in the [roadmap](#roadmap): the play-by-play does not yet slow down near your plan's limits. So far it has only been exercised in scripted test sessions, on Claude Code 2.1.289. Nobody has done real work with it yet, and installing it from the marketplace has not been tried.
+> **Status: built, not yet lived with.** Everything described here is built, and the [roadmap](#roadmap) is complete. Each part was tried in a real session on Claude Code 2.1.289, but only in short scripted ones. Nobody has done real work with it yet, so expect the prompts and defaults to need adjusting. The slow-down near plan limits is covered by tests only, and installing from the marketplace has not been tried.
 
 ## Using it
 
@@ -156,7 +156,9 @@ Saving a file does not call a model. The watcher only notices that something cha
 - Something real changed since the previous look. An edit that only touches blank lines, trailing whitespace or line endings doesn't count, and neither do files that git ignores, binary files, generated files or lock files.
 - No other look is still running.
 
-A look covers the net change since the previous look, however many saves that took. Work that was already uncommitted when you switched the tutor on is the starting point, not something to review. After a look fails, for instance on a rate limit, the next one waits longer. Looks will also slow down by themselves as you approach your plan's usage limits.
+A look covers the net change since the previous look, however many saves that took. Work that was already uncommitted when you switched the tutor on is the starting point, not something to review. After a look fails, for instance on a rate limit, the next one waits longer.
+
+The background work also holds back as your plan's usage runs out. Once any usage window of your plan is 80% spent, looks are spaced four times further apart. From 95%, the play-by-play and the automatic deep reviews stop, the pane says so, and both still run when you ask from the pane.
 
 ### Why the watcher polls
 
@@ -243,7 +245,7 @@ A persona changes how the tutor talks and what it dwells on. It never changes th
 
 - **It sees saves, not keystrokes.** The plugin reads files on disk, not your editor's unsaved buffer. With autosave on, that is close to live.
 - **It needs git.** Changes are found by diffing the working tree, and files that git ignores are never sent.
-- **It spends usage in the background.** Every play-by-play look and every deep review is a model call on your plan. The play-by-play waits for a pause, sends only the change and its surroundings, runs one look at a time, and can be paused. A deep review costs more, because it runs a stronger model at a higher thinking level, so how often it runs is yours to set.
+- **It spends usage in the background.** Every play-by-play look and every deep review is a model call on your plan. The play-by-play waits for a pause, sends only the change and its surroundings, runs one look at a time, slows down as your plan's usage runs out, and can be paused. A deep review costs more, because it runs a stronger model at a higher thinking level, so how often it runs is yours to set.
 - **Mods are new.** The mod API is early access and can change between Claude Code releases. Panes are drawn by the terminal CLI and by the Code tab of the desktop app. The VS Code extension's chat panel runs mods but does not draw them, so use `claude` in the editor's integrated terminal there.
 - **A mod is code that runs with your permissions.** This one is meant to stay small and auditable: it runs `git`, reads files inside the repository and its own plugin folder, calls models, keeps your profiles in its own store and draws a pane. It makes no network requests of its own, installs no git hooks and never writes to your working tree. `claude plugin validate` lists every event a mod hooks and every call it makes, so you can check that before installing.
 - **The edit guard covers the editing tools.** A shell command can still write a file, so that part rests on the contract and on Claude Code's normal permission prompts.
@@ -308,7 +310,7 @@ To use the working copy in a project of your own, start Claude Code there with `
 - [x] **Deep review.** Commit detection, the timer, the read-only reviewer with its own model and thinking level, and the Deep review tab with review now.
 - [x] **Profiles.** Language detection, the first-run questions, one profile per language shared across projects, hushing in chat or by key, lesson memory and the Profile tab.
 - [x] **Follow-through.** Explain and dismiss on each note, notes and reviews shared with the conversation, second opinions on contested points.
-- [ ] **Tuning.** Fewer repeated notes, usage back-off and per-language guidance.
+- [x] **Tuning.** Holding back near plan limits, telling the reviewers which language each file is in, and feeding the lesson memory into every prompt so that an idea already explained is referred back to.
 
 ## Related
 

@@ -12,7 +12,7 @@ These are standing instructions from the repository's owner. Follow them without
 
 ## Status
 
-Working, not yet tuned. Every milestone on the README's roadmap is built and was checked in a real session, except Tuning: slowing down near plan limits, suppressing repeats beyond what the hush and the reviewer's own judgment do, and per-language guidance in the reviewer prompts. Installing from the marketplace has not been tried. The README's roadmap lists the milestones in build order and which are done. The approved build plan is in `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine.
+Built, not yet lived with. Every milestone on the README's roadmap is done and was checked in a short real session, with two exceptions: the slow-down near plan limits is covered by tests only, because a real session cannot be put at 95% of its plan on demand, and installing from the marketplace has not been tried. Nobody has done real work with the tutor yet, so the prompts in `plugin/prompts/` and `plugin/skills/tutor/SKILL.md` are the part most likely to need changing. The README's roadmap lists the milestones in build order and which are done. The approved build plan is in `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine.
 
 The README is the design spec: the user flow, what the tutor remembers, the ground rules, a table mapping each behavior to a Claude Code mechanism, the settings and their defaults, limits, the file layout and the roadmap. Read it before changing anything.
 
@@ -156,6 +156,7 @@ How it is built:
 
 Seen in a real session with the defaults: a file saved with a planted bug got its note 14 seconds later, nothing appeared in the conversation, `e` in the focused pane sent the explain request, and saving the fix cleared the note at the next look. The first live note bundled three problems into five lines, which is why `prompts/play-by-play.md` now says one idea per note and under 40 words.
 
+- Near the plan's usage limit the background work holds back. `tick` reads `$.session.usage().rateLimits` (a free call) at most twice a minute, and only when something is pending. From 80% of the tightest window the minimum gap is four times longer and at least four minutes. From 95% no look or automatic deep review starts, the pane says "Holding back", and "look now" and "review now" still work.
 - Polling is deliberate. Claude Code's `FileChanged` hook watches named files (a matcher of literal filenames, or `watchPaths` set at session start), not a working tree, and native watchers (inotify-tools, fswatch, Watchman) are extra installs. None of them is on the owner's machine. Anthropic's own `diff` mod polls `HEAD` the same way.
 - The poll interval is not a setting. Start around 2 s and stretch it when `git status` is slow.
 - Run every background git command as `git --no-optional-locks ...`. A plain `git status` refreshes the index under a lock and can make the user's own git commands fail.

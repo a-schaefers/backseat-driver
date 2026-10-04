@@ -22,7 +22,8 @@ export type Note = {
 
 /** What the watcher is doing, for the pane's status line. */
 export type Watch = {
-  state: 'idle' | 'looking' | 'no-git' | 'failed'
+  /** `held`: nothing looks by itself, because a usage limit of the plan is nearly spent. */
+  state: 'idle' | 'looking' | 'no-git' | 'failed' | 'held'
   /** When the last look finished, in clock milliseconds; null before the first one. */
   lastLookAt: number | null
   /** Why the last look failed, or what it found, in a few words. */

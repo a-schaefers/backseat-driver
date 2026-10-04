@@ -30,7 +30,7 @@ test('a save becomes a note only after the tree has been quiet', async ($, on) =
   expect(request?.model).toBe('sonnet')
   expect(request?.effort).toBe('medium')
   expect(request?.system).toBe('PLAY-BY-PLAY INSTRUCTIONS')
-  expect(request?.prompt).toMatch('=== stats.py ===')
+  expect(request?.prompt).toMatch('=== stats.py (Python) ===')
   expect(request?.prompt).toMatch('+def mean(xs):')
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -238,4 +238,66 @@ test('switching the tutor off stops the watcher and clears the notes', async ($,
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: 'No notes. Keep going.' })).toBeDefined()
   await ui.unmount()
+})
+
+test('close to the plan limit, looks are spaced further apart', async ($, on) => {
+  const session = stubSession(on)
+  session.limits.push({ kind: 'five_hour', percentUsed: 85 })
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+
+  session.write('stats.py', MEAN)
+  await session.clock.advance(14_000)
+  expect(session.requests.length).toBe(1)
+
+  session.write('stats.py', `${MEAN}# more\n`)
+  // The setting says one minute. At 85% of the window it is four.
+  await session.clock.advance(120_000)
+  expect(session.requests.length).toBe(1)
+  await session.clock.advance(130_000)
+  expect(session.requests.length).toBe(2)
+})
+
+test('at the plan limit, the play-by-play waits to be asked', { timeoutMs: 20_000 }, async ($, on) => {
+  const session = stubSession(on)
+  session.limits.push({ kind: 'five_hour', percentUsed: 40 }, { kind: 'seven_day', percentUsed: 97 })
+  session.reply(EMPTY_LIST)
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+
+  session.write('stats.py', MEAN)
+  await session.clock.advance(120_000)
+  expect(session.requests.length).toBe(0)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: 'Holding back, because you are close to your plan limit.' })).toBeDefined()
+  // Asked for by hand, it still looks.
+  await ui.press({ key: 'look' })
+  expect(session.requests.length).toBe(1)
+  expect(await ui.find({ type: 'Text', text: 'What does this do for an empty list?' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('"look now" with nothing new says so', async ($, on) => {
+  const session = stubSession(on)
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'look' })
+  expect(session.toasts).toEqual(['Nothing has changed since the last look.'])
+  expect(session.requests.length).toBe(0)
+  await ui.unmount()
+})
+
+test('the reviewer is told which language each file is in', async ($, on) => {
+  const session = stubSession(on)
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+  session.write('stats.py', MEAN)
+  session.write('notes.txt', 'plain text\n')
+  await session.clock.advance(14_000)
+
+  expect(session.requests[0]?.prompt).toMatch('=== stats.py (Python) ===')
+  expect(session.requests[0]?.prompt).toMatch('=== notes.txt ===')
 })

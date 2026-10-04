@@ -12,7 +12,8 @@ import type { EngineInterface, ModelCompleteResult, Register, Timer } from 'clau
 
 import type { Hush, Mode, Note, Profile, Profiles, Review, Tab, Watch } from '../types'
 import { reframeInstructions, SESSION_NOTES, stripFrontmatter, tutorSections } from './contract'
-import { backoffMs, shouldLook } from './gate'
+import { backoffMs, shouldLook, slowedGapMs, throttle, usagePressure } from './gate'
+import type { Throttle } from './gate'
 import { parseStatus } from './git'
 import { DENIAL, isUsersFile } from './guard'
 import { languageOf, mainLanguages } from './languages'
@@ -108,6 +109,11 @@ let failures = 0
 let profiles: Profiles = NO_PROFILES
 /** The model's tools are registered the first time the tutor is switched on, and only then. */
 let areToolsRegistered = false
+
+/** How close the plan's usage limit is, read at most twice a minute. */
+let slowdown: Throttle = { gapFactor: 1, isHeld: false }
+let slowdownReadAt = 0
+const USAGE_READ_MS = 30_000
 
 /** The deep review's working state. */
 let repoRoot = ''
@@ -334,8 +340,25 @@ function describeFailure(result: Exclude<ModelCompleteResult, { isAnswered: true
   return result.reason === 'aborted' ? 'timed out' : 'empty reply'
 }
 
-/** One look: the pending changes go to the play-by-play model, and its reply becomes notes. */
-async function look($: EngineInterface, settings: Settings): Promise<void> {
+/** Reads how much of the plan's usage is spent. The call is free, and its answer is kept for half a minute. */
+async function readSlowdown($: EngineInterface, now: number): Promise<Throttle> {
+  if (slowdownReadAt !== 0 && now - slowdownReadAt < USAGE_READ_MS) return slowdown
+  slowdownReadAt = now
+  try {
+    slowdown = throttle(usagePressure((await $.session.usage()).rateLimits))
+  } catch {
+    // No reading is no reason to hold back.
+    slowdown = { gapFactor: 1, isHeld: false }
+  }
+
+  return slowdown
+}
+
+/**
+ * One look: the pending changes go to the play-by-play model, and its reply
+ * becomes notes. `isAsked` is true when the user pressed "look now".
+ */
+async function look($: EngineInterface, settings: Settings, isAsked: boolean): Promise<void> {
   const active = watcher
   if (isLooking || active === null) return
   isLooking = true
@@ -343,6 +366,7 @@ async function look($: EngineInterface, settings: Settings): Promise<void> {
     const changes = await active.collect()
     if (changes.length === 0) {
       active.settle([])
+      if (isAsked) $.ui.toast('Nothing has changed since the last look.')
 
       return
     }
@@ -466,6 +490,8 @@ async function reviewCommit($: EngineInterface, entry: ReflogEntry): Promise<voi
  */
 async function reviewSince($: EngineInterface, isAsked: boolean): Promise<void> {
   if (mode === 'off' || (mode === 'paused' && !isAsked)) return
+  // The timer holds back near the plan limit. A review asked for by hand does not.
+  if (!isAsked && (await readSlowdown($, await $.clock.now())).isHeld) return
   if (reviewAgentId !== null) {
     if (isAsked) $.ui.toast('A deep review is already running.')
 
@@ -509,7 +535,18 @@ async function checkHead($: EngineInterface, settings: Settings): Promise<void> 
 
     return
   }
-  if (settings.deepReview.isAfterCommit) await reviewCommit($, entry)
+  if (!settings.deepReview.isAfterCommit) return
+  if ((await readSlowdown($, await $.clock.now())).isHeld) {
+    await setReview($, {
+      state: 'failed',
+      subject: `commit ${entry.hash.slice(0, 7)}: ${commitTitle(entry)}`,
+      text: 'you are close to your plan limit. Press r to run it anyway.',
+      isUnseen: false,
+    })
+
+    return
+  }
+  await reviewCommit($, entry)
 }
 
 /** One poll of the working tree. A poll never calls a model: it only decides whether a look is due. */
@@ -530,17 +567,24 @@ async function tick($: EngineInterface, settings: Settings): Promise<void> {
     ticksToSkip = Math.min(MAX_SKIPPED_TICKS, Math.floor((now - started) / SLOW_POLL_MS))
     if (hasChanged) lastChangeAt = now
 
+    const hasPendingChange = active.hasPending()
+    // Usage is only looked up when there is something to look at.
+    const held = hasPendingChange ? await readSlowdown($, now) : slowdown
     const isDue = shouldLook({
       now,
       lastChangeAt,
       lastLookAt,
-      hasPendingChange: active.hasPending(),
+      hasPendingChange,
       isLookRunning: isLooking,
       quietMs: settings.playByPlay.quietMs,
-      minGapMs: settings.playByPlay.minGapMs,
+      minGapMs: slowedGapMs(settings.playByPlay.minGapMs, held.gapFactor),
       backoffMs: backoffMs(failures),
     })
-    if (settings.playByPlay.isAutomatic && isDue) void look($, settings)
+    if (settings.playByPlay.isAutomatic && isDue) {
+      if (!held.isHeld) void look($, settings, false)
+      // Said once, not on every tick that a look stays due.
+      else if ((await read($, watchAtom)).state !== 'held') await setWatch($, { state: 'held' })
+    }
     await checkHead($, settings)
   } catch (error) {
     $.ui.log(`poll failed: ${String(error)}`, { to: 'debug' })
@@ -568,6 +612,8 @@ async function startWatching($: EngineInterface, settings: Settings): Promise<vo
   lastLookAt = null
   failures = 0
   ticksToSkip = 0
+  slowdown = { gapFactor: 1, isHeld: false }
+  slowdownReadAt = 0
 
   const top = await git($, undefined, ['rev-parse', '--show-toplevel'])
   const root = top.stdout.trim()
@@ -862,7 +908,7 @@ export const register: Register = (on, options) => {
         void update($, notesAtom, open => open.filter(other => other.id !== note.id))
       },
       onLook: () => {
-        if (mode === 'on') void look($, settings)
+        if (mode === 'on') void look($, settings, true)
       },
       onReview: () => {
         void reviewSince($, true)

@@ -1,6 +1,7 @@
 import type { Note, Review } from '../types'
 import { formatHunks, splitLines } from './diff'
 import type { Hunk } from './diff'
+import { languageName, languageOf } from './languages'
 import { listNotes } from './notes'
 
 /** One file's change since the previous look. */
@@ -47,8 +48,10 @@ export function excerpt(after: string, hunks: readonly Hunk[]): string {
 }
 
 function fileSection(change: FileChange): string {
+  const language = languageOf(change.path)
+
   return [
-    `=== ${change.path} ===`,
+    `=== ${change.path}${language === null ? '' : ` (${languageName(language)})`} ===`,
     'What changed since your last look:',
     formatHunks(change.hunks),
     '',

@@ -55,6 +55,8 @@ function watching(view: PaneView): string {
       return 'On. Looking at your changes.'
     case 'failed':
       return `On. The last look failed (${view.watch.detail}). It will try again.`
+    case 'held':
+      return 'On. Holding back, because you are close to your plan limit. It still looks when you ask.'
     case 'idle':
       return view.isAutomatic ? 'On. Watching for your next save.' : 'On. Looking only when you ask.'
   }

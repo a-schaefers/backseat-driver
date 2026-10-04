@@ -129,7 +129,7 @@ test('playByPlayPrompt lists open notes, the diff and the numbered file', async 
 
   expect(shown).toEqual([change])
   expect(prompt).toMatch('1. [risk] a.py:1')
-  expect(prompt).toMatch('=== a.py ===')
+  expect(prompt).toMatch('=== a.py (Python) ===')
   expect(prompt).toMatch('+y = 2')
   expect(prompt).toMatch('2 | y = 2')
   expect(playByPlayPrompt([change], []).prompt).toMatch('(none)')

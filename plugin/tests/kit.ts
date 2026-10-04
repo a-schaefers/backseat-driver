@@ -125,6 +125,8 @@ export function stubSession(on: On, options: StubOptions = {}) {
     toasts: [] as string[],
     /** The plugin's store, which outlives the session. */
     store: new Map<string, unknown>(Object.entries(options.store ?? {})),
+    /** The plan's usage windows as Claude Code reports them. Empty means no reading. */
+    limits: [] as { kind: string; percentUsed: number }[],
     /** Every key the plugin read from its store, in order. */
     storeReads: [] as string[],
     /** Tools the plugin registered for the model. */
@@ -320,6 +322,13 @@ export function stubSession(on: On, options: StubOptions = {}) {
       { name: 'claudeMd', text: STOCK_CLAUDE_MD },
       { name: 'currentDate', text: "Today's date is 2026-10-04." },
     ],
+  }))
+  on('session.usage', () => ({
+    value: {
+      startedAt: 0,
+      context: { tokens: 0, window: 200_000, percent: 0 },
+      rateLimits: session.limits,
+    } as never,
   }))
   on('store.get', ($, e) => {
     session.storeReads.push(e.key)

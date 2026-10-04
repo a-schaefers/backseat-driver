@@ -264,3 +264,24 @@ test('the reviewer is offered to the model only while the tutor is on', async ($
   await $.command.run(typed('bsd'))
   expect(await $.agent.offer(offer)).toEqual({ isOffered: true })
 })
+
+test('at the plan limit, a commit is not reviewed until the user asks', async ($, on) => {
+  const session = stubSession(on)
+  session.limits.push({ kind: 'five_hour', percentUsed: 96 })
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+
+  session.write('stats.py', MEAN)
+  session.commit('Add mean')
+  await session.clock.advance(4000)
+  expect(session.spawned).toEqual([])
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-review' })
+  expect(await ui.find({ type: 'Text', text: 'you are close to your plan limit. Press r to run it anyway.' })).toBeDefined()
+
+  await ui.press({ key: 'review-now' })
+  expect(session.spawned.length).toBe(1)
+  expect(session.spawned[0]?.prompt).toMatch('Add mean')
+  await ui.unmount()
+})
