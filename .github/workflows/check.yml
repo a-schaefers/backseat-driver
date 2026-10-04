@@ -1,0 +1,57 @@
+# Runs `npm run check` (validate, test, typecheck) on every push and pull
+# request, against the Claude Code version the mod was last verified with.
+# Once a day it also runs against the newest Claude Code, because the mod API
+# can change between releases. That job only warns: a red nightly means
+# "look at the newest release", not "main is broken".
+
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check (Claude Code ${{ matrix.claude-code }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep in step with "last verified against" in CLAUDE.md.
+        claude-code: ['2.1.289', 'latest']
+        exclude:
+          - claude-code: ${{ github.event_name == 'schedule' && '2.1.289' || 'latest' }}
+    continue-on-error: ${{ matrix.claude-code == 'latest' }}
+    env:
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
+      DISABLE_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm install -g @anthropic-ai/claude-code@${{ matrix.claude-code }}
+      - run: claude --version
+      # The type check reads the mod API types, which Claude Code writes beside
+      # the plugin whenever it loads it. Loading it in print mode is enough:
+      # with no login the model call fails, after the types are written.
+      - name: Write the mod API types
+        run: |
+          claude -p hi --plugin-dir ./plugin || true
+          test -f plugin/.claude-plugin/types/claude-code/index.d.ts
+          head -1 plugin/.claude-plugin/types/claude-code/index.d.ts
+      - run: npm run check

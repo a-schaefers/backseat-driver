@@ -461,6 +461,7 @@ backseat-driver/
 │   │   └── *.ts                pure logic that register.tsx calls
 │   ├── types/index.d.ts        types for the state the pane reads
 │   └── tests/                  run with `claude plugin test`
+├── .github/workflows/check.yml CI: npm run check on each push, and nightly on the newest Claude Code
 ├── scripts/dev-session.sh      start a real session with the working copy, in tmux
 ├── package.json                dev tooling only: TypeScript for type checking
 ├── CLAUDE.md                   guidance for Claude Code when working on this repository
