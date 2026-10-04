@@ -26,7 +26,7 @@ One command starts it, and after that there is nothing to manage. Every setting 
 
 ### Start
 
-Run `claude` in a terminal next to your editor and type `/backseat-driver`, or `/bsd` for short. A Backseat pane opens beside the conversation, at once: the tutor finishes getting ready in the background. `/bsd help` lists every command and key.
+Type `/backseat-driver` in Claude Code, or `/bsd` for short. A Backseat pane opens beside the conversation, at once: the tutor finishes getting ready in the background. `/bsd help` lists every command and key.
 
 ### The first time
 
@@ -437,7 +437,7 @@ A look with nothing worth saying leaves it quiet, so what it says is always abou
 - **It needs git.** Changes are found by diffing the working tree, and files that git ignores are never sent.
 - **Explain is only as good as its model's reading.** It is told to say only what the code shown supports, and line numbers it gets wrong are caught, because every symbol has to quote its own first line. What it says about a function can still be mistaken. It knows the file it is in, and other files only once they have been mapped.
 - **It spends usage in the background.** Every play-by-play look and every deep review is a model call on your plan. The play-by-play waits for a pause, sends only the change and its surroundings, runs one look at a time, slows down as your plan's usage runs out, and can be paused. A deep review costs more, because it runs a stronger model at a higher thinking level, so how often it runs is yours to set.
-- **Mods are new.** The mod API is early access and can change between Claude Code releases. Panes are drawn by the terminal CLI and by the Code tab of the desktop app. The VS Code extension's chat panel runs mods but does not draw them, so use `claude` in the editor's integrated terminal there.
+- **Mods are new.** The mod API is early access and can change between Claude Code releases. Panes are drawn by the terminal CLI and by the Code tab of the desktop app. The VS Code extension's chat panel runs mods but does not draw them.
 - **A mod is code that runs with your permissions.** This one is meant to stay small and auditable: it runs `git`, reads files inside the repository and its own plugin folder, calls models, keeps what it remembers in its own data folder and draws a pane. The only other program it runs is `rm`, only when you tell it to forget something, and only on paths inside that folder, which it marks as its own before it will delete anything there. It makes no network requests of its own, installs no git hooks and never writes to your working tree. `claude plugin validate` lists every event a mod hooks and every call it makes, so you can check that before installing.
 - **The edit guard covers the editing tools.** A shell command can still write a file, so that part rests on the contract and on Claude Code's normal permission prompts.
 
