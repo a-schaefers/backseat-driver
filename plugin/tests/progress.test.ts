@@ -412,3 +412,19 @@ test('showing and missing a skill in the same commit is a mixed result, not a sl
   expect(skillStates(recovered).shown).toEqual(['edge-cases'])
   expect(skillStates(record([seen('a', 'testing', 'missed', 'junior'), seen('b', 'testing', 'missed', 'junior')])).working).toEqual(['testing'])
 })
+
+test('observations from several commits are kept oldest commit first, whatever order the model gave them', async () => {
+  const older = { hash: 'a'.repeat(40), short: 'aaaaaaa', weight: 0.5 }
+  const newer = { hash: 'b'.repeat(40), short: 'bbbbbbb', weight: 0.5 }
+  const assessment: Assessment = {
+    ...SAW,
+    observations: [
+      { commit: 'bbbbbbb', skill: 'edge-cases', verdict: 'shown', level: 'junior', note: 'perimeter rejects negative sizes.' },
+      { commit: 'aaaaaaa', skill: 'edge-cases', verdict: 'missed', level: 'junior', note: 'area accepts anything.' },
+    ],
+  }
+  const { record: kept } = withAssessment(emptyRecord('python'), assessment, [older, newer], 'shapes', 1)
+  expect(kept.observations.map(item => item.commit.slice(0, 7))).toEqual(['aaaaaaa', 'bbbbbbb'])
+  // Missed first, shown later: improving, not slipping.
+  expect(skillStates(kept)).toEqual({ shown: ['edge-cases'], slipping: [], working: [] })
+})

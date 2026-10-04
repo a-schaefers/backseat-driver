@@ -549,6 +549,19 @@ async function detectInstall($: EngineInterface): Promise<Install> {
   return { kind: 'unknown' }
 }
 
+/** The version Claude Code has installed for a plugin id, from `installed_plugins.json`, or ''. */
+async function installedVersion($: EngineInterface, id: string): Promise<string> {
+  const config = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${home}/.claude`
+  try {
+    const data = JSON.parse(await $.fs.read(`${config}/plugins/installed_plugins.json`)) as { plugins?: Record<string, { version?: unknown }[]> }
+    const version = data.plugins?.[id]?.[0]?.version
+
+    return typeof version === 'string' ? version : ''
+  } catch {
+    return ''
+  }
+}
+
 /** Claude Code's own clone of a marketplace, or '' when it keeps none. */
 async function marketplaceClone($: EngineInterface, name: string): Promise<string> {
   const config = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${home}/.claude`
@@ -617,6 +630,7 @@ async function runUpdate($: EngineInterface): Promise<void> {
 
       return
     }
+    const before = (await git($, install.top, ['rev-parse', 'HEAD'])).stdout.trim()
     const pulled = await git($, install.top, ['pull', '--ff-only'], true)
     if (pulled.exitCode !== 0) {
       $.ui.log(`git pull in ${install.top} did not work: ${(pulled.stderr ?? pulled.stdout).trim().split('\n')[0] ?? 'no reason given'}. Nothing was changed.`)
@@ -624,11 +638,17 @@ async function runUpdate($: EngineInterface): Promise<void> {
       return
     }
     await update($, updateAtom, () => '')
-    $.ui.log('Updated. The plugin reloads by itself in a moment, and the tutor stays as it is.')
+    const after = (await git($, install.top, ['rev-parse', 'HEAD'])).stdout.trim()
+    $.ui.log(
+      after === before
+        ? `Already up to date: ${install.top} has everything its origin has.`
+        : 'Updated. The plugin reloads by itself in a moment, and the tutor stays as it is.',
+    )
 
     return
   }
   if (install.kind === 'installed') {
+    const was = await installedVersion($, install.id)
     for (const argv of updateCommands(install)) {
       const result = await claudeCli($, argv)
       if (!result.ok) {
@@ -638,7 +658,13 @@ async function runUpdate($: EngineInterface): Promise<void> {
       }
     }
     await update($, updateAtom, () => '')
-    $.ui.log('Updated. Reloading plugins: the tutor stays as it is.')
+    const now = await installedVersion($, install.id)
+    if (now !== '' && now === was) {
+      $.ui.log(`Already up to date: ${now} is the newest release.`)
+
+      return
+    }
+    $.ui.log(`Updated${now === '' ? '' : ` to ${now}`}. Reloading plugins: the tutor stays as it is.`)
     try {
       await $.command.run({ command: 'reload-plugins', args: '' })
     } catch {
@@ -1925,7 +1951,8 @@ async function placeFirst($: EngineInterface, settings: Settings, run: number): 
       if (group === undefined || sizeOf(group) < MIN_LINES) continue
       picked.push({ hash: info.hash, short: shortHash(info.hash), weight: 0.5, title: info.message.split('\n')[0] ?? '', files: group })
     }
-    if (picked.length > 0 && run === engagement) await assess($, settings, language, picked, '')
+    // Read newest first from git log; assessed oldest first, so that the record runs in time order.
+    if (picked.length > 0 && run === engagement) await assess($, settings, language, picked.reverse(), '')
   }
 }
 

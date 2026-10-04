@@ -19,7 +19,7 @@ So the arrangement is turned around: you drive, and the AI rides along, watches 
 
 The project takes a side on this. While the tutor is on, the AI is never in the driver's seat, and nothing here presents handing the code to it as the faster or better way. Saying plainly that `/bsd off` puts Claude Code back to normal is fine.
 
-> **Status: part one built, part two under way.** Everything described here is built, except what is under [Part two](#part-two-being-built), which is being added now. Each part was tried in a real session on Claude Code 2.1.289, but only in short scripted ones. Nobody has done real work with it yet, so expect the prompts and defaults to need adjusting. Three things have only been run in tests: the slow-down near plan limits, the hook that refuses edits (the tutor declined before it was ever needed), and the deep review on its default model, because the live runs used a cheaper one. So have three parts of the journal: rolling up a sitting after an hour, two sessions keeping one journal, and the deep review reading it. The editor's side of it was tried with a script standing in for an editor. Installing from the marketplace has not been tried.
+> **Status: built, not yet lived with.** Everything described here is built, and every line of the [roadmap](#roadmap) is done. Each part was tried in a real session on Claude Code 2.1.289, but only in short scripted ones. Nobody has done real work with it yet, so expect the prompts and defaults to need adjusting. Three things have only been run in tests: the slow-down near plan limits, the hook that refuses edits (the tutor declined before it was ever needed), and the deep review on its default model, because the live runs used a cheaper one. So have three parts of the journal: rolling up a sitting after an hour, two sessions keeping one journal, and the deep review reading it. The editor's side of it was tried with a script standing in for an editor. Installing from a marketplace, updating with `/bsd update` and uninstalling were tried with a local git server standing in for GitHub, installed for one project only. No release has been published yet, so an installed copy stays at 0.1.0 until one is.
 
 ## Using it
 
@@ -506,11 +506,7 @@ scripts/dev-session.sh  # try the working copy in a real session, inside tmux
 
 To use the working copy in a project of your own, start Claude Code there with `claude --plugin-dir /path/to/backseat-driver/plugin`. That loads the plugin for that session only and reloads the mod whenever one of its files is saved.
 
-## Part two, being built
-
-Everything above this heading exists. What is under it is decided and is being built in the order the [roadmap](#roadmap) gives. A feature here does not exist until its line in the roadmap is checked.
-
-### Where it is kept
+## Where it is kept
 
 The data folder holds your profiles, your progress, and each project's journal and cache:
 
@@ -600,7 +596,7 @@ Part two:
 - [x] **Journal.** A record per project of what you do in the code, read by every model the tutor calls, the "Working on" line in the pane with `w` and `/bsd working`, the editor's buffers and attention in `focus.json`, and the `working` and `activity` tools for the tutor.
 - [x] **Progress.** Whose work it is, the evidence ledger, the rules for moving a level, the Progress tab, a first placement from past commits, and the observed level in every prompt.
 - [x] **Updates and uninstall.** Release tags and `scripts/release.sh`, the update notice, `/bsd update` and `/backseat-driver-update`, and `/bsd uninstall`.
-- [ ] **Usability, second pass.** Every screen and command walked through in a real session.
+- [x] **Usability, second pass.** Every tab and command walked through in a real session. `/bsd update` now says when there was nothing new, and a first placement keeps several commits in time order, so that a skill learned later is not marked slipping.
 
 ## Related
 

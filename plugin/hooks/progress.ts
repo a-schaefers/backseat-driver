@@ -224,6 +224,9 @@ export type AssessedCommit = { hash: string; short: string; weight: number }
  * The record after an assessment of one or more commits in a project. An
  * observation is kept against the commit it names, or the first one. A
  * commit already assessed adds nothing, so no work counts twice, in any project.
+ * `commits` come oldest first, and observations are kept in that order
+ * whatever order the model listed them in: what came later decides whether
+ * a skill is slipping.
  */
 export function withAssessment(
   record: ProgressRecord,
@@ -243,9 +246,11 @@ export function withAssessment(
     added.push({ commit: commit.hash, project, at, skill: seen.skill, verdict: seen.verdict, level: seen.level, weight: commit.weight, note: seen.note })
   }
 
+  const order = (seen: Observation): number => fresh.findIndex(commit => commit.hash === seen.commit)
+  const chronological = added.map((seen, index) => ({ seen, index })).sort((a, b) => order(a.seen) - order(b.seen) || a.index - b.index)
   const grown: ProgressRecord = {
     ...record,
-    observations: [...record.observations, ...added].slice(-MAX_OBSERVATIONS),
+    observations: [...record.observations, ...chronological.map(({ seen }) => seen)].slice(-MAX_OBSERVATIONS),
     assessed: [...record.assessed, ...fresh.map(commit => commit.hash)].slice(-MAX_ASSESSED),
   }
   const decided = decideLevel(grown, assessment.level)

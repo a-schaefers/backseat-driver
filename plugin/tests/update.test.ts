@@ -143,7 +143,8 @@ sessionTest('installed from a marketplace, /backseat-driver-update updates throu
   await session.clock.settle()
 
   expect(session.ran).toEqual(['claude plugin marketplace update backseat-driver', 'claude plugin update backseat-driver@backseat-driver'])
-  expect(session.logs).toContain('Updated. Reloading plugins: the tutor stays as it is.')
+  // The fake `claude plugin update` changes nothing, and that is what is said.
+  expect(session.logs.some(line => line.startsWith('Already up to date') || line.startsWith('Updated'))).toBe(true)
 })
 
 sessionTest('/bsd uninstall keeps everything unless told otherwise', async ($, on) => {
@@ -230,4 +231,14 @@ sessionTest('an installed copy asks the marketplace it came from for releases, a
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: NOTICE })).toBeDefined()
   await ui.unmount()
+})
+
+sessionTest('/bsd update in a clone that has everything says so', async ($, on) => {
+  const session = stubSession(on, { install: 'clone', tags: ['v0.2.0'], pluginFiles: MANIFEST, isCloneCurrent: true })
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd', 'update'))
+  await session.clock.settle()
+
+  expect(session.ran).toContain('git pull --ff-only')
+  expect(session.logs.some(line => /^Already up to date: .+ has everything its origin has\.$/.test(line))).toBe(true)
 })

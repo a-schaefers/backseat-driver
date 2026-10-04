@@ -122,6 +122,8 @@ export type StubOptions = {
   tags?: string[]
   /** True when the clone has changes of its own. */
   isCloneDirty?: boolean
+  /** True when the clone already has everything upstream has, so a pull changes nothing. */
+  isCloneCurrent?: boolean
 }
 
 /** Who wrote a commit in the fake repository, and anything its message says besides its title. */
@@ -162,8 +164,9 @@ export function stubSession(on: On, options: StubOptions = {}) {
       .join('\n')
   }
 
-  /** The clone's top folder, once the plugin has asked git for it. */
+  /** The clone's top folder, once the plugin has asked git for it, and the commit it is at. */
   let cloneTop = ''
+  let cloneHead = commitHash(500)
   const session = {
     opened: [] as string[],
     closed: [] as string[],
@@ -412,9 +415,11 @@ export function stubSession(on: On, options: StubOptions = {}) {
         return ok(`${cloneTop}\n`)
       }
       if (args[0] === 'remote') return ok('git@example.com:me/backseat-driver.git\n')
+      if (args[0] === 'rev-parse' && args[1] === 'HEAD') return ok(`${cloneHead}\n`)
       if (args[0] === 'status') return ok(options.isCloneDirty === true ? ' M plugin/hooks/register.tsx\n' : '')
       if (args[0] === 'pull') {
         session.ran.push(`git ${args.join(' ')}`)
+        if (options.isCloneCurrent !== true) cloneHead = commitHash(501)
 
         return ok('Updating 1111111..2222222\nFast-forward\n')
       }
