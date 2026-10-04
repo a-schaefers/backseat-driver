@@ -16,6 +16,8 @@ export type Persona = {
 /** The plugin's `/config` rows as the code uses them: durations in milliseconds, defaults applied. */
 export type Settings = {
   persona: Persona
+  /** Whether the pane shows the voice's animated character, and the reviewers write its lines. */
+  isAnimated: boolean
   playByPlay: {
     isAutomatic: boolean
     quietMs: number
@@ -72,6 +74,7 @@ export function readSettings(options: PluginOptions): Settings {
       voice: personaName(options.voice),
       engineering: personaName(options.engineering),
     },
+    isAnimated: options.animated_persona !== false,
     playByPlay: {
       isAutomatic: options.play_by_play !== 'on request',
       quietMs: durationMs(options.quiet_time, 10_000),

@@ -1,9 +1,13 @@
 import type { Note, NoteKind } from '../types'
 
-/** What the play-by-play model sends back: notes it adds and the ids of open notes that no longer apply. */
+/**
+ * What the play-by-play model sends back: notes it adds, the ids of open
+ * notes that no longer apply, and the animated persona's line, '' for none.
+ */
 export type ReviewReply = {
   resolved: number[]
   notes: Omit<Note, 'id'>[]
+  say: string
 }
 
 const KINDS: readonly NoteKind[] = ['bug', 'risk', 'idiom', 'tip']
@@ -70,7 +74,11 @@ export function parseReply(text: string): ReviewReply | null {
     })
   }
 
-  return { resolved, notes: notes.slice(0, MAX_NEW_NOTES) }
+  return {
+    resolved,
+    notes: notes.slice(0, MAX_NEW_NOTES),
+    say: typeof reply.say === 'string' ? reply.say.trim() : '',
+  }
 }
 
 /** Most important first, then in reading order. */
@@ -98,7 +106,7 @@ export function withDismissed(dismissed: readonly Note[], note: Note): Note[] {
  */
 export function applyReply(
   open: readonly Note[],
-  reply: ReviewReply,
+  reply: Pick<ReviewReply, 'resolved' | 'notes'>,
   lookedAt: readonly string[],
   nextId: number,
   dismissed: readonly Note[] = [],

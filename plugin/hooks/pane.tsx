@@ -1,6 +1,8 @@
 import type { Elements } from 'claude-code'
 
-import type { ExplainView, Mode, Note, OutlineRow, Profile, Profiles, Review, Tab, Watch } from '../types'
+import type { ExplainView, Mode, Note, OutlineRow, Profile, Profiles, Review, Speech, Tab, Watch } from '../types'
+import { bubble, bubbleWidth, isTalking, poseOf, saidSoFar, wordsSaid } from './avatar'
+import type { Avatar } from './avatar'
 import { languageName } from './languages'
 import { sortNotes } from './notes'
 import { ANSWER_LABELS, explained, GENERAL, recurring } from './profiles'
@@ -30,6 +32,10 @@ export type PaneView = {
   isFocused: boolean
   /** How wide the pane's body is, in columns. */
   columns: number
+  /** The voice's animated character and what it is saying, or null while the animation is off. */
+  character: { avatar: Avatar; speech: Speech } | null
+  /** True where rows are scarce, as in a pane above the prompt: the character is then drawn in one line. */
+  isCompact: boolean
 }
 
 /** What the pane's controls do. The closures come from register.tsx. */
@@ -127,6 +133,51 @@ export function reviewSchedule(isAfterCommit: boolean, everyMs: number): string 
   if (isAfterCommit) return everyMs > 0 ? `after each commit and ${timer}` : 'after each commit'
 
   return everyMs > 0 ? timer : 'only when you ask'
+}
+
+/** Said by a character while the tutor is paused. */
+export const ASLEEP = 'z z z'
+
+/**
+ * The animated persona: the drawing in its current pose, with its speech
+ * bubble beside it. It is dim while it rests and lights up while it talks.
+ */
+function characterRow({ Box, Text }: Kit, view: PaneView, { avatar, speech }: { avatar: Avatar; speech: Speech }) {
+  const pose = poseOf(view.mode, view.watch.state, speech)
+  const isResting = !isTalking(speech)
+  const isAsleep = view.mode === 'paused'
+  const width = bubbleWidth(view.columns, avatar.frames.rest[0]?.length ?? 0)
+
+  if (view.isCompact || width === 0) {
+    return (
+      <Box flexDirection="row" columnGap={1}>
+        <Text color={avatar.color} dimColor={isResting}>
+          {avatar.mini[pose]}
+        </Text>
+        <Text dimColor={isAsleep} wrap="truncate-end">
+          {isAsleep ? ASLEEP : saidSoFar(speech)}
+        </Text>
+      </Box>
+    )
+  }
+
+  return (
+    <Box flexDirection="row" columnGap={1}>
+      <Box flexDirection="column">
+        {avatar.frames[pose].map(line => (
+          <Text color={avatar.color} dimColor={isResting} wrap="truncate-end">
+            {line}
+          </Text>
+        ))}
+      </Box>
+      <Box flexDirection="column">
+        {isAsleep && <Text dimColor>{ASLEEP}</Text>}
+        {!isAsleep &&
+          speech.text !== '' &&
+          bubble(speech.text, wordsSaid(speech), width).map(line => <Text wrap="truncate-end">{line}</Text>)}
+      </Box>
+    </Box>
+  )
 }
 
 /** What the Explain tab says while what it shows is not the whole story. Empty when it is. */
@@ -345,6 +396,8 @@ function profileTab({ Box, Text, Button }: Kit, view: PaneView, actions: PaneAct
 export function renderPane(kit: Kit, view: PaneView, actions: PaneActions) {
   const { Box, Text, Button } = kit
   const row = tabRow(view)
+  // The character speaks for the play-by-play and the deep review, so it stands on their tabs only.
+  const character = view.tab === 'play' || view.tab === 'review' ? view.character : null
 
   return (
     <Box flexDirection="column">
@@ -362,6 +415,8 @@ export function renderPane(kit: Kit, view: PaneView, actions: PaneActions) {
       </Box>
       <Text dimColor>{statusLine(view)}</Text>
       <Text> </Text>
+      {character !== null && characterRow(kit, view, character)}
+      {character !== null && <Text> </Text>}
       {view.tab === 'play' && playByPlay(kit, view, actions)}
       {view.tab === 'review' && deepReview(kit, view, actions)}
       {view.tab === 'explain' && explainTab(kit, view, actions)}

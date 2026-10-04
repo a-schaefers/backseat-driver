@@ -33,23 +33,29 @@ A language you only touch later, such as the one shell script in a Python projec
 - **Notes are nudges, not patches.** A note says where to look and what to think about. You can ask for the concept behind it, and then for a small example. Typing the fix stays your job.
 - **A note leaves when you deal with it.** Fix the code and the note clears itself at the next look. Press `d` to dismiss one you have read: it goes, and the same point is not raised about that file again until you switch the tutor off. To silence a whole topic for good, press `m` or say so (see [Talk back](#talk-back)).
 - **Commits get a deeper review.** After each commit, a stronger model reads the whole commit together with the code around it and writes a longer review in the pane's Deep review tab. It can also run on a timer, or only when you ask.
+- **A character speaks up when it matters.** A small animated figure for your chosen voice stands at the top of the pane. When a look finds a critical point or a design decision in what you saved, it says one line about why it matters. It also passes on a deep review's takeaway, and now and then makes a joke. See [The animated persona](#the-animated-persona).
 
 ```text
 ┌─ conversation ─────────────────────────┬─ Backseat ────────────────────────────────────┐
 │                                        │ 1: Play  2: Review  3: Explain  4: Profile    │
-│ > /backseat-driver                     │ On. Watching for your next save.              │
-│   Backseat Driver is on. You drive.    │                                               │
-│                                        │ src/cache.rs                                  │
-│ > why does note 1 matter? the tests    │ > 1  risk · line 42                           │
-│   pass                                 │     This guard is still held when you reach   │
-│                                        │     the .await on line 47. Who else is        │
-│ ● They pass because nothing in them    │     waiting on it?                            │
-│   competes for the lock. Look at what  │   2  idiom · line 18                          │
-│   is still alive when you reach the    │     This match only changes the Some case.    │
-│   .await on line 47. While this task   │     Option has a method for exactly that.     │
-│   is parked there, what can every      │                                               │
-│   other task that wants the cache do?  │ e: explain  d: dismiss  m: mute  l: look now  │
+│ > /backseat-driver                     │ On. Watching for your next save. Voice:       │
+│   Backseat Driver is on. You drive.    │ torvalds.                                     │
 │                                        │                                               │
+│ > why does note 1 matter? the tests    │    .--.    ╭─────────────────────────────╮    │
+│   pass                                 │   |o_o |  ─┤ A lock held across an await │    │
+│                                        │   |:_/ |   │ turns a cache into a queue. │    │
+│ ● They pass because nothing in them    │  //   \ \  ╰─────────────────────────────╯    │
+│   competes for the lock. Look at what  │                                               │
+│   is still alive when you reach the    │ src/cache.rs                                  │
+│   .await on line 47. While this task   │ > 1  risk · line 42                           │
+│   is parked there, what can every      │     This guard is still held when you reach   │
+│   other task that wants the cache do?  │     the .await on line 47. Who else is        │
+│                                        │     waiting on it?                            │
+│                                        │   2  idiom · line 18                          │
+│                                        │     This match only changes the Some case.    │
+│                                        │     Option has a method for exactly that.     │
+│                                        │                                               │
+│                                        │ e: explain  d: dismiss  m: mute  l: look now  │
 │ >                                      │                                               │
 └────────────────────────────────────────┴───────────────────────────────────────────────┘
 ```
@@ -218,6 +224,7 @@ The watcher asks git what changed every couple of seconds, and stretches that in
 | `/backseat-driver` and `/bsd` | Two commands the mod registers with `$.command.register`, answered by the same hook. They run at once, without a model turn. |
 | The tutor contract | `plugin/skills/tutor/SKILL.md`. While the mode is on, a `prompt.compose` hook adds it, and the profiles in play, to the system prompt. The same hook replaces Claude Code's own "Doing tasks" section, which tells Claude to find the code and modify it. |
 | Voice and engineering persona | One Markdown file per voice in `plugin/personas/voice/`, and one per engineering persona in `plugin/personas/engineering/`. The chosen ones are added to the system prompt and to both review prompts, the engineering half first. |
+| The animated persona | Text art in `plugin/hooks/avatar.ts`, one character per voice, drawn by the pane's `ui.render` hook. Its line comes in the play-by-play's reply, in a field that `plugin/prompts/speech-bubble.md` asks for, or is a deep review's last line. One `$.clock.every` timer moves its mouth while it talks and another makes it blink. What it says lives in `$.state`, so each tick redraws it. |
 | The contract outranks the project's `CLAUDE.md` | A `prompt.context` hook keeps the project's instruction files loaded but reframes them as background that yields to the contract. |
 | Claude never edits your files | A `tool.call` hook refuses `Edit`, `Write` and `NotebookEdit` while the mode is on. The only paths it lets through are Claude Code's own: its folder under your home directory, where it keeps its notes, and its scratch folder. |
 | Noticing saves and commits | A `$.clock.every` timer runs `git status` through `$.process.run` for saves. For commits it checks the reflog file's size and modification time, and runs `git reflog` only when that changes. |
@@ -230,8 +237,8 @@ The watcher asks git what changed every couple of seconds, and stretches that in
 | Deep review | A read-only subagent (`Read`, `Grep`, `Glob`) that the mod registers with `$.agent.register` on the chosen model and thinking level, and starts with `$.agent.spawn`. A `turn.complete` hook takes its answer to the pane, not into the conversation. |
 | Second opinion on a contested point | The tutor hands the point to the same read-only subagent and reports its verdict in the conversation. |
 | "Stop warning me about that" | A `hush` tool the mod registers with `$.tool.register`. The tutor calls it when you state a preference, and the mod saves it to the profile and drops the matching notes. No permission prompt appears, because the mod answers its own tool. An `unhush` tool undoes it, a `record` tool saves what you tell the tutor about yourself, and a `profile` tool lets the tutor read your profile for a language that is not in play. |
-| The pane | `$.ui.open` plus a `ui.render` hook, with Play-by-play, Deep review and Profile tabs. Their contents live in `$.state`, so the pane redraws when they change. Buttons on a note send a question into the conversation with `$.prompt.submit`. |
-| The conversation knows the notes | A `prompt.submit` hook attaches the open notes and the latest review as context. |
+| The pane | `$.ui.open` plus a `ui.render` hook, with Play-by-play, Deep review, Explain and Profile tabs. Their contents live in `$.state`, so the pane redraws when they change. Buttons on a note send a question into the conversation with `$.prompt.submit`. |
+| The conversation knows the notes | A `prompt.submit` hook attaches the open notes, the latest review and the character's last line as context. |
 | Settings | `userConfig` in `plugin.json`. Each setting is a row in `/config`, listed under [Models and settings](#models-and-settings). |
 
 Why a mod and not a skill alone? A skill could carry the contract, and a plugin monitor (a background script whose output is fed to Claude) could report file changes. But every save would then become a turn in your conversation, paid for on your main model and mixed in with your questions. The mod reviews out of band, on the models you choose, and leaves the conversation for what you ask. Where mods are turned off, the skill still works alone as `/backseat-driver:tutor`: the same tutor, without the play-by-play and the automatic reviews.
@@ -253,6 +260,7 @@ Everything is configured in `/config`, and the three background jobs have separa
 | --- | --- | --- |
 | Voice persona | `default`, `torvalds`, `knuth`, `primeagen`, `eli5-tldr-kiss-terse` | `default` |
 | Engineering persona | `default`, `torvalds`, `knuth`, `primeagen` | `default` |
+| Animated persona | on, off | on |
 | Play-by-play | automatic, on request | automatic |
 | Play-by-play quiet time | 5, 10, 20, 30 or 60 seconds | 10 seconds |
 | Play-by-play minimum gap | none, 30 seconds, 1, 2 or 5 minutes | 1 minute |
@@ -310,6 +318,16 @@ So `eli5-tldr-kiss-terse` can explain what `knuth` would worry about, or `torval
 The engineering personas disagree in useful ways. Shown a linear search through a list inside a loop, `primeagen` asks for a set at once, `knuth` asks how large the list can grow, and `torvalds` lets it pass unless it sits on a path that runs all the time.
 
 Neither half changes the ground rules. The personas named after people are in their spirit: the tutor does not claim to be them or to quote them, and a voice does not bring its namesake's opinions about code along with it.
+
+#### The animated persona
+
+A small character stands at the top of the Play-by-play and Deep review tabs and speaks for the voice: Claude Code's own mascot for `default`, a penguin for `torvalds`, an owl for `knuth`, a streamer in a headset for `primeagen`, and a smiley for `eli5-tldr-kiss-terse`. None of them is a drawing of a real person. It rests dimmed, looks up while a look runs, and lights up and talks, one word at a time, when it has something to say:
+
+- **After a look**, one line about a critical point or a design decision in what you just saved, such as a choice of data structure, an interface or a way of handling errors: why it matters, never the fix.
+- **After four quiet looks in a row**, a look may give it a light remark about the work instead.
+- **When a deep review lands**, the review's closing line: the one thing most worth doing next.
+
+A look with nothing worth saying leaves it quiet, so what it says is always about your latest change. It blinks now and then, sleeps while the tutor is paused, and takes a single line where the pane sits above the prompt. Its lines come in the play-by-play's own reply, so it costs no extra model calls, only a few more words per look. The tutor in the conversation knows what it last said, so you can ask about it. Set Animated persona to off for a plain pane.
 
 ## Limits
 
@@ -484,6 +502,7 @@ Part two:
 - [x] **Data home and forgetting.** State in `~/.local/share/backseat-driver/`, profiles moved out of the plugin store, and `/bsd forget`.
 - [x] **Persona in two halves.** The voice and the engineering persona as separate settings, so that how the tutor talks and whose judgment it reviews with are chosen apart.
 - [x] **Explain.** The lookup engine and its queue, the never-stale rule, the Explain tab, `/bsd explain`, the files an editor reads and writes, and a lookup tool for the tutor.
+- [x] **Animated persona.** A small character for each voice at the top of the pane, which talks at the critical and decision points a look finds, passes on a deep review's takeaway, and jokes now and then. A setting turns it off.
 - [ ] **One cache for all three jobs.** Deep reviews write overviews and insights into the cache, a survey for each new project, and both reviewers read from it.
 - [ ] **Progress.** Whose work it is, the evidence ledger, the rules for moving a level, the Progress tab and a first placement from past commits.
 - [ ] **Updates and uninstall.** Release tags, the update notice, `/bsd update` and `/bsd uninstall`.

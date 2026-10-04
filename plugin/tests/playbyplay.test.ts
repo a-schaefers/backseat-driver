@@ -30,7 +30,7 @@ sessionTest('a save becomes a note only after the tree has been quiet', async ($
   const request = session.requests[0]
   expect(request?.model).toBe('sonnet')
   expect(request?.effort).toBe('medium')
-  expect(request?.system).toBe('PLAY-BY-PLAY INSTRUCTIONS')
+  expect(request?.system).toBe('PLAY-BY-PLAY INSTRUCTIONS\n\nSPEECH BUBBLE INSTRUCTIONS')
   expect(request?.prompt).toMatch('=== stats.py (Python) ===')
   expect(request?.prompt).toMatch('+def mean(xs):')
 
@@ -215,7 +215,7 @@ sessionTest('the chosen model and thinking level are what the look uses', { opti
   expect(session.requests.length).toBe(1)
   expect(session.requests[0]?.model).toBe('haiku')
   expect(session.requests[0]?.effort).toBe('low')
-  expect(session.requests[0]?.system).toBe('PLAY-BY-PLAY INSTRUCTIONS\n\n# Engineering: knuth')
+  expect(session.requests[0]?.system).toBe('PLAY-BY-PLAY INSTRUCTIONS\n\nSPEECH BUBBLE INSTRUCTIONS\n\n# Engineering: knuth')
 })
 
 sessionTest('outside a git repository the pane says why there is no play-by-play', async ($, on) => {

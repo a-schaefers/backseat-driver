@@ -252,6 +252,7 @@ export function stubSession(on: On, options: StubOptions = {}) {
     if (e.path.endsWith('/prompts/play-by-play.md')) return { value: 'PLAY-BY-PLAY INSTRUCTIONS\n' }
     if (e.path.endsWith('/prompts/deep-review.md')) return { value: 'DEEP REVIEW INSTRUCTIONS\n' }
     if (e.path.endsWith('/prompts/explain.md')) return { value: 'EXPLAIN INSTRUCTIONS\n' }
+    if (e.path.endsWith('/prompts/speech-bubble.md')) return { value: 'SPEECH BUBBLE INSTRUCTIONS\n' }
     for (const [suffix, text] of Object.entries(options.pluginFiles ?? {})) {
       if (e.path.endsWith(suffix)) return { value: text }
     }

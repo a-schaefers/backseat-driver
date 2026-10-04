@@ -17,19 +17,20 @@ const note = (id: number, overrides: Partial<Note> = {}): Note => ({
 
 test('parseReply reads the JSON object the reviewer was asked for', async () => {
   const reply = parseReply(
-    '{"resolved": [2], "notes": [{"file": "a.py", "line": 12, "kind": "bug", "topic": "Off by One!", "note": " Look at the last index. "}]}',
+    '{"resolved": [2], "notes": [{"file": "a.py", "line": 12, "kind": "bug", "topic": "Off by One!", "note": " Look at the last index. "}], "say": " Count the fence posts. "}',
   )
 
   expect(reply).toEqual({
     resolved: [2],
     notes: [{ file: 'a.py', line: 12, kind: 'bug', topic: 'off-by-one', text: 'Look at the last index.' }],
+    say: 'Count the fence posts.',
   })
 })
 
 test('parseReply finds the object inside prose or a code fence', async () => {
   const fenced = 'Here you go:\n```json\n{"resolved": [], "notes": []}\n```\nDone.'
 
-  expect(parseReply(fenced)).toEqual({ resolved: [], notes: [] })
+  expect(parseReply(fenced)).toEqual({ resolved: [], notes: [], say: '' })
 })
 
 test('parseReply drops what it cannot trust and never throws', async () => {
@@ -52,6 +53,7 @@ test('parseReply drops what it cannot trust and never throws', async () => {
   expect(reply).toEqual({
     resolved: [1],
     notes: [{ file: 'a.py', line: 1, kind: 'tip', topic: 'no-line-or-topic-given', text: 'No line or topic given.' }],
+    say: '',
   })
 })
 

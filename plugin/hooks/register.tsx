@@ -11,6 +11,19 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteResult, Register, Timer } from 'claude-code'
 
 import type { Hush, Mode, Note, Profile, Profiles, Review, Spot, Tab, Watch } from '../types'
+import {
+  avatarFor,
+  BLINK_MS,
+  BLINK_SHUT_MS,
+  closingLine,
+  finished,
+  isTalking,
+  nextTick,
+  QUIET_LOOKS_BEFORE_REMARK,
+  SILENT,
+  speech,
+  TALK_MS,
+} from './avatar'
 import { personaPrompt, reframeInstructions, SESSION_NOTES, stripFrontmatter, tutorSections } from './contract'
 import { dataHome, fileEntryPath, isRemovable, MARKER, MARKER_TEXT, profilePath, projectId } from './datahome'
 import { createExplainer, NO_VIEW } from './explainer'
@@ -62,6 +75,7 @@ import {
   withoutHush,
 } from './profiles'
 import { explainAsk, explainContext, explainRequest, paneContext, playByPlayPrompt, reviewerSystem } from './prompts'
+import type { Bubble } from './prompts'
 import { firstRunQuestions, groupAnswers } from './questions'
 import type { Question } from './questions'
 import {
@@ -107,6 +121,7 @@ const watchAtom = atom({ plugin: 'backseat-driver', key: 'watch' } as const, IDL
 const reviewAtom = atom({ plugin: 'backseat-driver', key: 'review' } as const, NO_REVIEW)
 const profilesAtom = atom({ plugin: 'backseat-driver', key: 'profiles' } as const, NO_PROFILES)
 const explainAtom = atom({ plugin: 'backseat-driver', key: 'explain' } as const, NO_VIEW)
+const speechAtom = atom({ plugin: 'backseat-driver', key: 'speech' } as const, SILENT)
 
 /**
  * The mode is kept twice, because each copy is lost by a different event.
@@ -129,6 +144,8 @@ let persona = ''
 let lookInstructions = ''
 let reviewInstructions = ''
 let explainInstructions = ''
+/** What the play-by-play is told about the animated persona's speech bubble. */
+let bubbleInstructions = ''
 /** The user's home directory, for telling their files from Claude Code's own. */
 let home = ''
 /** The folder the tutor keeps its own files in. '' until first needed, and when there is no home directory. */
@@ -180,6 +197,12 @@ let writtenView = ''
 const FOCUS_POLL_MS = 100
 const EDITOR_LIVE_MS = 600_000
 
+/** The animated persona's timers: one moves its mouth while it talks, the other makes it blink now and then. */
+let talkTimer: Timer | null = null
+let blinkTimer: Timer | null = null
+/** Looks in a row that gave it nothing to say. After enough of them, a look may give it a light remark. */
+let quietLooks = 0
+
 /** How close the plan's usage limit is, read at most twice a minute. */
 let slowdown: Throttle = { gapFactor: 1, isHeld: false }
 let slowdownReadAt = 0
@@ -206,11 +229,12 @@ async function loadTutor($: EngineInterface, chosen: Persona): Promise<void> {
   const root = $.plugin.root
   const file = (path: string): Promise<string> => $.fs.read(`${root}/${path}`)
   // Read side by side: `/bsd` waits for these, and nothing else.
-  const [skill, lookText, reviewText, explainText, engineering, voice] = await Promise.all([
+  const [skill, lookText, reviewText, explainText, bubbleText, engineering, voice] = await Promise.all([
     file('skills/tutor/SKILL.md'),
     file('prompts/play-by-play.md'),
     file('prompts/deep-review.md'),
     file('prompts/explain.md'),
+    file('prompts/speech-bubble.md'),
     readPersona($, 'engineering', chosen.engineering),
     readPersona($, 'voice', chosen.voice),
     resolveHome($),
@@ -219,6 +243,7 @@ async function loadTutor($: EngineInterface, chosen: Persona): Promise<void> {
   lookInstructions = lookText.trim()
   reviewInstructions = reviewText.trim()
   explainInstructions = explainText.trim()
+  bubbleInstructions = bubbleText.trim()
   persona = personaPrompt({ engineering, voice })
 }
 
@@ -292,6 +317,62 @@ async function markHome($: EngineInterface): Promise<void> {
 
 async function openPane($: EngineInterface): Promise<void> {
   await $.ui.open({ id: 'backseat-driver', title: 'Backseat' })
+}
+
+function stopTalking(): void {
+  talkTimer?.cancel()
+  talkTimer = null
+}
+
+function stopAnimating(): void {
+  stopTalking()
+  blinkTimer?.cancel()
+  blinkTimer = null
+}
+
+/** Gives the animated persona a new line, which it says one word a tick. '' leaves it quiet. */
+async function say($: EngineInterface, text: string): Promise<void> {
+  const line = speech(text)
+  await update($, speechAtom, () => line)
+  stopTalking()
+  // Switched off while the line was being written: nothing may keep running.
+  if (line.text === '' || mode === 'off') return
+  talkTimer = $.clock.every(TALK_MS, () => {
+    void talkOn($)
+  })
+}
+
+/** One tick of talking. The timer stops once the line is out. */
+async function talkOn($: EngineInterface): Promise<void> {
+  const said = await update($, speechAtom, nextTick)
+  if (!isTalking(said)) stopTalking()
+}
+
+/** Shuts a resting character's eyes for a moment. */
+async function blink($: EngineInterface): Promise<void> {
+  if (mode !== 'on' || talkTimer !== null) return
+  await update($, speechAtom, said => ({ ...said, isBlinking: true }))
+  $.clock.after(BLINK_SHUT_MS, () => {
+    void update($, speechAtom, said => ({ ...said, isBlinking: false }))
+  })
+}
+
+/**
+ * Brings the animated persona on stage. Switched on, it says hello. After a
+ * reload, its timers are gone, so a line it was in the middle of is finished.
+ */
+async function startAnimating($: EngineInterface, settings: Settings, isFresh: boolean): Promise<void> {
+  stopAnimating()
+  if (!settings.isAnimated) {
+    await update($, speechAtom, () => SILENT)
+
+    return
+  }
+  blinkTimer = $.clock.every(BLINK_MS, () => {
+    void blink($)
+  })
+  if (isFresh) await say($, avatarFor(settings.persona.voice).hello)
+  else await update($, speechAtom, finished)
 }
 
 /** Changes what the pane's status line says about the watcher. */
@@ -573,11 +654,20 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
       $,
       changes.map(change => languageOf(change.path)).filter(language => language !== null),
     )
-    const { prompt, shown } = playByPlayPrompt(changes, await read($, notesAtom), await read($, dismissedAtom))
+    const bubble: Bubble | null = !settings.isAnimated
+      ? null
+      : quietLooks >= QUIET_LOOKS_BEFORE_REMARK
+        ? 'remark'
+        : 'insight'
+    const { prompt, shown } = playByPlayPrompt(changes, await read($, notesAtom), await read($, dismissedAtom), bubble)
     const result = await $.model.complete({
       model: settings.playByPlay.model,
       effort: settings.playByPlay.thinking,
-      system: reviewerSystem(lookInstructions, [personText(profiles)], persona),
+      system: reviewerSystem(
+        lookInstructions,
+        [bubble === null ? '' : bubbleInstructions, personText(profiles)],
+        persona,
+      ),
       prompt,
       maxTokens: 2000,
       timeoutMs: 120_000,
@@ -620,6 +710,12 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
       }
       for (const [subject, topics] of raised) {
         await saveSubject($, settings, subject, profile => withFlagged(profile, topics))
+      }
+
+      // The persona's line is about this look, so a quiet look leaves it quiet.
+      if (bubble !== null) {
+        quietLooks = reply.say === '' ? quietLooks + 1 : 0
+        await say($, reply.say)
       }
     }
     await setWatch($, { state: 'idle', lastLookAt: now, detail: '' })
@@ -1104,6 +1200,8 @@ async function lookUp($: EngineInterface, spot: Spot): Promise<string> {
  */
 async function engage($: EngineInterface, settings: Settings, run: number, isFresh: boolean): Promise<void> {
   try {
+    await startAnimating($, settings, isFresh)
+    if (run !== engagement) return
     await startWatching($, settings, run)
     if (run !== engagement) return
     await moveOutOfStore($)
@@ -1138,6 +1236,8 @@ async function switchTo($: EngineInterface, next: Mode, settings: Settings): Pro
     void engage($, settings, engagement, true)
   } else {
     stopWatching()
+    stopAnimating()
+    await update($, speechAtom, () => SILENT)
     await update($, notesAtom, () => [])
     await update($, dismissedAtom, () => [])
     await update($, selectedAtom, () => null)
@@ -1343,9 +1443,13 @@ export const register: Register = (on, options) => {
   // The conversation is told what the pane shows, so "explain note 2" means something.
   on('prompt.submit', async ($, e, next) => {
     if (mode === 'off') return next(e)
-    const shown = [paneContext(await read($, notesAtom), await read($, reviewAtom)), explainContext(await read($, explainAtom))].filter(
-      part => part !== '',
-    )
+    // The character's hello says nothing about the code.
+    const said = settings.isAnimated ? (await read($, speechAtom)).text : ''
+    const isHello = said === avatarFor(settings.persona.voice).hello
+    const shown = [
+      paneContext(await read($, notesAtom), await read($, reviewAtom), isHello ? '' : said),
+      explainContext(await read($, explainAtom)),
+    ].filter(part => part !== '')
     if (shown.length === 0) return next(e)
 
     return next({ ...e, context: [...(e.context ?? []), ...shown] })
@@ -1364,6 +1468,8 @@ export const register: Register = (on, options) => {
       const isUnseen = (await read($, tabAtom)) !== 'review'
       await setReview($, { state: 'done', text: fitReview(e.answer), isUnseen })
       if (isUnseen) $.ui.toast(`Deep review ready: ${scopeSubject(scope)}`)
+      // The review ends on the one thing most worth doing next, which is worth saying out loud.
+      if (settings.isAnimated) await say($, `Review's in. ${closingLine(e.answer)}`)
     } else {
       await setReview($, { state: 'failed', text: e.reason === 'answer' ? 'the reviewer said nothing' : e.reason })
     }
@@ -1464,6 +1570,11 @@ export const register: Register = (on, options) => {
       explain: await read($, explainAtom),
       isFocused: e.props.isFocused,
       columns: e.props.bodyColumns,
+      character: settings.isAnimated
+        ? { avatar: avatarFor(settings.persona.voice), speech: await read($, speechAtom) }
+        : null,
+      // Above the prompt rows are scarce, and other surfaces may not draw text art in a fixed-width font.
+      isCompact: e.props.placement === 'inline' || e.surface !== 'terminal',
     }
 
     return renderPane($.ui.resolve(e), view, {

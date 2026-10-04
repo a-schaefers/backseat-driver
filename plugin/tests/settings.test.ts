@@ -18,6 +18,7 @@ test('durationMs falls back on anything it does not recognise', async () => {
 test('readSettings applies the documented defaults to empty options', async () => {
   expect(readSettings({})).toEqual({
     persona: { voice: 'default', engineering: 'default' },
+    isAnimated: true,
     playByPlay: {
       isAutomatic: true,
       quietMs: 10_000,
@@ -39,6 +40,7 @@ test('readSettings takes what the user chose', async () => {
   const settings = readSettings({
     voice: 'eli5-tldr-kiss-terse',
     engineering: 'knuth',
+    animated_persona: false,
     play_by_play: 'on request',
     quiet_time: '30 seconds',
     minimum_gap: 'none',
@@ -51,6 +53,7 @@ test('readSettings takes what the user chose', async () => {
   })
 
   expect(settings.persona).toEqual({ voice: 'eli5-tldr-kiss-terse', engineering: 'knuth' })
+  expect(settings.isAnimated).toBe(false)
   expect(settings.playByPlay).toEqual({
     isAutomatic: false,
     quietMs: 30_000,

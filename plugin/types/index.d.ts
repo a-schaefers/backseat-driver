@@ -44,6 +44,16 @@ export type Review = {
   isUnseen: boolean
 }
 
+/** What the pane's animated character is saying. */
+export type Speech = {
+  /** The line, or '' while it has nothing to say. */
+  text: string
+  /** Ticks since it began the line. One more word is said each tick. */
+  tick: number
+  /** True for a moment now and then, while its eyes are shut. */
+  isBlinking: boolean
+}
+
 /** Something the user asked not to hear about again. */
 export type Hush = {
   /** The same kind of slug a note carries, such as `missing-type-hints`. */
@@ -141,6 +151,8 @@ declare module 'claude-code' {
       profiles: Profiles
       /** What the Explain tab shows about the spot in focus. */
       explain: ExplainView
+      /** The animated persona's line, while the animation is on. */
+      speech: Speech
     }
   }
 }

@@ -25,6 +25,12 @@
       "options": ["default", "torvalds", "knuth", "primeagen"],
       "default": "default"
     },
+    "animated_persona": {
+      "type": "boolean",
+      "title": "Animated persona",
+      "description": "A small character in the pane that speaks for the voice persona: a line at the critical and decision points in your code, and now and then a joke. Off keeps the pane plain.",
+      "default": true
+    },
     "play_by_play": {
       "type": "string",
       "title": "Play-by-play",

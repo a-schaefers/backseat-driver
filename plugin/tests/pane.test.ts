@@ -20,6 +20,8 @@ const VIEW: PaneView = {
   explain: NO_VIEW,
   isFocused: true,
   columns: 76,
+  character: null,
+  isCompact: false,
 }
 
 const note = (id: number, overrides: Partial<Note> = {}): Note => ({

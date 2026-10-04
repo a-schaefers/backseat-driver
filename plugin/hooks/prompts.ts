@@ -62,13 +62,26 @@ function fileSection(change: FileChange): string {
 }
 
 /**
+ * What the animated persona's speech bubble may hold after a look: only what
+ * matters, or, when it has kept quiet for a while, a light remark too.
+ */
+export type Bubble = 'insight' | 'remark'
+
+const BUBBLE_REQUEST: Record<Bubble, string> = {
+  insight: 'Speech bubble: only for something that matters in this change.',
+  remark: 'Speech bubble: if nothing in this change needs a word, a light remark is welcome.',
+}
+
+/**
  * The user message for one look, and which files it shows. Files that would
  * push it past the size limit are left out, and wait for the next look.
+ * `bubble` is null while the persona is not animated.
  */
 export function playByPlayPrompt<Change extends FileChange>(
   changes: readonly Change[],
   open: readonly Note[],
   dismissed: readonly Note[] = [],
+  bubble: Bubble | null = null,
 ): { prompt: string; shown: Change[] } {
   // Only what was dismissed in the files of this look: the rest cannot come up.
   const gone = dismissed.filter(note => changes.some(change => change.path === note.file))
@@ -92,7 +105,9 @@ export function playByPlayPrompt<Change extends FileChange>(
     size += section.length
   }
 
-  return { prompt: [head, ...sections].join('\n\n'), shown }
+  const request = bubble === null ? [] : [BUBBLE_REQUEST[bubble]]
+
+  return { prompt: [head, ...sections, ...request].join('\n\n'), shown }
 }
 
 /** The reviewer's system prompt: its instructions, then what is known about the person, then the persona. */
@@ -108,10 +123,19 @@ export function notesContext(notes: readonly Note[]): string {
   ].join('\n')
 }
 
-/** Everything the pane shows that the conversation should know about, or '' when it shows nothing. */
-export function paneContext(notes: readonly Note[], review: Review): string {
+/**
+ * Everything the pane shows that the conversation should know about, or ''
+ * when it shows nothing. `said` is the animated persona's line, if it has one
+ * worth knowing.
+ */
+export function paneContext(notes: readonly Note[], review: Review, said = ''): string {
   const parts: string[] = []
   if (notes.length > 0) parts.push(notesContext(notes))
+  if (said !== '') {
+    parts.push(
+      `Backseat Driver: the animated character in the pane speaks for the play-by-play and the deep review. It last said: "${said}"`,
+    )
+  }
   if (review.state === 'done') {
     parts.push(
       [
