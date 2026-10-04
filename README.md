@@ -6,7 +6,7 @@ Backseat Driver is a plugin for [Claude Code](https://claude.com/claude-code). S
 
 You learn by building whatever you want to build. The tutor sets no exercises and runs no quizzes. It chimes in from the background, and how often, how deeply and in what voice is yours to tune.
 
-> **Status: part one built, part two under way.** Everything described here is built, except what is under [Part two](#part-two-being-built), which is being added now. Each part was tried in a real session on Claude Code 2.1.289, but only in short scripted ones. Nobody has done real work with it yet, so expect the prompts and defaults to need adjusting. Three things have only been run in tests: the slow-down near plan limits, the hook that refuses edits (the tutor declined before it was ever needed), and the deep review on its default model, because the live runs used a cheaper one. Installing from the marketplace has not been tried.
+> **Status: part one built, part two under way.** Everything described here is built, except what is under [Part two](#part-two-being-built), which is being added now. Each part was tried in a real session on Claude Code 2.1.289, but only in short scripted ones. Nobody has done real work with it yet, so expect the prompts and defaults to need adjusting. Three things have only been run in tests: the slow-down near plan limits, the hook that refuses edits (the tutor declined before it was ever needed), and the deep review on its default model, because the live runs used a cheaper one. So have three parts of the journal: rolling up a sitting after an hour, two sessions keeping one journal, and the deep review reading it. The editor's side of it was tried with a script standing in for an editor. Installing from the marketplace has not been tried.
 
 ## Using it
 
@@ -33,6 +33,7 @@ A language you only touch later, such as the one shell script in a Python projec
 - **Notes are nudges, not patches.** A note says where to look and what to think about. You can ask for the concept behind it, and then for a small example. Typing the fix stays your job.
 - **A note leaves when you deal with it.** Fix the code and the note clears itself at the next look. Press `d` to dismiss one you have read: it goes, and the same point is not raised about that file again until you switch the tutor off. To silence a whole topic for good, press `m` or say so (see [Talk back](#talk-back)).
 - **Commits get a deeper review.** After each commit, a stronger model reads the whole commit together with the code around it and writes a longer review in the pane's Deep review tab. It can also run on a timer, or only when you ask.
+- **It keeps track of what you are working on.** You never have to explain: it works that out from what you do, and shows it under the pane's status line. See [What you are working on](#what-you-are-working-on).
 - **A character speaks up when it matters.** A small animated figure for your chosen voice stands at the top of the pane. When a look finds a critical point or a design decision in what you saved, it says one line about why it matters. It also passes on a deep review's takeaway, and now and then makes a joke. See [The animated persona](#the-animated-persona).
 
 ```text
@@ -40,6 +41,8 @@ A language you only touch later, such as the one shell script in a Python projec
 │                                        │ 1: Play  2: Review  3: Explain  4: Profile    │
 │ > /backseat-driver                     │ On. Watching for your next save. Voice:       │
 │   Backseat Driver is on. You drive.    │ torvalds.                                     │
+│                                        │ w: Working on adding an async cache           │
+│                                        │ Worked out from your activity.                │
 │                                        │                                               │
 │ > why does note 1 matter? the tests    │    .,,,,.                                     │
 │   pass                                 │   /      \                                    │
@@ -61,6 +64,28 @@ A language you only touch later, such as the one shell script in a Python projec
 │ >                                      │                                               │
 └────────────────────────────────────────┴───────────────────────────────────────────────┘
 ```
+
+### What you are working on
+
+The tutor keeps a journal of what you do in the project: which files you save and what each save changed, where your editor's caret stays and for how long, which files you have open and on screen, your commits, and the notes it raised, all in order. Every model the tutor calls reads it, so each one knows what is going on without you having to explain.
+
+From the journal the tutor works out what you are working on, and the pane shows it under the status line, with how it knows. Until a look has said, it shows where your activity is, such as `stats.py, in median`, and how much of the last ten minutes went there. You never have to tell it. When it has it wrong, or you want to be precise:
+
+- Press `w` in the pane. It asks its one question, "What are you working on right now?". Type your answer, or pick what it worked out.
+- Run `/bsd working on the CSV parser`.
+- Tell the tutor in the conversation, and it records your words.
+
+What you say stands until you change it, in later sessions too, and the pane says when you said it once that was a while ago. `/bsd working clear`, or "Let the tutor work it out" under `w`, hands the job back to the tutor.
+
+What reads the journal:
+
+- **The play-by-play** reads it before your changes, so that a note fits what you are doing. Its reply says what you appear to be working on, and that is what the pane shows.
+- **The deep review** reads it after the commit, to judge the change against what it was for.
+- **The conversation.** Each question you type goes with a few lines on what you are working on and where your caret is, so "why does this fail?" means the code you were just in. The tutor can also read the whole journal, including what your latest saves changed.
+
+Without an editor plugin the journal goes by your saves and commits. With one, it also knows where your attention is: see [The editor side](#the-editor-side).
+
+The journal is kept per project in the tutor's data folder. It holds file paths, line numbers, the names of functions, commit titles and what you said you are working on, and never your code. Once a sitting is over, which is after an hour with nothing to record, it is rolled up into a few lines, so the file stays small. `/bsd forget project` erases it.
 
 ### While you read
 
@@ -108,12 +133,13 @@ The play-by-play and the deep review are not announcements to be read in silence
 - **Do it your way.** You can always overrule the tutor, and it will not argue the point again. The play-by-play may still flag it.
 - **Tell it to hush.** Say "stop warning me about missing type hints", or press `m` on a note. It stops at once and remembers, in this project and in every other project in that language.
 - **Tell it where you stand.** Say "I have written Python for six years" or "what I want now is performance", and it updates your profile on the spot. You can also answer the first-run questions again from the pane's Profile tab.
+- **Say what you are working on**, when the pane has it wrong. The tutor records your words, and the reviewers go by them too.
 
 ### Forget
 
 The tutor keeps a growing record of you, so there are deliberate ways to erase it and no accidental ones.
 
-`/bsd forget` asks what to forget: what is cached about this project, one language's profile and progress, or everything. It then asks again, with keeping as the answer Enter gives. Forgetting everything also takes the words "forget everything", typed out. Esc at any point keeps everything. `/bsd forget project`, `/bsd forget python` and `/bsd forget everything` skip the first question and none of the others.
+`/bsd forget` asks what to forget: this project's journal and cache, one language's profile and progress, or everything. It then asks again, with keeping as the answer Enter gives. Forgetting everything also takes the words "forget everything", typed out. Esc at any point keeps everything. `/bsd forget project`, `/bsd forget python` and `/bsd forget everything` skip the first question and none of the others.
 
 It works whether the tutor is on or off.
 
@@ -155,6 +181,8 @@ Your profile is per language. What the tutor learns about the code is kept per p
 
 The never-stale rule holds here too. An insight is kept with a fingerprint of the code it was written about, and it is shown or passed on only while that code is exactly what it was. Change the function and what was said about the old one goes. The overview is about the project as a whole, so it is labelled with the commit it was written at, and the next review corrects it when it is wrong.
 
+Beside the cache sits the project's journal: what you have been doing in the code, in order, and what you are working on. The cache is about the code, and the journal is about your work on it. See [What you are working on](#what-you-are-working-on).
+
 All of it is plain JSON in the data folder, under `projects/<name>-<hash>/`. `/bsd forget project` erases it.
 
 ## Ground rules
@@ -192,8 +220,9 @@ gate            Waits for the working tree to go quiet and for the minimum
       │         changed.
       ▼
 reviewer        One background request to the play-by-play model with the
-      │         change since the last look, the code around it, your profile
-      │         and the notes already open. No tools, no turn in your chat.
+      │         change since the last look, the code around it, your profile,
+      │         the notes already open and what the journal says you have
+      │         been doing. No tools, no turn in your chat.
       ▼
 Play-by-play    New notes appear. Notes you have dealt with disappear.
 tab
@@ -217,8 +246,8 @@ tab
 CONVERSATION
 
 Your questions go to the session's model, which is given your profile, the
-open notes and the latest review as context. A point you contest goes to the
-deep review model for a second opinion.
+open notes, the latest review and a few lines from the journal as context. A
+point you contest goes to the deep review model for a second opinion.
 ```
 
 ### When the play-by-play looks
@@ -253,13 +282,15 @@ The watcher asks git what changed every couple of seconds, and stretches that in
 | First-run questions | `$.ui.ask`, the same question dialog Claude uses. |
 | Explain | `$.model.complete` on the explain model, with an abort signal so that a lookup overtaken by a save is cut short. What it learns is one JSON file per source file in the project's cache. While the tab or an editor is watching, the file in focus is checked for changes ten times a second with `$.fs.stat`. |
 | Looking code up in conversation | A `lookup` tool the mod registers. It answers from the same cache and turns the tab to the spot. |
+| The journal | One JSON file per project in the tutor's data folder. Each poll of the watcher adds what was saved, diffed in the mod with no model involved, and the time since the previous poll to where the editor's caret is. It is written at most every 30 seconds. Another session on the same project adds to it rather than overwriting it. |
+| What you are working on | The play-by-play's reply says what you appear to be working on, in a field its prompt asks for. `w` and `/bsd working` ask with `$.ui.ask`, and a `working` tool records what you tell the tutor. An `activity` tool lets the tutor read the whole journal. |
 | Profiles | One JSON file per language in the tutor's data folder, written with `$.fs.write`. Forgetting deletes with `rm`, because the mod API has no delete. |
 | Play-by-play review | `$.model.complete` with the chosen model and thinking level: one request, no tools, no conversation history. |
 | Deep review | A read-only subagent (`Read`, `Grep`, `Glob`) that the mod registers with `$.agent.register` on the chosen model and thinking level, and starts with `$.agent.spawn`. A `turn.complete` hook takes its answer to the pane, not into the conversation. |
 | Second opinion on a contested point | The tutor hands the point to the same read-only subagent and reports its verdict in the conversation. |
 | "Stop warning me about that" | A `hush` tool the mod registers with `$.tool.register`. The tutor calls it when you state a preference, and the mod saves it to the profile and drops the matching notes. No permission prompt appears, because the mod answers its own tool. An `unhush` tool undoes it, a `record` tool saves what you tell the tutor about yourself, and a `profile` tool lets the tutor read your profile for a language that is not in play. |
 | The pane | `$.ui.open` plus a `ui.render` hook, with Play-by-play, Deep review, Explain and Profile tabs. Their contents live in `$.state`, so the pane redraws when they change. Buttons on a note send a question into the conversation with `$.prompt.submit`. |
-| The conversation knows the notes | A `prompt.submit` hook attaches the open notes, the latest review and the character's last line as context. |
+| The conversation knows the notes | A `prompt.submit` hook attaches the open notes, the latest review, the character's last line and a few lines from the journal as context. |
 | Settings | `userConfig` in `plugin.json`. Each setting is a row in `/config`, listed under [Models and settings](#models-and-settings). |
 
 Why a mod and not a skill alone? A skill could carry the contract, and a plugin monitor (a background script whose output is fed to Claude) could report file changes. But every save would then become a turn in your conversation, paid for on your main model and mixed in with your questions. The mod reviews out of band, on the models you choose, and leaves the conversation for what you ask. Where mods are turned off, the skill still works alone as `/backseat-driver:tutor`: the same tutor, without the play-by-play and the automatic reviews.
@@ -353,6 +384,7 @@ A look with nothing worth saying leaves it quiet, so what it says is always abou
 ## Limits
 
 - **It sees saves, not keystrokes.** The plugin reads files on disk, not your editor's unsaved buffer. With autosave on, that is close to live.
+- **It sees what you read only through an editor.** Without an editor plugin, the journal knows what you saved and committed, not where you were looking, and what you are working on is worked out from your saves alone.
 - **It needs git.** Changes are found by diffing the working tree, and files that git ignores are never sent.
 - **Explain is only as good as its model's reading.** It is told to say only what the code shown supports, and line numbers it gets wrong are caught, because every symbol has to quote its own first line. What it says about a function can still be mistaken. It knows the file it is in, and other files only once they have been mapped.
 - **It spends usage in the background.** Every play-by-play look and every deep review is a model call on your plan. The play-by-play waits for a pause, sends only the change and its surroundings, runs one look at a time, slows down as your plan's usage runs out, and can be paused. A deep review costs more, because it runs a stronger model at a higher thinking level, so how often it runs is yours to set.
@@ -441,17 +473,18 @@ While the tutor is on, it checks at most every six hours whether a newer release
 
 ### Where it is kept
 
-The data folder that holds your profiles and each project's cache will also hold the progress records:
+The data folder that holds your profiles, and each project's journal and cache, will also hold the progress records:
 
 ```text
 ~/.local/share/backseat-driver/
   profiles/<language>.json      answers, hushes, lesson memory
   progress/<language>.json      evidence, level, report                  (planned)
   projects/<name>-<hash>/
+    journal.json                what you have been doing, and what you are working on
     project.json                overview, what each file is for, insights
     reviews.json                the last few deep reviews
     files/<hash>-<name>.json    one source file: its outline and explanations
-  focus.json                    written by an editor: where the cursor is
+  focus.json                    written by an editor: where the cursor is, what is open
   view.json                     written by the tutor: what it knows about that spot
 ```
 
@@ -461,15 +494,25 @@ Plugins for vim and emacs are planned and not written. This is the whole of what
 
 Both files live in the tutor's data folder, `~/.local/share/backseat-driver/`.
 
-**The editor writes `focus.json`** whenever the cursor or the selection moves:
+**The editor writes `focus.json`** whenever the cursor or the selection moves, and whenever any of the other fields change:
 
 ```json
-{ "file": "/home/you/project/src/stats.py", "line": 12, "endLine": 15 }
+{
+  "file": "/home/you/project/src/stats.py",
+  "line": 12,
+  "endLine": 15,
+  "modified": true,
+  "buffers": ["/home/you/project/src/stats.py", "/home/you/project/tests/test_stats.py"],
+  "visible": ["/home/you/project/tests/test_stats.py"],
+  "active": true
+}
 ```
 
 - `file` is an absolute path. A file outside the repository the tutor is running in is ignored, so several sessions can share the one focus file.
 - `line` is 1-based. `endLine` is there only while lines are selected.
-- Write it to a temporary name and rename it into place, so that it is never read half-written.
+- `file` and `line` are all Explain needs. The rest feed the journal and are optional: `modified` says the buffer with the cursor has changes that are not saved, `buffers` lists the files open in the editor, `visible` the other files on screen beside it, as in a split, and `active` is false while the editor's window does not have the keyboard.
+- The editor reports only where things are, never how long. The tutor adds the time up itself, crediting each poll to where the cursor is. Time keeps counting for two minutes after the last write, so a cursor left still while you read counts, and one left overnight does not.
+- A few writes a second is plenty. Write it to a temporary name and rename it into place, so that it is never read half-written.
 
 **The tutor writes `view.json`** in answer, and again whenever what it knows about that spot changes:
 
@@ -514,6 +557,7 @@ Part two:
 - [x] **Explain.** The lookup engine and its queue, the never-stale rule, the Explain tab, `/bsd explain`, the files an editor reads and writes, and a lookup tool for the tutor.
 - [x] **Animated persona.** A small character for each voice at the top of the pane, which talks at the critical and decision points a look finds, passes on a deep review's takeaway, and jokes now and then. A setting turns it off.
 - [x] **One cache for all three jobs.** Deep reviews write overviews and insights into the project's cache, a first look at each new project, and the play-by-play and Explain read from it, under the same never-stale rule.
+- [x] **Journal.** A record per project of what you do in the code, read by every model the tutor calls, the "Working on" line in the pane with `w` and `/bsd working`, the editor's buffers and attention in `focus.json`, and the `working` and `activity` tools for the tutor.
 - [ ] **Progress.** Whose work it is, the evidence ledger, the rules for moving a level, the Progress tab and a first placement from past commits.
 - [ ] **Updates and uninstall.** Release tags, the update notice, `/bsd update` and `/bsd uninstall`.
 - [ ] **Usability, second pass.** Every screen and command walked through in a real session.

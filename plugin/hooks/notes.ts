@@ -2,12 +2,14 @@ import type { Note, NoteKind } from '../types'
 
 /**
  * What the play-by-play model sends back: notes it adds, the ids of open
- * notes that no longer apply, and the animated persona's line, '' for none.
+ * notes that no longer apply, the animated persona's line, and what the
+ * person appears to be working on. Each of the last two is '' for none.
  */
 export type ReviewReply = {
   resolved: number[]
   notes: Omit<Note, 'id'>[]
   say: string
+  workingOn: string
 }
 
 const KINDS: readonly NoteKind[] = ['bug', 'risk', 'idiom', 'tip']
@@ -78,6 +80,7 @@ export function parseReply(text: string): ReviewReply | null {
     resolved,
     notes: notes.slice(0, MAX_NEW_NOTES),
     say: typeof reply.say === 'string' ? reply.say.trim() : '',
+    workingOn: typeof reply.working_on === 'string' ? reply.working_on.replace(/\s+/g, ' ').trim() : '',
   }
 }
 

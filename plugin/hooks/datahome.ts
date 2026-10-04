@@ -5,7 +5,8 @@ import { shortHash } from './hash'
  *
  *   profiles/<language>.json   answers, hushes, lesson memory
  *   progress/<language>.json   evidence, level, report
- *   projects/<name>-<hash>/    one project's cache
+ *   projects/<name>-<hash>/    one project's journal and cache
+ *   focus.json                 written by an editor: where the caret is
  */
 
 /** The folder's own name under the user's data directory. */
@@ -70,6 +71,16 @@ export function projectId(repoRoot: string): string {
 
 export function projectDir(root: string, repoRoot: string): string {
   return `${root}/projects/${projectId(repoRoot)}`
+}
+
+/** The file that holds a project's journal: what the person has been doing in its code. */
+export function journalPath(root: string, repoRoot: string): string {
+  return `${projectDir(root, repoRoot)}/journal.json`
+}
+
+/** The file an editor writes to say where the caret is. One for every project: each tutor ignores a file outside its repository. */
+export function focusPath(root: string): string {
+  return `${root}/focus.json`
 }
 
 /** The file that holds what is known about one source file of a project. */

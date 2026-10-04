@@ -4,9 +4,9 @@ import type { Mode } from '../types'
 export type ModeRequest = 'on' | 'off' | 'pause' | 'resume' | 'status'
 
 /** Everything `/bsd <word>` can ask for. */
-export type Request = ModeRequest | 'explain' | 'questions' | 'forget' | 'help'
+export type Request = ModeRequest | 'explain' | 'questions' | 'working' | 'forget' | 'help'
 
-const WORDS: readonly Request[] = ['on', 'off', 'pause', 'resume', 'status', 'explain', 'questions', 'forget', 'help']
+const WORDS: readonly Request[] = ['on', 'off', 'pause', 'resume', 'status', 'explain', 'questions', 'working', 'forget', 'help']
 
 export type Parsed = {
   request: Request
@@ -28,7 +28,9 @@ export function parseRequest(args: string): Parsed {
 }
 
 export function isModeRequest(request: Request): request is ModeRequest {
-  return request !== 'explain' && request !== 'questions' && request !== 'forget' && request !== 'help'
+  return (
+    request !== 'explain' && request !== 'questions' && request !== 'working' && request !== 'forget' && request !== 'help'
+  )
 }
 
 /** Every command and key, as `/bsd help` prints it. */
@@ -42,6 +44,8 @@ export const HELP = [
   '  /bsd status      whether it is on, its voice and its engineering persona',
   '  /bsd explain     explain a spot in the code: /bsd explain src/app.py:42',
   '  /bsd questions   answer the first-run questions again',
+  '  /bsd working     say what you are working on: /bsd working on the parser',
+  '                   /bsd working clear lets it work that out again',
   '  /bsd forget      erase what it remembers: this project, one language, or everything',
   '  /bsd help        this list',
   '',
@@ -51,6 +55,7 @@ export const HELP = [
   '  l         look at your changes now',
   '  r         run a deep review now',
   '  n p e     in Explain: next symbol, previous symbol, ask about this one',
+  '  w         say what you are working on',
   '  q         answer the questions again',
   '',
   'Models, thinking levels, pacing, the voice and the engineering persona are in /config: search for "backseat".',

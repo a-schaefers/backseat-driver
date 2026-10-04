@@ -15,7 +15,7 @@ export function parseScope(rest: string): Scope | null {
 }
 
 export const SCOPE_QUESTION = 'What should be forgotten?'
-export const SCOPE_PROJECT = "This project's cache"
+export const SCOPE_PROJECT = 'This project: its journal and cache'
 export const SCOPE_LANGUAGE = 'One language: its profile and progress'
 export const SCOPE_EVERYTHING = 'Everything'
 export const LANGUAGE_QUESTION = 'Which language? Type its name if it is not listed.'
@@ -26,7 +26,7 @@ export const FORGET = 'Forget it'
 
 /** Forgetting everything also takes these words, typed out. */
 export const PHRASE = 'forget everything'
-export const PHRASE_QUESTION = `This erases every profile, every progress record and every project's cache. Type "${PHRASE}" to go ahead.`
+export const PHRASE_QUESTION = `This erases every profile, every progress record and every project's journal and cache. Type "${PHRASE}" to go ahead.`
 export const PHRASE_OPTIONS = ['Keep everything', 'Cancel'] as const
 
 export function isPhrase(answer: string): boolean {
@@ -46,11 +46,11 @@ export function scopeOf(answer: string): Scope['kind'] | null {
 export function describeScope(scope: Scope, projectName: string): string {
   switch (scope.kind) {
     case 'project':
-      return `what is cached about this project (${projectName})`
+      return `the journal and cache of this project (${projectName})`
     case 'language':
       return `your ${languageName(scope.language)} profile and progress`
     case 'everything':
-      return "every profile, every progress record and every project's cache"
+      return "every profile, every progress record and every project's journal and cache"
   }
 }
 

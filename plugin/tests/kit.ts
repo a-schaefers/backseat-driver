@@ -218,10 +218,16 @@ export function stubSession(on: On, options: StubOptions = {}) {
     reply(reply: unknown) {
       session.replies.push(typeof reply === 'string' ? reply : JSON.stringify(reply))
     },
-    /** Moves the cursor in an editor that reports to the tutor: it writes the focus file. */
-    editor(file: string, line: number, endLine?: number) {
+    /**
+     * Moves the cursor in an editor that reports to the tutor: it writes the
+     * focus file. `more` holds the protocol's other fields, such as `buffers`.
+     */
+    editor(file: string, line: number, endLine?: number, more: Record<string, unknown> = {}) {
       writes += 1
-      session.disk.set(`${DATA_HOME}/focus.json`, JSON.stringify({ file, line, ...(endLine === undefined ? {} : { endLine }) }))
+      session.disk.set(
+        `${DATA_HOME}/focus.json`,
+        JSON.stringify({ file, line, ...(endLine === undefined ? {} : { endLine }), ...more }),
+      )
       mtimes.set(`${DATA_HOME}/focus.json`, writes)
     },
     /**
@@ -340,6 +346,7 @@ export function stubSession(on: On, options: StubOptions = {}) {
     if (args[0] === 'rev-parse') {
       if (args[1] === '--show-toplevel') return ok(`${ROOT}\n`)
       if (args[1] === '--absolute-git-dir') return ok(`${ROOT}/.git\n`)
+      if (args[1] === '--abbrev-ref') return ok('main\n')
 
       return ok(`${tip().hash}\n`)
     }

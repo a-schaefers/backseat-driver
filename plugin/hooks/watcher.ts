@@ -110,6 +110,11 @@ export function createWatcher(ports: WatcherPorts) {
       return false
     },
 
+    /** Every file that differs from HEAD as of the last poll. */
+    dirty(): string[] {
+      return [...seen.keys()]
+    },
+
     /**
      * The real changes since the previous look. Files that cannot be read,
      * are too large or binary, or changed only in whitespace are settled

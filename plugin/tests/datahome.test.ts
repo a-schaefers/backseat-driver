@@ -235,7 +235,7 @@ sessionTest('/bsd forget asks what, and forgetting everything takes the words ty
   await session.clock.settle()
   expect(session.removed).toEqual([`${DATA_HOME}/profiles`, `${DATA_HOME}/projects`])
   expect([...session.disk.keys()]).toEqual([MARKER_PATH])
-  expect(session.logs).toContain("Forgot every profile, every progress record and every project's cache.")
+  expect(session.logs).toContain("Forgot every profile, every progress record and every project's journal and cache.")
 })
 
 sessionTest('/bsd forget project clears this project and leaves the languages alone', async ($, on) => {

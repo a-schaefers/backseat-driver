@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteResult, Register, Timer } from 'claude-code'
 
-import type { Hush, Mode, Note, Profile, Profiles, Review, Spot, Tab, Watch } from '../types'
+import type { Hush, Mode, Note, Profile, Profiles, Review, Spot, Tab, Watch, Working } from '../types'
 import {
   avatarFor,
   BLINK_MS,
@@ -25,7 +25,18 @@ import {
   TALK_MS,
 } from './avatar'
 import { personaPrompt, reframeInstructions, SESSION_NOTES, stripFrontmatter, tutorSections } from './contract'
-import { dataHome, fileEntryPath, isRemovable, MARKER, MARKER_TEXT, profilePath, projectDir, projectId } from './datahome'
+import {
+  dataHome,
+  fileEntryPath,
+  focusPath,
+  isRemovable,
+  journalPath,
+  MARKER,
+  MARKER_TEXT,
+  profilePath,
+  projectDir,
+  projectId,
+} from './datahome'
 import { createExplainer, NO_VIEW } from './explainer'
 import type { Explainer, Intent } from './explainer'
 import { describeSpot, parseFocusFile, parseTarget, relativeTo, viewFile, viewText } from './focus'
@@ -52,6 +63,7 @@ import type { Scope } from './forget'
 import { backoffMs, shouldLook, slowedGapMs, throttle, usagePressure } from './gate'
 import type { Throttle } from './gate'
 import { parseStatus } from './git'
+import { NO_ACTIVITY } from './glance'
 import { DENIAL, isUsersFile } from './guard'
 import { languageName, languageOf, mainLanguages } from './languages'
 import { sourcePrint } from './knowledge'
@@ -93,6 +105,8 @@ import { explainAsk, explainContext, explainRequest, paneContext, playByPlayProm
 import type { Bubble } from './prompts'
 import { firstRunQuestions, groupAnswers } from './questions'
 import type { Question } from './questions'
+import { createRecorder } from './recorder'
+import type { Recorder } from './recorder'
 import {
   commitTitle,
   fitReview,
@@ -114,6 +128,7 @@ import { readJson, writeJson } from './storage'
 import type { Disk } from './storage'
 import { createWatcher } from './watcher'
 import type { Watcher } from './watcher'
+import { chosen, parseWorking, tidy, WORKING_HEADER, WORKING_QUESTION, workingChoices } from './working'
 
 const COMMANDS = ['backseat-driver', 'bsd'] as const
 
@@ -127,6 +142,7 @@ const IDLE: Watch = { state: 'idle', lastLookAt: null, detail: '' }
 const STARTING: Watch = { state: 'starting', lastLookAt: null, detail: '' }
 const NO_REVIEW: Review = { state: 'none', subject: '', text: '', isUnseen: false }
 const NO_PROFILES: Profiles = { languages: [], subjects: {} }
+const NO_WORKING: Working = { said: '', saidAgo: '', inferred: '', where: '', share: '' }
 
 const modeAtom = atom({ plugin: 'backseat-driver', key: 'mode' } as const, 'off')
 const tabAtom = atom({ plugin: 'backseat-driver', key: 'tab' } as const, 'play')
@@ -138,6 +154,7 @@ const reviewAtom = atom({ plugin: 'backseat-driver', key: 'review' } as const, N
 const profilesAtom = atom({ plugin: 'backseat-driver', key: 'profiles' } as const, NO_PROFILES)
 const explainAtom = atom({ plugin: 'backseat-driver', key: 'explain' } as const, NO_VIEW)
 const speechAtom = atom({ plugin: 'backseat-driver', key: 'speech' } as const, SILENT)
+const workingAtom = atom({ plugin: 'backseat-driver', key: 'working' } as const, NO_WORKING)
 
 /**
  * The mode is kept twice, because each copy is lost by a different event.
@@ -197,7 +214,9 @@ let focus: Focus | null = null
 /** When an editor last moved the focus, in clock milliseconds. A save does not move the focus away from a live editor. */
 let editorFocusAt = 0
 let focusTimer: Timer | null = null
+/** The editor's focus file as last read: its size and modification time, and its text, null when it is not there. */
 let focusStamp = ''
+let focusText: string | null = null
 /** Counts refreshes of the Explain view, so that a slower, older one does not overwrite a newer one. */
 let viewRun = 0
 /** The focused file's stamp when the view was last made. A different stamp now means the view may describe code that is gone. */
@@ -247,6 +266,11 @@ let reviewScope: ReviewScope | null = null
 /** A commit made while a review was running. Only the latest is kept. */
 let queuedCommit: ReflogEntry | null = null
 let reviewTimer: Timer | null = null
+
+/** The journal of what they are doing in this project. Null while the tutor is off, and outside a repository. */
+let recorder: Recorder | null = null
+/** What the pane was last told they are working on, as JSON, so that it is told again only when that changes. */
+let workingShown = ''
 
 async function loadTutor($: EngineInterface, chosen: Persona): Promise<void> {
   const root = $.plugin.root
@@ -431,6 +455,109 @@ async function git(
     // Git is missing, or took too long.
     return { exitCode: 1, stdout: '' }
   }
+}
+
+/** Tells the pane what they are working on, when that has changed since it was last told. */
+async function showWorking($: EngineInterface, now: number): Promise<void> {
+  const working = recorder === null ? NO_WORKING : recorder.working(now)
+  const text = JSON.stringify(working)
+  if (text === workingShown) return
+  workingShown = text
+  await update($, workingAtom, (): Working => working)
+}
+
+/** Writes the journal when it is due, or now when `isForced`. A write that fails is made again with the next one. */
+async function flushJournal($: EngineInterface, journal: Recorder, now: number, isForced: boolean): Promise<void> {
+  try {
+    await journal.flush(now, isForced)
+  } catch (error) {
+    $.ui.log(`could not write the journal: ${String(error)}`, { to: 'debug' })
+  }
+}
+
+/**
+ * The journal's part of a poll: what was just saved and what it changed, the
+ * time the caret has spent where it is, and a write when one is due. No
+ * model is involved.
+ */
+async function keepJournal($: EngineInterface, active: Watcher, now: number): Promise<void> {
+  const journal = recorder
+  if (journal === null) return
+  const saved = active.changed()
+  if (saved.length > 0) await journal.saved(saved, now)
+  journal.settle(active.dirty())
+  await journal.tick(now)
+  await showWorking($, now)
+  await flushJournal($, journal, now, false)
+}
+
+/**
+ * Starts the journal of this project, once the watcher has read the tree.
+ * `isFresh` is false when the tutor was already on and the module reloaded.
+ */
+async function startJournal($: EngineInterface, run: number, isFresh: boolean): Promise<void> {
+  const root = repoRoot
+  if (root === '') return
+  const disk = diskOf($)
+  const started = createRecorder({
+    disk: {
+      ...disk,
+      write: async (path, text) => {
+        await markHome($)
+        await disk.write(path, text)
+      },
+    },
+    file: dataRoot === '' ? '' : journalPath(dataRoot, root),
+    root,
+    read: async path => {
+      try {
+        return await $.fs.read(`${root}/${path}`)
+      } catch {
+        return null
+      }
+    },
+    head: async path => {
+      const shown = await git($, root, ['show', `HEAD:${path}`])
+
+      return shown.exitCode === 0 ? shown.stdout : null
+    },
+  })
+  const branch = (await git($, root, ['rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim()
+  const now = await $.clock.now()
+  await started.start(now, isFresh ? branch : null, watcher?.dirty() ?? [])
+  // Where the caret was left before the tutor was watching earns no time until the editor writes again.
+  await readFocus($)
+  started.editor(focusText, now, true)
+  // Switched off, or on again, in the meantime: this journal is no longer wanted.
+  if (run !== engagement) return
+
+  recorder = started
+  await showWorking($, now)
+}
+
+/** Records what they said they are working on, or takes it back with ''. It is saved at once. */
+async function sayWorking($: EngineInterface, said: string): Promise<void> {
+  const journal = recorder
+  if (journal === null) return
+  const now = await $.clock.now()
+  journal.say(said, now)
+  await showWorking($, now)
+  await flushJournal($, journal, now, true)
+}
+
+/** Asks what they are working on. Dismissing the dialog leaves everything as it is. */
+async function askWorking($: EngineInterface): Promise<void> {
+  const journal = recorder
+  if (journal === null) return
+  const working = journal.working(await $.clock.now())
+  let answer = ''
+  try {
+    answer = await $.ui.ask(WORKING_QUESTION, { options: workingChoices(working), header: WORKING_HEADER })
+  } catch {
+    return
+  }
+  const said = chosen(answer, working)
+  if (said !== null) await sayWorking($, said)
 }
 
 async function loadSubject($: EngineInterface, subject: string): Promise<Profile> {
@@ -633,6 +760,24 @@ async function registerTools($: EngineInterface): Promise<void> {
       'Backseat Driver: read what is on record about the user for a language that is not in play in this project, for example to explain an idea by comparison with a language they know.',
     inputSchema: { type: 'object', properties: { language }, required: ['language'] },
   })
+  await $.tool.register({
+    name: 'working',
+    description:
+      'Backseat Driver: record what the user says they are working on right now, in their own words. Call it when they tell you, whether you asked or not. It is shown in the pane and given to the background reviewers. Pass an empty string when they take it back or tell you to work it out yourself.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        on: { type: 'string', description: "What they are working on, in a few of the user's own words. Empty to take it back." },
+      },
+      required: ['on'],
+    },
+  })
+  await $.tool.register({
+    name: 'activity',
+    description:
+      "Backseat Driver: read the journal of what the user has been doing in this project's code: where the last few minutes went, the files and lines they saved, where their editor's caret is, their commits, the notes raised, in order, and what their previous sitting here was about. Use it when a question depends on what they were just doing, or when they ask what they have been up to.",
+    inputSchema: { type: 'object', properties: {} },
+  })
 }
 
 function describeFailure(result: Exclude<ModelCompleteResult, { isAnswered: true }>): string {
@@ -685,7 +830,9 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
     const changedFiles = changes.map(change => change.path)
     const current = await currentInsights($, changedFiles)
     const brief = project === null ? '' : projectBrief(project, changedFiles, insight => current.has(insight))
-    const { prompt, shown } = playByPlayPrompt(changes, await read($, notesAtom), await read($, dismissedAtom), bubble, brief)
+    // What the journal says they have been doing, so that the changes are read in the light of it.
+    const doing = recorder?.glance(await $.clock.now()) ?? ''
+    const { prompt, shown } = playByPlayPrompt(changes, await read($, notesAtom), await read($, dismissedAtom), bubble, brief, doing)
     const result = await $.model.complete({
       model: settings.playByPlay.model,
       effort: settings.playByPlay.thinking,
@@ -724,11 +871,16 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
       const paths = shown.map(change => change.path)
       // Read again: a note dismissed while this look ran must not come back with it.
       const dismissed = await read($, dismissedAtom)
+      const dealtWith = (await read($, notesAtom)).filter(note => reply.resolved.includes(note.id))
       await update($, notesAtom, open => applyReply(open, reply, paths, firstId, dismissed).notes)
 
       // Lesson memory: which ideas reached the pane, by language. A repeat
       // of a note that is already open is not a second time it came up.
       const added = (await read($, notesAtom)).filter(note => note.id >= firstId)
+      for (const note of dealtWith) recorder?.add({ at: now, kind: 'fixed', path: note.file, line: note.line, text: note.topic })
+      for (const note of added) recorder?.add({ at: now, kind: 'note', path: note.file, line: note.line, text: note.topic })
+      recorder?.infer(reply.workingOn, paths, now)
+      await showWorking($, now)
       const raised = new Map<string, string[]>()
       for (const note of added) {
         const subject = languageOf(note.file) ?? GENERAL
@@ -780,7 +932,11 @@ async function startReview($: EngineInterface, scope: ReviewScope): Promise<void
     const spawned = await $.agent.spawn({
       subagentType: 'backseat-driver:deep-reviewer',
       description: `Deep review of ${subject}`,
-      prompt: reviewRequest(scope, { overview: project === null ? '' : overviewLine(project), earlier: reviewDigest(reviews) }),
+      prompt: reviewRequest(
+        scope,
+        { overview: project === null ? '' : overviewLine(project), earlier: reviewDigest(reviews) },
+        recorder?.glance(await $.clock.now()) ?? '',
+      ),
     })
     const agentId = spawned.deny === undefined ? await startedReviewer($, spawned.agentId) : undefined
     if (agentId === undefined) {
@@ -933,13 +1089,17 @@ async function checkHead($: EngineInterface, settings: Settings): Promise<void> 
   const entry = parseReflog((await git($, repoRoot, REFLOG_ARGS)).stdout)
   if (entry === null || entry.hash === lastHead) return
   lastHead = entry.hash
+  const movedAt = await $.clock.now()
   if (!isCommit(entry)) {
     // A checkout, pull, reset or rebase is not new work. Deep reviews start afresh from here.
     reviewedHead = entry.hash
     reviewedPrint = ''
+    recorder?.add({ at: movedAt, kind: 'head', hash: entry.hash, text: entry.subject })
+    recorder?.moved(movedAt)
 
     return
   }
+  recorder?.add({ at: movedAt, kind: 'commit', hash: entry.hash, text: commitTitle(entry) })
   if (!settings.deepReview.isAfterCommit) return
   if ((await readSlowdown($, await $.clock.now())).isHeld) {
     await setReview($, {
@@ -980,6 +1140,7 @@ async function tick($: EngineInterface, settings: Settings): Promise<void> {
     await explainer?.tick()
     // Until an editor has written its focus file, looking for it this often is enough.
     if (focusTimer === null) await pollFocus($)
+    await keepJournal($, active, now)
     const isDue = shouldLook({
       now,
       lastChangeAt,
@@ -1014,6 +1175,7 @@ function stopWatching(): void {
   reviews = []
   focus = null
   focusStamp = ''
+  focusText = null
   writtenView = ''
   viewedStamp = ''
   reviewTimer?.cancel()
@@ -1127,23 +1289,48 @@ async function setFocus($: EngineInterface, next: Focus, isAsked: boolean): Prom
   await refreshView($, isAsked)
 }
 
-/** Reads the file an editor writes its cursor to, when that file has changed. */
-async function pollFocus($: EngineInterface): Promise<void> {
-  if (explainer === null || dataRoot === '' || mode === 'off') return
-  const stamp = await fileStamp($, `${dataRoot}/focus.json`)
-  if (stamp === focusStamp) return
-  focusStamp = stamp
-  if (stamp === '') return
-  try {
-    const spot = parseFocusFile(await $.fs.read(`${dataRoot}/focus.json`), repoRoot)
-    if (spot === null) return
-    editorFocusAt = await $.clock.now()
-    // An editor is reporting its cursor: from now on its file is checked four times a second.
-    watchClosely($)
-    await setFocus($, { ...spot, source: 'editor' }, false)
-  } catch {
-    // Caught half-written. The next poll reads it whole.
+/**
+ * Reads the file an editor writes its cursor to, again when it has changed.
+ * Resolves true when it had. One read serves the journal and Explain both.
+ */
+async function readFocus($: EngineInterface): Promise<boolean> {
+  if (dataRoot === '') return false
+  const path = focusPath(dataRoot)
+  const stamp = await fileStamp($, path)
+  if (stamp === focusStamp) return false
+  let text: string | null = null
+  if (stamp !== '') {
+    try {
+      text = await $.fs.read(path)
+    } catch {
+      // Gone between the stat and the read. The next poll looks again.
+      return false
+    }
   }
+  focusStamp = stamp
+  focusText = text
+
+  return true
+}
+
+/** Explain follows the spot the editor's focus file names, when it names one in this repository. */
+async function followEditor($: EngineInterface, now: number): Promise<void> {
+  if (explainer === null || focusText === null) return
+  // A file caught half-written does not parse. The editor's next write is read whole.
+  const spot = parseFocusFile(focusText, repoRoot)
+  if (spot === null) return
+  editorFocusAt = now
+  // An editor is reporting its cursor: from now on its file is checked ten times a second.
+  watchClosely($)
+  await setFocus($, { ...spot, source: 'editor' }, false)
+}
+
+/** Hands what an editor says, when it has said something new, to the journal and to Explain. */
+async function pollFocus($: EngineInterface): Promise<void> {
+  if (mode === 'off' || repoRoot === '' || !(await readFocus($))) return
+  const now = await $.clock.now()
+  recorder?.editor(focusText, now, false)
+  await followEditor($, now)
 }
 
 /** Whether anyone can see the Explain view: the tab is open, or an editor is showing it. */
@@ -1256,7 +1443,9 @@ async function startExplaining($: EngineInterface, settings: Settings, run: numb
   if (shown !== null) focus = { ...shown, source: 'pane' }
   else await update($, explainAtom, () => NO_VIEW)
   await refreshView($)
-  await pollFocus($)
+  // The journal may have read the focus file already. What it said is followed either way.
+  await readFocus($)
+  await followEditor($, await $.clock.now())
   if (await isWatched($)) watchClosely($)
 }
 
@@ -1315,6 +1504,8 @@ async function engage($: EngineInterface, settings: Settings, run: number, isFre
     if (run !== engagement) return
     await startWatching($, settings, run)
     if (run !== engagement) return
+    await startJournal($, run, isFresh)
+    if (run !== engagement) return
     await moveOutOfStore($)
     const main = await setUpProfiles($)
     await loadProject($)
@@ -1351,6 +1542,12 @@ async function switchTo($: EngineInterface, next: Mode, settings: Settings): Pro
     stopWatching()
     stopAnimating()
     await update($, speechAtom, () => SILENT)
+    // The journal is written one last time, with the attention added up so far. The command does not wait for it.
+    const leaving = recorder
+    recorder = null
+    const now = await $.clock.now()
+    if (leaving !== null) void flushJournal($, leaving, now, true)
+    await showWorking($, now)
     await update($, notesAtom, () => [])
     await update($, dismissedAtom, () => [])
     await update($, selectedAtom, () => null)
@@ -1438,6 +1635,9 @@ async function forget($: EngineInterface, settings: Settings, named: Scope | nul
       await update($, dismissedAtom, () => [])
       await update($, selectedAtom, () => null)
       await update($, reviewAtom, () => NO_REVIEW)
+      // Or the journal held in memory would be written straight back into the folder that was just deleted.
+      recorder?.reset()
+      await showWorking($, await $.clock.now())
     }
     if (scope.kind !== 'project' && mode !== 'off') {
       await setUpProfiles($)
@@ -1473,7 +1673,7 @@ export const register: Register = (on, options) => {
         await $.command.register({
           name,
           description: 'Turn the Backseat Driver tutor on. /bsd help lists the rest',
-          argumentHint: '[off | pause | resume | status | questions | help]',
+          argumentHint: '[off | pause | resume | status | questions | working | help]',
           immediate: true,
         })
       } catch (error) {
@@ -1488,6 +1688,11 @@ export const register: Register = (on, options) => {
   // /clear, /resume and /branch reset `$.state` and do not fire `session.start`.
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
     await update($, modeAtom, () => mode)
+    // The pane's "Working on" line was reset with the rest of the state. The journal behind it was not.
+    if (mode !== 'off') {
+      workingShown = ''
+      await showWorking($, await $.clock.now())
+    }
 
     return next(e)
   })
@@ -1517,6 +1722,22 @@ export const register: Register = (on, options) => {
       void setFocus($, { path: spot.path, line: spot.line, ...(spot.endLine === undefined ? {} : { endLine: spot.endLine }), source: 'command' }, true)
 
       return { text: `Explaining ${describeSpot(spot)} in the pane.` }
+    }
+    if (request === 'working') {
+      if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
+      if (recorder === null) {
+        return { text: 'There is no journal to put that in: the tutor is still getting ready, or this folder is not a git repository.' }
+      }
+      const said = parseWorking(rest)
+      if (said === null) {
+        // Not awaited: the dialog stays open for as long as the person takes.
+        void askWorking($)
+
+        return { text: 'Type it, or pick an answer. Esc leaves it as it is.' }
+      }
+      void sayWorking($, said)
+
+      return { text: said === '' ? 'Cleared. The tutor goes by your activity again.' : `Noted. Working on: ${said}` }
     }
     if (request === 'forget') {
       // Not awaited: the dialogs stay open for as long as the person takes.
@@ -1555,7 +1776,8 @@ export const register: Register = (on, options) => {
     }
   })
 
-  // The conversation is told what the pane shows, so "explain note 2" means something.
+  // The conversation is told what the pane shows, so "explain note 2" means something,
+  // and what the person is doing in the code, so "why does this fail?" has a place.
   on('prompt.submit', async ($, e, next) => {
     if (mode === 'off') return next(e)
     // The character's hello says nothing about the code.
@@ -1564,6 +1786,7 @@ export const register: Register = (on, options) => {
     const shown = [
       paneContext(await read($, notesAtom), await read($, reviewAtom), isHello ? '' : said),
       explainContext(await read($, explainAtom)),
+      recorder?.brief(await $.clock.now()) ?? '',
     ].filter(part => part !== '')
     if (shown.length === 0) return next(e)
 
@@ -1586,6 +1809,8 @@ export const register: Register = (on, options) => {
       const shown = await keepReview($, scope, e.answer)
       const isUnseen = (await read($, tabAtom)) !== 'review'
       await setReview($, { state: 'done', text: fitReview(shown), isUnseen })
+      // A survey reviewed none of their work, so it is not part of the record of it.
+      if (scope.kind !== 'survey') recorder?.add({ at: await $.clock.now(), kind: 'review', text: scopeSubject(scope) })
       if (isUnseen) $.ui.toast(`Deep review ready: ${scopeSubject(scope)}`)
       // The review ends on the one thing most worth doing next, which is worth saying out loud.
       // Its last line as shown: the notes after it are not for the person.
@@ -1669,6 +1894,30 @@ export const register: Register = (on, options) => {
     return { result: text === '' ? `Nothing is on record for ${subject}.` : text }
   })
 
+  on('tool.call', { tool: 'mcp__backseat-driver__working' }, async ($, e) => {
+    if (mode === 'off' || recorder === null) return { result: 'No journal is being kept here, so nothing was recorded.' }
+    // Only an empty string takes their words back. A call that left `on` out, as one did in a live session, changes nothing.
+    if (typeof e.on !== 'string') {
+      return { result: 'Nothing was recorded: give `on`, what they said in their words, or an empty string when they take it back.' }
+    }
+    const said = tidy(e.on)
+    await sayWorking($, said)
+
+    return {
+      result:
+        said === ''
+          ? 'Cleared. What they are working on is worked out from their activity again.'
+          : `Recorded: they are working on "${said}". The pane shows it, and the background reviewers are told.`,
+    }
+  })
+
+  on('tool.call', { tool: 'mcp__backseat-driver__activity' }, async $ => {
+    if (mode === 'off' || recorder === null) return { result: NO_ACTIVITY }
+    const doing = recorder.activity(await $.clock.now())
+
+    return { result: doing === '' ? NO_ACTIVITY : doing }
+  })
+
   // The one rule that does not rest on the model: Claude cannot edit the user's files.
   on('tool.call', { tool: ['Edit', 'Write', 'NotebookEdit'] }, ($, e, next) => {
     if (mode === 'off') return next(e)
@@ -1690,6 +1939,7 @@ export const register: Register = (on, options) => {
       reviewSchedule: reviewSchedule(settings.deepReview.isAfterCommit, settings.deepReview.everyMs),
       profiles: await read($, profilesAtom),
       explain: await read($, explainAtom),
+      working: await read($, workingAtom),
       isFocused: e.props.isFocused,
       columns: e.props.bodyColumns,
       character: settings.isAnimated
@@ -1741,6 +1991,10 @@ export const register: Register = (on, options) => {
         void update($, notesAtom, open => open.filter(other => other.id !== note.id))
         // Remembered, so that the next look does not bring the same point back.
         void update($, dismissedAtom, dismissed => withDismissed(dismissed, note))
+        void $.clock.now().then(at => recorder?.add({ at, kind: 'dismissed', path: note.file, line: note.line, text: note.topic }))
+      },
+      onWorking: () => {
+        void askWorking($)
       },
       onLook: () => {
         if (mode === 'on') void look($, settings, true)

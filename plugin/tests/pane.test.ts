@@ -18,6 +18,7 @@ const VIEW: PaneView = {
   reviewSchedule: 'after each commit',
   profiles: { languages: [], subjects: {} },
   explain: NO_VIEW,
+  working: { said: '', saidAgo: '', inferred: '', where: '', share: '' },
   isFocused: true,
   columns: 76,
   character: null,

@@ -1,6 +1,6 @@
 import type { Elements } from 'claude-code'
 
-import type { ExplainView, Mode, Note, OutlineRow, Profile, Profiles, Review, Speech, Tab, Watch } from '../types'
+import type { ExplainView, Mode, Note, OutlineRow, Profile, Profiles, Review, Speech, Tab, Watch, Working } from '../types'
 import { bubbleColumn, bubbleWidth, isTalking, poseOf, saidSoFar, wordsSaid } from './avatar'
 import type { Avatar } from './avatar'
 import { languageName } from './languages'
@@ -29,6 +29,8 @@ export type PaneView = {
   reviewSchedule: string
   profiles: Profiles
   explain: ExplainView
+  /** What they are working on: what they said, what a look made of it, and where their activity is. */
+  working: Working
   /** True while the pane has the keyboard, which is when its keys work. */
   isFocused: boolean
   /** How wide the pane's body is, in columns. */
@@ -58,6 +60,8 @@ export type PaneActions = {
   onExplainFetch: () => void
   /** Take what is in focus to the conversation. */
   onExplainAsk: () => void
+  /** Ask what they are working on, so that they can say it themselves or take it back. */
+  onWorking: () => void
 }
 
 const TABS: readonly { tab: Tab; label: string; short: string; hotkey: string }[] = [
@@ -118,6 +122,45 @@ export function statusLine(view: PaneView): string {
   const persona = personaLine(view.persona)
 
   return persona === '' ? watching(view) : `${watching(view)} ${persona}`
+}
+
+/** What the "Working on" line says before there is anything to go on. */
+export const NOT_CLEAR = '(not clear yet)'
+
+/**
+ * What the person is working on, and how the tutor knows: their own words
+ * first, then what a look made of their activity, then where the activity is.
+ * The head follows "Working on" and reads as one phrase with it.
+ */
+export function workingLines(working: Working): { head: string; tail: string } {
+  const lately = working.where === '' ? '' : ` Lately: ${working.where}.`
+  if (working.said !== '') {
+    return { head: working.said, tail: `You said so${working.saidAgo === '' ? '' : ` ${working.saidAgo}`}.${lately}` }
+  }
+  if (working.inferred !== '') return { head: working.inferred, tail: `Worked out from your activity.${lately}` }
+  if (working.where !== '') {
+    return { head: working.where, tail: working.share === '' ? 'From your activity.' : `From your activity: ${working.share}.` }
+  }
+
+  return { head: NOT_CLEAR, tail: '' }
+}
+
+function workingOn({ Box, Text, Button }: Kit, view: PaneView, actions: PaneActions) {
+  const { head, tail } = workingLines(view.working)
+
+  return (
+    <Box flexDirection="column">
+      <Box flexDirection="row" columnGap={1}>
+        <Button key="working" label="Working on" hotkey="w" plain onPress={() => actions.onWorking()} />
+        <Text wrap="truncate-end">{head}</Text>
+      </Box>
+      {tail !== '' && !view.isCompact && (
+        <Text dimColor wrap="truncate-end">
+          {tail}
+        </Text>
+      )}
+    </Box>
+  )
 }
 
 /** The note the keys act on: the selected one if it is still open, otherwise the first. */
@@ -423,6 +466,8 @@ export function renderPane(kit: Kit, view: PaneView, actions: PaneActions) {
         ))}
       </Box>
       <Text dimColor>{statusLine(view)}</Text>
+      {/* Outside a repository there is no journal, so nothing to go on and nowhere to keep an answer. */}
+      {view.watch.state !== 'no-git' && workingOn(kit, view, actions)}
       <Text> </Text>
       {character !== null && characterRow(kit, view, character)}
       {character !== null && <Text> </Text>}

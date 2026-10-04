@@ -97,10 +97,15 @@ function background(context: ReviewContext): string[] {
   ]
 }
 
-/** The task handed to the deep reviewer. Its instructions are its system prompt. */
-export function reviewRequest(scope: ReviewScope, context: ReviewContext = { overview: '', earlier: '' }): string {
+/**
+ * The task handed to the deep reviewer. Its instructions are its system
+ * prompt. `doing` is what the journal says about how the work came about, or
+ * '' for nothing: it goes after the change, because it is not part of it.
+ */
+export function reviewRequest(scope: ReviewScope, context: ReviewContext = { overview: '', earlier: '' }, doing = ''): string {
   const closing =
     'The repository is your working directory. Read the files this touches, and the code around them, before you write.'
+  const journal = doing === '' ? [] : ['', doing]
 
   if (scope.kind === 'survey') {
     return [
@@ -109,7 +114,7 @@ export function reviewRequest(scope: ReviewScope, context: ReviewContext = { ove
     ].join('\n')
   }
   if (scope.kind === 'commit') {
-    return [`Review this commit.`, closing, ...background(context), '', capped(scope.patch)].join('\n')
+    return [`Review this commit.`, closing, ...background(context), '', capped(scope.patch), ...journal].join('\n')
   }
 
   return [
@@ -125,6 +130,7 @@ export function reviewRequest(scope: ReviewScope, context: ReviewContext = { ove
     ...(scope.untracked.length === 0
       ? []
       : ['', 'New files git does not track yet. Read the ones that matter:', ...scope.untracked.map(path => `- ${path}`)]),
+    ...journal,
   ].join('\n')
 }
 

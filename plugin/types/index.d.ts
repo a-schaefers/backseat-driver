@@ -129,6 +129,23 @@ export type ExplainView = {
   insights: string[]
 }
 
+/**
+ * What the person is working on, for the line under the pane's status line.
+ * The pane shows the first of `said`, `inferred` and `where` that has anything in it.
+ */
+export type Working = {
+  /** What they said they are working on, in their words. '' when they have not said, or took it back. */
+  said: string
+  /** How long ago they said it, once that is an hour or more: "3 h ago". */
+  saidAgo: string
+  /** What the play-by-play made of their activity at its last look, while the activity still fits it. */
+  inferred: string
+  /** Where their saves and their editor's caret have been lately: "stats.py, in mean". */
+  where: string
+  /** How much of the last few minutes went there: "72% of the last 10 minutes in the editor". */
+  share: string
+}
+
 declare module 'claude-code' {
   /** The tools this plugin registers for the tutor, so that a `tool.call` hook on one is typed. */
   interface McpToolInputs {
@@ -137,6 +154,8 @@ declare module 'claude-code' {
     'mcp__backseat-driver__profile': { language: string }
     'mcp__backseat-driver__record': { about: string; language: string; answer: string }
     'mcp__backseat-driver__lookup': { file: string; line?: number }
+    'mcp__backseat-driver__working': { on: string }
+    'mcp__backseat-driver__activity': Record<never, never>
   }
 
   interface PluginState {
@@ -155,6 +174,8 @@ declare module 'claude-code' {
       explain: ExplainView
       /** The animated persona's line, while the animation is on. */
       speech: Speech
+      /** What they are working on, for the line under the status line. */
+      working: Working
     }
   }
 }

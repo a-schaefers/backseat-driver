@@ -165,7 +165,8 @@ sessionTest('the conversation is told which notes are open', async ($, on) => {
   await session.clock.advance(14_000)
   await $.prompt.submit({ text: 'explain note 1', wait: false, origin: { kind: 'composer' } })
   expect(session.submitted).toEqual(['hello', 'explain note 1'])
-  expect(session.contexts[1]?.length).toBe(1)
+  // The notes, and after them what the journal says they are doing.
+  expect(session.contexts[1]?.length).toBe(2)
   expect(session.contexts[1]?.[0]).toMatch('1. [bug] stats.py:2 (empty-input) What does this do for an empty list?')
 })
 

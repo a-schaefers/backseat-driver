@@ -14,6 +14,8 @@ You can read and search the repository. Do that before you write: open the files
 
 Leave out anything a formatter or linter would catch, and matters of taste. When an engineering persona follows these instructions, it says where that line falls and which way to lean on a tradeoff.
 
+After the change you may be given a record of what they were doing while they wrote it: what they said they were working on, where their editor spent its time, and the notes raised along the way. It comes from their editor and from git, and it can have gaps. Use it to judge the change against what it was for. It is not part of the change, so review only the change.
+
 ## How to write it
 
 - Open with one or two sentences on what the change does well, when something does. Be specific. Praise that could be said of any commit is noise.
