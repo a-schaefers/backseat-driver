@@ -8,9 +8,14 @@
 #   tmux capture-pane -p -t bsd                 read the screen back
 #   tmux kill-session -t bsd                    stop it
 #
+# Starting it again replaces the tmux session of the same name. Two Claude
+# Code sessions checking changes side by side each need their own
+# BSD_SESSION, or each one kills the other's session and types into it.
+#
 # The first start in a new folder shows Claude Code's trust prompt, which a
 # person or a script has to answer. Real model calls are made on your plan.
 #
+# BSD_SESSION     the tmux session's name (default: bsd)
 # BSD_RIDE_DIR    the throwaway repository (default: a folder under $TMPDIR)
 # BSD_DATA_DIR    where this session keeps profiles, progress and caches
 #                 (default: a folder under $TMPDIR, never your real one)
@@ -21,6 +26,7 @@ set -euo pipefail
 plugin="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/plugin"
 ride="${BSD_RIDE_DIR:-${TMPDIR:-/tmp}/backseat-driver-ride}"
 data="${BSD_DATA_DIR:-${TMPDIR:-/tmp}/backseat-driver-home}"
+session="${BSD_SESSION:-bsd}"
 
 if [ ! -d "$ride/.git" ]; then
   mkdir -p "$ride"
@@ -42,6 +48,6 @@ if [ "${BSD_FULLSCREEN:-0}" = "1" ]; then
 fi
 launch+=(claude --plugin-dir "$plugin" "$@")
 
-tmux kill-session -t bsd 2>/dev/null || true
-tmux new-session -d -s bsd -x 170 -y 48 -c "$ride" "$(printf '%q ' "${launch[@]}")"
-echo "Session 'bsd' started in $ride, keeping its data in $data"
+tmux kill-session -t "$session" 2>/dev/null || true
+tmux new-session -d -s "$session" -x 170 -y 48 -c "$ride" "$(printf '%q ' "${launch[@]}")"
+echo "Session '$session' started in $ride, keeping its data in $data"

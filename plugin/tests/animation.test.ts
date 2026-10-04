@@ -36,8 +36,22 @@ sessionTest("the character is the voice persona's", { options: { voice: 'torvald
   await session.clock.advance(SAY_ALL)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: AVATARS.torvalds.frames.rest[1] })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: AVATARS.torvalds.hello })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: AVATARS.torvalds.frames.rest[2] })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: `-| ${AVATARS.torvalds.hello} |` })).toBeDefined()
+  await ui.unmount()
+})
+
+sessionTest('the keep-it-simple voice gets the KISS penguin in its top hat', { options: { voice: 'eli5-tldr-kiss-terse' } }, async ($, on) => {
+  const session = stubSession(on)
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+  await session.clock.advance(SAY_ALL)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: ' ._|____|_.' })).toBeDefined()
+  // A pane 60 columns wide fits the quote in two lines, with the tail on the second, level with the beak.
+  expect(await ui.find({ type: 'Text', text: ' | "whatsoever a man soweth, that shall he |' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '-| also reap."' })).toBeDefined()
   await ui.unmount()
 })
 

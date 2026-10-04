@@ -4,6 +4,7 @@ import {
   AVATARS,
   avatarFor,
   bubble,
+  bubbleColumn,
   bubbleWidth,
   closingLine,
   finished,
@@ -42,12 +43,16 @@ test('every character keeps its size in every pose, and draws only with one-cell
       expect(avatar.mini[pose].length).toBe(avatar.mini.rest.length)
       expect(isOneCell(avatar.mini[pose])).toBe(true)
     }
+    // The bubble's tail points at a row of the drawing, with a row above it for the bubble's top.
+    expect({ voice, isMouthInside: avatar.mouth >= 1 && avatar.mouth < height }).toEqual({ voice, isMouthInside: true })
   }
 })
 
 test("each voice has its own character, and a voice without one gets Claude Code's mascot", async () => {
-  expect(avatarFor('torvalds').name).toBe('a penguin')
-  expect(avatarFor('knuth').name).toBe('an owl')
+  expect(avatarFor('torvalds').name).toBe('Linus Torvalds, in ASCII')
+  expect(avatarFor('knuth').name).toBe('Donald Knuth, in ASCII')
+  expect(avatarFor('primeagen').name).toBe('ThePrimeagen, in ASCII')
+  expect(avatarFor('eli5-tldr-kiss-terse').name).toBe('the KISS Linux penguin')
   expect(avatarFor('nobody')).toBe(AVATARS.default)
   expect(new Set(Object.values(AVATARS)).size).toBe(Object.keys(AVATARS).length)
 })
@@ -134,3 +139,25 @@ test('the bubble leaves room for the drawing, and gives way when the pane is too
   expect(bubbleWidth(200, 9)).toBe(60)
   expect(bubbleWidth(28, 9)).toBe(0)
 })
+
+test('ASCII art speaks in an ASCII bubble, with its tail on any line', async () => {
+  expect(bubble('Keep it simple.', 3, 40, 'ascii')).toEqual([' .-----------------.', '-| Keep it simple. |', " '-----------------'"])
+  expect(bubble('a b', 2, 6, 'ascii', 1)).toEqual([' .---.', ' | a |', '-| b |', " '---'"])
+})
+
+test("the bubble's tail is level with the character's mouth, and a tall bubble hangs below as little as it can", async () => {
+  const kiss = AVATARS['eli5-tldr-kiss-terse']
+  const short = bubbleColumn(kiss, kiss.hello, 9, 60)
+  expect(short.slice(0, kiss.mouth - 1)).toEqual([' ', ' ', ' '])
+  expect(short[kiss.mouth]).toBe('-| "whatsoever a man soweth, that shall he also reap." |')
+
+  // Three lines of text with the mouth on row 4: the tail moves to the last line, and the bubble ends below the mouth.
+  const long = bubbleColumn(kiss, 'one two three four five six', 6, 12)
+  expect(long.length).toBe(kiss.mouth + 2)
+  expect(long[kiss.mouth]?.startsWith('-|')).toBe(true)
+
+  // Claude's mascot speaks from its middle row, at the top of the bubble.
+  const claude = AVATARS.default
+  expect(bubbleColumn(claude, 'Hi!', 1, 60)).toEqual([' ╭─────╮', '─┤ Hi! │', ' ╰─────╯'])
+})
+

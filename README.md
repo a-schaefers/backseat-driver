@@ -41,15 +41,17 @@ A language you only touch later, such as the one shell script in a Python projec
 │ > /backseat-driver                     │ On. Watching for your next save. Voice:       │
 │   Backseat Driver is on. You drive.    │ torvalds.                                     │
 │                                        │                                               │
-│ > why does note 1 matter? the tests    │    .--.    ╭─────────────────────────────╮    │
-│   pass                                 │   |o_o |  ─┤ A lock held across an await │    │
-│                                        │   |:_/ |   │ turns a cache into a queue. │    │
-│ ● They pass because nothing in them    │  //   \ \  ╰─────────────────────────────╯    │
-│   competes for the lock. Look at what  │                                               │
-│   is still alive when you reach the    │ src/cache.rs                                  │
-│   .await on line 47. While this task   │ > 1  risk · line 42                           │
-│   is parked there, what can every      │     This guard is still held when you reach   │
-│   other task that wants the cache do?  │     the .await on line 47. Who else is        │
+│ > why does note 1 matter? the tests    │    .,,,,.                                     │
+│   pass                                 │   /      \                                    │
+│                                        │  | [o]-[o] |  .-----------------------------. │
+│ ● They pass because nothing in them    │  |    >    |  | A lock held across an await | │
+│   competes for the lock. Look at what  │   \  `-'  /  -| turns a cache into a queue. | │
+│   is still alive when you reach the    │    '-----'    '-----------------------------' │
+│   .await on line 47. While this task   │                                               │
+│   is parked there, what can every      │ src/cache.rs                                  │
+│   other task that wants the cache do?  │ > 1  risk · line 42                           │
+│                                        │     This guard is still held when you reach   │
+│                                        │     the .await on line 47. Who else is        │
 │                                        │     waiting on it?                            │
 │                                        │   2  idiom · line 18                          │
 │                                        │     This match only changes the Some case.    │
@@ -340,7 +342,7 @@ Neither half changes the ground rules. The personas named after people are in th
 
 #### The animated persona
 
-A small character stands at the top of the Play-by-play and Deep review tabs and speaks for the voice: Claude Code's own mascot for `default`, a penguin for `torvalds`, an owl for `knuth`, a streamer in a headset for `primeagen`, and a smiley for `eli5-tldr-kiss-terse`. None of them is a drawing of a real person. It rests dimmed, looks up while a look runs, and lights up and talks, one word at a time, when it has something to say:
+A small character stands at the top of the Play-by-play and Deep review tabs and speaks for the voice. For `default` it is Claude Code's own mascot. The others are ASCII caricatures, drawn in good fun: Linus in his square glasses for `torvalds`, Knuth in his round ones for `knuth`, ThePrimeagen in headphones and mustache for `primeagen`, and the KISS Linux penguin in its top hat for `eli5-tldr-kiss-terse`. It rests dimmed, looks up while a look runs, and lights up and talks, one word at a time, when it has something to say:
 
 - **After a look**, one line about a critical point or a design decision in what you just saved, such as a choice of data structure, an interface or a way of handling errors: why it matters, never the fix.
 - **After four quiet looks in a row**, a look may give it a light remark about the work instead.

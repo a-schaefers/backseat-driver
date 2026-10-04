@@ -7,15 +7,21 @@ import type { Mode, Speech, Watch } from '../types'
 
 export type Pose = 'rest' | 'talk' | 'blink' | 'think'
 
+/** How a speech bubble is drawn: with Claude Code's own box lines, or in plain ASCII to match ASCII art. */
+export type BubbleStyle = 'round' | 'ascii'
+
 /** One character. Every pose has the same number of lines, and every line the same width. */
 export type Avatar = {
-  /** What it is, in a few words. */
+  /** Who or what it is, in a few words. */
   name: string
   /** What it says when the tutor is switched on. */
   hello: string
   /** A theme key or a terminal color for the drawing. */
   color: string
   frames: Record<Pose, readonly string[]>
+  /** The row of `frames` that the speech bubble's tail points at: its mouth, give or take. At least 1. */
+  mouth: number
+  bubbleStyle: BubbleStyle
   /** The same poses in one line, for where rows are scarce. Every one the same width. */
   mini: Record<Pose, string>
 }
@@ -31,68 +37,82 @@ const CLAUDE: Avatar = {
     blink: [' ▐█████▌ ', '▝▜█████▛▘', '  ▘▘ ▝▝  '],
     think: [' ▐▙███▟▌ ', '▝▜█████▛▘', '  ▘▘ ▝▝  '],
   },
+  mouth: 1,
+  bubbleStyle: 'round',
   mini: { rest: ' ▐▛███▜▌ ', talk: '▗▐▛███▜▌▖', blink: ' ▐█████▌ ', think: ' ▐▙███▟▌ ' },
 }
 
-const PENGUIN: Avatar = {
-  name: 'a penguin',
+/** Square glasses, a tuft of hair and a wry smile. */
+const LINUS: Avatar = {
+  name: 'Linus Torvalds, in ASCII',
   hello: 'Ready. Save something.',
-  color: 'white',
+  color: 'green',
   frames: {
-    rest: ['   .--.  ', '  |o_o | ', '  |:_/ | ', ' //   \\ \\'],
-    talk: ['   .--.  ', '  |o_o | ', '  |:o/ | ', ' \\\\   / /'],
-    blink: ['   .--.  ', '  |-_- | ', '  |:_/ | ', ' //   \\ \\'],
-    think: ['   .--.  ', '  |o_O | ', '  |:_/ | ', ' //   \\ \\'],
+    rest: ['   .,,,,.   ', '  /      \\  ', ' | [o]-[o] |', ' |    >    |', "  \\  `-'  / ", "   '-----'  "],
+    talk: ['   .,,,,.   ', '  /      \\  ', ' | [o]-[o] |', ' |    >    |', '  \\   O   / ', "   '-----'  "],
+    blink: ['   .,,,,.   ', '  /      \\  ', ' | [-]-[-] |', ' |    >    |', "  \\  `-'  / ", "   '-----'  "],
+    think: ['   .,,,,.   ', '  /      \\  ', " | [']-['] |", ' |    >    |', "  \\  `-'  / ", "   '-----'  "],
   },
-  mini: { rest: '/(o_o)\\', talk: '\\(oOo)/', blink: '/(-_-)\\', think: '/(o_O)\\' },
+  mouth: 4,
+  bubbleStyle: 'ascii',
+  mini: { rest: '[o]-[o]', talk: '[O]-[O]', blink: '[-]-[-]', think: "[']-[']" },
 }
 
-const OWL: Avatar = {
-  name: 'an owl',
+/** Bald on top, tufts at the sides, round glasses and a big smile. */
+const KNUTH: Avatar = {
+  name: 'Donald Knuth, in ASCII',
   hello: 'Shall we read some programs together?',
   color: 'yellow',
   frames: {
-    rest: ['  ,___,  ', '  (O,O)  ', '  /)_)   ', '   ""    '],
-    talk: ['  ,___,  ', '  (OvO)  ', ' \\/)_)/  ', '   ""    '],
-    blink: ['  ,___,  ', '  (-,-)  ', '  /)_)   ', '   ""    '],
-    think: ['  ,___,  ', '  (o,O)  ', '  /)_)   ', '   ""    '],
+    rest: ['   .---.   ', ' ~/     \\~ ', ' |(o)-(o)| ', ' |   >   | ', '  \\ \\_/ /  ', "   '---'   "],
+    talk: ['   .---.   ', ' ~/     \\~ ', ' |(o)-(o)| ', ' |   >   | ', '  \\  O  /  ', "   '---'   "],
+    blink: ['   .---.   ', ' ~/     \\~ ', ' |(-)-(-)| ', ' |   >   | ', '  \\ \\_/ /  ', "   '---'   "],
+    think: ['   .---.   ', ' ~/     \\~ ', " |(')-(')| ", ' |   >   | ', '  \\ \\_/ /  ', "   '---'   "],
   },
-  mini: { rest: ' (O,O) ', talk: '\\(OvO)/', blink: ' (-,-) ', think: ' (o,O) ' },
+  mouth: 4,
+  bubbleStyle: 'ascii',
+  mini: { rest: '(o)-(o)', talk: '(O)-(O)', blink: '(-)-(-)', think: "(')-(')" },
 }
 
-const STREAMER: Avatar = {
-  name: 'a streamer with a headset and a mustache',
+/** A shaved head under headphones, and the mustache. */
+const PRIME: Avatar = {
+  name: 'ThePrimeagen, in ASCII',
   hello: "Let's go. Write something.",
   color: 'magenta',
   frames: {
-    rest: ['  .---.  ', ' [(o o)] ', " ,/'^'\\, ", '   \\_/   '],
-    talk: ['  .---.  ', ' [(o o)] ', " ,/'^'\\, ", '   \\O/   '],
-    blink: ['  .---.  ', ' [(- -)] ', " ,/'^'\\, ", '   \\_/   '],
-    think: ['  .---.  ', ' [(o O)] ', " ,/'^'\\, ", '   \\_/   '],
+    rest: ['   .---.   ', ' [/     \\] ', ' [| o o |] ', "  |,/^\\,|  ", '   \\_-_/   '],
+    talk: ['   .---.   ', ' [/     \\] ', ' [| o o |] ', "  |,/^\\,|  ", '   \\_O_/   '],
+    blink: ['   .---.   ', ' [/     \\] ', ' [| - - |] ', "  |,/^\\,|  ", '   \\_-_/   '],
+    think: ['   .---.   ', ' [/     \\] ', " [| ' ' |] ", "  |,/^\\,|  ", '   \\_-_/   '],
   },
-  mini: { rest: '[(o~o)]', talk: '[(oOo)]', blink: '[(-~-)]', think: '[(o~O)]' },
+  mouth: 3,
+  bubbleStyle: 'ascii',
+  mini: { rest: '[o~o]', talk: '[oOo]', blink: '[-~-]', think: "['~']" },
 }
 
-const SMILEY: Avatar = {
-  name: 'a smiley',
-  hello: "Hi! Save a file and I'll look.",
-  color: 'cyan',
+/** Tux in a top hat, after the KISS Linux one, for the keep-it-simple voice. */
+const KISS: Avatar = {
+  name: 'the KISS Linux penguin',
+  hello: '"whatsoever a man soweth, that shall he also reap."',
+  color: 'white',
   frames: {
-    rest: ['  .---.  ', ' ( ^ ^ ) ', ' (  u  ) ', "  '---'  "],
-    talk: ['  .---.  ', ' ( ^ ^ ) ', ' (  o  ) ', "  '---'  "],
-    blink: ['  .---.  ', ' ( - - ) ', ' (  u  ) ', "  '---'  "],
-    think: ['  .---.  ', ' ( o o ) ', ' (  ~  ) ', "  '---'  "],
+    rest: ['    ____   ', '   |    |  ', ' ._|____|_.', '   |o_o |  ', '   |:_/ |  ', '  //   \\ \\ '],
+    talk: ['    ____   ', '   |    |  ', ' ._|____|_.', '   |o_o |  ', '   |:o/ |  ', '  \\\\   / / '],
+    blink: ['    ____   ', '   |    |  ', ' ._|____|_.', '   |-_- |  ', '   |:_/ |  ', '  //   \\ \\ '],
+    think: ['    ____   ', '   |    |  ', ' ._|____|_.', "   |'_' |  ", '   |:_/ |  ', '  //   \\ \\ '],
   },
-  mini: { rest: '(^u^)', talk: '(^o^)', blink: '(-u-)', think: '(o~o)' },
+  mouth: 4,
+  bubbleStyle: 'ascii',
+  mini: { rest: '_|o_o|_', talk: '_|oOo|_', blink: '_|-_-|_', think: "_|'_'|_" },
 }
 
 /** The character for each voice. */
 export const AVATARS = {
   default: CLAUDE,
-  torvalds: PENGUIN,
-  knuth: OWL,
-  primeagen: STREAMER,
-  'eli5-tldr-kiss-terse': SMILEY,
+  torvalds: LINUS,
+  knuth: KNUTH,
+  primeagen: PRIME,
+  'eli5-tldr-kiss-terse': KISS,
 } as const satisfies Record<string, Avatar>
 
 const BY_VOICE: ReadonlyMap<string, Avatar> = new Map(Object.entries(AVATARS))
@@ -209,13 +229,19 @@ export function wrap(text: string, width: number): string[][] {
   return lines
 }
 
+/** The lines a bubble is drawn with, by style. */
+const BUBBLE_LINES: Record<BubbleStyle, { top: readonly [string, string]; side: string; tail: string; bottom: readonly [string, string]; rule: string }> = {
+  round: { top: [' ╭', '╮'], side: '│', tail: '─┤', bottom: [' ╰', '╯'], rule: '─' },
+  ascii: { top: [' .', '.'], side: '|', tail: '-|', bottom: [" '", "'"], rule: '-' },
+}
+
 /**
- * The speech bubble as lines of text, its tail on the second row pointing
- * back at the character. It is no wider than its line needs and at most
- * `maxWidth`, and it is sized for the whole line from the first word, so that
- * it does not grow while the words come.
+ * The speech bubble as lines of text, its tail on text line `tail` (from 0)
+ * pointing back at the character. It is no wider than its line needs and at
+ * most `maxWidth`, and it is sized for the whole line from the first word, so
+ * that it does not grow while the words come.
  */
-export function bubble(text: string, said: number, maxWidth: number): string[] {
+export function bubble(text: string, said: number, maxWidth: number, style: BubbleStyle = 'round', tail = 0): string[] {
   const lines = wrap(text, maxWidth - 5)
   if (lines.length > MAX_BUBBLE_LINES) {
     const last = lines[MAX_BUBBLE_LINES - 1] ?? []
@@ -224,6 +250,7 @@ export function bubble(text: string, said: number, maxWidth: number): string[] {
   }
   const shown = lines.slice(0, MAX_BUBBLE_LINES)
   const inner = Math.max(1, ...shown.map(line => line.join(' ').length))
+  const drawn = BUBBLE_LINES[style]
   let left = said
   const rows = shown.map(line => {
     const spoken = line.slice(0, Math.max(0, left))
@@ -233,10 +260,25 @@ export function bubble(text: string, said: number, maxWidth: number): string[] {
   })
 
   return [
-    ` ╭${'─'.repeat(inner + 2)}╮`,
-    ...rows.map((row, index) => `${index === 0 ? '─┤' : ' │'} ${row} │`),
-    ` ╰${'─'.repeat(inner + 2)}╯`,
+    `${drawn.top[0]}${drawn.rule.repeat(inner + 2)}${drawn.top[1]}`,
+    ...rows.map((row, index) => `${index === tail ? drawn.tail : ` ${drawn.side}`} ${row} ${drawn.side}`),
+    `${drawn.bottom[0]}${drawn.rule.repeat(inner + 2)}${drawn.bottom[1]}`,
   ]
+}
+
+/**
+ * What stands beside a character: blank rows, then its bubble, placed so
+ * that the tail is level with the character's mouth. When there is not room
+ * above the mouth for the whole bubble, the tail moves down the bubble's
+ * side instead, so that the bubble hangs below the drawing as little as it can.
+ */
+export function bubbleColumn(avatar: Avatar, text: string, said: number, maxWidth: number): string[] {
+  const lines = Math.min(MAX_BUBBLE_LINES, wrap(text, maxWidth - 5).length)
+  const tail = Math.max(0, Math.min(lines - 1, avatar.mouth - 1))
+  // A blank row is a space: an empty line of text can collapse to nothing.
+  const above = Array.from({ length: avatar.mouth - 1 - tail }, () => ' ')
+
+  return [...above, ...bubble(text, said, maxWidth, avatar.bubbleStyle, tail)]
 }
 
 /** How wide the bubble can be beside a drawing of `artWidth` columns, or 0 when it does not fit. */

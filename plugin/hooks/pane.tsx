@@ -1,7 +1,7 @@
 import type { Elements } from 'claude-code'
 
 import type { ExplainView, Mode, Note, OutlineRow, Profile, Profiles, Review, Speech, Tab, Watch } from '../types'
-import { bubble, bubbleWidth, isTalking, poseOf, saidSoFar, wordsSaid } from './avatar'
+import { bubbleColumn, bubbleWidth, isTalking, poseOf, saidSoFar, wordsSaid } from './avatar'
 import type { Avatar } from './avatar'
 import { languageName } from './languages'
 import { sortNotes } from './notes'
@@ -172,10 +172,13 @@ function characterRow({ Box, Text }: Kit, view: PaneView, { avatar, speech }: { 
         ))}
       </Box>
       <Box flexDirection="column">
-        {isAsleep && <Text dimColor>{ASLEEP}</Text>}
+        {isAsleep &&
+          [...Array.from({ length: avatar.mouth - 1 }, () => ' '), ASLEEP].map(line => <Text dimColor>{line}</Text>)}
         {!isAsleep &&
           speech.text !== '' &&
-          bubble(speech.text, wordsSaid(speech), width).map(line => <Text wrap="truncate-end">{line}</Text>)}
+          bubbleColumn(avatar, speech.text, wordsSaid(speech), width).map(line => (
+            <Text wrap="truncate-end">{line}</Text>
+          ))}
       </Box>
     </Box>
   )
