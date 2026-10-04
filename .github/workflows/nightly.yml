@@ -1,20 +1,20 @@
-# Runs `npm run check` (validate, test, typecheck) on every push to main and
-# every pull request, against the Claude Code version the mod was last
-# verified with. nightly.yml runs the same check on the newest Claude Code.
+# Runs `npm run check` once a day on the newest Claude Code. The mod API can
+# change between releases, so a red run here means "a new Claude Code broke
+# something", not "main is broken": check.yml is the one pinned to the version
+# the mod was last verified with. The README shows this run's status as a badge.
 
-name: check
+name: nightly
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  schedule:
+    - cron: '17 6 * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: check-${{ github.ref }}
+  group: nightly-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -22,8 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      # Keep in step with "last verified against" in CLAUDE.md.
-      CLAUDE_CODE_VERSION: '2.1.289'
+      # Always the newest release.
+      CLAUDE_CODE_VERSION: latest
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
       DISABLE_TELEMETRY: '1'
     steps:
