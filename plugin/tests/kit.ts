@@ -19,6 +19,8 @@ export function typed(command: string, args = '') {
 export const SESSION = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
 
 export const HOME = '/home/me'
+/** Where the tutor keeps its own files in a test. */
+export const DATA_HOME = `${HOME}/.local/share/backseat-driver`
 /** The fake repository's root. */
 export const ROOT = '/work'
 
@@ -81,8 +83,12 @@ export type StubOptions = {
   head?: Record<string, string>
   /** False for a folder that is not a git repository. */
   isRepository?: boolean
-  /** What the plugin's store holds before the session, by key. */
+  /** What the plugin's store holds before the session, by key. Profiles lived there once. */
   store?: Record<string, unknown>
+  /** JSON files already in the tutor's data folder, by path from it: `profiles/python.json`. */
+  data?: Record<string, unknown>
+  /** Environment variables besides HOME. */
+  env?: Record<string, string>
 }
 
 /**
@@ -125,10 +131,24 @@ export function stubSession(on: On, options: StubOptions = {}) {
     toasts: [] as string[],
     /** The plugin's store, which outlives the session. */
     store: new Map<string, unknown>(Object.entries(options.store ?? {})),
+    /** Every file outside the repository, by absolute path: the tutor's data folder. */
+    disk: new Map<string, string>(
+      Object.entries(options.data ?? {}).map(([path, value]) => [`${DATA_HOME}/${path}`, JSON.stringify(value)]),
+    ),
+    /** What the plugin deleted with `rm`, in order. */
+    removed: [] as string[],
+    /** A JSON file in the tutor's data folder, by path from it, or undefined when it is not there. */
+    data(path: string): unknown {
+      const text = session.disk.get(`${DATA_HOME}/${path}`)
+
+      return text === undefined ? undefined : (JSON.parse(text) as unknown)
+    },
     /** The plan's usage windows as Claude Code reports them. Empty means no reading. */
     limits: [] as { kind: string; percentUsed: number }[],
     /** Every key the plugin read from its store, in order. */
     storeReads: [] as string[],
+    /** Every file the plugin read outside the repository and its own folder, in order. */
+    diskReads: [] as string[],
     /** Tools the plugin registered for the model. */
     tools: [] as Required<ToolSpec>[],
     /** The questions the plugin put to the user, and the answers still queued. With none queued, the dialog is dismissed. */
@@ -172,7 +192,7 @@ export function stubSession(on: On, options: StubOptions = {}) {
   on('session.start', () => ({ cwd: ROOT }))
   on('classic.SessionStart', () => ({}))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
-  on('env.get', ($, e) => ({ value: e.name === 'HOME' ? HOME : undefined }))
+  on('env.get', ($, e) => ({ value: e.name === 'HOME' ? HOME : options.env?.[e.name] }))
   on('ui.log', ($, e) => {
     session.logs.push(e.text)
 
@@ -198,9 +218,39 @@ export function stubSession(on: On, options: StubOptions = {}) {
     for (const [suffix, text] of Object.entries(options.pluginFiles ?? {})) {
       if (e.path.endsWith(suffix)) return { value: text }
     }
-    const text = e.path.startsWith(`${ROOT}/`) ? files[e.path.slice(ROOT.length + 1)] : undefined
+    if (!e.path.startsWith(`${ROOT}/`)) session.diskReads.push(e.path)
+    const text = e.path.startsWith(`${ROOT}/`) ? files[e.path.slice(ROOT.length + 1)] : session.disk.get(e.path)
 
     return text === undefined ? { deny: `no such file: ${e.path}` } : { value: text }
+  })
+  on('fs.write', ($, e) => {
+    writes += 1
+    session.disk.set(e.path, e.text)
+    mtimes.set(e.path, writes)
+
+    return { value: undefined }
+  })
+  on('fs.exists', ($, e) => ({
+    value: session.disk.has(e.path) || [...session.disk.keys()].some(path => path.startsWith(`${e.path}/`)),
+  }))
+  on('fs.list', ($, e) => {
+    const inside = [...session.disk.keys()].filter(path => path.startsWith(`${e.path}/`))
+    if (inside.length === 0) return { deny: `no such folder: ${e.path}` }
+    const names = [...new Set(inside.map(path => path.slice(String(e.path).length + 1).split('/')[0] ?? ''))]
+
+    return {
+      value: names.map(name => {
+        const text = session.disk.get(`${e.path}/${name}`)
+
+        return {
+          name,
+          kind: text === undefined ? ('dir' as const) : ('file' as const),
+          size: text?.length ?? 0,
+          mtimeMs: mtimes.get(`${e.path}/${name}`) ?? 0,
+          isLink: false,
+        }
+      }),
+    }
   })
   on('fs.stat', ($, e) => {
     if (e.path === `${ROOT}/.git/logs/HEAD`) {
@@ -208,10 +258,12 @@ export function stubSession(on: On, options: StubOptions = {}) {
       return { value: { kind: 'file', size: reflog.length, mtimeMs: reflog.length, isLink: false } }
     }
     const path = e.path.slice(ROOT.length + 1)
-    const text = e.path.startsWith(`${ROOT}/`) ? files[path] : undefined
+    const isInRepository = e.path.startsWith(`${ROOT}/`)
+    const text = isInRepository ? files[path] : session.disk.get(e.path)
     if (text === undefined) return { deny: `no such file: ${e.path}` }
+    const mtimeMs = mtimes.get(isInRepository ? path : e.path) ?? 0
 
-    return { value: { kind: 'file', size: text.length, mtimeMs: mtimes.get(path) ?? 0, isLink: false } }
+    return { value: { kind: 'file', size: text.length, mtimeMs, isLink: false } }
   })
 
   on('process.run', ($, e) => {
@@ -220,6 +272,15 @@ export function stubSession(on: On, options: StubOptions = {}) {
     })
     const failed = { value: { exitCode: 128, stdout: '', stderr: 'fatal', isStdoutTruncated: false, isStderrTruncated: false } }
     const args = e.argv.slice(2)
+    if (e.argv[0] === 'rm' && e.argv[1] === '-rf' && e.argv[2] === '--' && e.argv.length === 4) {
+      const target = String(e.argv[3])
+      session.removed.push(target)
+      for (const path of [...session.disk.keys()]) {
+        if (path === target || path.startsWith(`${target}/`)) session.disk.delete(path)
+      }
+
+      return ok('')
+    }
     if (e.argv[0] !== 'git' || e.argv[1] !== '--no-optional-locks') return { deny: `unexpected process: ${e.argv.join(' ')}` }
     if (options.isRepository === false) return failed
 
@@ -338,6 +399,12 @@ export function stubSession(on: On, options: StubOptions = {}) {
   on('store.set', ($, e) => {
     // As the real store does: what comes back is what JSON keeps.
     session.store.set(e.key, JSON.parse(JSON.stringify(e.value)))
+
+    return { value: undefined }
+  })
+  on('store.keys', () => ({ value: [...session.store.keys()] }))
+  on('store.delete', ($, e) => {
+    session.store.delete(e.key)
 
     return { value: undefined }
   })

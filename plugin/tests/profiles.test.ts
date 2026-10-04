@@ -154,13 +154,13 @@ test('the first time in a project, the questions are asked and the answers are s
 
   expect(session.asked.length).toBe(4)
   expect(session.asked[1]).toBe('How much Python have you written?')
-  expect(session.store.get(subjectKey('general'))).toEqual({
+  expect(session.data('profiles/general.json')).toEqual({
     answers: { knows: 'JavaScript or TypeScript' },
     isAsked: true,
     hushed: [],
     topics: {},
   })
-  expect(parseProfile(session.store.get(subjectKey('python'))).answers.level).toBe('A little: tutorials and small scripts')
+  expect(parseProfile(session.data('profiles/python.json')).answers.level).toBe('A little: tutorials and small scripts')
 
   // The tutor and both reviewers are told.
   const { sections } = await $.prompt.compose(COMPOSE)
@@ -176,7 +176,7 @@ test('dismissing the questions skips them for good, and the tutor works without 
 
   expect(started.text).toBe('Backseat Driver is on. You drive.')
   expect(session.asked.length).toBe(1)
-  expect(parseProfile(session.store.get(subjectKey('python')))).toEqual({ ...emptyProfile(), isAsked: true })
+  expect(parseProfile(session.data('profiles/python.json'))).toEqual({ ...emptyProfile(), isAsked: true })
 
   await $.command.run(typed('bsd', 'off'))
   await $.command.run(typed('bsd'))
@@ -188,7 +188,7 @@ test('a language already on record is not asked about again, in any project', as
   const known = withAnswers(emptyProfile(), { level: 'For years: I know it well' })
   const session = stubSession(on, {
     head: { 'stats.py': MEAN },
-    store: { [subjectKey('python')]: known, [subjectKey('general')]: withAnswers(emptyProfile(), { knows: 'Python' }) },
+    data: { 'profiles/python.json': known, 'profiles/general.json': withAnswers(emptyProfile(), { knows: 'Python' }) },
   })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -199,12 +199,13 @@ test('a language already on record is not asked about again, in any project', as
   expect(sections[sections.length - 1]?.text).toMatch('- Has written: For years: I know it well')
 })
 
-test('the store is read at session start even while the tutor is off', async ($, on) => {
-  const session = stubSession(on)
+test('while the tutor is off, starting a session touches nothing', async ($, on) => {
+  const session = stubSession(on, { data: { 'profiles/python.json': emptyProfile() } })
   await $.session.start(SESSION)
 
-  // One read and nothing else: no pane, no tools, no model.
-  expect(session.storeReads).toEqual([subjectKey('general')])
+  // No read of the store or the data folder, no pane, no tools, no model.
+  expect(session.storeReads).toEqual([])
+  expect(session.diskReads).toEqual([])
   expect(session.opened).toEqual([])
   expect(session.tools).toEqual([])
   expect(session.agents).toEqual([])
@@ -229,7 +230,7 @@ test('the hush tool stops a topic at once, for good, and removes its notes', asy
     result: 'Recorded. "type-hints" will not be brought up again for python, in this project or any other. Removed from the pane: 1.',
   })
   expect(await ui.find({ type: 'Text', text: 'No notes. Keep going.' })).toBeDefined()
-  expect(parseProfile(session.store.get(subjectKey('python'))).hushed).toEqual([{ topic: 'type-hints', text: 'missing type hints' }])
+  expect(parseProfile(session.data('profiles/python.json')).hushed).toEqual([{ topic: 'type-hints', text: 'missing type hints' }])
 
   // The reviewer is told, and a note on the topic is dropped even if it sends one.
   session.write('stats.py', `${MEAN}\ndef total(xs):\n    return sum(xs)\n\ndef count(xs):\n    return len(xs)\n`)
@@ -239,7 +240,7 @@ test('the hush tool stops a topic at once, for good, and removes its notes', asy
   expect(await ui.find({ type: 'Text', text: 'No notes. Keep going.' })).toBeDefined()
 
   await $.tool.call({ tool: 'mcp__backseat-driver__unhush', topic: 'type-hints', language: 'python' })
-  expect(parseProfile(session.store.get(subjectKey('python'))).hushed).toEqual([])
+  expect(parseProfile(session.data('profiles/python.json')).hushed).toEqual([])
   await ui.unmount()
 })
 
@@ -262,7 +263,7 @@ test('a hush that names a note uses the note\'s own topic, whatever the model ca
   })
   expect(String((answer as { result: unknown }).result)).toMatch('"builtin-sum" will not be brought up again for python')
   expect(String((answer as { result: unknown }).result)).toMatch('Removed from the pane: 1.')
-  expect(parseProfile(session.store.get(subjectKey('python'))).hushed).toEqual([
+  expect(parseProfile(session.data('profiles/python.json')).hushed).toEqual([
     { topic: 'builtin-sum', text: 'using built-ins instead of my own loops' },
   ])
 
@@ -299,11 +300,11 @@ test('what the play-by-play raises and what gets explained goes into the lesson 
   await session.clock.settle()
   session.write('stats.py', `${MEAN}# more\n`)
   await session.clock.advance(14_000)
-  expect(parseProfile(session.store.get(subjectKey('python'))).topics).toEqual({ 'empty-input': { flagged: 1, explained: 0 } })
+  expect(parseProfile(session.data('profiles/python.json')).topics).toEqual({ 'empty-input': { flagged: 1, explained: 0 } })
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'explain' })
-  expect(parseProfile(session.store.get(subjectKey('python'))).topics).toEqual({ 'empty-input': { flagged: 1, explained: 1 } })
+  expect(parseProfile(session.data('profiles/python.json')).topics).toEqual({ 'empty-input': { flagged: 1, explained: 1 } })
   await ui.press({ key: 'tab-profile' })
   expect(await ui.find({ type: 'Text', text: 'Explained so far: empty-input' })).toBeDefined()
   await ui.unmount()
@@ -332,7 +333,7 @@ test('a language first met mid-session comes into play without questions', async
 
 test('the profile tool reads a language that is not in play', async ($, on) => {
   const rust = withHush(withAnswers(emptyProfile(), { level: 'None yet' }), { topic: 'lifetimes', text: 'lifetime elision' })
-  const session = stubSession(on, { head: { 'stats.py': MEAN }, store: { [subjectKey('rust')]: rust } })
+  const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { 'profiles/rust.json': rust } })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
   await session.clock.settle()
@@ -353,7 +354,7 @@ test('while the tutor is off, its tools change nothing', async ($, on) => {
 
   const answer = await $.tool.call({ tool: 'mcp__backseat-driver__hush', topic: 'x', language: 'python', what: 'x' })
   expect(answer).toEqual({ result: 'Backseat Driver is off, so nothing was recorded.' })
-  expect(session.store.get(subjectKey('python'))).toBeUndefined()
+  expect(session.data('profiles/python.json')).toBeUndefined()
 })
 
 test('a note the reviewer repeats while it is still open is counted once in the lesson memory', { timeoutMs: 20_000 }, async ($, on) => {
@@ -371,7 +372,7 @@ test('a note the reviewer repeats while it is still open is counted once in the 
   await session.clock.advance(80_000)
 
   expect(session.requests.length).toBe(2)
-  expect(parseProfile(session.store.get(subjectKey('python'))).topics).toEqual({ 'empty-input': { flagged: 1, explained: 0 } })
+  expect(parseProfile(session.data('profiles/python.json')).topics).toEqual({ 'empty-input': { flagged: 1, explained: 0 } })
 })
 
 test('the record tool keeps what the user says about themselves', async ($, on) => {
@@ -384,12 +385,12 @@ test('the record tool keeps what the user says about themselves', async ($, on) 
   expect(level).toEqual({
     result: 'Recorded for Python: "Has written: For years, mostly data work". It is kept across sessions and projects.',
   })
-  expect(parseProfile(session.store.get(subjectKey('python'))).answers).toEqual({ level: 'For years, mostly data work' })
+  expect(parseProfile(session.data('profiles/python.json')).answers).toEqual({ level: 'For years, mostly data work' })
 
   // The language they know best is kept once, not once per language.
   const knows = await $.tool.call({ tool: 'mcp__backseat-driver__record', about: 'knows', language: 'python', answer: 'Go' })
   expect(String((knows as { result: unknown }).result)).toMatch('Recorded: "Knows best: Go".')
-  expect(parseProfile(session.store.get(subjectKey('general'))).answers).toEqual({ knows: 'Go' })
+  expect(parseProfile(session.data('profiles/general.json')).answers).toEqual({ knows: 'Go' })
 
   // The tutor and the deep reviewer are told.
   const { sections } = await $.prompt.compose(COMPOSE)
@@ -405,9 +406,9 @@ test('the record tool does not count as the first-run questions, and refuses wha
 
   // Rust is not in this project. Its questions are still asked when it first is.
   await $.tool.call({ tool: 'mcp__backseat-driver__record', about: 'goals', language: 'rust', answer: 'Understand ownership' })
-  expect(parseProfile(session.store.get(subjectKey('rust')))).toEqual({ ...emptyProfile(), answers: { goals: 'Understand ownership' } })
+  expect(parseProfile(session.data('profiles/rust.json'))).toEqual({ ...emptyProfile(), answers: { goals: 'Understand ownership' } })
 
-  const before = JSON.stringify([...session.store.entries()])
+  const before = JSON.stringify([...session.disk.entries()])
   for (const bad of [
     { about: 'mood', language: 'python', answer: 'fine' },
     { about: 'constructor', language: 'python', answer: 'x' },
@@ -417,7 +418,7 @@ test('the record tool does not count as the first-run questions, and refuses wha
     const refused = await $.tool.call({ tool: 'mcp__backseat-driver__record', ...bad })
     expect(String((refused as { result: unknown }).result)).toMatch('Nothing was recorded')
   }
-  expect(JSON.stringify([...session.store.entries()])).toBe(before)
+  expect(JSON.stringify([...session.disk.entries()])).toBe(before)
 })
 
 test('the questions can be answered again from the Profile tab', async ($, on) => {
@@ -426,7 +427,7 @@ test('the questions can be answered again from the Profile tab', async ($, on) =
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
   await session.clock.settle()
-  expect(parseProfile(session.store.get(subjectKey('python'))).answers.level).toBe('None yet')
+  expect(parseProfile(session.data('profiles/python.json')).answers.level).toBe('None yet')
 
   session.answers.push('JavaScript or TypeScript', 'Regularly: I build real things in it', 'Design larger programs well', 'Performance')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -435,11 +436,11 @@ test('the questions can be answered again from the Profile tab', async ($, on) =
 
   // All four again, and the new answers replace the old.
   expect(session.asked.length).toBe(8)
-  expect(parseProfile(session.store.get(subjectKey('python'))).answers).toEqual({
+  expect(parseProfile(session.data('profiles/python.json')).answers).toEqual({
     level: 'Regularly: I build real things in it',
     goals: 'Design larger programs well',
     focus: 'Performance',
   })
-  expect(parseProfile(session.store.get(subjectKey('general'))).answers).toEqual({ knows: 'JavaScript or TypeScript' })
+  expect(parseProfile(session.data('profiles/general.json')).answers).toEqual({ knows: 'JavaScript or TypeScript' })
   await ui.unmount()
 })

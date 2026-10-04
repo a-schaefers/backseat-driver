@@ -66,6 +66,14 @@ The play-by-play and the deep review are not announcements to be read in silence
 - **Tell it to hush.** Say "stop warning me about missing type hints", or press `m` on a note. It stops at once and remembers, in this project and in every other project in that language.
 - **Tell it where you stand.** Say "I have written Python for six years" or "what I want now is performance", and it updates your profile on the spot. You can also answer the first-run questions again from the pane's Profile tab.
 
+### Forget
+
+The tutor keeps a growing record of you, so there are deliberate ways to erase it and no accidental ones.
+
+`/bsd forget` asks what to forget: what is cached about this project, one language's profile and progress, or everything. It then asks again, with keeping as the answer Enter gives. Forgetting everything also takes the words "forget everything", typed out. Esc at any point keeps everything. `/bsd forget project`, `/bsd forget python` and `/bsd forget everything` skip the first question and none of the others.
+
+It works whether the tutor is on or off.
+
 ### Stop
 
 `/bsd pause` silences it without closing anything. `/bsd off` ends the ride, and Claude Code behaves normally again. Each new session starts with it off. Clearing the conversation with `/clear` does not switch it off.
@@ -85,7 +93,7 @@ A profile holds:
 
 A profile comes into play when you work on a file in that language. In a project that mixes languages several can be active, and your Bash profile stays out of the way until you touch a shell script. The tutor can also look at your other profiles when that helps, for example to explain a Rust idea in terms of Python.
 
-Profiles are saved automatically, on your machine and outside any project, in the store Claude Code gives each plugin: one small JSON file under `~/.claude/plugins/store/`, readable in any editor. They are never written into your repository. The pane's Profile tab shows what the tutor has on record for the languages in play. Beside each thing you hushed is a key to bring it back, and under each language a key to answer its questions again.
+Profiles are saved automatically, on your machine and outside any project, as plain JSON files in one folder: `~/.local/share/backseat-driver/`, or under `$XDG_DATA_HOME` when that is set. They are never written into your repository. It is the same folder however the plugin was installed, and nothing in it expires. The pane's Profile tab shows what the tutor has on record for the languages in play. Beside each thing you hushed is a key to bring it back, and under each language a key to answer its questions again.
 
 ## Ground rules
 
@@ -180,7 +188,7 @@ The watcher asks git what changed every couple of seconds, and stretches that in
 | Noticing saves and commits | A `$.clock.every` timer runs `git status` through `$.process.run` for saves. For commits it checks the reflog file's size and modification time, and runs `git reflog` only when that changes. |
 | Finding the project's languages | `git ls-files` and a table of file extensions. A language counts as a main one when it holds at least 15% of the source files, and the biggest always counts. |
 | First-run questions | `$.ui.ask`, the same question dialog Claude uses. |
-| Profiles | `$.store`, the key-value store Claude Code gives each plugin: one small JSON document per language. |
+| Profiles | One JSON file per language in the tutor's data folder, written with `$.fs.write`. Forgetting deletes with `rm`, because the mod API has no delete. |
 | Play-by-play review | `$.model.complete` with the chosen model and thinking level: one request, no tools, no conversation history. |
 | Deep review | A read-only subagent (`Read`, `Grep`, `Glob`) that the mod registers with `$.agent.register` on the chosen model and thinking level, and starts with `$.agent.spawn`. A `turn.complete` hook takes its answer to the pane, not into the conversation. |
 | Second opinion on a contested point | The tutor hands the point to the same read-only subagent and reports its verdict in the conversation. |
@@ -251,10 +259,8 @@ A persona changes how the tutor talks and what it dwells on. It never changes th
 - **It needs git.** Changes are found by diffing the working tree, and files that git ignores are never sent.
 - **It spends usage in the background.** Every play-by-play look and every deep review is a model call on your plan. The play-by-play waits for a pause, sends only the change and its surroundings, runs one look at a time, slows down as your plan's usage runs out, and can be paused. A deep review costs more, because it runs a stronger model at a higher thinking level, so how often it runs is yours to set.
 - **Mods are new.** The mod API is early access and can change between Claude Code releases. Panes are drawn by the terminal CLI and by the Code tab of the desktop app. The VS Code extension's chat panel runs mods but does not draw them, so use `claude` in the editor's integrated terminal there.
-- **A mod is code that runs with your permissions.** This one is meant to stay small and auditable: it runs `git`, reads files inside the repository and its own plugin folder, calls models, keeps your profiles in its own store and draws a pane. It makes no network requests of its own, installs no git hooks and never writes to your working tree. `claude plugin validate` lists every event a mod hooks and every call it makes, so you can check that before installing.
+- **A mod is code that runs with your permissions.** This one is meant to stay small and auditable: it runs `git`, reads files inside the repository and its own plugin folder, calls models, keeps what it remembers in its own data folder and draws a pane. The only other program it runs is `rm`, only when you tell it to forget something, and only on paths inside that folder, which it marks as its own before it will delete anything there. It makes no network requests of its own, installs no git hooks and never writes to your working tree. `claude plugin validate` lists every event a mod hooks and every call it makes, so you can check that before installing.
 - **The edit guard covers the editing tools.** A shell command can still write a file, so that part rests on the contract and on Claude Code's normal permission prompts.
-- **Profiles last as long as you keep using Claude Code.** Claude Code clears a plugin's store once no session has touched it for its retention period (the `cleanupPeriodDays` setting). Backseat Driver touches its store whenever Claude Code starts, so a long break from the tutor alone does not lose your profiles.
-- **Profiles belong to one install.** Claude Code keeps a separate store for each way a plugin is loaded, so a working copy loaded with `--plugin-dir` and a copy installed from the marketplace do not share profiles.
 
 ## Install
 
@@ -349,16 +355,22 @@ It updates after each deep review of a commit of yours. It is meant to be honest
 
 While the tutor is on, it checks at most every six hours whether a newer release is on GitHub, and says so in the pane. `/bsd update` (or `/backseat-driver-update`) fetches it, and the tutor comes back on by itself afterwards. A setting turns the check off.
 
-### Forgetting, and uninstalling
+### Uninstalling
 
-The tutor will keep a growing record, so there are deliberate ways to erase it and no accidental ones.
+`/bsd uninstall` will forget everything, remove the plugin, and say what is left in your settings.
 
-- `/bsd forget` asks what to forget: this project's cache, one language's profile and progress, or everything. Each asks again, with keeping as the default, and forgetting everything also needs the words typed out.
-- `/bsd uninstall` forgets everything, removes the plugin, and says what is left in your settings.
+### Where it is kept
 
-### Where it will be kept
+The data folder that holds your profiles today will also hold the progress records and each project's cache:
 
-One folder, `~/.local/share/backseat-driver/`, holds the profiles, the progress records and each project's cache as plain JSON files. Profiles move there from Claude Code's plugin store, which is capped in size, is separate for each way the plugin is installed, and is cleared after a period without use.
+```text
+~/.local/share/backseat-driver/
+  profiles/<language>.json      answers, hushes, lesson memory          (exists)
+  progress/<language>.json      evidence, level, report
+  projects/<name>-<hash>/       one project's cache
+  focus.json                    written by an editor: where the cursor is
+  view.json                     written by the tutor: what it knows about that spot
+```
 
 ## Roadmap
 
@@ -373,7 +385,7 @@ One folder, `~/.local/share/backseat-driver/`, holds the profiles, the progress 
 Part two:
 
 - [x] **Usability, first pass.** `/bsd` answers at once and sets up in the background, `/bsd help`, `/bsd questions` and the `q` key, and a line in the pane on how to give it the keyboard.
-- [ ] **Data home and forgetting.** State in `~/.local/share/backseat-driver/`, profiles moved out of the plugin store, and `/bsd forget`.
+- [x] **Data home and forgetting.** State in `~/.local/share/backseat-driver/`, profiles moved out of the plugin store, and `/bsd forget`.
 - [ ] **Explain.** The lookup engine and its queue, the never-stale rule, the Explain tab, `/bsd explain`, the files an editor will read and write, and a lookup tool for the tutor.
 - [ ] **One cache for all three jobs.** Deep reviews write overviews and insights into the cache, a survey for each new project, and both reviewers read from it.
 - [ ] **Progress.** Whose work it is, the evidence ledger, the rules for moving a level, the Progress tab and a first placement from past commits.

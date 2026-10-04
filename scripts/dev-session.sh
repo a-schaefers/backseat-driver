@@ -12,12 +12,15 @@
 # person or a script has to answer. Real model calls are made on your plan.
 #
 # BSD_RIDE_DIR    the throwaway repository (default: a folder under $TMPDIR)
+# BSD_DATA_DIR    where this session keeps profiles, progress and caches
+#                 (default: a folder under $TMPDIR, never your real one)
 # BSD_FULLSCREEN  set to 1 for the fullscreen layout, where the pane docks
 #                 beside the conversation; tmux gets the main screen otherwise
 set -euo pipefail
 
 plugin="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/plugin"
 ride="${BSD_RIDE_DIR:-${TMPDIR:-/tmp}/backseat-driver-ride}"
+data="${BSD_DATA_DIR:-${TMPDIR:-/tmp}/backseat-driver-home}"
 
 if [ ! -d "$ride/.git" ]; then
   mkdir -p "$ride"
@@ -32,7 +35,7 @@ fi
 # A clean environment: started from inside Claude Code, the session would
 # otherwise inherit the parent session's own variables.
 launch=(env -i HOME="$HOME" USER="${USER:-$(id -un)}" SHELL=/bin/bash LANG=C.UTF-8
-  TERM=xterm-256color
+  TERM=xterm-256color BACKSEAT_DRIVER_HOME="$data"
   PATH="$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
 if [ "${BSD_FULLSCREEN:-0}" = "1" ]; then
   launch+=(CLAUDE_CODE_NO_FLICKER=1)
@@ -41,4 +44,4 @@ launch+=(claude --plugin-dir "$plugin" "$@")
 
 tmux kill-session -t bsd 2>/dev/null || true
 tmux new-session -d -s bsd -x 170 -y 48 -c "$ride" "$(printf '%q ' "${launch[@]}")"
-echo "Session 'bsd' started in $ride"
+echo "Session 'bsd' started in $ride, keeping its data in $data"

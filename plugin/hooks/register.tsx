@@ -12,6 +12,26 @@ import type { EngineInterface, ModelCompleteResult, Register, Timer } from 'clau
 
 import type { Hush, Mode, Note, Profile, Profiles, Review, Tab, Watch } from '../types'
 import { reframeInstructions, SESSION_NOTES, stripFrontmatter, tutorSections } from './contract'
+import { dataHome, isRemovable, MARKER, MARKER_TEXT, profilePath, projectId } from './datahome'
+import {
+  confirmQuestion,
+  describeScope,
+  FORGET,
+  isPhrase,
+  KEEP,
+  knownLanguages,
+  LANGUAGE_QUESTION,
+  parseScope,
+  PHRASE_OPTIONS,
+  PHRASE_QUESTION,
+  SCOPE_EVERYTHING,
+  SCOPE_LANGUAGE,
+  SCOPE_PROJECT,
+  SCOPE_QUESTION,
+  scopeOf,
+  scopePaths,
+} from './forget'
+import type { Scope } from './forget'
 import { backoffMs, shouldLook, slowedGapMs, throttle, usagePressure } from './gate'
 import type { Throttle } from './gate'
 import { parseStatus } from './git'
@@ -29,7 +49,7 @@ import {
   isHushed,
   parseProfile,
   personText,
-  subjectKey,
+  storedSubject,
   withAnswer,
   withAnswers,
   withExplained,
@@ -56,6 +76,8 @@ import {
 import type { ReflogEntry, ReviewScope } from './review'
 import { readSettings } from './settings'
 import type { Settings } from './settings'
+import { readJson, writeJson } from './storage'
+import type { Disk } from './storage'
 import { createWatcher } from './watcher'
 import type { Watcher } from './watcher'
 
@@ -102,6 +124,10 @@ let lookInstructions = ''
 let reviewInstructions = ''
 /** The user's home directory, for telling their files from Claude Code's own. */
 let home = ''
+/** The folder the tutor keeps its own files in. '' until first needed, and when there is no home directory. */
+let dataRoot = ''
+/** True once this session has seen the folder's marker file, which is what allows deleting inside it. */
+let isHomeMarked = false
 
 /** The play-by-play's working state. None of it outlives a reload: the watcher starts again from the tree as it is. */
 let watcher: Watcher | null = null
@@ -157,7 +183,61 @@ async function loadTutor($: EngineInterface, personaName: string): Promise<void>
       $.ui.log(`no style sheet for persona "${personaName}"`, { to: 'debug' })
     }
   }
+  await resolveHome($)
+}
+
+/** Works out the user's home directory and the tutor's data folder. */
+async function resolveHome($: EngineInterface): Promise<void> {
+  if (dataRoot !== '') return
   home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE')) ?? ''
+  dataRoot = dataHome({
+    override: await $.env.get('BACKSEAT_DRIVER_HOME'),
+    xdg: await $.env.get('XDG_DATA_HOME'),
+    home,
+  })
+}
+
+/**
+ * The tutor's own files, through `$`. A read of a missing file is null and a
+ * listing of a missing folder is empty. `remove` is the one place the mod
+ * runs anything but git: `rm`, and only on a path inside its own folder.
+ */
+function diskOf($: EngineInterface): Disk {
+  return {
+    read: async path => {
+      try {
+        return await $.fs.read(path)
+      } catch {
+        return null
+      }
+    },
+    write: (path, text) => $.fs.write(path, text),
+    list: async path => {
+      try {
+        return (await $.fs.list(path)).map(entry => entry.name)
+      } catch {
+        return []
+      }
+    },
+    remove: async path => {
+      if (!isRemovable(dataRoot, path)) return false
+      try {
+        // The marker says the folder is the tutor's own. Without it nothing is deleted.
+        if (!(await $.fs.exists(`${dataRoot}/${MARKER}`))) return false
+
+        return (await $.process.run(['rm', '-rf', '--', path], { timeoutMs: 15_000 })).exitCode === 0
+      } catch {
+        return false
+      }
+    },
+  }
+}
+
+/** Makes sure the data folder carries its marker before anything is written into it. */
+async function markHome($: EngineInterface): Promise<void> {
+  if (isHomeMarked || dataRoot === '') return
+  if (!(await $.fs.exists(`${dataRoot}/${MARKER}`))) await $.fs.write(`${dataRoot}/${MARKER}`, MARKER_TEXT)
+  isHomeMarked = true
 }
 
 async function openPane($: EngineInterface): Promise<void> {
@@ -200,10 +280,35 @@ async function git(
 }
 
 async function loadSubject($: EngineInterface, subject: string): Promise<Profile> {
+  if (dataRoot === '') return emptyProfile()
   try {
-    return parseProfile(await $.store.get(subjectKey(subject)))
+    return parseProfile(await readJson(diskOf($), profilePath(dataRoot, subject)))
   } catch {
     return emptyProfile()
+  }
+}
+
+/**
+ * Profiles used to live in the plugin's store, which is capped in size, is
+ * separate for each way the plugin is installed and is cleared after a period
+ * without use. This moves what is there into files, once, and empties the store.
+ */
+async function moveOutOfStore($: EngineInterface): Promise<void> {
+  if (dataRoot === '') return
+  try {
+    for (const key of await $.store.keys()) {
+      const subject = storedSubject(key)
+      if (subject === null) continue
+      const path = profilePath(dataRoot, subject)
+      // A profile already in a file is the newer one.
+      if ((await diskOf($).read(path)) === null) {
+        await markHome($)
+        await writeJson(diskOf($), path, parseProfile(await $.store.get(key)))
+      }
+      await $.store.delete(key)
+    }
+  } catch (error) {
+    $.ui.log(`could not move profiles out of the store: ${String(error)}`, { to: 'debug' })
   }
 }
 
@@ -224,7 +329,7 @@ async function registerReviewer($: EngineInterface, settings: Settings): Promise
   })
 }
 
-/** Changes one subject's profile in the store and everywhere it is shown or used. */
+/** Changes one subject's profile on disk and everywhere it is shown or used. */
 async function saveSubject(
   $: EngineInterface,
   settings: Settings,
@@ -233,7 +338,10 @@ async function saveSubject(
 ): Promise<void> {
   // Read right before writing: another session may have changed this subject since it was loaded.
   const next = change(await loadSubject($, subject))
-  await $.store.set(subjectKey(subject), next)
+  if (dataRoot !== '') {
+    await markHome($)
+    await writeJson(diskOf($), profilePath(dataRoot, subject), next)
+  }
   profiles = { ...profiles, subjects: { ...profiles.subjects, [subject]: next } }
   await update($, profilesAtom, () => profiles)
   await registerReviewer($, settings)
@@ -712,6 +820,7 @@ async function engage($: EngineInterface, settings: Settings, run: number, isFre
   try {
     await startWatching($, settings, run)
     if (run !== engagement) return
+    await moveOutOfStore($)
     const main = await setUpProfiles($)
     await registerReviewer($, settings)
     await registerTools($)
@@ -752,19 +861,92 @@ async function switchTo($: EngineInterface, next: Mode, settings: Settings): Pro
   }
 }
 
+/** Asks one question about forgetting, and answers null when the dialog is dismissed. */
+async function choose($: EngineInterface, question: string, options: readonly string[]): Promise<string | null> {
+  try {
+    return await $.ui.ask(question, { options: [...options], header: 'Forget' })
+  } catch {
+    return null
+  }
+}
+
+const NOTHING_FORGOTTEN = 'Nothing was forgotten.'
+
+/** Asks what to forget. Resolves to the scope, or to the line to print when there is nothing to go on with. */
+async function pickScope($: EngineInterface): Promise<Scope | string> {
+  const picked = scopeOf((await choose($, SCOPE_QUESTION, [SCOPE_PROJECT, SCOPE_LANGUAGE, SCOPE_EVERYTHING])) ?? '')
+  if (picked === null) return NOTHING_FORGOTTEN
+  if (picked !== 'language') return { kind: picked }
+
+  const disk = diskOf($)
+  const known = knownLanguages([...(await disk.list(`${dataRoot}/profiles`)), ...(await disk.list(`${dataRoot}/progress`))])
+  if (known.length === 0) return 'Nothing is on record for any language yet.'
+  // The dialog takes two to four options. More languages than that are typed.
+  const offered = known.length === 1 ? [known[0] ?? '', 'None of them'] : known.slice(0, 4)
+  const language = (await choose($, LANGUAGE_QUESTION, offered))?.trim().toLowerCase() ?? ''
+
+  return language === '' || language === 'none of them' ? NOTHING_FORGOTTEN : { kind: 'language', language }
+}
+
+/**
+ * `/bsd forget`: erases what the tutor remembers, after asking. Every way out
+ * of a dialog but the explicit one keeps everything.
+ */
+async function forget($: EngineInterface, settings: Settings, named: Scope | null): Promise<void> {
+  const kept = (): void => $.ui.log(NOTHING_FORGOTTEN)
+  try {
+    await resolveHome($)
+    if (dataRoot === '') {
+      $.ui.log('There is no home directory, so nothing is kept and nothing can be forgotten.')
+
+      return
+    }
+    const root = repoRoot !== '' ? repoRoot : (await git($, undefined, ['rev-parse', '--show-toplevel'])).stdout.trim()
+    const projectName = root === '' ? 'no repository here' : projectId(root)
+
+    const scope = named ?? (await pickScope($))
+    if (typeof scope === 'string') {
+      $.ui.log(scope)
+
+      return
+    }
+
+    if ((await choose($, confirmQuestion(scope, projectName), [KEEP, FORGET])) !== FORGET) return kept()
+    if (scope.kind === 'everything' && !isPhrase((await choose($, PHRASE_QUESTION, PHRASE_OPTIONS)) ?? '')) return kept()
+
+    const disk = diskOf($)
+    const failed: string[] = []
+    for (const path of scopePaths(dataRoot, root, scope)) {
+      if ((await disk.read(path)) === null && (await disk.list(path)).length === 0) continue
+      if (!(await disk.remove(path))) failed.push(path)
+    }
+    if (failed.length > 0) {
+      $.ui.log(`Could not delete ${failed.join(', ')}. Delete it by hand to finish.`)
+
+      return
+    }
+
+    // What this session holds in memory goes too, so that the blank slate starts now.
+    if (scope.kind !== 'language') {
+      await update($, notesAtom, () => [])
+      await update($, dismissedAtom, () => [])
+      await update($, selectedAtom, () => null)
+      await update($, reviewAtom, () => NO_REVIEW)
+    }
+    if (scope.kind !== 'project' && mode !== 'off') {
+      await setUpProfiles($)
+      await registerReviewer($, settings)
+    }
+    $.ui.log(`Forgot ${describeScope(scope, projectName)}.`)
+  } catch (error) {
+    $.ui.log(`Forgetting failed (${String(error)}). Nothing more was deleted.`)
+  }
+}
+
 export const register: Register = (on, options) => {
   const settings = readSettings(options)
 
   on('session.start', async ($, e, next) => {
-    // The one thing the plugin does while switched off: Claude Code clears a
-    // store that no session has touched for a while, and this read keeps the
-    // profiles from expiring.
-    try {
-      await $.store.get(subjectKey(GENERAL))
-    } catch {
-      // No store, no profiles. The tutor works without them.
-    }
-
     // After a reload, `$.state` still holds the mode and the notes.
     mode = await read($, modeAtom)
     if (mode !== 'off') {
@@ -806,7 +988,7 @@ export const register: Register = (on, options) => {
 
   // Spelled out so that `claude plugin validate` can print which commands this answers.
   on('command.run', { command: ['backseat-driver', 'bsd'] }, async ($, e) => {
-    const { request, unknown } = parseRequest(e.args)
+    const { request, rest, unknown } = parseRequest(e.args)
     if (request === 'help') return { text: helpText(unknown) }
     if (request === 'questions') {
       if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
@@ -814,6 +996,12 @@ export const register: Register = (on, options) => {
       void ask($, settings, firstRunQuestions(profiles.languages, false))
 
       return { text: 'Here are the questions again. Esc stops at any point, and the answers so far are kept.' }
+    }
+    if (request === 'forget') {
+      // Not awaited: the dialogs stay open for as long as the person takes.
+      void forget($, settings, parseScope(rest))
+
+      return { text: 'Nothing is forgotten until you confirm it. Esc keeps everything.' }
     }
     if (!isModeRequest(request)) return { text: helpText() }
 

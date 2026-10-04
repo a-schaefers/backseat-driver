@@ -146,8 +146,8 @@ test('/bsd questions asks again, about everything in play', async ($, on) => {
 
   // All four are asked again. The two answered replace the old answers, and the dialog was then dismissed.
   expect(session.asked.length).toBe(7)
-  expect(parseProfile(session.store.get(subjectKey('general'))).answers).toEqual({ knows: 'C, C++ or Rust' })
-  expect(parseProfile(session.store.get(subjectKey('python'))).answers).toEqual({
+  expect(parseProfile(session.data('profiles/general.json')).answers).toEqual({ knows: 'C, C++ or Rust' })
+  expect(parseProfile(session.data('profiles/python.json')).answers).toEqual({
     level: 'Regularly: I build real things in it',
     goals: 'Understand what happens underneath',
     focus: 'Idioms and style',

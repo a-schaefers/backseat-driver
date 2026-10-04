@@ -4,9 +4,17 @@ import { languageName } from './languages'
 /** The subject for what is not tied to one language. */
 export const GENERAL = 'general'
 
-/** A profile's key in the plugin's store. One per subject, so two sessions rarely write the same key. */
+/**
+ * A profile's key in the plugin's store, where profiles lived before they
+ * moved into files. Only the move reads it now.
+ */
 export function subjectKey(subject: string): string {
   return `subject/${subject}`
+}
+
+/** The subject a store key holds a profile for, or null when the key is something else. */
+export function storedSubject(key: string): string | null {
+  return key.startsWith('subject/') && key.length > 'subject/'.length ? key.slice('subject/'.length) : null
 }
 
 export function emptyProfile(): Profile {
