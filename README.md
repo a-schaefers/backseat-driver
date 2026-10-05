@@ -26,7 +26,7 @@ This project is trying to reverse course.
 
 It's not about speed. If it takes me longer but I grok it, I win. **It's about owning your understanding.**
 
-So yes, this is a Claude plugin, and yes, I see the irony. Backseat Driver puts the machine where it belongs: in the back seat. You drive. It watches the road and speaks up when it matters.
+Backseat Driver puts the machine where it belongs: in the back seat. You drive. It watches the road and speaks up when it matters.
 
 ## What it is
 
