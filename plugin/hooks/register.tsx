@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Register, Timer } from 'claude-code'
 
-import type { ExplainView, Hush, LevelChange, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, Spot, Tab, Watch, Working } from '../types'
+import type { ExplainView, Hush, LevelChange, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, SettingRow, Spot, Tab, Watch, Working } from '../types'
 import {
   avatarFor,
   BLINK_MS,
@@ -112,7 +112,7 @@ import {
 import type { Install } from './update'
 import { assessmentRequest, emptyRecord, parseAssessment, parseRecord, progressText, recordText, withAssessment } from './progress'
 import type { AssessedCommit, CommitForAssessment } from './progress'
-import { helpText, isModeRequest, parseRequest, transition } from './mode'
+import { helpText, isModeRequest, parseRequest, SETTINGS_OFF, transition } from './mode'
 import { isNoiseFile } from './noise'
 import { isLookDue, playOf, wakeAt } from './play'
 import type { Play, PlayFacts } from './play'
@@ -197,7 +197,7 @@ import {
   withoutCommit,
 } from './reviewqueue'
 import type { ReviewQueue, Waiting } from './reviewqueue'
-import { DEFAULT_PERSONA, readSettings } from './settings'
+import { configValue, DEFAULT_PERSONA, readSettings, settingRows, withSetting } from './settings'
 import type { Persona, Settings } from './settings'
 import { createLocks } from './locks'
 import { memoryDisk } from './storage'
@@ -229,6 +229,7 @@ const progressAtom = atom({ plugin: 'backseat-driver', key: 'progress' } as cons
 const updateAtom = atom({ plugin: 'backseat-driver', key: 'update' } as const, '')
 const speechAtom = atom({ plugin: 'backseat-driver', key: 'speech' } as const, SILENT)
 const workingAtom = atom({ plugin: 'backseat-driver', key: 'working' } as const, NO_WORKING)
+const settingsAtom = atom({ plugin: 'backseat-driver', key: 'settings' } as const, [])
 
 /**
  * The mode is kept twice, because each copy is lost by a different event.
@@ -1074,6 +1075,38 @@ async function markHome($: EngineInterface): Promise<void> {
 
 async function openPane($: EngineInterface): Promise<void> {
   await $.ui.open({ id: 'backseat-driver', title: 'Backseat' })
+  // Not awaited: the Settings tab can wait for its rows, switching on cannot.
+  void showSettings($)
+}
+
+/** Reads the plugin's own `/config` rows again, for the Settings tab. */
+async function showSettings($: EngineInterface): Promise<void> {
+  try {
+    const rows = settingRows(await $.config.list(), $.plugin.name)
+    await update($, settingsAtom, () => rows)
+  } catch (error) {
+    fail($, 'could not read the settings from /config', error)
+  }
+}
+
+/**
+ * Changes one of the plugin's `/config` rows from the Settings tab, as the
+ * person would in `/config`. Claude Code then loads the mod again with the
+ * new value, so the tab shows it at once and the rest follows the reload.
+ */
+async function changeSetting($: EngineInterface, row: SettingRow, picked: string): Promise<void> {
+  await update($, settingsAtom, rows => withSetting(rows, row.key, picked))
+  try {
+    const { deny } = await $.config.set({ key: row.key, value: configValue(row, picked) })
+    trace($, 'state', 'setting', () => ({ key: row.key, value: picked, deny }))
+    if (deny !== undefined) {
+      await update($, settingsAtom, rows => withSetting(rows, row.key, row.value))
+      $.ui.toast(`${row.label} stays ${row.value}: ${deny}`)
+    }
+  } catch (error) {
+    await update($, settingsAtom, rows => withSetting(rows, row.key, row.value))
+    fail($, `could not change ${row.key}`, error)
+  }
 }
 
 function stopTalking(): void {
@@ -1977,6 +2010,7 @@ async function carryPane($: EngineInterface): Promise<void> {
 async function restorePane($: EngineInterface, settings: Settings): Promise<void> {
   const kept = carried
   carried = null
+  void showSettings($)
   if (kept === null) {
     await update($, profilesAtom, () => profiles)
     await showProgress($, settings)
@@ -3446,7 +3480,7 @@ export const register: Register = (on, options) => {
         await $.command.register({
           name,
           description: 'Turn the Backseat Driver tutor on. /bsd help lists the rest',
-          argumentHint: '[off | pause | resume | status | explain | questions | working | forget | update | uninstall | debug | help]',
+          argumentHint: '[off | pause | resume | status | explain | settings | questions | working | forget | update | uninstall | debug | help]',
           immediate: true,
         })
       } catch (error) {
@@ -3497,6 +3531,14 @@ export const register: Register = (on, options) => {
       void ask($, settings, firstRunQuestions(profiles.languages, false))
 
       return { text: 'Here are the questions again. Esc stops at any point, and the answers so far are kept.' }
+    }
+    if (request === 'settings') {
+      if (mode === 'off') return { text: SETTINGS_OFF }
+      await update($, tabAtom, () => 'settings')
+      // Asking again brings back a pane the user closed by hand, and reads the rows again.
+      await openPane($)
+
+      return { text: 'The settings are in the pane. Ctrl+X Tab gives it the keyboard, then pick a row and press Enter.' }
     }
     if (request === 'explain') {
       if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
@@ -3845,7 +3887,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: 'backseat-driver' }, async ($, e) => {
     quiet.renders += 1
     // One round for everything the pane shows, not a dozen in a row for every frame.
-    const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech] = await Promise.all([
+    const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, shownSettings] = await Promise.all([
       read($, modeAtom),
       read($, tabAtom),
       read($, notesAtom),
@@ -3858,6 +3900,7 @@ export const register: Register = (on, options) => {
       read($, progressAtom),
       read($, updateAtom),
       read($, speechAtom),
+      read($, settingsAtom),
     ])
     const view = {
       mode: shownMode,
@@ -3879,6 +3922,7 @@ export const register: Register = (on, options) => {
       character: settings.isAnimated ? { avatar: avatarFor(settings.persona.voice), speech } : null,
       // Above the prompt rows are scarce, and other surfaces may not draw text art in a fixed-width font.
       isCompact: e.props.placement === 'inline' || e.surface !== 'terminal',
+      settings: shownSettings,
     }
 
     return renderPane($.ui.resolve(e), view, {
@@ -3887,6 +3931,8 @@ export const register: Register = (on, options) => {
         void update($, tabAtom, () => tab)
         if (tab === 'review') void setReview($, { isUnseen: false })
         if (tab === 'explain') watchClosely($)
+        // Read again each time: a change made in /config meanwhile shows.
+        if (tab === 'settings') void showSettings($)
       },
       onSelect: (id: number) => {
         touched($, settings, 'select', () => id)
@@ -3939,6 +3985,10 @@ export const register: Register = (on, options) => {
       onWorking: () => {
         touched($, settings, 'working')
         void askWorking($)
+      },
+      onSetting: (row: SettingRow, value: string) => {
+        touched($, settings, 'setting', () => ({ key: row.key, value }))
+        void changeSetting($, row, value)
       },
       onLook: () => {
         touched($, settings, 'look now')

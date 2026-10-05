@@ -36,7 +36,8 @@ Stance: the project is against Claude writing the user's code, not neutral. Whil
 - One command, then hands off: `/backseat-driver` or `/bsd`. Every setting has a default, every question is skippable, setup never blocks work. A language first met mid-session gets defaults; its questions are offered in the pane, never interrupting.
 - One profile per language, never per project (`python`, not "python project 1"). It matters only once the user works in that language. The tutor may read other profiles (e.g. explain Rust via Python).
 - The user has the last word. Pushback is weighed. A contested point goes to the deep review model for a second opinion, and the user is told. "Do it my way" always stands. The play-by-play may keep flagging until the user hushes it; a hush saves to that language's profile at once.
-- The pane's default view is the play-by-play. Tabs: 1 Play-by-play, 2 Deep review, 3 Explain, 4 Progress.
+- The pane's default view is the play-by-play. Tabs: 1 Play-by-play, 2 Deep review, 3 Explain, 4 Progress, 5 Settings.
+- Settings are one press away (owner, 2026-10-05: surprised `/config` had no shortcut when the tab buttons work so well). A mod cannot add a row or a button to `/config`, so the pane's Settings tab edits the same rows, and `/bsd settings` opens it.
 - First-run questions are few and single choice: the language they know best (once ever), then three per new language (level, goals, focus). Never more than ten at once. Esc skips the rest. Re-ask with `/bsd questions` or `q` in Progress.
 - Three background jobs, each with its own model and thinking level: play-by-play (while hacking), deep review (commits), Explain (reading). The conversation uses the session's model. Explain's cache is per project (profiles are per language); all three jobs feed it and read it.
 - Learning and Explanatory modes, read-only (owner, 2026-10-04): take the good parts of Anthropic's `learning-output-style` plugin and leave all the driving to the user. Its decision-point criteria and its `★ Insight` format are adapted into the play-by-play, the deep review and the contract. A decision point is pointed out as the user's call, with what each way costs, never handed over to be written. Insights are about this codebase and this code, never general concepts, and never a defect in disguise.
@@ -69,6 +70,7 @@ Every roadmap milestone is built and was seen working in short scripted real ses
   - the journal's sitting roll-up, two sessions sharing a journal, and the deep reviewer reading the journal
   - the deep review's watchdog, a review given up on after three tries, and the retries of the look at progress
 - Never run: the `primeagen` engineering persona.
+- The Settings tab and `/bsd settings`: tests only (the kit stubs `config.list` and `config.set`). Not yet seen live: how a pick looks in a real terminal, and the reload that follows it.
 - Persona pairs run live: `eli5-tldr-kiss-terse`+`knuth`, `primeagen`+`torvalds`. Every voice's character has been seen live.
 - The editor side has been tried only with a script writing `focus.json`.
 - Decision points and insights (from `learning-output-style`): seen live in the play-by-play, the deep review and the conversation on Sonnet at low thinking. A play-by-play `insight` has not been seen live.
@@ -188,7 +190,7 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 
 | File | Holds |
 | --- | --- |
-| `settings.ts` | `/config` values as typed settings |
+| `settings.ts` | `/config` values as typed settings; the plugin's `/config` rows for the Settings tab |
 | `mode.ts` | `/bsd` argument parsing, mode transitions, `HELP` (the authoritative command and key list) |
 | `contract.ts` | system prompt contents, `SESSION_NOTES`, instruction-file reframing |
 | `guard.ts` | which paths are the user's |
@@ -365,6 +367,7 @@ The owner wants the logic functional where it can be, "to detect, prevent and re
 - Tabs say what is behind them (`tabBadge`): `Play-by-play (3)` for open notes, `Deep review (new)` until it is opened, `(…)` while a review runs, Explain is looking something up or Progress is assessing, `(!)` for a review that did not finish. `tabRow` keeps the badges for as long as the row fits: full names, then short names with a gap of 2, then 1, then only the review's badge, which is the one that asks for a look.
 - The Deep review tab always has something to read. A review that finished stays, as `Review.last`, while a newer one runs, waits or has failed (`withReviewChange`, which every write of the review state goes through; `readableReview` is what the tab and the conversation's context use). Above it: "Reviewing commit a1b2c3d: Title since 12:01." or why it did not finish, and how many more commits wait (`Review.waiting`, set by `changeQueue`).
 - The row under the status line (`Watch.health`, from `healthLine` in `status.ts`) says what keeps going wrong in the background and is otherwise absent: Claude not answering and until when, a refused account, the plan limit, a scan of the working tree that took over 1.5 s, and anything `fail()` reported twice within five minutes ("Keeps failing: … /bsd debug dump saves the details."). It leaves out what the status line already says, which is the case whenever a look is the thing held back. Until M7 those errors went to `claude --debug` only.
+- Settings tab (5, `settings`): the plugin's own rows of `/config`, read with `$.config.list()` (`showSettings`: when the pane opens, when the tab is opened, after `/clear`) and kept to rows whose `provider.plugin` is `$.plugin.name` (`settingRows`). Each row is a `Select`: a choice's options, a toggle as `on`/`off`. A pick goes through `$.config.set` (`changeSetting`), exactly as a change in `/config`, which reloads the mod with the new options; the row shows the pick at once and goes back with a toast if refused. A locked row is text. A surface without `Select` shows the values as text and says to use `/config`.
 - New fields in `$.state` are optional (`Watch.health`, `Review.since`, `Review.waiting`, `Review.last`): after an update the state still holds what the older version wrote.
 - Live (2026-10-04): "1: Play (2)  2: Review (new)  3: Explain  4: Progress" after a save with two notes, "Review (…)" while a commit was reviewed. During the second commit's review the tab read "Reviewing commit 5554aa7: Sort a copy since 20:17." then "The review before it:" and the first review. After `/clear` the two notes and the review were still in the pane, on the tab that had been open. With `play_by_play` on request and no connection: "On. Looking only when you ask." and under it "There is no connection to Claude. Background work waits until 20:25.", gone once a lookup was answered. A fix saved and committed within one scan took its note out of the pane at the next look, and left the note that was still true.
 - Not seen live: the git-is-slow and keeps-failing parts of the row, the `(!)` badge. Tests cover them (`kernel.test.ts`, `pane.test.ts`).
@@ -657,6 +660,7 @@ For developing Backseat Driver, not for its users: everything the tutor does, in
 - Hard rules are hooks; teaching style is the contract. The edit guard covers only `Edit`, `Write` and `NotebookEdit`; a shell command could still write, which rests on the contract and Claude Code's permission prompts.
 - Footprint (the paragraph closing the README's "What it is" states it to users):
   - Runs `git`, reads the repo and its own plugin folder, calls models, writes only its data folder, draws a pane. One of the git repositories it runs git in is its own: `locks.git` in the data folder.
+  - Changes Claude Code's own settings only when the person picks a value in the Settings tab, through `$.config.set`, as `/config` would.
   - Other processes only on request: `rm` inside the data folder (forget, `/bsd debug clear`), `claude plugin` (update, uninstall).
   - The debug log, when the user switches it on, holds their code and prompts. It stays in the data folder.
   - Network of its own: the release check (`git ls-remote`, at most every 6 h, opt-out) and `/bsd update`'s fetch.
@@ -679,6 +683,7 @@ The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above mem
 - `update($, atom, fn)` gives a misleading "Atom<…> is not assignable to StateRef" when `fn` returns literal-union fields. Annotate: `(w): Watch => ({ ...w, state: 'looking' })`.
 - `userConfig` `options` pickers work on string fields only. A stored value outside the options reads as the default, with a warning (in tests too). A `/config` change reloads the mod with new options, and the tutor stays on. For the working copy, values go to `~/.claude/settings.json` `pluginConfigs["backseat-driver@inline"]`: restore the owner's settings after a check.
 - `$.ui.ask`: one question, 2–4 options plus free text. It rejects on dismiss (first-run treats that as skip all) and under `claude -p`. In tests it reaches the `tool.call` stub as `AskUserQuestion`.
+- `/config` and a mod: `$.config.list()` returns every row (`key` `<plugin>.<field>` for a `userConfig` field, `kind`, `value`, `options`, `provider`, `isLocked`), and `$.config.set({ key, value })` changes one as the menu would, resolving `{ value }` or `{ deny }`. A mod cannot add a row, a button or a shortcut to the menu: `config.describe` only relabels, re-describes or hides an existing row. `Select` is missing from one surface's element table (`Kit` takes it as optional).
 - `$.store`: 4 MiB total, per install, expires (unused now). `get`, `set`, `delete`, `keys`.
 - `$.fs`: `read` (≤4 MiB), `write` (makes folders), `list`, `exists`, `stat`, `ancestors`. No delete or rename. `list`/`read` reject on missing. Absolute paths outside the project work without a prompt.
 - `$.env.get` takes a string literal; the validator lists the names.

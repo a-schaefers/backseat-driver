@@ -66,7 +66,7 @@ Type `/bsd` in Claude Code. The first time you work in a language, it asks a few
 | `/bsd update`, `/bsd uninstall` | Fetch a newer release when the pane announces one, or remove the plugin |
 | `/bsd help` | Every command and key |
 
-`Ctrl+X Tab` focuses the pane, and `Esc` leaves it. `1` to `4` switch tabs. The pane draws in the terminal and in the desktop app's Code tab. Models, pacing and persona (`torvalds`, `knuth`, `primeagen`, `eli5-tldr-kiss-terse`) are set in `/config`.
+`Ctrl+X Tab` focuses the pane, and `Esc` leaves it. `1` to `5` switch tabs. The pane draws in the terminal and in the desktop app's Code tab. Models, pacing and persona (`torvalds`, `knuth`, `primeagen`, `eli5-tldr-kiss-terse`) live in tab `5`, Settings, or `/bsd settings`. They're in `/config` too.
 
 ## License
 
