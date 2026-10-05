@@ -248,9 +248,13 @@ export function withAssessment(
 
   const order = (seen: Observation): number => fresh.findIndex(commit => commit.hash === seen.commit)
   const chronological = added.map((seen, index) => ({ seen, index })).sort((a, b) => order(a.seen) - order(b.seen) || a.index - b.index)
+  const observations = [...record.observations, ...chronological.map(({ seen }) => seen)]
+  // The oldest go past the limit. A level change counts the observations before it, so its count goes down with them.
+  const dropped = Math.max(0, observations.length - MAX_OBSERVATIONS)
   const grown: ProgressRecord = {
     ...record,
-    observations: [...record.observations, ...chronological.map(({ seen }) => seen)].slice(-MAX_OBSERVATIONS),
+    observations: observations.slice(dropped),
+    history: record.history.map(change => ({ ...change, observationCount: Math.max(0, change.observationCount - dropped) })),
     assessed: [...record.assessed, ...fresh.map(commit => commit.hash)].slice(-MAX_ASSESSED),
   }
   const decided = decideLevel(grown, assessment.level)

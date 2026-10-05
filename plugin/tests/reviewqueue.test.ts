@@ -482,3 +482,18 @@ sessionTest('paused, a waiting commit waits, and resuming takes it up', REVIEW_O
   await session.clock.settle()
   expect(session.spawned.length).toBe(1)
 })
+
+sessionTest('switching off while a commit is assessed leaves it waiting for the next time', { options: { ...QUIET, deep_review_after_commit: false } }, async ($, on) => {
+  const session = stubSession(on, { head: { 'stats.py': MEAN } })
+  await start($, session)
+  session.stall('progress')
+  const hash = await commit(session, 'Add a total', TOTAL)
+  await session.clock.settle()
+  expect(session.assessments.length).toBe(1)
+  expect(waitingIn(session)).toEqual([hash])
+
+  await $.command.run(typed('bsd', 'off'))
+  session.release()
+  await session.clock.settle()
+  expect(waitingIn(session)).toEqual([hash])
+})

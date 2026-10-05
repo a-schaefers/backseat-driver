@@ -1388,7 +1388,7 @@ var stepWire = function(health) {
     throw new Error("Failed pattern match at Kernel.Health (line 260, column 25 - line 262, column 20): " + [v.constructor.name]);
   };
 };
-var accountErrors = ["authentication_failed", "oauth_org_not_allowed", "account_on_hold", "verification_required", "billing_error"];
+var accountErrors = ["authentication_failed", "oauth_org_not_allowed", "account_on_hold", "verification_required", "billing_error", "cloud_credential_error"];
 var troubleOf = function(error) {
   if (error === "rate_limit") {
     return RateLimit.value;
