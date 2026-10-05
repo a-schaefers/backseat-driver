@@ -8,7 +8,7 @@
     "url": "https://github.com/a-schaefers"
   },
   "repository": "https://github.com/a-schaefers/backseat-driver",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "keywords": ["tutor", "learning", "code-review", "mod"],
   "types": "./types/index.d.ts",
   "userConfig": {

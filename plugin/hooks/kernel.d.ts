@@ -94,3 +94,18 @@ export type PlayWire = {
 export const playOfWire: (facts: PlayFactsWire) => PlayWire
 export const wakeAtWire: (facts: PlayFactsWire) => { has: boolean; at: number }
 export const isLookDueWire: (facts: PlayFactsWire) => (now: number) => boolean
+
+// The license
+export type LicenseFactsWire = {
+  use: string
+  key: string
+  expiresAt: number
+  keySince: number
+  hasServer: boolean
+  answer: string
+  answeredAt: number
+  triedAt: number
+  now: number
+}
+export const licenseStandingWire: (facts: LicenseFactsWire) => string
+export const licenseNextCheckWire: (facts: LicenseFactsWire) => number

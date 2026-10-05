@@ -62,11 +62,11 @@ var bottomNumber = Number.NEGATIVE_INFINITY;
 
 // output/Data.Ord/foreign.js
 var unsafeCompareImpl = function(lt) {
-  return function(eq2) {
+  return function(eq4) {
     return function(gt) {
       return function(x) {
         return function(y) {
-          return x < y ? lt : x === y ? eq2 : gt;
+          return x < y ? lt : x === y ? eq4 : gt;
         };
       };
     };
@@ -81,6 +81,7 @@ var refEq = function(r1) {
     return r1 === r2;
   };
 };
+var eqBooleanImpl = refEq;
 var eqIntImpl = refEq;
 var eqNumberImpl = refEq;
 var eqStringImpl = refEq;
@@ -95,8 +96,20 @@ var eqNumber = {
 var eqInt = {
   eq: eqIntImpl
 };
+var eqBoolean = {
+  eq: eqBooleanImpl
+};
 var eq = function(dict) {
   return dict.eq;
+};
+var eq2 = /* @__PURE__ */ eq(eqBoolean);
+var notEq = function(dictEq) {
+  var eq32 = eq(dictEq);
+  return function(x) {
+    return function(y) {
+      return eq2(eq32(x)(y))(false);
+    };
+  };
 };
 
 // output/Data.Ordering/index.js
@@ -251,10 +264,10 @@ var findIndex = /* @__PURE__ */ (function() {
   return runFn4(findIndexImpl)(Just.create)(Nothing.value);
 })();
 var elemIndex = function(dictEq) {
-  var eq2 = eq(dictEq);
+  var eq23 = eq(dictEq);
   return function(x) {
     return findIndex(function(v) {
-      return eq2(v)(x);
+      return eq23(v)(x);
     });
   };
 };
@@ -993,8 +1006,366 @@ var nextCheck = function(lease) {
   };
 };
 
-// output/Kernel.Pace/index.js
+// output/Kernel.License/index.js
 var max5 = /* @__PURE__ */ max(ordNumber);
+var Unchosen = /* @__PURE__ */ (function() {
+  function Unchosen2() {
+  }
+  ;
+  Unchosen2.value = new Unchosen2();
+  return Unchosen2;
+})();
+var Personal = /* @__PURE__ */ (function() {
+  function Personal2() {
+  }
+  ;
+  Personal2.value = new Personal2();
+  return Personal2;
+})();
+var Commercial = /* @__PURE__ */ (function() {
+  function Commercial2() {
+  }
+  ;
+  Commercial2.value = new Commercial2();
+  return Commercial2;
+})();
+var Unchosen$prime = /* @__PURE__ */ (function() {
+  function Unchosen$prime2() {
+  }
+  ;
+  Unchosen$prime2.value = new Unchosen$prime2();
+  return Unchosen$prime2;
+})();
+var Personal$prime = /* @__PURE__ */ (function() {
+  function Personal$prime2() {
+  }
+  ;
+  Personal$prime2.value = new Personal$prime2();
+  return Personal$prime2;
+})();
+var Licensed = /* @__PURE__ */ (function() {
+  function Licensed2() {
+  }
+  ;
+  Licensed2.value = new Licensed2();
+  return Licensed2;
+})();
+var NeedsKey = /* @__PURE__ */ (function() {
+  function NeedsKey2() {
+  }
+  ;
+  NeedsKey2.value = new NeedsKey2();
+  return NeedsKey2;
+})();
+var BadKey = /* @__PURE__ */ (function() {
+  function BadKey2() {
+  }
+  ;
+  BadKey2.value = new BadKey2();
+  return BadKey2;
+})();
+var Expired = /* @__PURE__ */ (function() {
+  function Expired2() {
+  }
+  ;
+  Expired2.value = new Expired2();
+  return Expired2;
+})();
+var Withdrawn = /* @__PURE__ */ (function() {
+  function Withdrawn2() {
+  }
+  ;
+  Withdrawn2.value = new Withdrawn2();
+  return Withdrawn2;
+})();
+var Unchecked = /* @__PURE__ */ (function() {
+  function Unchecked2() {
+  }
+  ;
+  Unchecked2.value = new Unchecked2();
+  return Unchecked2;
+})();
+var NoKey = /* @__PURE__ */ (function() {
+  function NoKey2() {
+  }
+  ;
+  NoKey2.value = new NoKey2();
+  return NoKey2;
+})();
+var Malformed = /* @__PURE__ */ (function() {
+  function Malformed2() {
+  }
+  ;
+  Malformed2.value = new Malformed2();
+  return Malformed2;
+})();
+var Forged = /* @__PURE__ */ (function() {
+  function Forged2() {
+  }
+  ;
+  Forged2.value = new Forged2();
+  return Forged2;
+})();
+var Unverified = /* @__PURE__ */ (function() {
+  function Unverified2() {
+  }
+  ;
+  Unverified2.value = new Unverified2();
+  return Unverified2;
+})();
+var Valid = /* @__PURE__ */ (function() {
+  function Valid2() {
+  }
+  ;
+  Valid2.value = new Valid2();
+  return Valid2;
+})();
+var NoAnswer = /* @__PURE__ */ (function() {
+  function NoAnswer2() {
+  }
+  ;
+  NoAnswer2.value = new NoAnswer2();
+  return NoAnswer2;
+})();
+var Active = /* @__PURE__ */ (function() {
+  function Active2() {
+  }
+  ;
+  Active2.value = new Active2();
+  return Active2;
+})();
+var Revoked = /* @__PURE__ */ (function() {
+  function Revoked2() {
+  }
+  ;
+  Revoked2.value = new Revoked2();
+  return Revoked2;
+})();
+var Unknown = /* @__PURE__ */ (function() {
+  function Unknown2() {
+  }
+  ;
+  Unknown2.value = new Unknown2();
+  return Unknown2;
+})();
+var standingText = function(v) {
+  if (v instanceof Unchosen$prime) {
+    return "unchosen";
+  }
+  ;
+  if (v instanceof Personal$prime) {
+    return "personal";
+  }
+  ;
+  if (v instanceof Licensed) {
+    return "licensed";
+  }
+  ;
+  if (v instanceof NeedsKey) {
+    return "needs-key";
+  }
+  ;
+  if (v instanceof BadKey) {
+    return "bad-key";
+  }
+  ;
+  if (v instanceof Expired) {
+    return "expired";
+  }
+  ;
+  if (v instanceof Withdrawn) {
+    return "withdrawn";
+  }
+  ;
+  if (v instanceof Unchecked) {
+    return "unchecked";
+  }
+  ;
+  throw new Error("Failed pattern match at Kernel.License (line 161, column 16 - line 169, column 27): " + [v.constructor.name]);
+};
+var fromWire = function(w) {
+  var useOf = function(v) {
+    if (v === "personal") {
+      return Personal.value;
+    }
+    ;
+    if (v === "commercial") {
+      return Commercial.value;
+    }
+    ;
+    return Unchosen.value;
+  };
+  var keyOf = function(v) {
+    if (v === "malformed") {
+      return Malformed.value;
+    }
+    ;
+    if (v === "forged") {
+      return Forged.value;
+    }
+    ;
+    if (v === "unverified") {
+      return Unverified.value;
+    }
+    ;
+    if (v === "valid") {
+      return Valid.value;
+    }
+    ;
+    return NoKey.value;
+  };
+  var answerOf = function(v) {
+    if (v === "active") {
+      return Active.value;
+    }
+    ;
+    if (v === "revoked") {
+      return Revoked.value;
+    }
+    ;
+    if (v === "unknown") {
+      return Unknown.value;
+    }
+    ;
+    return NoAnswer.value;
+  };
+  return {
+    use: useOf(w.use),
+    key: keyOf(w.key),
+    expiresAt: w.expiresAt,
+    keySince: w.keySince,
+    hasServer: w.hasServer,
+    answer: answerOf(w.answer),
+    answeredAt: w.answeredAt,
+    triedAt: w.triedAt,
+    now: w.now
+  };
+};
+var eqKeyState = {
+  eq: function(x) {
+    return function(y) {
+      if (x instanceof NoKey && y instanceof NoKey) {
+        return true;
+      }
+      ;
+      if (x instanceof Malformed && y instanceof Malformed) {
+        return true;
+      }
+      ;
+      if (x instanceof Forged && y instanceof Forged) {
+        return true;
+      }
+      ;
+      if (x instanceof Unverified && y instanceof Unverified) {
+        return true;
+      }
+      ;
+      if (x instanceof Valid && y instanceof Valid) {
+        return true;
+      }
+      ;
+      return false;
+    };
+  }
+};
+var eq12 = /* @__PURE__ */ eq(eqKeyState);
+var notEq2 = /* @__PURE__ */ notEq(eqKeyState);
+var eqAnswer = {
+  eq: function(x) {
+    return function(y) {
+      if (x instanceof NoAnswer && y instanceof NoAnswer) {
+        return true;
+      }
+      ;
+      if (x instanceof Active && y instanceof Active) {
+        return true;
+      }
+      ;
+      if (x instanceof Revoked && y instanceof Revoked) {
+        return true;
+      }
+      ;
+      if (x instanceof Unknown && y instanceof Unknown) {
+        return true;
+      }
+      ;
+      return false;
+    };
+  }
+};
+var eq22 = /* @__PURE__ */ eq(eqAnswer);
+var dayMs = 864e5;
+var everyMs = /* @__PURE__ */ (function() {
+  return 7 * dayMs;
+})();
+var quietMs = /* @__PURE__ */ (function() {
+  return 30 * dayMs;
+})();
+var standingOf = function(facts) {
+  if (facts.use instanceof Unchosen) {
+    return Unchosen$prime.value;
+  }
+  ;
+  if (facts.use instanceof Personal) {
+    return Personal$prime.value;
+  }
+  ;
+  if (facts.use instanceof Commercial) {
+    if (eq12(facts.key)(NoKey.value)) {
+      return NeedsKey.value;
+    }
+    ;
+    if (eq12(facts.key)(Malformed.value) || eq12(facts.key)(Forged.value)) {
+      return BadKey.value;
+    }
+    ;
+    if (facts.expiresAt > 0 && facts.now >= facts.expiresAt) {
+      return Expired.value;
+    }
+    ;
+    if (eq22(facts.answer)(Revoked.value)) {
+      return Withdrawn.value;
+    }
+    ;
+    if (facts.hasServer && facts.now - max5(facts.answeredAt)(facts.keySince) >= quietMs) {
+      return Unchecked.value;
+    }
+    ;
+    if (otherwise) {
+      return Licensed.value;
+    }
+    ;
+  }
+  ;
+  throw new Error("Failed pattern match at Kernel.License (line 94, column 20 - line 103, column 28): " + [facts.use.constructor.name]);
+};
+var licenseStandingWire = function($34) {
+  return standingText(standingOf(fromWire($34)));
+};
+var retryMs = dayMs;
+var nextCheckAt = function(facts) {
+  if (facts.use instanceof Commercial && (facts.hasServer && (notEq2(facts.key)(NoKey.value) && (notEq2(facts.key)(Malformed.value) && notEq2(facts.key)(Forged.value))))) {
+    var $32 = facts.triedAt === 0;
+    if ($32) {
+      return facts.now;
+    }
+    ;
+    var $33 = facts.answeredAt < facts.triedAt;
+    if ($33) {
+      return facts.triedAt + retryMs;
+    }
+    ;
+    return facts.answeredAt + everyMs;
+  }
+  ;
+  return 0;
+};
+var licenseNextCheckWire = function($35) {
+  return nextCheckAt(fromWire($35));
+};
+
+// output/Kernel.Pace/index.js
+var max6 = /* @__PURE__ */ max(ordNumber);
 var min5 = /* @__PURE__ */ min(ordNumber);
 var slowedGapMs = function(minGapMs) {
   return function(factor) {
@@ -1003,7 +1374,7 @@ var slowedGapMs = function(minGapMs) {
     }
     ;
     if (otherwise) {
-      return max5(minGapMs)(6e4) * factor;
+      return max6(minGapMs)(6e4) * factor;
     }
     ;
     throw new Error("Failed pattern match at Kernel.Pace (line 40, column 1 - line 40, column 42): " + [minGapMs.constructor.name, factor.constructor.name]);
@@ -1042,7 +1413,7 @@ var backoffMs = function(failures) {
 };
 
 // output/Kernel.Play/index.js
-var max6 = /* @__PURE__ */ max(ordNumber);
+var max7 = /* @__PURE__ */ max(ordNumber);
 var LookFailed = /* @__PURE__ */ (function() {
   function LookFailed2(value0) {
     this.value0 = value0;
@@ -1347,7 +1718,7 @@ var paced = function(facts) {
       }
       ;
       if (facts.lastLookAt instanceof Just) {
-        return max6(facts.lastChangeAt.value0 + facts.quietMs)(facts.lastLookAt.value0 + slowedGapMs(facts.minGapMs)(gapFactor(facts.pressure.percent)) + backoffMs(facts.failures));
+        return max7(facts.lastChangeAt.value0 + facts.quietMs)(facts.lastLookAt.value0 + slowedGapMs(facts.minGapMs)(gapFactor(facts.pressure.percent)) + backoffMs(facts.failures));
       }
       ;
       throw new Error("Failed pattern match at Kernel.Play (line 101, column 7 - line 104, column 110): " + [facts.lastLookAt.constructor.name]);
@@ -1439,7 +1810,7 @@ var playOf = function(facts) {
         ;
         if (facts.health instanceof Waiting) {
           return new Waiting2({
-            until: new Just(max6(facts.health.value0.until)(dueAt)),
+            until: new Just(max7(facts.health.value0.until)(dueAt)),
             why: orTrouble(facts.health.value0.trouble)(facts.health.value0.detail)
           });
         }
@@ -1598,7 +1969,7 @@ var wakeAtWire = function(facts) {
 
 // output/Kernel.Sensor/index.js
 var min6 = /* @__PURE__ */ min(ordNumber);
-var max7 = /* @__PURE__ */ max(ordNumber);
+var max8 = /* @__PURE__ */ max(ordNumber);
 var slowScanWaitMs = 2e3;
 var slowScanStepMs = 250;
 var scanMs = 2e3;
@@ -1649,7 +2020,7 @@ var scanGapMsWire = function(w) {
 };
 var focusScanMs = 100;
 var focusGapMs = function(tookMs) {
-  return min6(longestFocusGapMs)(max7(focusScanMs)(tookMs * 4));
+  return min6(longestFocusGapMs)(max8(focusScanMs)(tookMs * 4));
 };
 
 // output/Kernel.Main/index.js
@@ -1678,6 +2049,8 @@ export {
   leaseReleased,
   leaseSlackMs,
   leaseTtlMs,
+  licenseNextCheckWire,
+  licenseStandingWire,
   longestFocusGapMs,
   longestScanGapMs,
   mayAskWire,

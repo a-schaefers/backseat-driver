@@ -100,6 +100,11 @@ export function lockRepoPath(root: string): string {
   return `${root}/locks.git`
 }
 
+/** Personal or commercial use, and the commercial key: about the person, like the profiles. */
+export function licensePath(root: string): string {
+  return `${root}/license.json`
+}
+
 /** The file that says whether the debug log is on, for every session. */
 export function debugSwitchPath(root: string): string {
   return `${root}/debug.json`
@@ -124,7 +129,7 @@ export function isOwnFolder(names: readonly string[]): boolean {
 }
 
 /** What the tutor may delete: only these, directly under its own folder. */
-export const REMOVABLE = ['profiles', 'progress', 'projects', 'focus.json', 'view.json', 'update.json', 'debug', 'debug.json', 'locks.git'] as const
+export const REMOVABLE = ['profiles', 'progress', 'projects', 'focus.json', 'view.json', 'update.json', 'license.json', 'debug', 'debug.json', 'locks.git'] as const
 
 /**
  * Whether `path` is something the tutor may delete: inside one of its own

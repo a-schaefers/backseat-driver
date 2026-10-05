@@ -37,7 +37,7 @@ Backseat Driver puts the machine where it belongs: in the back seat. You drive. 
 - **Progress.** An honest level per language, beginner to senior, judged only on commits you wrote. It follows you across projects, and it can go down.
 - **Conversation.** Ask anything. Push back, and a contested point gets a second opinion. Tell it to drop a topic, and it's dropped for good. You have the last word.
 
-While it's on, a hook blocks Claude's editing tools, so your code stays yours no matter what the model decides. It installs no git hooks and never writes to your working tree. What it remembers stays in `~/.local/share/backseat-driver/`. Its only network request of its own is a check for a newer release, at most every six hours.
+While it's on, a hook blocks Claude's editing tools, so your code stays yours no matter what the model decides. It installs no git hooks and never writes to your working tree. What it remembers stays in `~/.local/share/backseat-driver/`. Its only network requests of its own are a check for a newer release, at most every six hours, and, with a commercial key, a check of that key about once a week.
 
 ## Who it's for
 
@@ -63,6 +63,7 @@ Type `/bsd` in Claude Code. The first time you work in a language, it asks a few
 | `/bsd`, `/bsd pause`, `/bsd off` | Switch it on, quiet it, or switch it off |
 | `/bsd explain src/app.py:42` | Explain a spot in the code |
 | `/bsd forget` | Erase what it remembers |
+| `/bsd license` | Personal or commercial use, and your commercial key |
 | `/bsd update`, `/bsd uninstall` | Fetch a newer release when the pane announces one, or remove the plugin |
 | `/bsd help` | Every command and key |
 
@@ -70,4 +71,9 @@ Type `/bsd` in Claude Code. The first time you work in a language, it asks a few
 
 ## License
 
-MIT. The decision points and insights are adapted, with thanks, from Anthropic's [learning-output-style](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/learning-output-style) plugin, under its Apache 2.0 license. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Source-available, not open source. Read it, change it, share it.
+
+- **Personal use is free.** Learning, hobby projects, unpaid open source. Schools and charities too.
+- **Commercial use is paid.** Using it for a business needs a [commercial license](COMMERCIAL-LICENSE.md). You'll pick personal or commercial the first time you switch it on, and `/bsd license` changes it. No lockouts. A missing key gets a note in the pane, nothing more.
+
+The terms are the [PolyForm Noncommercial License 1.0.0](LICENSE). Commits that carry the MIT license stay MIT. The decision points and insights are adapted, with thanks, from Anthropic's [learning-output-style](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/learning-output-style) plugin, under its Apache 2.0 license. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

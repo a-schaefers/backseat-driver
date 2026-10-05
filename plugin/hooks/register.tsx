@@ -48,6 +48,7 @@ import {
   isRemovable,
   journalPath,
   leasePath,
+  licensePath,
   lockRepoPath,
   MARKER,
   MARKER_TEXT,
@@ -205,6 +206,30 @@ import type { Disk } from './storage'
 import { createStore, plainStore, updateJson } from './store'
 import type { Store } from './store'
 import { createWatcher } from './watcher'
+import {
+  checkUrl,
+  COMMERCIAL_CHOICE,
+  KEY_CHOICES,
+  KEY_HEADER,
+  KEY_QUESTION,
+  LICENSE_SERVER,
+  licenseFacts,
+  licenseLine,
+  licenseStanding,
+  licenseStatus,
+  nextLicenseCheck,
+  parseAnswer,
+  parseLicense,
+  parseLicenseRequest,
+  USE_CHOICES,
+  USE_HEADER,
+  USE_QUESTION,
+  useOfAnswer,
+  withKey,
+} from './license'
+import type { LicenseRecord, LicenseRequest, Standing } from './license'
+import { checkKey, cleanKey, looksLikeKey } from './licensekey'
+import type { KeyCheck } from './licensekey'
 import type { Watcher } from './watcher'
 import { chosen, parseWorking, tidy, WORKING_HEADER, WORKING_QUESTION, workingChoices } from './working'
 
@@ -227,6 +252,7 @@ const explainAtom = atom({ plugin: 'backseat-driver', key: 'explain' } as const,
 const NO_PROGRESS: ProgressView = { isOn: true, identity: [], records: [], busy: '', skipped: '' }
 const progressAtom = atom({ plugin: 'backseat-driver', key: 'progress' } as const, NO_PROGRESS)
 const updateAtom = atom({ plugin: 'backseat-driver', key: 'update' } as const, '')
+const licenseAtom = atom({ plugin: 'backseat-driver', key: 'license' } as const, '')
 const speechAtom = atom({ plugin: 'backseat-driver', key: 'speech' } as const, SILENT)
 const workingAtom = atom({ plugin: 'backseat-driver', key: 'working' } as const, NO_WORKING)
 
@@ -548,6 +574,7 @@ async function fullState($: EngineInterface): Promise<Record<string, unknown>> {
       working: await read($, workingAtom),
       progress: await read($, progressAtom),
       update: await read($, updateAtom),
+      license: await read($, licenseAtom),
       speech: await read($, speechAtom),
     },
   }
@@ -1240,6 +1267,155 @@ async function marketplaceClone($: EngineInterface, name: string): Promise<strin
     return marketplaceLocation(await $.fs.read(`${config}/plugins/known_marketplaces.json`), name)
   } catch {
     return ''
+  }
+}
+
+// --- The license: personal or commercial use, and the commercial key. Nothing here ever stops the tutor.
+
+/** `license.json` as it stands. */
+async function readLicense($: EngineInterface): Promise<LicenseRecord> {
+  await resolveHome($)
+
+  return dataRoot === '' ? parseLicense(null) : parseLicense(await storeOf($).read(licensePath(dataRoot)))
+}
+
+/** Changes `license.json`, and the pane's line with it. */
+async function changeLicense($: EngineInterface, change: (record: LicenseRecord) => LicenseRecord): Promise<LicenseRecord> {
+  await resolveHome($)
+  if (dataRoot === '') return change(parseLicense(null))
+  const record = await updateJson(storeOf($), licensePath(dataRoot), parseLicense, change)
+  trace($, 'state', 'license', () => ({ use: record.use, hasKey: record.key !== '', answer: record.answer }))
+
+  return record
+}
+
+/** Whether a server may be asked about a key: there is one, and Claude Code's own switch for inessential traffic is not on. */
+async function hasLicenseServer($: EngineInterface): Promise<boolean> {
+  return LICENSE_SERVER !== '' && (await $.env.get('CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC')) === undefined
+}
+
+/** Where the person stands, worked out from the record and the key. */
+async function standingOf($: EngineInterface, record: LicenseRecord): Promise<{ standing: Standing; check: KeyCheck | null }> {
+  const check = record.key === '' ? null : await checkKey(record.key)
+  const facts = licenseFacts(record, check, await $.clock.now(), await hasLicenseServer($))
+
+  return { standing: licenseStanding(facts), check }
+}
+
+/** Puts the license's line under the pane's status line, or takes it away. */
+async function showLicense($: EngineInterface, given?: LicenseRecord): Promise<void> {
+  try {
+    const record = given ?? (await readLicense($))
+    const { standing, check } = await standingOf($, record)
+    await update($, licenseAtom, () => licenseLine(standing, check, record))
+  } catch (error) {
+    fail($, 'could not show the license', error)
+  }
+}
+
+/** At a fresh switch-on: the question, once ever, then a look at the key when one is due. */
+async function startLicense($: EngineInterface): Promise<void> {
+  let record = await readLicense($)
+  if (!record.isAsked) record = await askLicense($)
+  await showLicense($, record)
+  void checkLicense($, record)
+}
+
+/**
+ * Personal or commercial, and for commercial the key. Dismissing either
+ * question is an answer too: nothing is chosen, and nothing is asked again
+ * unprompted. `/bsd license` changes it at any time.
+ */
+async function askLicense($: EngineInterface): Promise<LicenseRecord> {
+  let answer: string
+  try {
+    answer = await $.ui.ask(USE_QUESTION, { options: [...USE_CHOICES], header: USE_HEADER })
+  } catch {
+    return await changeLicense($, record => ({ ...record, isAsked: true }))
+  }
+  const use = useOfAnswer(answer)
+  // A key typed straight into the first question is taken as commercial use with that key.
+  if (use === null && looksLikeKey(answer)) return await addKey($, answer)
+  const chosen = await changeLicense($, record => ({ ...record, isAsked: true, use: use ?? record.use }))
+  if (answer !== COMMERCIAL_CHOICE || chosen.key !== '') return chosen
+  try {
+    const key = await $.ui.ask(KEY_QUESTION, { options: [...KEY_CHOICES], header: KEY_HEADER })
+    if (looksLikeKey(key)) return await addKey($, key)
+  } catch {
+    // Later, then.
+  }
+
+  return chosen
+}
+
+/** Keeps a pasted key, says what was made of it, and asks the server about it when there is one. */
+async function addKey($: EngineInterface, pasted: string): Promise<LicenseRecord> {
+  const now = await $.clock.now()
+  const record = await changeLicense($, stored => withKey(stored, cleanKey(pasted), now))
+  await showLicense($, record)
+  void checkLicense($, record)
+
+  return record
+}
+
+/**
+ * Asks the license server whether the key still stands, when that is due:
+ * about once a week, a day after a try that got no answer. No answer is no
+ * news: the key keeps counting as good. Only the key's id is sent.
+ */
+async function checkLicense($: EngineInterface, record: LicenseRecord): Promise<void> {
+  try {
+    if (record.key === '' || !(await hasLicenseServer($))) return
+    const check = await checkKey(record.key)
+    const now = await $.clock.now()
+    const due = nextLicenseCheck(licenseFacts(record, check, now, true))
+    if (due === null || due > now || check.state === 'malformed') return
+    await changeLicense($, stored => (stored.key === record.key ? { ...stored, triedAt: now } : stored))
+    let answer: ReturnType<typeof parseAnswer> = null
+    try {
+      const response = await $.http.fetch(checkUrl(LICENSE_SERVER, check.payload.id), { headers: { accept: 'application/json' } })
+      answer = parseAnswer(response.status, response.text)
+      trace($, 'license', 'checked', () => ({ status: response.status, answer }))
+    } catch (error) {
+      trace($, 'license', 'not reached', () => ({ error: String(error) }))
+    }
+    if (answer === null) return
+    const kept = await changeLicense($, stored => (stored.key === record.key ? { ...stored, answer, answeredAt: now } : stored))
+    await showLicense($, kept)
+  } catch (error) {
+    fail($, 'could not check the license key', error)
+  }
+}
+
+/** `/bsd license`: where they stand, a change of use, a key, or the key taken away. Works while the tutor is off. */
+async function licenseCommand($: EngineInterface, asked: LicenseRequest): Promise<string> {
+  try {
+    await resolveHome($)
+    if (dataRoot === '') return 'There is no home directory, so there is nowhere to keep that.'
+    let record: LicenseRecord
+    switch (asked.kind) {
+      case 'status':
+        record = await readLicense($)
+        break
+      case 'use':
+        record = await changeLicense($, stored => ({ ...stored, isAsked: true, use: asked.use }))
+        break
+      case 'clear-key':
+        record = await changeLicense($, stored => ({ ...stored, key: '', keySince: 0, answer: null, answeredAt: 0, triedAt: 0 }))
+        break
+      case 'key':
+        if (!looksLikeKey(asked.key)) return 'That is not a license key: one starts with BSD1. /bsd license personal, commercial or clear change the rest.'
+        record = await addKey($, asked.key)
+        break
+    }
+    await showLicense($, record)
+    const { standing, check } = await standingOf($, record)
+
+    return licenseStatus(standing, check)
+  } catch (error) {
+    fail($, 'could not change the license', error)
+
+    return 'Could not do that just now. Nothing was changed.'
   }
 }
 
@@ -3260,6 +3436,8 @@ async function engage($: EngineInterface, settings: Settings, run: number, isFre
     if (isFresh) void checkForUpdate($, settings)
     // Last, so that everything already works if the questions are dismissed.
     if (isFresh && run === engagement) await ask($, settings, unasked(main))
+    // After the questions about their code: how they use the tutor, asked once ever, never in the way.
+    if (isFresh && run === engagement) await startLicense($)
   } catch (error) {
     fail($, 'could not finish starting', error)
   }
@@ -3446,7 +3624,7 @@ export const register: Register = (on, options) => {
         await $.command.register({
           name,
           description: 'Turn the Backseat Driver tutor on. /bsd help lists the rest',
-          argumentHint: '[off | pause | resume | status | explain | questions | working | forget | update | uninstall | debug | help]',
+          argumentHint: '[off | pause | resume | status | explain | questions | working | forget | license | update | uninstall | debug | help]',
           immediate: true,
         })
       } catch (error) {
@@ -3468,6 +3646,7 @@ export const register: Register = (on, options) => {
       await restorePane($, settings)
       workingShown = ''
       await showWorking($, await $.clock.now())
+      await showLicense($)
       // The session may go by another id now. The lease is renewed under it.
       await keepLease($, settings, engagement)
     }
@@ -3491,6 +3670,7 @@ export const register: Register = (on, options) => {
 
       return { text: asked === null ? DEBUG_USAGE : await debugCommand($, settings, asked) }
     }
+    if (request === 'license') return { text: await licenseCommand($, parseLicenseRequest(rest)) }
     if (request === 'questions') {
       if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
       // Not awaited: the dialog stays open for as long as the person takes.
@@ -3845,7 +4025,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: 'backseat-driver' }, async ($, e) => {
     quiet.renders += 1
     // One round for everything the pane shows, not a dozen in a row for every frame.
-    const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech] = await Promise.all([
+    const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, licensing] = await Promise.all([
       read($, modeAtom),
       read($, tabAtom),
       read($, notesAtom),
@@ -3858,6 +4038,7 @@ export const register: Register = (on, options) => {
       read($, progressAtom),
       read($, updateAtom),
       read($, speechAtom),
+      read($, licenseAtom),
     ])
     const view = {
       mode: shownMode,
@@ -3874,6 +4055,7 @@ export const register: Register = (on, options) => {
       working,
       progress,
       update: release,
+      license: licensing,
       isFocused: e.props.isFocused,
       columns: e.props.bodyColumns,
       character: settings.isAnimated ? { avatar: avatarFor(settings.persona.voice), speech } : null,
