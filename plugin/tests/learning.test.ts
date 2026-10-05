@@ -6,11 +6,11 @@
 import { expect, test } from 'claude-code/testing'
 
 import { stripComments } from '../hooks/contract'
-import { isProblem, parseReply, sortNotes } from '../hooks/notes'
+import { isProblem, parseReply, sortNotes } from '../core/notes'
 import { DECISION_HEADING, INSIGHT_HEADING } from '../hooks/pane'
-import { parseProfile, subjectKey } from '../hooks/profiles'
-import { MAX_DECISIONS, splitReview } from '../hooks/project'
-import { explainRequest } from '../hooks/prompts'
+import { parseProfile, subjectKey } from '../core/profiles'
+import { MAX_DECISIONS, splitReview } from '../core/project'
+import { explainRequest } from '../core/prompts'
 import type { Note } from '../types'
 import { PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 

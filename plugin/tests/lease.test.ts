@@ -1,10 +1,10 @@
 import { expect, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 
-import { projectId } from '../hooks/datahome'
-import { claimed, isHeld, LEASE_BEAT_MS, LEASE_SLACK_MS, LEASE_TTL_MS, nextLeaseCheck, NO_LEASE, parseLease, released } from '../hooks/lease'
-import type { Lease } from '../hooks/lease'
-import { emptyProfile, withHush } from '../hooks/profiles'
+import { projectId } from '../core/datahome'
+import { claimed, isHeld, LEASE_BEAT_MS, LEASE_SLACK_MS, LEASE_TTL_MS, nextLeaseCheck, NO_LEASE, parseLease, released } from '../core/lease'
+import type { Lease } from '../core/lease'
+import { emptyProfile, withHush } from '../core/profiles'
 import { COMPOSE, DATA_HOME, PANE, ROOT, SESSION, SESSION_ID, sessionTest, stubSession, typed } from './kit'
 
 /** Which session drives a project, and what every session shares about the person. */

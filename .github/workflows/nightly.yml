@@ -34,7 +34,7 @@ jobs:
           cache: npm
       - run: npm ci
       # The kernel is PureScript. `npm run check` builds it and fails when the committed bundle,
-      # plugin/hooks/kernel.js, is not what kernel/src builds. The compiler (fetched by pinned hash)
+      # plugin/core/kernel.js, is not what kernel/src builds. The compiler (fetched by pinned hash)
       # and spago's packages are kept between runs.
       - uses: actions/cache@v4
         with:

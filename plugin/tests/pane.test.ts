@@ -1,12 +1,12 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Note } from '../types'
-import { NO_VIEW } from '../hooks/explainer'
+import { NO_VIEW } from '../core/explainer'
 import { currentNote, detailMarkdown, explainNotice, KEYBOARD_HINT, personaLine, reviewBanner, statusLine, tabBadge, tabRow, waitingLine } from '../hooks/pane'
 import type { PaneView } from '../hooks/pane'
-import { paneContext } from '../hooks/prompts'
-import { readableReview, SURVEY_SUBJECT, withReviewChange } from '../hooks/review'
-import { clockTime, watchOf } from '../hooks/status'
+import { paneContext } from '../core/prompts'
+import { readableReview, SURVEY_SUBJECT, withReviewChange } from '../core/review'
+import { clockTime, watchOf } from '../core/status'
 import { PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const VIEW: PaneView = {

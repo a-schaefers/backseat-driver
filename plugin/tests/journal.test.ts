@@ -1,16 +1,16 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Working } from '../types'
-import { createAttention, parseEditorReport, SLICE_MS } from '../hooks/attention'
-import { definitionName, enclosingName } from '../hooks/enclosing'
-import { ago, briefText, glanceText, pictureOf, placeWords, shareWords, took, workingOf } from '../hooks/glance'
-import type { Seen } from '../hooks/glance'
-import { compact, emptyJournal, knownEntries, mergeSpans, parseJournal, SAVE_RUN_MS, sync, withEntry } from '../hooks/journal'
-import type { Entry, Journal, Span } from '../hooks/journal'
-import { createRecorder, FLUSH_MS } from '../hooks/recorder'
-import { memoryDisk } from '../hooks/storage'
-import { plainStore } from '../hooks/store'
-import { chosen, LET_IT_INFER, NOTHING_YET, parseWorking, workingChoices } from '../hooks/working'
+import { createAttention, parseEditorReport, SLICE_MS } from '../core/attention'
+import { definitionName, enclosingName } from '../core/enclosing'
+import { ago, briefText, glanceText, pictureOf, placeWords, shareWords, took, workingOf } from '../core/glance'
+import type { Seen } from '../core/glance'
+import { compact, emptyJournal, knownEntries, mergeSpans, parseJournal, SAVE_RUN_MS, sync, withEntry } from '../core/journal'
+import type { Entry, Journal, Span } from '../core/journal'
+import { createRecorder, FLUSH_MS } from '../core/recorder'
+import { memoryDisk } from '../core/storage'
+import { plainStore } from '../core/store'
+import { chosen, LET_IT_INFER, NOTHING_YET, parseWorking, workingChoices } from '../core/working'
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE

@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { addedLines, byLanguage, hasOtherAuthor, identityOf, judge, MAX_ADDED_LINES, parseCommitInfo, parseRecent } from '../hooks/authorship'
-import { FORGET } from '../hooks/forget'
+import { addedLines, byLanguage, hasOtherAuthor, identityOf, judge, MAX_ADDED_LINES, parseCommitInfo, parseRecent } from '../core/authorship'
+import { FORGET } from '../core/forget'
 import {
   assessmentRequest,
   decideLevel,
@@ -13,8 +13,8 @@ import {
   recordText,
   skillStates,
   withAssessment,
-} from '../hooks/progress'
-import type { Assessment } from '../hooks/progress'
+} from '../core/progress'
+import type { Assessment } from '../core/progress'
 import type { Level, Observation, ProgressRecord } from '../types'
 import { COMPOSE, DATA_HOME, PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 

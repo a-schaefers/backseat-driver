@@ -2,7 +2,7 @@
   "name": "backseat-driver-dev",
   "license": "PolyForm-Noncommercial-1.0.0",
   "private": true,
-  "description": "Development tooling for the Backseat Driver plugin. Nothing here ships to users: the plugin is the plugin/ folder. TypeScript checks the types. license-server/ is a reference license server, also never shipped. spago and esbuild build the PureScript kernel into plugin/hooks/kernel.js, and the compiler itself comes by pinned hash (scripts/toolchain.py).",
+  "description": "Development tooling for the Backseat Driver plugin. Nothing here ships to users: the plugin is the plugin/ folder. TypeScript checks the types. license-server/ is a reference license server, also never shipped. spago and esbuild build the PureScript kernel into plugin/core/kernel.js, and the compiler itself comes by pinned hash (scripts/toolchain.py).",
   "scripts": {
     "build:kernel": "scripts/build-kernel.sh",
     "kernel": "scripts/build-kernel.sh --check",

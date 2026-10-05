@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds the kernel: kernel/src (PureScript) into plugin/hooks/kernel.js, the
+# Builds the kernel: kernel/src (PureScript) into plugin/core/kernel.js, the
 # one ES module the mod loads. That file is committed, because nothing is built
 # on a user's machine.
 #
@@ -12,7 +12,7 @@
 # from node_modules (npm install), the packages by spago's pinned set.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-bundle="$root/plugin/hooks/kernel.js"
+bundle="$root/plugin/core/kernel.js"
 banner='// The kernel of Backseat Driver, compiled from PureScript (kernel/src in the repository) by scripts/build-kernel.sh. Do not edit: change the source and build again.'
 
 python3 "$root/scripts/toolchain.py" > /dev/null
@@ -27,10 +27,10 @@ esbuild output/Kernel.Main/index.js --bundle --format=esm --charset=utf8 --banne
 
 if [ "${1:-}" = "--check" ]; then
   if ! cmp -s "$out" "$bundle"; then
-    echo "plugin/hooks/kernel.js is not what kernel/src builds. Run: npm run build:kernel" >&2
+    echo "plugin/core/kernel.js is not what kernel/src builds. Run: npm run build:kernel" >&2
     exit 1
   fi
-  echo "kernel: plugin/hooks/kernel.js is what kernel/src builds ($(wc -c < "$bundle") bytes)"
+  echo "kernel: plugin/core/kernel.js is what kernel/src builds ($(wc -c < "$bundle") bytes)"
 else
-  echo "kernel: wrote plugin/hooks/kernel.js ($(wc -c < "$bundle") bytes)"
+  echo "kernel: wrote plugin/core/kernel.js ($(wc -c < "$bundle") bytes)"
 fi

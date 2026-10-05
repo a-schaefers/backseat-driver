@@ -13,8 +13,8 @@ import {
   parseSwitch,
   sessionFolder,
   toLine,
-} from '../hooks/debuglog'
-import type { DebugRecord } from '../hooks/debuglog'
+} from '../core/debuglog'
+import type { DebugRecord } from '../core/debuglog'
 
 /** A folder in memory, with the writes made to it in order. */
 function folder(files: Map<string, string> = new Map()) {

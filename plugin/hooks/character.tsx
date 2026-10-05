@@ -6,9 +6,9 @@
  */
 import type { Elements } from 'claude-code'
 
-import type { Avatar, Pose } from './avatar'
-import { rasterCells, spriteSize } from './sprite'
-import type { Backdrop } from './sprite'
+import type { Avatar, Pose } from '../core/avatar'
+import { rasterCells, spriteSize } from '../core/sprite'
+import type { Backdrop } from '../core/sprite'
 
 /** The elements a character is drawn with. `Raster` only the terminal has. */
 export type CharacterKit = Pick<Elements['terminal'], 'Box' | 'Text'> & { Raster?: Elements['terminal']['Raster'] }

@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { createLocks, LOCK_TTL_MS, LOCK_WAIT_MS, lockRef } from '../hooks/locks'
-import type { LockPorts } from '../hooks/locks'
+import { createLocks, LOCK_TTL_MS, LOCK_WAIT_MS, lockRef } from '../core/locks'
+import type { LockPorts } from '../core/locks'
 
 const REPO = '/d/locks.git'
 

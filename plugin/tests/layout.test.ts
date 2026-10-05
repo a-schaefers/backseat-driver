@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Review } from '../types'
 import { drawnOrder, hasDigits, moreLine, noteMark, previewCount, previewLine, statusEntry, steppedNote, stripColumns, unifiedTabs } from '../hooks/pane'
-import { layoutOf, readSettings } from '../hooks/settings'
+import { layoutOf, readSettings } from '../core/settings'
 import { BAND, HINT, PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const NO_REVIEW: Review = { state: 'none', subject: '', text: '', isUnseen: false, decisions: [], insights: [] }

@@ -1,11 +1,11 @@
 import { expect, test } from 'claude-code/testing'
 
-import { projectId } from '../hooks/datahome'
-import { NO_VIEW, SETTLE_MS } from '../hooks/explainer'
-import { describeSpot, parseFocusFile, parseTarget, relativeTo, viewText } from '../hooks/focus'
-import { FORGET, SCOPE_PROJECT } from '../hooks/forget'
+import { projectId } from '../core/datahome'
+import { NO_VIEW, SETTLE_MS } from '../core/explainer'
+import { describeSpot, parseFocusFile, parseTarget, relativeTo, viewText } from '../core/focus'
+import { FORGET, SCOPE_PROJECT } from '../core/forget'
 import { detailMarkdown, explainNotice, outlineLine, tabRow } from '../hooks/pane'
-import { explainAsk, explainContext } from '../hooks/prompts'
+import { explainAsk, explainContext } from '../core/prompts'
 import type { ExplainView, Review } from '../types'
 import { DATA_HOME, PANE, ROOT, SESSION, sessionTest, stubSession, typed } from './kit'
 

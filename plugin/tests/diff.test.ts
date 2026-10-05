@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { diffLines, formatHunks, splitLines } from '../hooks/diff'
+import { diffLines, formatHunks, splitLines } from '../core/diff'
 
 const lines = (count: number, prefix = 'line') => Array.from({ length: count }, (_, i) => `${prefix} ${i + 1}`)
 
