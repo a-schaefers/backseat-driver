@@ -124,3 +124,15 @@ export const retryBaseMs: number
 export const watchdogMs: number
 export const watchdogLimitMs: number
 export const verdictMs: number
+
+// The store's retry policy
+/** `found` is `missing`, `parsed` or `unreadable`. `next` is `absent`, `sound`, `again` or `broken`. */
+export const afterReadWire: (attempt: number) => (found: string) => { next: string; waitMs: number }
+/** `unchanged`, `check` or `write`. */
+export const stepOfWire: (facts: { attempt: number; hasLock: boolean; isSound: boolean; isSame: boolean }) => string
+export const keepsBackupWire: (facts: { wantsBackup: boolean; isSound: boolean; exists: boolean }) => boolean
+/** `next` is `done`, `unconfirmed` or `again`. */
+export const afterWriteWire: (attempt: number) => (isConfirmed: boolean) => { next: string; waitMs: number }
+export const readTries: number
+export const readRetryMs: number
+export const writeTries: number

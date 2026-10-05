@@ -392,3 +392,56 @@ export function heldText(health: Health, pressure: Pressure, jobBlock: string | 
 export function failedText(detail: string, retryAt: number | null): string {
   return K.failedTextWire(clockTime)(detail)(retryAt !== null)(retryAt ?? 0)
 }
+
+// --- The store's retry policy (Kernel.Store)
+
+/** How often a file that is empty or does not parse is read again before it counts as broken. */
+export const READ_TRIES: number = K.readTries
+/** How long to wait before reading it again: a write takes a few milliseconds. */
+export const READ_RETRY_MS: number = K.readRetryMs
+/** How often a change is made again after another session's write got in its way. */
+export const WRITE_TRIES: number = K.writeTries
+
+export type AfterRead = { next: 'absent' } | { next: 'sound' } | { next: 'broken' } | { next: 'again'; waitMs: number }
+
+/** What to do after the nth read of a file found it missing, parsed, or empty or unparseable. */
+export function afterRead(attempt: number, found: 'missing' | 'parsed' | 'unreadable'): AfterRead {
+  const wire = K.afterReadWire(Math.trunc(attempt))(found)
+  switch (wire.next) {
+    case 'absent':
+      return { next: 'absent' }
+    case 'sound':
+      return { next: 'sound' }
+    case 'again':
+      return { next: 'again', waitMs: wire.waitMs }
+    default:
+      return { next: 'broken' }
+  }
+}
+
+/** What the nth try at a change does once it has the new text: nothing, check that nobody wrote first, or write. */
+export function changeStep(attempt: number, facts: { hasLock: boolean; isSound: boolean; isSame: boolean }): 'unchanged' | 'check' | 'write' {
+  const step = K.stepOfWire({ attempt: Math.trunc(attempt), ...facts })
+
+  return step === 'unchanged' || step === 'check' ? step : 'write'
+}
+
+/** Whether to keep the file as it was before writing over it. */
+export function keepsBackup(facts: { wantsBackup: boolean; isSound: boolean; exists: boolean }): boolean {
+  return K.keepsBackupWire(facts)
+}
+
+export type AfterWrite = { next: 'done' } | { next: 'unconfirmed' } | { next: 'again'; waitMs: number }
+
+/** What the nth try does after reading back what it wrote. */
+export function afterWrite(attempt: number, isConfirmed: boolean): AfterWrite {
+  const wire = K.afterWriteWire(Math.trunc(attempt))(isConfirmed)
+  switch (wire.next) {
+    case 'done':
+      return { next: 'done' }
+    case 'again':
+      return { next: 'again', waitMs: wire.waitMs }
+    default:
+      return { next: 'unconfirmed' }
+  }
+}

@@ -9,6 +9,8 @@ import type { PlayFacts } from '../hooks/play'
 import { current, isSpent, MAX_ATTEMPTS, MAX_WAIT_MS, MAX_WAITING, nextToAssess, nextToReview, reviewed, settledIn, withAttempt, withCommit, withoutCommit } from '../hooks/reviewqueue'
 import type { ReviewQueue } from '../hooks/reviewqueue'
 import { createScheduler } from '../hooks/scheduler'
+import { afterRead, afterWrite, changeStep, keepsBackup } from '../hooks/core'
+import { READ_RETRY_MS, READ_TRIES, WRITE_TRIES } from '../hooks/store'
 import { FOCUS_SCAN_MS, focusGapMs, HOT_FOR_MS, HOT_SCAN_MS, IDLE_AFTER_MS, IDLE_SCAN_MS, LONGEST_FOCUS_GAP_MS, LONGEST_SCAN_GAP_MS, SCAN_MS, scanGapMs } from '../hooks/sensor'
 import { clockTime, healthLine, playLine, watchOf } from '../hooks/status'
 
@@ -667,4 +669,46 @@ test('whatever commits come and whatever happens to them, the queue keeps its ru
       if (settledIn(queue, wanted).length > 0) throw new Error(`settled while progress is kept. ${where}`)
     }
   }
+})
+
+test('the store reads a broken file a few times, writes a few times, and always comes to an end', async () => {
+  // A file that is there and parses, or is not there at all, is settled at the first read.
+  expect(afterRead(1, 'parsed')).toEqual({ next: 'sound' })
+  expect(afterRead(1, 'missing')).toEqual({ next: 'absent' })
+  // One that is empty or broken is read again a moment later, and is broken after the last try.
+  for (let attempt = 1; attempt < READ_TRIES; attempt += 1) expect(afterRead(attempt, 'unreadable')).toEqual({ next: 'again', waitMs: READ_RETRY_MS })
+  expect(afterRead(READ_TRIES, 'unreadable')).toEqual({ next: 'broken' })
+
+  for (const hasLock of [true, false]) {
+    for (const isSound of [true, false]) {
+      for (const isSame of [true, false]) {
+        for (let attempt = 1; attempt <= WRITE_TRIES; attempt += 1) {
+          const step = changeStep(attempt, { hasLock, isSound, isSame })
+          // A change that changes nothing in a sound file is never written.
+          if (isSound && isSame) expect(step).toBe('unchanged')
+          // Without the lock it checks first, except on the last try, which writes regardless.
+          else if (!hasLock && attempt < WRITE_TRIES) expect(step).toBe('check')
+          else expect(step).toBe('write')
+        }
+      }
+    }
+  }
+
+  // A write that is read back is done. One that is not is tried again, a little later each time, and then given up on.
+  let waited = 0
+  for (let attempt = 1; attempt <= WRITE_TRIES; attempt += 1) {
+    expect(afterWrite(attempt, true)).toEqual({ next: 'done' })
+    const after = afterWrite(attempt, false)
+    if (attempt === WRITE_TRIES) expect(after).toEqual({ next: 'unconfirmed' })
+    else {
+      if (after.next !== 'again' || after.waitMs <= waited) throw new Error(`try ${attempt}: ${JSON.stringify(after)}`)
+      waited = after.waitMs
+    }
+  }
+
+  // The file as it was is kept only when it was asked for, was sound, and was there.
+  expect(keepsBackup({ wantsBackup: true, isSound: true, exists: true })).toBe(true)
+  expect(keepsBackup({ wantsBackup: false, isSound: true, exists: true })).toBe(false)
+  expect(keepsBackup({ wantsBackup: true, isSound: false, exists: true })).toBe(false)
+  expect(keepsBackup({ wantsBackup: true, isSound: true, exists: false })).toBe(false)
 })

@@ -2401,6 +2401,256 @@ var focusGapMs = function(tookMs) {
   return min6(longestFocusGapMs)(max8(focusScanMs)(tookMs * 4));
 };
 
+// output/Kernel.Store/index.js
+var Unchanged = /* @__PURE__ */ (function() {
+  function Unchanged2() {
+  }
+  ;
+  Unchanged2.value = new Unchanged2();
+  return Unchanged2;
+})();
+var CheckFirst = /* @__PURE__ */ (function() {
+  function CheckFirst2() {
+  }
+  ;
+  CheckFirst2.value = new CheckFirst2();
+  return CheckFirst2;
+})();
+var WriteNow = /* @__PURE__ */ (function() {
+  function WriteNow2() {
+  }
+  ;
+  WriteNow2.value = new WriteNow2();
+  return WriteNow2;
+})();
+var Missing = /* @__PURE__ */ (function() {
+  function Missing2() {
+  }
+  ;
+  Missing2.value = new Missing2();
+  return Missing2;
+})();
+var Parsed = /* @__PURE__ */ (function() {
+  function Parsed2() {
+  }
+  ;
+  Parsed2.value = new Parsed2();
+  return Parsed2;
+})();
+var Unreadable = /* @__PURE__ */ (function() {
+  function Unreadable2() {
+  }
+  ;
+  Unreadable2.value = new Unreadable2();
+  return Unreadable2;
+})();
+var Done2 = /* @__PURE__ */ (function() {
+  function Done3() {
+  }
+  ;
+  Done3.value = new Done3();
+  return Done3;
+})();
+var Unconfirmed = /* @__PURE__ */ (function() {
+  function Unconfirmed2() {
+  }
+  ;
+  Unconfirmed2.value = new Unconfirmed2();
+  return Unconfirmed2;
+})();
+var TryAgainIn = /* @__PURE__ */ (function() {
+  function TryAgainIn2(value0) {
+    this.value0 = value0;
+  }
+  ;
+  TryAgainIn2.create = function(value0) {
+    return new TryAgainIn2(value0);
+  };
+  return TryAgainIn2;
+})();
+var Absent = /* @__PURE__ */ (function() {
+  function Absent2() {
+  }
+  ;
+  Absent2.value = new Absent2();
+  return Absent2;
+})();
+var Sound = /* @__PURE__ */ (function() {
+  function Sound2() {
+  }
+  ;
+  Sound2.value = new Sound2();
+  return Sound2;
+})();
+var ReadAgainIn = /* @__PURE__ */ (function() {
+  function ReadAgainIn2(value0) {
+    this.value0 = value0;
+  }
+  ;
+  ReadAgainIn2.create = function(value0) {
+    return new ReadAgainIn2(value0);
+  };
+  return ReadAgainIn2;
+})();
+var Broken = /* @__PURE__ */ (function() {
+  function Broken2() {
+  }
+  ;
+  Broken2.value = new Broken2();
+  return Broken2;
+})();
+var writeTries = 4;
+var stepOf = function(facts) {
+  if (facts.isSound && facts.isSame) {
+    return Unchanged.value;
+  }
+  ;
+  if (!facts.hasLock && facts.attempt < writeTries) {
+    return CheckFirst.value;
+  }
+  ;
+  if (otherwise) {
+    return WriteNow.value;
+  }
+  ;
+  throw new Error("Failed pattern match at Kernel.Store (line 90, column 1 - line 90, column 96): " + [facts.constructor.name]);
+};
+var stepOfWire = function(facts) {
+  var v = stepOf(facts);
+  if (v instanceof Unchanged) {
+    return "unchanged";
+  }
+  ;
+  if (v instanceof CheckFirst) {
+    return "check";
+  }
+  ;
+  if (v instanceof WriteNow) {
+    return "write";
+  }
+  ;
+  throw new Error("Failed pattern match at Kernel.Store (line 133, column 20 - line 136, column 22): " + [v.constructor.name]);
+};
+var readTries = 3;
+var readRetryMs = 25;
+var keepsBackup = function(facts) {
+  return facts.wantsBackup && (facts.isSound && facts.exists);
+};
+var keepsBackupWire = keepsBackup;
+var afterWrite = function(attempt) {
+  return function(isConfirmed) {
+    if (isConfirmed) {
+      return Done2.value;
+    }
+    ;
+    if (attempt >= writeTries) {
+      return Unconfirmed.value;
+    }
+    ;
+    if (otherwise) {
+      return new TryAgainIn(readRetryMs * toNumber(attempt));
+    }
+    ;
+    throw new Error("Failed pattern match at Kernel.Store (line 109, column 1 - line 109, column 43): " + [attempt.constructor.name, isConfirmed.constructor.name]);
+  };
+};
+var afterWriteWire = function(attempt) {
+  return function(isConfirmed) {
+    var v = afterWrite(attempt)(isConfirmed);
+    if (v instanceof Done2) {
+      return {
+        next: "done",
+        waitMs: 0
+      };
+    }
+    ;
+    if (v instanceof Unconfirmed) {
+      return {
+        next: "unconfirmed",
+        waitMs: 0
+      };
+    }
+    ;
+    if (v instanceof TryAgainIn) {
+      return {
+        next: "again",
+        waitMs: v.value0
+      };
+    }
+    ;
+    throw new Error("Failed pattern match at Kernel.Store (line 143, column 38 - line 146, column 49): " + [v.constructor.name]);
+  };
+};
+var afterRead = function(attempt) {
+  return function(v) {
+    if (v instanceof Missing) {
+      return Absent.value;
+    }
+    ;
+    if (v instanceof Parsed) {
+      return Sound.value;
+    }
+    ;
+    if (v instanceof Unreadable) {
+      if (attempt < readTries) {
+        return new ReadAgainIn(readRetryMs);
+      }
+      ;
+      if (otherwise) {
+        return Broken.value;
+      }
+      ;
+    }
+    ;
+    throw new Error("Failed pattern match at Kernel.Store (line 72, column 21 - line 77, column 26): " + [v.constructor.name]);
+  };
+};
+var afterReadWire = function(attempt) {
+  return function(found) {
+    var foundFromTag = function(v2) {
+      if (v2 === "missing") {
+        return Missing.value;
+      }
+      ;
+      if (v2 === "parsed") {
+        return Parsed.value;
+      }
+      ;
+      return Unreadable.value;
+    };
+    var v = afterRead(attempt)(foundFromTag(found));
+    if (v instanceof Absent) {
+      return {
+        next: "absent",
+        waitMs: 0
+      };
+    }
+    ;
+    if (v instanceof Sound) {
+      return {
+        next: "sound",
+        waitMs: 0
+      };
+    }
+    ;
+    if (v instanceof ReadAgainIn) {
+      return {
+        next: "again",
+        waitMs: v.value0
+      };
+    }
+    ;
+    if (v instanceof Broken) {
+      return {
+        next: "broken",
+        waitMs: 0
+      };
+    }
+    ;
+    throw new Error("Failed pattern match at Kernel.Store (line 120, column 31 - line 124, column 44): " + [v.constructor.name]);
+  };
+};
+
 // output/Kernel.Main/index.js
 var leaseTtlMs = ttlMs;
 var leaseSlackMs = slackMs;
@@ -2410,6 +2660,8 @@ var leaseIsHeld = isHeld;
 var leaseClaimed = claimed;
 var leaseBeatMs = beatMs;
 export {
+  afterReadWire,
+  afterWriteWire,
   backoffMs,
   currentQueueWire,
   failedTextWire,
@@ -2424,6 +2676,7 @@ export {
   isHeldAt,
   isLookDueWire,
   isSpentWire,
+  keepsBackupWire,
   leaseBeatMs,
   leaseClaimed,
   leaseIsHeld,
@@ -2443,6 +2696,8 @@ export {
   outcomeOfWire,
   planHeld,
   playOfWire,
+  readRetryMs,
+  readTries,
   retryBaseMs,
   retryDelayMsWire,
   retryMs,
@@ -2451,6 +2706,7 @@ export {
   scanMs,
   settledInWire,
   slowedGapMs,
+  stepOfWire,
   stepWire,
   troubleOfWire,
   verdictMs,
@@ -2459,5 +2715,6 @@ export {
   watchdogMs,
   withAttemptWire,
   withCommitWire,
-  withoutCommitWire
+  withoutCommitWire,
+  writeTries
 };
