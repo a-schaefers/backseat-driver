@@ -8,7 +8,7 @@
  * logic needs an effect, it is handed a closure written here.
  */
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Register, Timer } from 'claude-code'
+import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Register, Timer, UiFocusResult } from 'claude-code'
 
 import type { ExplainView, Hush, LevelChange, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, Spot, Tab, Watch, Working } from '../types'
 import {
@@ -117,7 +117,7 @@ import { isNoiseFile } from './noise'
 import { isLookDue, playOf, wakeAt } from './play'
 import type { Play, PlayFacts } from './play'
 import { applyReply, isProblem, parseReply, withDismissed } from './notes'
-import { renderPane, reviewSchedule, statusEntry } from './pane'
+import { renderPane, reviewSchedule, statusEntry, steppedNote } from './pane'
 import type { Kit, PaneView } from './pane'
 import {
   ANSWER_LABELS,
@@ -231,11 +231,15 @@ const updateAtom = atom({ plugin: 'backseat-driver', key: 'update' } as const, '
 const speechAtom = atom({ plugin: 'backseat-driver', key: 'speech' } as const, SILENT)
 const workingAtom = atom({ plugin: 'backseat-driver', key: 'working' } as const, NO_WORKING)
 const unfoldedAtom = atom({ plugin: 'backseat-driver', key: 'unfolded' } as const, false)
+const bandKeysAtom = atom({ plugin: 'backseat-driver', key: 'bandKeys' } as const, false)
 
 /** The pane's id, for the vertical layout. The other two layouts draw above the prompt and open no pane. */
 const PANE_ID = 'backseat-driver'
 /** How wide the vertical layout asks its pane to be when Claude Code docks it beside the conversation. */
 const PANE_COLUMNS = 64
+
+/** The band's instance id, as its last drawing saw it: what `$.ui.focus` names it by. */
+let bandId = ''
 
 /** The layout in force, from the settings this load of the module was given, or from `/bsd layout`. */
 let layout: Layout = 'unified'
@@ -2026,6 +2030,43 @@ async function restorePane($: EngineInterface, settings: Settings): Promise<void
   ])
 }
 
+/** Shows a tab, or folds it in the unified layout. */
+async function showTab($: EngineInterface, tab: Tab, isFolding: boolean): Promise<void> {
+  await update($, tabAtom, () => tab)
+  await update($, unfoldedAtom, () => !isFolding)
+  if (isFolding) return
+  if (tab === 'review') await setReview($, { isUnseen: false })
+  if (tab === 'explain') watchClosely($)
+}
+
+/**
+ * A tab's digit pressed in the band above the prompt. Claude Code also lets
+ * a bare digit typed into an empty prompt press a band's button, and nothing
+ * says when the band gave the keyboard back (Esc raises no event). So the
+ * press first moves the band's focus ring onto that tab, which Claude Code
+ * refuses when the band does not have the keyboard: then the digit was meant
+ * for the prompt, and it is put there.
+ */
+async function pressBandTab($: EngineInterface, tab: Tab, isFolding: boolean): Promise<void> {
+  // Where the focus ring cannot be asked at all, the press is taken at its word.
+  const moved = bandId === '' ? {} : await $.ui.focus({ requestId: bandId, key: `tab-${tab}` }).catch((): UiFocusResult => ({}))
+  if (moved.deny !== undefined) {
+    trace($, 'ui', 'digit for the prompt', () => ({ tab, why: moved.deny }))
+    await update($, bandKeysAtom, () => false)
+    const digit = String(TAB_ORDER.indexOf(tab) + 1)
+    await $.prompt.fill({ text: digit, mode: 'insert' })
+
+    return
+  }
+  await showTab($, tab, isFolding)
+}
+
+/** The tabs in the order of their digits. */
+const TAB_ORDER: readonly Tab[] = ['play', 'review', 'explain', 'profile']
+
+/** Said once at switch-on in the layouts with no pane, which do not say by themselves how to reach them. */
+const BAND_INTRO = 'Notes show above the prompt. Ctrl+X Tab gives it the keyboard, then 1 to 4 open its tabs. /bsd layout switches to a pane.'
+
 /** What a session that does not drive says when it is asked for a look or a review. */
 const FOLLOWING = 'Another session is driving Backseat Driver in this project. Ask for it there.'
 
@@ -3310,6 +3351,7 @@ async function switchTo($: EngineInterface, next: Mode, settings: Settings): Pro
     if (isEngaged) {
       // Paused, nothing is scanned and no look is due. Resumed, the tree is looked at straight away.
       if (next === 'paused') {
+        await update($, unfoldedAtom, () => false)
         deadlines?.cancel('scan')
         deadlines?.cancel('look')
         await showPlay($, settings)
@@ -3471,7 +3513,7 @@ async function forget($: EngineInterface, settings: Settings, named: Scope | nul
 }
 
 /** Draws the tutor for one of the three layouts, in the room the site gives it. */
-async function drawTutor($: EngineInterface, settings: Settings, kit: Kit, where: Pick<PaneView, 'layout' | 'isFocused' | 'columns' | 'isCompact'>) {
+async function drawTutor($: EngineInterface, settings: Settings, kit: Kit, where: Pick<PaneView, 'layout' | 'isFocused' | 'columns' | 'isCompact' | 'rows'>) {
   quiet.renders += 1
   // One round for everything the pane shows, not a dozen in a row for every frame.
   const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, isUnfolded] = await Promise.all([
@@ -3512,17 +3554,21 @@ async function drawTutor($: EngineInterface, settings: Settings, kit: Kit, where
   return renderPane(kit, view, {
     onTab: (tab: Tab) => {
       touched($, settings, 'tab', () => tab)
-      // In the unified layout a tab's key opens it above the prompt, and the open tab's key folds it again.
-      const isFolding = where.layout === 'unified' && isUnfolded && view.tab === tab
-      void update($, tabAtom, () => tab)
-      void update($, unfoldedAtom, () => !isFolding)
-      if (isFolding) return
-      if (tab === 'review') void setReview($, { isUnseen: false })
-      if (tab === 'explain') watchClosely($)
+      if (where.layout === 'vertical') {
+        void showTab($, tab, false)
+
+        return
+      }
+      void pressBandTab($, tab, where.layout === 'unified' && isUnfolded && view.tab === tab)
     },
     onFold: () => {
       touched($, settings, 'fold')
       void update($, unfoldedAtom, () => false)
+    },
+    onStep: (step: 1 | -1) => {
+      touched($, settings, 'step', () => step)
+      const next = steppedNote(view, step)
+      if (next !== undefined) void update($, selectedAtom, () => next.id)
     },
     onSelect: (id: number) => {
       touched($, settings, 'select', () => id)
@@ -3725,9 +3771,11 @@ export const register: Register = (on, options) => {
     if (!isModeRequest(request)) return { text: helpText() }
 
     const { to, text } = transition(mode, request)
+    const wasOff = mode === 'off'
     if (to !== mode) await switchTo($, to, settings)
     // Asking for "on" again brings back a pane the user closed by hand.
     else if (request === 'on') await showLayout($)
+    if (request === 'on' && wasOff && layout !== 'vertical') return { text: `${text} ${BAND_INTRO}` }
     if (request !== 'status') return { text }
 
     return { text: `${text} Voice: ${settings.persona.voice}. Engineering: ${settings.persona.engineering}.` }
@@ -3765,6 +3813,9 @@ export const register: Register = (on, options) => {
   // and what the person is doing in the code, so "why does this fail?" has a place.
   on('prompt.submit', async ($, e, next) => {
     if (mode === 'off') return next(e)
+    // A tab opened above the prompt folds when the conversation goes on, so that the answer has the room. Typing, the band no longer has the keys.
+    if (layout === 'unified') await update($, unfoldedAtom, () => false)
+    await update($, bandKeysAtom, () => false)
     // The character's hello says nothing about the code.
     const said = settings.isAnimated ? (await read($, speechAtom)).text : ''
     const isHello = said === avatarFor(settings.persona.voice).hello
@@ -4024,6 +4075,7 @@ export const register: Register = (on, options) => {
       // The pane is the vertical layout's. Drawn while another layout is chosen, it is still drawn whole.
       layout: 'vertical',
       isFocused: e.props.isFocused,
+      rows: e.viewport?.rows ?? 48,
       columns: e.props.bodyColumns,
       // Above the prompt rows are scarce, and other surfaces may not draw text art in a fixed-width font.
       isCompact: e.props.placement === 'inline' || e.surface !== 'terminal',
@@ -4033,18 +4085,36 @@ export const register: Register = (on, options) => {
   // In the unified layout, what the play-by-play is doing ends Claude Code's own hint line under the prompt.
   on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
     if (mode === 'off' || layout !== 'unified') return next(e)
-    const [shownMode, watch] = await Promise.all([read($, modeAtom), read($, watchAtom)])
+    const [shownMode, watch, hasKeys] = await Promise.all([read($, modeAtom), read($, watchAtom), read($, bandKeysAtom)])
+    // Something typed in the prompt means the prompt has the keys, whatever the band last heard.
 
-    return next({ ...e, props: { ...e.props, tail: statusEntry({ mode: shownMode, watch }) } })
+    return next({ ...e, props: { ...e.props, tail: statusEntry({ mode: shownMode, watch }, hasKeys && !e.props.isDraft) } })
+  })
+
+  // The focus ring says two things nothing else does: whether the band has the keyboard, and which note the person is on.
+  on('ui.focus', async ($, e, next) => {
+    const result = await next(e)
+    if (result.deny !== undefined) return result
+    const note = /^note-(\d+)$/.exec(e.element ?? '')
+    if (note !== null) await update($, selectedAtom, () => Number(note[1]))
+    if (e.component === 'AbovePrompt') {
+      const hasKeys = e.element !== undefined
+      trace($, 'ui', 'band keys', () => ({ hasKeys, element: e.element, origin: e.origin }))
+      if ((await read($, bandKeysAtom)) !== hasKeys) await update($, bandKeysAtom, () => hasKeys)
+    }
+
+    return result
   })
 
   // The horizontal and unified layouts draw in the band above the prompt. A survey there comes first.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (mode === 'off' || layout === 'vertical' || e.props.hasSurvey) return next(e)
+    bandId = e.requestId
 
     return drawTutor($, settings, $.ui.resolve(e), {
       layout,
-      isFocused: false,
+      isFocused: await read($, bandKeysAtom),
+      rows: e.viewport?.rows ?? 48,
       columns: e.props.bodyColumns,
       isCompact: layout === 'unified' || e.surface !== 'terminal',
     })

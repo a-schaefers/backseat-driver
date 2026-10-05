@@ -289,6 +289,8 @@ declare module 'claude-code' {
       working: Working
       /** In the unified layout, whether the lines above the prompt are opened into the tab. */
       unfolded: boolean
+      /** Whether the band above the prompt has the keyboard, as far as its focus ring has told. */
+      bandKeys: boolean
     }
   }
 }

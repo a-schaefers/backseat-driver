@@ -30,8 +30,8 @@ Backseat Driver puts the machine where it belongs: in the back seat. You drive. 
 
 ## What it is
 
-- **Play-by-play.** Save, pause, and a fast model reads what changed. If it's worth saying, a short note lands in the pane: a bug, a risky pattern, a better idiom. A hint, never a fix. Fix the code and the note goes away.
-- **Decision points and insights.** When your code reaches a real choice, like how to handle errors or which data structure to use, the pane marks it as **your call** and lays out what each way costs. Then it gets out of the way. It also points out ★ insights about how your codebase does things.
+- **Play-by-play.** Save, pause, and a fast model reads what changed. If it's worth saying, a short note lands right above your prompt: a bug, a risky pattern, a better idiom. A hint, never a fix. Fix the code and the note goes away.
+- **Decision points and insights.** When your code reaches a real choice, like how to handle errors or which data structure to use, it marks it as **your call** and lays out what each way costs. Then it gets out of the way. It also points out ★ insights about how your codebase does things.
 - **Deep review.** Commit, and a stronger model reviews it in context, decision points first.
 - **Explain.** What the code under your cursor does, how and why. Edit the code and the old explanation is gone.
 - **Progress.** An honest level per language, beginner to senior, judged only on commits you wrote. It follows you across projects, and it can go down.
@@ -63,10 +63,11 @@ Type `/bsd` in Claude Code. The first time you work in a language, it asks a few
 | `/bsd`, `/bsd pause`, `/bsd off` | Switch it on, quiet it, or switch it off |
 | `/bsd explain src/app.py:42` | Explain a spot in the code |
 | `/bsd forget` | Erase what it remembers |
-| `/bsd update`, `/bsd uninstall` | Fetch a newer release when the pane announces one, or remove the plugin |
+| `/bsd layout` | Unified, horizontal or vertical. It remembers |
+| `/bsd update`, `/bsd uninstall` | Fetch a newer release when it announces one, or remove the plugin |
 | `/bsd help` | Every command and key |
 
-`Ctrl+X Tab` focuses the pane, and `Esc` leaves it. `1` to `4` switch tabs. The pane draws in the terminal and in the desktop app's Code tab. Models, pacing and persona (`torvalds`, `knuth`, `primeagen`, `eli5-tldr-kiss-terse`) are set in `/config`.
+It lives in Claude Code itself, just above your prompt: no extra window. Want a panel? `/bsd layout` gives you a horizontal frame or a vertical pane. `Ctrl+X Tab` hands it the keyboard, and `Esc` takes it back. `1` to `4` open the tabs. It draws in the terminal and in the desktop app's Code tab. Models, pacing and persona (`torvalds`, `knuth`, `primeagen`, `eli5-tldr-kiss-terse`) are set in `/config`.
 
 ## License
 

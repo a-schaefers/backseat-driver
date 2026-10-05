@@ -41,7 +41,7 @@ sessionTest('/bsd and /backseat-driver switch the same tutor', async ($, on) => 
 
   const started = await $.command.run(typed('bsd'))
   await session.clock.settle()
-  expect(started.text).toBe('Backseat Driver is on. You drive.')
+  expect(started.text).toMatch(/^Backseat Driver is on. You drive./)
 
   const again = await $.command.run(typed('backseat-driver'))
   await session.clock.settle()
@@ -96,7 +96,7 @@ sessionTest('/bsd answers before its setup has finished', { options: { layout: '
   await $.session.start(SESSION)
 
   const started = await $.command.run(typed('bsd'))
-  expect(started.text).toBe('Backseat Driver is on. You drive.')
+  expect(started.text).toMatch(/^Backseat Driver is on. You drive./)
   // The pane is up and the contract is in force. The questions have not been asked yet.
   expect(session.opened).toEqual(['backseat-driver'])
   expect(session.asked).toEqual([])

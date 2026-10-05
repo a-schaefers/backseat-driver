@@ -30,6 +30,7 @@ const VIEW: PaneView = {
   isCompact: false,
   layout: 'vertical',
   isUnfolded: false,
+  rows: 48,
 }
 
 const note = (id: number, overrides: Partial<Note> = {}): Note => ({

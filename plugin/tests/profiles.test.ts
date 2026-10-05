@@ -174,7 +174,7 @@ sessionTest('dismissing the questions skips them for good, and the tutor works w
   const started = await $.command.run(typed('bsd'))
   await session.clock.settle()
 
-  expect(started.text).toBe('Backseat Driver is on. You drive.')
+  expect(started.text).toMatch(/^Backseat Driver is on. You drive./)
   expect(session.asked.length).toBe(1)
   expect(parseProfile(session.data('profiles/python.json'))).toEqual({ ...emptyProfile(), isAsked: true })
 

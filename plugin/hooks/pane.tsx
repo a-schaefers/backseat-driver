@@ -48,6 +48,8 @@ export type PaneView = {
   layout: Layout
   /** Unified only: whether the lines above the prompt are opened into the tab shown. */
   isUnfolded: boolean
+  /** How many rows the terminal has, as far as the drawing knows. */
+  rows: number
 }
 
 /** What the pane's controls do. The closures come from register.tsx. */
@@ -73,6 +75,8 @@ export type PaneActions = {
   onWorking: () => void
   /** Unified only: fold the opened tab back into the few lines above the prompt. */
   onFold: () => void
+  /** Select the next note in the order they are drawn, or the previous one. */
+  onStep: (step: 1 | -1) => void
 }
 
 const TABS: readonly { tab: Tab; label: string; short: string; hotkey: string }[] = [
@@ -194,11 +198,35 @@ function workingOn({ Box, Text, Button }: Kit, view: PaneView, actions: PaneActi
   )
 }
 
-/** The note the keys act on: the selected one if it is still open, otherwise the first. */
-export function currentNote(view: Pick<PaneView, 'notes' | 'selected'>): Note | undefined {
-  const sorted = sortNotes(view.notes)
+/**
+ * The notes in the order every layout draws them: decision points first,
+ * as theirs to make, then what will or may break and what reads better,
+ * then insights.
+ */
+export function drawnOrder(notes: readonly Note[]): Note[] {
+  const sorted = sortNotes(notes)
 
-  return sorted.find(note => note.id === view.selected) ?? sorted[0]
+  return [
+    ...sorted.filter(note => note.kind === 'decision'),
+    ...sorted.filter(note => isProblem(note.kind)),
+    ...sorted.filter(note => note.kind === 'insight'),
+  ]
+}
+
+/** The note the keys act on: the selected one if it is still open, otherwise the first one drawn. */
+export function currentNote(view: Pick<PaneView, 'notes' | 'selected'>): Note | undefined {
+  const drawn = drawnOrder(view.notes)
+
+  return drawn.find(note => note.id === view.selected) ?? drawn[0]
+}
+
+/** The note `step` away from the current one, in the order they are drawn, wrapping round. */
+export function steppedNote(view: Pick<PaneView, 'notes' | 'selected'>, step: 1 | -1): Note | undefined {
+  const drawn = drawnOrder(view.notes)
+  const at = drawn.findIndex(note => note.id === currentNote(view)?.id)
+  if (at === -1) return undefined
+
+  return drawn[(at + step + drawn.length) % drawn.length]
 }
 
 /** When deep reviews run by themselves, from the two trigger settings. */
@@ -299,6 +327,9 @@ export function detailMarkdown(detail: NonNullable<ExplainView['detail']>): stri
   return parts.join('\n\n')
 }
 
+/** What the Explain tab says about a file it knows nothing about yet. */
+export const NOTHING_EXPLAINED = 'Nothing explained here yet. f looks this file up, or run /bsd explain with a file and a line.'
+
 function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, actions: PaneActions) {
   const { explain } = view
   if (explain.spot === null) {
@@ -311,8 +342,10 @@ function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
   }
 
   const { target, detail } = explain
-  const notice = explainNotice(explain)
-  const canFetch = explain.status === 'waiting' || explain.status === 'held' || explain.status === 'failed'
+  // Nothing known about the file, and nothing on its way: say what to do rather than show an empty tab.
+  const isBlank = target === null && explain.outline.length === 0 && explain.fileSummary === '' && explain.status === 'fresh'
+  const notice = isBlank ? NOTHING_EXPLAINED : explainNotice(explain)
+  const canFetch = isBlank || explain.status === 'waiting' || explain.status === 'held' || explain.status === 'failed'
 
   return (
     <Box flexDirection="column">
@@ -360,6 +393,11 @@ export function reviewBanner(review: Review): string {
   return ''
 }
 
+/** A subject such as "a first look around this project", as a heading. */
+export function capitalized(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
 /** How many commits wait behind the one the banner is about, as a sentence, or ''. */
 export function waitingLine(review: Review): string {
   const behind = (review.waiting ?? 0) - 1
@@ -383,7 +421,7 @@ function deepReview({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
       {behind !== '' && <Text dimColor>{behind}</Text>}
       {isOlder && <Text> </Text>}
       {isOlder && <Text dimColor>The review before it:</Text>}
-      {shown !== null && <Text bold>{shown.subject}</Text>}
+      {shown !== null && <Text bold>{capitalized(shown.subject)}</Text>}
       {shown !== null && shown.decisions.length > 0 && (
         <Box flexDirection="column">
           <Text bold color="magenta">
@@ -433,7 +471,7 @@ function noteRow({ Box, Text, Button }: Kit, note: Note, current: Note, label: s
     <Box flexDirection="column">
       <Button
         key={`note-${note.id}`}
-        label={`${note.id === current.id ? '>' : ' '} ${label}`}
+        label={`${note.id === current.id ? '❯' : ' '} ${label}`}
         plain
         dimColor={note.id !== current.id}
         onPress={() => actions.onSelect(note.id)}
@@ -451,14 +489,16 @@ function noteRow({ Box, Text, Button }: Kit, note: Note, current: Note, label: s
  */
 function playByPlay(kit: Kit, view: PaneView, actions: PaneActions) {
   const { Box, Text, Button } = kit
-  const notes = sortNotes(view.notes)
+  const notes = drawnOrder(view.notes)
   const current = currentNote(view)
+  // Paused, nothing looks, so it is not offered.
+  const canLook = view.mode !== 'paused'
   if (current === undefined) {
     return (
       <Box flexDirection="column">
         <Text dimColor>No notes. Keep going.</Text>
-        <Text> </Text>
-        <Button key="look" label="look now" hotkey="l" plain onPress={() => actions.onLook()} />
+        {canLook && <Text> </Text>}
+        {canLook && <Button key="look" label="look now" hotkey="l" plain onPress={() => actions.onLook()} />}
       </Box>
     )
   }
@@ -486,11 +526,13 @@ function playByPlay(kit: Kit, view: PaneView, actions: PaneActions) {
       {insights.length > 0 && <Text color="cyan">{INSIGHT_HEADING}</Text>}
       {insights.map(note => noteRow(kit, note, current, `${note.id}  ${note.file} · line ${note.line}`, actions))}
       <Text> </Text>
-      <Box flexDirection="row" columnGap={3}>
+      <Box flexDirection="row" columnGap={3} flexWrap="wrap">
+        {notes.length > 1 && <Button key="next-note" label="next" hotkey="j" plain onPress={() => actions.onStep(1)} />}
+        {notes.length > 1 && <Button key="previous-note" label="previous" hotkey="k" plain onPress={() => actions.onStep(-1)} />}
         <Button key="explain" label="explain" hotkey="e" plain onPress={() => actions.onExplain(current)} />
         <Button key="dismiss" label="dismiss" hotkey="d" plain onPress={() => actions.onDismiss(current)} />
         <Button key="mute" label="mute" hotkey="m" plain onPress={() => actions.onMute(current)} />
-        <Button key="look" label="look now" hotkey="l" plain onPress={() => actions.onLook()} />
+        {canLook && <Button key="look" label="look now" hotkey="l" plain onPress={() => actions.onLook()} />}
       </Box>
     </Box>
   )
@@ -605,17 +647,31 @@ function tabBody(kit: Kit, view: PaneView, actions: PaneActions) {
   return profileTab(kit, view, actions)
 }
 
+/**
+ * Whether the tab buttons carry their digits. A pane's keys work only while
+ * it has the keyboard. Above the prompt, Claude Code also lets a bare digit
+ * typed into an empty prompt press a button, so there the digits are only
+ * given while the band has the keyboard: otherwise answering Claude with
+ * "2" would open a tab.
+ */
+export function hasDigits(view: Pick<PaneView, 'layout' | 'isFocused'>): boolean {
+  return view.layout === 'vertical' || view.isFocused
+}
+
 /** The tabs as a row of buttons. */
 function tabButtons({ Box, Button }: Kit, view: PaneView, actions: PaneActions, row: { labels: string[]; gap: number }) {
+  const isUnified = view.layout === 'unified'
+
   return (
-    <Box flexDirection="row" columnGap={row.gap} flexShrink={0}>
+    <Box flexDirection="row" columnGap={row.gap} flexShrink={0} marginRight={view.layout === 'vertical' ? 0 : 2}>
       {TABS.map(({ tab, hotkey }, index) => (
         <Button
           key={`tab-${tab}`}
           label={row.labels[index] ?? ''}
-          hotkey={hotkey}
+          {...(hasDigits(view) ? { hotkey } : {})}
+          {...(view.layout !== 'vertical' && view.tab === tab ? { autoFocus: true as const } : {})}
           plain
-          dimColor={view.tab !== tab || (view.layout === 'unified' && !view.isUnfolded)}
+          dimColor={view.tab !== tab || (isUnified && !view.isUnfolded)}
           onPress={() => actions.onTab(tab)}
         />
       ))}
@@ -711,10 +767,12 @@ function renderStrip(kit: Kit, view: PaneView, actions: PaneActions) {
   )
 }
 
-/** How many notes the unified layout shows above the prompt while it is folded. */
-export const PREVIEW_NOTES = 3
+/** How many notes the unified layout shows above the prompt while it is folded: fewer on a short terminal. */
+export function previewCount(rows: number): number {
+  return rows < 40 ? 2 : 3
+}
 
-/** The mark and color a note's kind gets on its one line in the unified layout. */
+/** The mark and color a note's kind gets on its one line in the unified layout: Claude Code's own for errors and warnings. */
 export function noteMark(note: Pick<Note, 'kind'>): { mark: string; color: string | undefined } {
   switch (note.kind) {
     case 'decision':
@@ -722,9 +780,9 @@ export function noteMark(note: Pick<Note, 'kind'>): { mark: string; color: strin
     case 'insight':
       return { mark: '★', color: 'cyan' }
     case 'bug':
-      return { mark: '!', color: 'red' }
+      return { mark: '✘', color: 'red' }
     case 'risk':
-      return { mark: '!', color: 'yellow' }
+      return { mark: '⚠', color: 'yellow' }
     default:
       return { mark: '·', color: undefined }
   }
@@ -736,15 +794,42 @@ export function previewLine(note: Note): string {
 }
 
 /** What the unified layout says under its notes when more are open than it shows. '' when none are hidden. */
-export function moreLine(count: number): string {
-  const hidden = count - PREVIEW_NOTES
+export function moreLine(count: number, shown: number): string {
+  const hidden = count - shown
 
-  return hidden <= 0 ? '' : hidden === 1 ? 'One more note. 1 opens the play-by-play.' : `${hidden} more notes. 1 opens the play-by-play.`
+  return hidden <= 0 ? '' : hidden === 1 ? 'and one more note' : `and ${hidden} more notes`
 }
 
-/** The text of the tutor's entry on Claude Code's status line, in the unified layout. */
-export function statusEntry(view: Pick<PaneView, 'mode' | 'watch'>): string {
-  return `Backseat: ${view.mode === 'paused' ? playLine({ at: 'paused' }) : view.watch.line}`
+/** The play-by-play's state in a word or two, for the end of Claude Code's hint line. */
+export function statusWord(view: Pick<PaneView, 'mode' | 'watch'>): string {
+  if (view.mode === 'paused') return 'paused'
+  const { state, line } = view.watch
+  switch (state) {
+    case 'starting':
+      return 'starting'
+    case 'no-git':
+      return 'no git repository'
+    case 'looking':
+      return 'looking…'
+    case 'settling':
+      return 'saw your save'
+    case 'waiting': {
+      const next = /Next try (\S+)\./.exec(line)?.[1] ?? /until (\S+),/.exec(line)?.[1]
+
+      return next === undefined ? 'waiting' : `waiting, next try ${next}`
+    }
+    case 'idle':
+      return line.includes('Another session') ? 'in another session' : line.includes('only when you ask') ? 'on request' : 'watching'
+  }
+}
+
+/**
+ * The tutor's entry at the end of Claude Code's hint line under the prompt,
+ * in the unified layout: what the play-by-play is doing, and where the
+ * keyboard is, since nothing else in that layout says so.
+ */
+export function statusEntry(view: Pick<PaneView, 'mode' | 'watch'>, hasKeys: boolean): string {
+  return `backseat ${statusWord(view)} · ${hasKeys ? 'esc to leave' : 'ctrl+x tab for keys'}`
 }
 
 /** The tabs' labels in the unified layout's one row: short names, and what each says about itself. */
@@ -752,61 +837,84 @@ export function unifiedTabs(view: Pick<PaneView, 'review'> & Partial<Pick<PaneVi
   return TABS.map(({ tab, short }) => `${short}${tabBadge(tab, view)}`)
 }
 
-/** Shown under an opened tab in the unified layout. */
-export const UNFOLDED_HINT = 'Ctrl+X Tab or a click for these keys. The tab\'s key again, or x, folds it.'
+/** How wide the unified layout's tab row draws, with its digits or without, and its margin. */
+export function unifiedTabsWidth(labels: readonly string[], withDigits: boolean): number {
+  return labels.reduce((sum, label) => sum + label.length + (withDigits ? 3 : 0), 0) + 2 * (labels.length - 1) + 2
+}
+
+/** The speech left room on the unified layout's row, below which it is left out rather than cut to a word. */
+const MIN_SPEECH = 16
+
+/** The full names of the tabs, for the heading of one opened in the unified layout. */
+function tabName(tab: Tab): string {
+  return TABS.find(entry => entry.tab === tab)?.label ?? tab
+}
 
 /**
  * The unified layout: no pane. One row above the prompt holds the character's
  * line and the tabs, with the open notes under it, one line each. A tab's
  * key opens it right there, and folds it again. What the play-by-play is
- * doing goes on Claude Code's own status line (`statusEntry`).
+ * doing ends Claude Code's own hint line under the prompt (`statusEntry`).
  */
 function renderUnified(kit: Kit, view: PaneView, actions: PaneActions) {
   const { Box, Text, Button } = kit
-  const notes = sortNotes(view.notes)
+  const notes = drawnOrder(view.notes)
   const isAsleep = view.mode === 'paused'
   const character = view.character
-  const said = character === null ? '' : isAsleep ? ASLEEP : saidSoFar(character.speech)
+  const labels = unifiedTabs(view)
+  const face = character === null ? 'Backseat' : character.avatar.mini[poseOf(view.mode, view.watch.state, character.speech)]
+  const room = view.columns - unifiedTabsWidth(labels, hasDigits(view)) - face.length - 3
+  const said = character === null || room < MIN_SPEECH ? '' : isAsleep ? ASLEEP : saidSoFar(character.speech)
+  const isSpeaking = character !== null && isTalking(character.speech)
+  const shown = previewCount(view.rows)
   const body = { ...view, columns: view.columns - 2, isCompact: true }
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" marginTop={1}>
       <Box flexDirection="row" columnGap={2}>
         <Box flexDirection="row" columnGap={1} flexGrow={1} flexShrink={1}>
-          {character === null && <Text dimColor>Backseat</Text>}
-          {character !== null && (
-            <Text color={character.avatar.color} dimColor={!isTalking(character.speech)}>
-              {character.avatar.mini[poseOf(view.mode, view.watch.state, character.speech)]}
+          <Box flexShrink={0}>
+            <Text color={character?.avatar.color} dimColor={!isSpeaking} wrap="truncate">
+              {face}
             </Text>
-          )}
+          </Box>
           {said !== '' && (
-            <Text dimColor={isAsleep || character === null || !isTalking(character.speech)} wrap="truncate-end">
+            <Text dimColor={isAsleep || !isSpeaking} wrap="truncate-end">
               {said}
             </Text>
           )}
         </Box>
-        {tabButtons(kit, view, actions, { labels: unifiedTabs(view), gap: 2 })}
-        {view.isUnfolded && <Button key="fold" label="fold" hotkey="x" plain dimColor onPress={() => actions.onFold()} />}
+        {tabButtons(kit, view, actions, { labels, gap: 2 })}
       </Box>
       {statusRows(kit, view, false)}
       {!view.isUnfolded &&
-        notes.slice(0, PREVIEW_NOTES).map(note => {
+        notes.slice(0, shown).map(note => {
           const { mark, color } = noteMark(note)
 
           return (
             <Box flexDirection="row" columnGap={1}>
               <Text color={color}>{mark}</Text>
-              <Text wrap="truncate-end">{previewLine(note)}</Text>
+              <Text dimColor wrap="truncate-end">
+                {previewLine(note)}
+              </Text>
             </Box>
           )
         })}
-      {!view.isUnfolded && moreLine(notes.length) !== '' && <Text dimColor>{moreLine(notes.length)}</Text>}
+      {!view.isUnfolded && moreLine(notes.length, shown) !== '' && (
+        <Box paddingLeft={2}>
+          <Text dimColor>{moreLine(notes.length, shown)}</Text>
+        </Box>
+      )}
       {view.isUnfolded && (
         <Box flexDirection="column" paddingLeft={2}>
+          <Box flexDirection="row" columnGap={2}>
+            <Text bold>{tabName(view.tab)}</Text>
+            <Button key="fold" label="fold" hotkey="x" plain dimColor onPress={() => actions.onFold()} />
+          </Box>
+          {view.tab === 'play' && <Text dimColor>{statusLine(view)}</Text>}
           {view.tab === 'play' && view.watch.state !== 'no-git' && workingOn(kit, body, actions)}
-          {view.tab === 'play' && <Text> </Text>}
+          <Text> </Text>
           {tabBody(kit, body, actions)}
-          <Text dimColor>{UNFOLDED_HINT}</Text>
         </Box>
       )}
     </Box>
