@@ -681,3 +681,38 @@ test('whoever waits for a lookup is told the moment one ends', async () => {
   await w.settle()
   expect(isReleased).toBe(true)
 })
+
+test('a save while its file is being mapped maps it again once it settles', async () => {
+  const w = world({ 'stats.py': STATS })
+  await w.explainer.touch('stats.py')
+  w.state.now += SETTLE_MS
+  await w.explainer.wake()
+  await w.settle()
+  expect(w.open('Map this file.').length).toBe(1)
+
+  // Saved mid-mapping: that mapping is cut short, and the next one is asked for once the file has settled.
+  w.save('stats.py', `${STATS}\n`)
+  await w.explainer.touch('stats.py')
+  await w.settle()
+  expect(w.asked[0]?.signal.aborted).toBe(true)
+  w.answer(w.asked[0], OUTLINE)
+  await w.settle()
+  w.state.now += SETTLE_MS
+  await w.explainer.wake()
+  await w.settle()
+  expect(w.asked.length).toBe(2)
+  expect(w.open('Map this file.').length).toBe(1)
+})
+
+test('forgetting the cache while a lookup runs leaves nothing of it on disk', async () => {
+  const w = world({ 'stats.py': STATS })
+  await w.explainer.view({ path: 'stats.py', line: 6 }, 'asked')
+  await w.settle()
+  expect(w.open('Map this file.').length).toBe(1)
+
+  w.explainer.reset()
+  w.answer(w.open('Map this file.')[0], OUTLINE)
+  await w.settle()
+  expect(await w.disk.read('/d/files/stats.py.json')).toBeNull()
+  expect(w.explainer.pending()).toBe(0)
+})

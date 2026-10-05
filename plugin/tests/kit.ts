@@ -586,7 +586,7 @@ export function stubSession(on: On, options: StubOptions = {}) {
 
       return ok(changed.map(path => `diff --git a/${path} b/${path}\n+${files[path] ?? ''}`).join('\n'))
     }
-    if (args[0] === 'show' && !String(args[1]).startsWith('HEAD:')) {
+    if (args[0] === 'show' && !String(args[1]).includes(':')) {
       const commit = commits.find(known => known.hash === args[args.length - 1])
 
       return commit === undefined ? failed : ok(`commit ${commit.hash}\n\n${commit.message}\n\n+patch of ${commit.message}`)
@@ -603,8 +603,11 @@ export function stubSession(on: On, options: StubOptions = {}) {
       )
     }
     if (args[0] === 'show') {
-      const path = String(args[1]).replace(/^HEAD:/, '')
-      const text = head[path]
+      // `HEAD:path`, or `<hash>:path` for a file as a commit left it.
+      const [ref = '', ...rest] = String(args[1]).split(':')
+      const path = rest.join(':')
+      const tree = ref === 'HEAD' ? head : commits.find(known => known.hash === ref)?.tree
+      const text = tree?.[path]
 
       return text === undefined ? failed : ok(text)
     }
@@ -625,6 +628,8 @@ export function stubSession(on: On, options: StubOptions = {}) {
     const answer = () => {
       const queued = session.failing.findIndex(entry => !entry.includes(':') || entry.startsWith(`${job}:`))
       const failure = queued === -1 ? undefined : session.failing.splice(queued, 1)[0]?.replace(/^[a-z]+:/, '')
+      // Claude Code refusing to send at all, as for a blocked model: the call rejects.
+      if (failure === 'refused') throw new Error('refused')
       if (job === 'progress') {
         if (failure !== undefined) return refused(failure)
         const text = session.assessmentReplies.shift() ?? '{"observations": [], "level": null}'

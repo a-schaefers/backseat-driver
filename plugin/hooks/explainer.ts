@@ -138,6 +138,8 @@ export function createExplainer(ports: ExplainPorts) {
   /** Whoever is waiting for the next lookup to end. */
   let waiters: (() => void)[] = []
   let isStopped = false
+  /** Counts `reset()`s, so that a lookup started before one leaves nothing behind. */
+  let generation = 0
 
   /** The file as it is on disk now. The text is read again only when its stamp has changed. */
   async function source(path: string): Promise<Source | null> {
@@ -255,7 +257,11 @@ export function createExplainer(ports: ExplainPorts) {
       const read = await source(file)
       const held = await knowledge(file)
       if (read === null || held === null) continue
-      for (const symbol of freshSymbols(held, read.lines)) prints.set(`${file}\n${symbol.name}`, symbol.print)
+      // The first of two symbols with one name (a getter and a setter, overloads) is the one an explanation records.
+      for (const symbol of freshSymbols(held, read.lines)) {
+        const key = `${file}\n${symbol.name}`
+        if (!prints.has(key)) prints.set(key, symbol.print)
+      }
     }
 
     return prints
@@ -388,6 +394,7 @@ export function createExplainer(ports: ExplainPorts) {
       queue.delete(job.key)
       const control = new AbortController()
       running.set(job.key, control)
+      const born = generation
       void run(job, control.signal)
         .catch(error => {
           ports.log(`lookup failed (${job.key}): ${String(error)}`)
@@ -397,7 +404,9 @@ export function createExplainer(ports: ExplainPorts) {
         .then(async outcome => {
           running.delete(job.key)
           const finished = await ports.now()
-          if (outcome === 'failed' && ports.pressure() === 'held') {
+          if (born !== generation) {
+            // Started before the project's cache was forgotten: nothing of it is taken up again.
+          } else if (outcome === 'failed' && ports.pressure() === 'held') {
             // Claude is not answering, or the plan is spent: that is not this lookup's failure. It waits with
             // the rest and goes again when they do, as something looked at and not asked for a second time.
             failedAt.delete(job.key)
@@ -405,7 +414,7 @@ export function createExplainer(ports: ExplainPorts) {
           } else if (outcome === 'failed') failedAt.set(job.key, finished)
           else failedAt.delete(job.key)
           // Saved again while it was being mapped: once more, after it has settled.
-          if (outcome === 'again') enqueue(outlineJob(job.path, Math.max(job.priority, LOOKING)))
+          if (outcome === 'again' && born === generation) enqueue(outlineJob(job.path, Math.max(job.priority, LOOKING)))
           const told = waiters
           waiters = []
           for (const tell of told) tell()
@@ -435,8 +444,8 @@ export function createExplainer(ports: ExplainPorts) {
     // Queued twice by two things that noticed the same gap: the first one has already filled it.
     if ((await knowledge(job.path))?.print === before.print) return 'done'
     const reply = await ports.complete(outlineRequest(ports.project(), job.path, before.lines), 6000, signal)
-    // Cut short by a save, which has already queued the next mapping.
-    if (signal.aborted) return 'stale'
+    // Cut short by a save. The save could not queue the next mapping while this one ran, so this asks for it.
+    if (signal.aborted) return 'again'
     const outline = reply === null ? null : parseOutline(reply)
     if (outline === null) return 'failed'
 
@@ -609,6 +618,9 @@ export function createExplainer(ports: ExplainPorts) {
     },
     /** Forgets everything held in memory, as after the project's cache was deleted. */
     reset(): void {
+      // What is in flight would write the cache back into the folder that was just deleted.
+      generation += 1
+      for (const control of running.values()) control.abort()
       known.clear()
       sources.clear()
       queue.clear()

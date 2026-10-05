@@ -71,13 +71,17 @@ export type AddedLines = { path: string; language: string; lines: string[] }
 export function addedLines(patch: string): AddedLines[] {
   const files: AddedLines[] = []
   let current: AddedLines | null = null
+  // Past a file's first `@@`, a line that starts `+++ ` is an added line that starts `++ `, not a header.
+  let isInHunk = false
   for (const line of patch.split('\n')) {
     if (line.startsWith('diff --git ')) {
       current = null
+      isInHunk = false
       continue
     }
-    if (line.startsWith('+++ ')) {
-      const path = line.slice(4).trim().replace(/^b\//, '')
+    if (line.startsWith('@@')) isInHunk = true
+    if (!isInHunk && line.startsWith('+++ ')) {
+      const path = unquoted(line.slice(4).trim()).replace(/^b\//, '')
       const language = path === '/dev/null' || isNoiseFile(path) ? null : languageOf(path)
       current = language === null ? null : { path, language, lines: [] }
       if (current !== null) files.push(current)
@@ -87,6 +91,40 @@ export function addedLines(patch: string): AddedLines[] {
   }
 
   return files.filter(file => file.lines.some(line => line.trim() !== ''))
+}
+
+const ESCAPED: Record<string, string> = { n: '\n', t: '\t', '"': '"', '\\': '\\', a: '\x07', b: '\b', f: '\f', r: '\r', v: '\v' }
+
+/**
+ * A path as git prints it in a patch header. One with a character outside
+ * plain ASCII, a quote or a backslash comes in double quotes, with C escapes
+ * and its UTF-8 bytes in octal: `"b/caf\303\251.py"`.
+ */
+export function unquoted(path: string): string {
+  if (path.length < 2 || !path.startsWith('"') || !path.endsWith('"')) return path
+  const body = path.slice(1, -1)
+  let encoded = ''
+  for (let index = 0; index < body.length; index += 1) {
+    const char = body.charAt(index)
+    if (char !== '\\') {
+      encoded += encodeURIComponent(char)
+      continue
+    }
+    const octal = /^[0-7]{3}/.exec(body.slice(index + 1))
+    if (octal !== null) {
+      encoded += `%${Number.parseInt(octal[0], 8).toString(16).padStart(2, '0')}`
+      index += 3
+      continue
+    }
+    const next = body.charAt(index + 1)
+    encoded += encodeURIComponent(ESCAPED[next] ?? next)
+    index += 1
+  }
+  try {
+    return decodeURIComponent(encoded)
+  } catch {
+    return path
+  }
 }
 
 /** Above either of these, a commit reads as an import, a vendored library or generated code. */
