@@ -18,6 +18,7 @@ test('durationMs falls back on anything it does not recognise', async () => {
 test('readSettings applies the documented defaults to empty options', async () => {
   expect(readSettings({})).toEqual({
     persona: { voice: 'default', engineering: 'default' },
+    layout: 'unified',
     isAnimated: true,
     isProgressOn: true,
     isUpdateCheckOn: true,

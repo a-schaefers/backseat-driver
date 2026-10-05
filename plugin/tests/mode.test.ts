@@ -57,7 +57,7 @@ sessionTest('/bsd and /backseat-driver switch the same tutor', async ($, on) => 
   expect(stopped.text).toBe('Backseat Driver is off. Claude Code is back to normal.')
 })
 
-sessionTest('the pane opens with the tutor, closes with it, and stays through a pause', async ($, on) => {
+sessionTest('in the vertical layout the pane opens with the tutor, closes with it, and stays through a pause', { options: { layout: 'vertical' } }, async ($, on) => {
   const calls = stubSession(on)
   await $.session.start(SESSION)
   expect(calls.opened).toEqual([])
@@ -91,7 +91,7 @@ sessionTest('the tutor is still on after /clear', async ($, on) => {
   expect(status.text).toBe('Backseat Driver is on. Voice: default. Engineering: default.')
 })
 
-sessionTest('/bsd answers before its setup has finished', async ($, on) => {
+sessionTest('/bsd answers before its setup has finished', { options: { layout: 'vertical' } }, async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': 'x = 1\n' } })
   await $.session.start(SESSION)
 

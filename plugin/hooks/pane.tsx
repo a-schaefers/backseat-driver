@@ -10,7 +10,7 @@ import { lately, levelPhrase, skillStates } from './progress'
 import { readableReview, SURVEY_SUBJECT } from './review'
 import { DEFAULT_PERSONA } from './settings'
 import { clockTime, playLine } from './status'
-import type { Persona } from './settings'
+import type { Layout, Persona } from './settings'
 
 /** The elements the pane is built from. Every surface that draws panes has them. */
 export type Kit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdown'>
@@ -44,6 +44,10 @@ export type PaneView = {
   character: { avatar: Avatar; speech: Speech } | null
   /** True where rows are scarce, as in a pane above the prompt: the character is then drawn in one line. */
   isCompact: boolean
+  /** Which of the three ways of showing the tutor this drawing is for. */
+  layout: Layout
+  /** Unified only: whether the lines above the prompt are opened into the tab shown. */
+  isUnfolded: boolean
 }
 
 /** What the pane's controls do. The closures come from register.tsx. */
@@ -67,6 +71,8 @@ export type PaneActions = {
   onExplainAsk: () => void
   /** Ask what they are working on, so that they can say it themselves or take it back. */
   onWorking: () => void
+  /** Unified only: fold the opened tab back into the few lines above the prompt. */
+  onFold: () => void
 }
 
 const TABS: readonly { tab: Tab; label: string; short: string; hotkey: string }[] = [
@@ -590,39 +596,226 @@ function profileTab(kit: Kit, view: PaneView, actions: PaneActions) {
   )
 }
 
-export function renderPane(kit: Kit, view: PaneView, actions: PaneActions) {
-  const { Box, Text, Button } = kit
-  const row = tabRow(view)
-  // The character speaks for the play-by-play and the deep review, so it stands on their tabs only.
-  const character = view.tab === 'play' || view.tab === 'review' ? view.character : null
+/** The tab's own contents, under the parts every tab shares. */
+function tabBody(kit: Kit, view: PaneView, actions: PaneActions) {
+  if (view.tab === 'play') return playByPlay(kit, view, actions)
+  if (view.tab === 'review') return deepReview(kit, view, actions)
+  if (view.tab === 'explain') return explainTab(kit, view, actions)
+
+  return profileTab(kit, view, actions)
+}
+
+/** The tabs as a row of buttons. */
+function tabButtons({ Box, Button }: Kit, view: PaneView, actions: PaneActions, row: { labels: string[]; gap: number }) {
+  return (
+    <Box flexDirection="row" columnGap={row.gap} flexShrink={0}>
+      {TABS.map(({ tab, hotkey }, index) => (
+        <Button
+          key={`tab-${tab}`}
+          label={row.labels[index] ?? ''}
+          hotkey={hotkey}
+          plain
+          dimColor={view.tab !== tab || (view.layout === 'unified' && !view.isUnfolded)}
+          onPress={() => actions.onTab(tab)}
+        />
+      ))}
+    </Box>
+  )
+}
+
+/** The lines under the tabs: what the play-by-play is doing, what keeps going wrong, a newer release. */
+function statusRows({ Text }: Kit, view: PaneView, withStatus: boolean) {
+  return [
+    withStatus && <Text dimColor>{statusLine(view)}</Text>,
+    view.mode !== 'paused' && (view.watch.health ?? '') !== '' && <Text dimColor>{view.watch.health}</Text>,
+    view.update !== '' && <Text color="yellow">{view.update}</Text>,
+  ]
+}
+
+/** The character speaks for the play-by-play and the deep review, so it stands on their tabs only. */
+function characterOf(view: PaneView): PaneView['character'] {
+  return view.tab === 'play' || view.tab === 'review' ? view.character : null
+}
+
+/** The vertical layout: every part stacked, as a pane beside the conversation wants it. */
+function renderStacked(kit: Kit, view: PaneView, actions: PaneActions) {
+  const { Box, Text } = kit
+  const character = characterOf(view)
 
   return (
     <Box flexDirection="column">
-      <Box flexDirection="row" columnGap={row.gap}>
-        {TABS.map(({ tab, hotkey }, index) => (
-          <Button
-            key={`tab-${tab}`}
-            label={row.labels[index] ?? ''}
-            hotkey={hotkey}
-            plain
-            dimColor={view.tab !== tab}
-            onPress={() => actions.onTab(tab)}
-          />
-        ))}
-      </Box>
-      <Text dimColor>{statusLine(view)}</Text>
-      {view.mode !== 'paused' && (view.watch.health ?? '') !== '' && <Text dimColor>{view.watch.health}</Text>}
-      {view.update !== '' && <Text color="yellow">{view.update}</Text>}
+      {tabButtons(kit, view, actions, tabRow(view))}
+      {statusRows(kit, view, true)}
       {/* Outside a repository there is no journal, so nothing to go on and nowhere to keep an answer. */}
       {view.watch.state !== 'no-git' && workingOn(kit, view, actions)}
       <Text> </Text>
       {character !== null && characterRow(kit, view, character)}
       {character !== null && <Text> </Text>}
-      {view.tab === 'play' && playByPlay(kit, view, actions)}
-      {view.tab === 'review' && deepReview(kit, view, actions)}
-      {view.tab === 'explain' && explainTab(kit, view, actions)}
-      {view.tab === 'profile' && profileTab(kit, view, actions)}
+      {tabBody(kit, view, actions)}
       {!view.isFocused && <Text dimColor>{KEYBOARD_HINT}</Text>}
     </Box>
   )
+}
+
+/** What the horizontal layout's frame and padding take from each side. */
+const FRAME_COLUMNS = 4
+/** The gap between the horizontal layout's two columns. */
+const SPLIT_GAP = 3
+
+/**
+ * How the horizontal layout splits its width: a side column for the
+ * character and what they are working on, and the rest for the tab. Null
+ * when the strip is too narrow for two columns, which then stack.
+ */
+export function stripColumns(columns: number): { side: number; body: number } | null {
+  const inner = columns - FRAME_COLUMNS
+  const side = Math.max(30, Math.min(48, Math.round(inner * 0.34)))
+  const body = inner - side - SPLIT_GAP
+
+  return body < 44 ? null : { side, body }
+}
+
+/** The horizontal layout: a framed strip above the prompt, the character beside the tab rather than above it. */
+function renderStrip(kit: Kit, view: PaneView, actions: PaneActions) {
+  const { Box, Text } = kit
+  const inner = { ...view, columns: view.columns - FRAME_COLUMNS }
+  const split = stripColumns(view.columns)
+  if (split === null) {
+    return (
+      <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
+        {renderStacked(kit, inner, actions)}
+      </Box>
+    )
+  }
+  const side = { ...view, columns: split.side }
+  const body = { ...view, columns: split.body }
+  const character = characterOf(side)
+
+  return (
+    <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
+      {tabButtons(kit, view, actions, tabRow(inner))}
+      {statusRows(kit, inner, true)}
+      <Text> </Text>
+      <Box flexDirection="row" columnGap={SPLIT_GAP}>
+        <Box flexDirection="column" width={split.side} flexShrink={0}>
+          {view.watch.state !== 'no-git' && workingOn(kit, side, actions)}
+          {character !== null && <Text> </Text>}
+          {character !== null && characterRow(kit, side, character)}
+        </Box>
+        <Box flexDirection="column" width={split.body}>
+          {tabBody(kit, body, actions)}
+        </Box>
+      </Box>
+      {!view.isFocused && <Text dimColor>{KEYBOARD_HINT}</Text>}
+    </Box>
+  )
+}
+
+/** How many notes the unified layout shows above the prompt while it is folded. */
+export const PREVIEW_NOTES = 3
+
+/** The mark and color a note's kind gets on its one line in the unified layout. */
+export function noteMark(note: Pick<Note, 'kind'>): { mark: string; color: string | undefined } {
+  switch (note.kind) {
+    case 'decision':
+      return { mark: '◆', color: 'magenta' }
+    case 'insight':
+      return { mark: '★', color: 'cyan' }
+    case 'bug':
+      return { mark: '!', color: 'red' }
+    case 'risk':
+      return { mark: '!', color: 'yellow' }
+    default:
+      return { mark: '·', color: undefined }
+  }
+}
+
+/** One note on one line: where it is, then as much of it as fits. */
+export function previewLine(note: Note): string {
+  return `${note.file}:${note.line}  ${note.text}`
+}
+
+/** What the unified layout says under its notes when more are open than it shows. '' when none are hidden. */
+export function moreLine(count: number): string {
+  const hidden = count - PREVIEW_NOTES
+
+  return hidden <= 0 ? '' : hidden === 1 ? 'One more note. 1 opens the play-by-play.' : `${hidden} more notes. 1 opens the play-by-play.`
+}
+
+/** The text of the tutor's entry on Claude Code's status line, in the unified layout. */
+export function statusEntry(view: Pick<PaneView, 'mode' | 'watch'>): string {
+  return `Backseat: ${view.mode === 'paused' ? playLine({ at: 'paused' }) : view.watch.line}`
+}
+
+/** The tabs' labels in the unified layout's one row: short names, and what each says about itself. */
+export function unifiedTabs(view: Pick<PaneView, 'review'> & Partial<Pick<PaneView, 'notes' | 'explain' | 'progress'>>): string[] {
+  return TABS.map(({ tab, short }) => `${short}${tabBadge(tab, view)}`)
+}
+
+/** Shown under an opened tab in the unified layout. */
+export const UNFOLDED_HINT = 'Ctrl+X Tab or a click for these keys. The tab\'s key again, or x, folds it.'
+
+/**
+ * The unified layout: no pane. One row above the prompt holds the character's
+ * line and the tabs, with the open notes under it, one line each. A tab's
+ * key opens it right there, and folds it again. What the play-by-play is
+ * doing goes on Claude Code's own status line (`statusEntry`).
+ */
+function renderUnified(kit: Kit, view: PaneView, actions: PaneActions) {
+  const { Box, Text, Button } = kit
+  const notes = sortNotes(view.notes)
+  const isAsleep = view.mode === 'paused'
+  const character = view.character
+  const said = character === null ? '' : isAsleep ? ASLEEP : saidSoFar(character.speech)
+  const body = { ...view, columns: view.columns - 2, isCompact: true }
+
+  return (
+    <Box flexDirection="column">
+      <Box flexDirection="row" columnGap={2}>
+        <Box flexDirection="row" columnGap={1} flexGrow={1} flexShrink={1}>
+          {character === null && <Text dimColor>Backseat</Text>}
+          {character !== null && (
+            <Text color={character.avatar.color} dimColor={!isTalking(character.speech)}>
+              {character.avatar.mini[poseOf(view.mode, view.watch.state, character.speech)]}
+            </Text>
+          )}
+          {said !== '' && (
+            <Text dimColor={isAsleep || character === null || !isTalking(character.speech)} wrap="truncate-end">
+              {said}
+            </Text>
+          )}
+        </Box>
+        {tabButtons(kit, view, actions, { labels: unifiedTabs(view), gap: 2 })}
+        {view.isUnfolded && <Button key="fold" label="fold" hotkey="x" plain dimColor onPress={() => actions.onFold()} />}
+      </Box>
+      {statusRows(kit, view, false)}
+      {!view.isUnfolded &&
+        notes.slice(0, PREVIEW_NOTES).map(note => {
+          const { mark, color } = noteMark(note)
+
+          return (
+            <Box flexDirection="row" columnGap={1}>
+              <Text color={color}>{mark}</Text>
+              <Text wrap="truncate-end">{previewLine(note)}</Text>
+            </Box>
+          )
+        })}
+      {!view.isUnfolded && moreLine(notes.length) !== '' && <Text dimColor>{moreLine(notes.length)}</Text>}
+      {view.isUnfolded && (
+        <Box flexDirection="column" paddingLeft={2}>
+          {view.tab === 'play' && view.watch.state !== 'no-git' && workingOn(kit, body, actions)}
+          {view.tab === 'play' && <Text> </Text>}
+          {tabBody(kit, body, actions)}
+          <Text dimColor>{UNFOLDED_HINT}</Text>
+        </Box>
+      )}
+    </Box>
+  )
+}
+
+export function renderPane(kit: Kit, view: PaneView, actions: PaneActions) {
+  if (view.layout === 'unified') return renderUnified(kit, view, actions)
+  if (view.layout === 'horizontal') return renderStrip(kit, view, actions)
+
+  return renderStacked(kit, view, actions)
 }

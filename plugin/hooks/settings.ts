@@ -13,9 +13,28 @@ export type Persona = {
   engineering: string
 }
 
+/**
+ * Where the tutor shows itself. `unified` draws into Claude Code's own
+ * places: a few lines above the prompt that open into the tabs on demand,
+ * and the status line under the prompt. `horizontal` is the whole view as a
+ * framed strip above the prompt, its parts side by side. `vertical` is the
+ * whole view as a pane, stacked, which Claude Code docks beside the
+ * conversation in its fullscreen layout.
+ */
+export type Layout = 'unified' | 'horizontal' | 'vertical'
+
+/** In the order `/bsd layout` steps through them. The first is the default. */
+export const LAYOUTS: readonly Layout[] = ['unified', 'horizontal', 'vertical']
+
+/** A layout as set in /config or typed after `/bsd layout`. Anything else is null. */
+export function layoutOf(value: unknown): Layout | null {
+  return LAYOUTS.find(layout => layout === (typeof value === 'string' ? value.trim().toLowerCase() : value)) ?? null
+}
+
 /** The plugin's `/config` rows as the code uses them: durations in milliseconds, defaults applied. */
 export type Settings = {
   persona: Persona
+  layout: Layout
   /** Whether the pane shows the voice's animated character, and the reviewers write its lines. */
   isAnimated: boolean
   /** Whether the tutor keeps a record of the person's level in each language, from their own commits. */
@@ -78,6 +97,7 @@ export function readSettings(options: PluginOptions): Settings {
       voice: personaName(options.voice),
       engineering: personaName(options.engineering),
     },
+    layout: layoutOf(options.layout) ?? 'unified',
     isAnimated: options.animated_persona !== false,
     isProgressOn: options.progress_report !== false,
     isUpdateCheckOn: options.update_check !== false,

@@ -287,6 +287,8 @@ declare module 'claude-code' {
       speech: Speech
       /** What they are working on, for the line under the status line. */
       working: Working
+      /** In the unified layout, whether the lines above the prompt are opened into the tab. */
+      unfolded: boolean
     }
   }
 }

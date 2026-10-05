@@ -112,12 +112,13 @@ import {
 import type { Install } from './update'
 import { assessmentRequest, emptyRecord, parseAssessment, parseRecord, progressText, recordText, withAssessment } from './progress'
 import type { AssessedCommit, CommitForAssessment } from './progress'
-import { helpText, isModeRequest, parseRequest, transition } from './mode'
+import { helpText, isModeRequest, LAYOUT_USAGE, parseRequest, transition } from './mode'
 import { isNoiseFile } from './noise'
 import { isLookDue, playOf, wakeAt } from './play'
 import type { Play, PlayFacts } from './play'
 import { applyReply, isProblem, parseReply, withDismissed } from './notes'
-import { renderPane, reviewSchedule } from './pane'
+import { renderPane, reviewSchedule, statusEntry } from './pane'
+import type { Kit, PaneView } from './pane'
 import {
   ANSWER_LABELS,
   answerSubject,
@@ -197,8 +198,8 @@ import {
   withoutCommit,
 } from './reviewqueue'
 import type { ReviewQueue, Waiting } from './reviewqueue'
-import { DEFAULT_PERSONA, readSettings } from './settings'
-import type { Persona, Settings } from './settings'
+import { DEFAULT_PERSONA, LAYOUTS, layoutOf, readSettings } from './settings'
+import type { Layout, Persona, Settings } from './settings'
 import { createLocks } from './locks'
 import { memoryDisk } from './storage'
 import type { Disk } from './storage'
@@ -229,6 +230,15 @@ const progressAtom = atom({ plugin: 'backseat-driver', key: 'progress' } as cons
 const updateAtom = atom({ plugin: 'backseat-driver', key: 'update' } as const, '')
 const speechAtom = atom({ plugin: 'backseat-driver', key: 'speech' } as const, SILENT)
 const workingAtom = atom({ plugin: 'backseat-driver', key: 'working' } as const, NO_WORKING)
+const unfoldedAtom = atom({ plugin: 'backseat-driver', key: 'unfolded' } as const, false)
+
+/** The pane's id, for the vertical layout. The other two layouts draw above the prompt and open no pane. */
+const PANE_ID = 'backseat-driver'
+/** How wide the vertical layout asks its pane to be when Claude Code docks it beside the conversation. */
+const PANE_COLUMNS = 64
+
+/** The layout in force, from the settings this load of the module was given, or from `/bsd layout`. */
+let layout: Layout = 'unified'
 
 /**
  * The mode is kept twice, because each copy is lost by a different event.
@@ -1073,7 +1083,22 @@ async function markHome($: EngineInterface): Promise<void> {
 }
 
 async function openPane($: EngineInterface): Promise<void> {
-  await $.ui.open({ id: 'backseat-driver', title: 'Backseat' })
+  await $.ui.open({ id: PANE_ID, title: 'Backseat', columns: PANE_COLUMNS })
+}
+
+/** Closes the vertical layout's pane, when it is open. */
+async function closePane($: EngineInterface): Promise<void> {
+  if ((await $.ui.panes()).some(pane => pane.id === PANE_ID)) await $.ui.close({ id: PANE_ID })
+}
+
+/**
+ * Puts the tutor where the layout says: a pane for `vertical`, and nothing
+ * to open for the two that draw above the prompt, whose drawing follows
+ * the mode by itself. A pane left from another layout is closed.
+ */
+async function showLayout($: EngineInterface): Promise<void> {
+  if (mode !== 'off' && layout === 'vertical') await openPane($)
+  else await closePane($)
 }
 
 function stopTalking(): void {
@@ -2830,9 +2855,14 @@ async function pollFocus($: EngineInterface): Promise<void> {
   await followEditor($, now)
 }
 
+/** Whether the tab that is chosen can be seen: in the unified layout, only while it is opened. */
+async function isTabShown($: EngineInterface): Promise<boolean> {
+  return layout !== 'unified' || (await read($, unfoldedAtom))
+}
+
 /** Whether anyone can see the Explain view: the tab is open, or an editor is showing it. */
 async function isWatched($: EngineInterface): Promise<boolean> {
-  if ((await read($, tabAtom)) === 'explain') return true
+  if ((await read($, tabAtom)) === 'explain' && (await isTabShown($))) return true
 
   return focus?.source === 'editor' && (await $.clock.now()) - editorFocusAt < EDITOR_LIVE_MS
 }
@@ -3299,7 +3329,7 @@ async function switchTo($: EngineInterface, next: Mode, settings: Settings): Pro
   if (isEngaged) {
     isWatchReady = false
     await showPlay($, settings)
-    await openPane($)
+    await showLayout($)
     void engage($, settings, engagement, true)
   } else {
     // The lease goes back at once, so that a session waiting for it takes over without waiting for it to run out.
@@ -3320,9 +3350,29 @@ async function switchTo($: EngineInterface, next: Mode, settings: Settings): Pro
     await update($, explainAtom, () => NO_VIEW)
     profiles = NO_PROFILES
     await update($, profilesAtom, () => NO_PROFILES)
-    await $.ui.close({ id: 'backseat-driver' })
+    await update($, unfoldedAtom, () => false)
+    await showLayout($)
     await stopDebug($, 'the tutor was switched off')
   }
+}
+
+/**
+ * Changes the layout, and keeps it: the change goes to /config as if made
+ * there, which reloads the module with it. It is shown at once all the same,
+ * so that nothing waits on the reload. Answers what the command prints.
+ */
+async function changeLayout($: EngineInterface, wanted: Layout): Promise<string> {
+  const rows = await $.config.list()
+  // The row's owner is named with where the plugin came from (`backseat-driver@inline` for a working copy).
+  const row = rows.find(candidate => candidate.provider.plugin.split('@')[0] === 'backseat-driver' && candidate.key.endsWith('.layout'))
+  if (row === undefined) return 'The layout setting was not found in /config.'
+  const { deny } = await $.config.set({ key: row.key, value: wanted })
+  if (deny !== undefined) return `The layout stays ${layout}: ${deny}`
+  trace($, 'state', 'layout', () => ({ from: layout, to: wanted }))
+  layout = wanted
+  await showLayout($)
+
+  return `Layout: ${wanted}. It is kept for next time.${mode === 'off' ? ' It shows when you run /bsd.' : ''}`
 }
 
 /** Asks one question about forgetting, and answers null when the dialog is dismissed. */
@@ -3420,8 +3470,126 @@ async function forget($: EngineInterface, settings: Settings, named: Scope | nul
   }
 }
 
+/** Draws the tutor for one of the three layouts, in the room the site gives it. */
+async function drawTutor($: EngineInterface, settings: Settings, kit: Kit, where: Pick<PaneView, 'layout' | 'isFocused' | 'columns' | 'isCompact'>) {
+  quiet.renders += 1
+  // One round for everything the pane shows, not a dozen in a row for every frame.
+  const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, isUnfolded] = await Promise.all([
+    read($, modeAtom),
+    read($, tabAtom),
+    read($, notesAtom),
+    read($, selectedAtom),
+    read($, watchAtom),
+    read($, reviewAtom),
+    read($, profilesAtom),
+    read($, explainAtom),
+    read($, workingAtom),
+    read($, progressAtom),
+    read($, updateAtom),
+    read($, speechAtom),
+    read($, unfoldedAtom),
+  ])
+  const view: PaneView = {
+    mode: shownMode,
+    tab,
+    persona: settings.persona,
+    notes,
+    selected,
+    watch,
+    isAutomatic: settings.playByPlay.isAutomatic,
+    review,
+    reviewSchedule: reviewSchedule(settings.deepReview.isAfterCommit, settings.deepReview.everyMs),
+    profiles: shownProfiles,
+    explain,
+    working,
+    progress,
+    update: release,
+    ...where,
+    character: settings.isAnimated ? { avatar: avatarFor(settings.persona.voice), speech } : null,
+    isUnfolded,
+  }
+
+  return renderPane(kit, view, {
+    onTab: (tab: Tab) => {
+      touched($, settings, 'tab', () => tab)
+      // In the unified layout a tab's key opens it above the prompt, and the open tab's key folds it again.
+      const isFolding = where.layout === 'unified' && isUnfolded && view.tab === tab
+      void update($, tabAtom, () => tab)
+      void update($, unfoldedAtom, () => !isFolding)
+      if (isFolding) return
+      if (tab === 'review') void setReview($, { isUnseen: false })
+      if (tab === 'explain') watchClosely($)
+    },
+    onFold: () => {
+      touched($, settings, 'fold')
+      void update($, unfoldedAtom, () => false)
+    },
+    onSelect: (id: number) => {
+      touched($, settings, 'select', () => id)
+      void update($, selectedAtom, () => id)
+    },
+    onExplain: (note: Note) => {
+      touched($, settings, 'explain', () => note)
+      // Not awaited: it resolves when the turn starts, which may be after the one now running.
+      void $.prompt.submit({ text: explainRequest(note), asUser: true })
+      // A decision point or an insight is about this one spot in their code, not an idea now explained to them.
+      if (isProblem(note.kind)) void saveSubject($, settings, languageOf(note.file) ?? GENERAL, profile => withExplained(profile, note.topic))
+    },
+    onMute: (note: Note) => {
+      touched($, settings, 'mute', () => note)
+      const entry = { topic: note.topic, text: note.topic.replaceAll('-', ' ') }
+      void hush($, settings, languageOf(note.file) ?? GENERAL, entry)
+    },
+    onUnhush: (subject: string, topic: string) => {
+      touched($, settings, 'unhush', () => ({ subject, topic }))
+      void saveSubject($, settings, subject, profile => withoutHush(profile, topic))
+    },
+    onQuestions: () => {
+      touched($, settings, 'questions')
+      void ask($, settings, firstRunQuestions(profiles.languages, false))
+    },
+    onExplainMove: (step: 1 | -1) => {
+      touched($, settings, 'explain move', () => step)
+      void moveFocus($, step)
+    },
+    onExplainFetch: () => {
+      touched($, settings, 'explain fetch')
+      void refreshView($, true)
+    },
+    onExplainAsk: () => {
+      touched($, settings, 'explain ask')
+      void read($, explainAtom).then(view => {
+        const text = explainAsk(view)
+        // A prompt the mod submits skips the mod's own `prompt.submit` hook. The text
+        // names the file and the lines, and the tutor's lookup tool has the rest.
+        if (text !== '') void $.prompt.submit({ text, asUser: true })
+      })
+    },
+    onDismiss: (note: Note) => {
+      touched($, settings, 'dismiss', () => note)
+      void update($, notesAtom, open => open.filter(other => other.id !== note.id))
+      // Remembered, so that the next look does not bring the same point back.
+      void update($, dismissedAtom, dismissed => withDismissed(dismissed, note))
+      void $.clock.now().then(at => recorder?.add({ at, kind: 'dismissed', path: note.file, line: note.line, text: note.topic }))
+    },
+    onWorking: () => {
+      touched($, settings, 'working')
+      void askWorking($)
+    },
+    onLook: () => {
+      touched($, settings, 'look now')
+      if (mode === 'on') void look($, settings, true)
+    },
+    onReview: () => {
+      touched($, settings, 'review now')
+      void reviewSince($, settings, true)
+    },
+  })
+}
+
 export const register: Register = (on, options) => {
   const settings = readSettings(options)
+  layout = settings.layout
 
   on('session.start', async ($, e, next) => {
     // After a reload, `$.state` still holds the mode and the notes.
@@ -3431,7 +3599,8 @@ export const register: Register = (on, options) => {
       const open = await read($, notesAtom)
       nextNoteId = open.reduce((highest, note) => Math.max(highest, note.id), 0) + 1
       await loadTutor($, settings.persona)
-      await openPane($)
+      // A change of layout in /config reloads the module: the pane opens or closes to suit it.
+      await showLayout($)
       engagement += 1
       await engage($, settings, engagement, false)
     }
@@ -3446,7 +3615,7 @@ export const register: Register = (on, options) => {
         await $.command.register({
           name,
           description: 'Turn the Backseat Driver tutor on. /bsd help lists the rest',
-          argumentHint: '[off | pause | resume | status | explain | questions | working | forget | update | uninstall | debug | help]',
+          argumentHint: '[off | pause | resume | status | explain | layout | questions | working | forget | update | uninstall | debug | help]',
           immediate: true,
         })
       } catch (error) {
@@ -3491,6 +3660,12 @@ export const register: Register = (on, options) => {
 
       return { text: asked === null ? DEBUG_USAGE : await debugCommand($, settings, asked) }
     }
+    if (request === 'layout') {
+      const wanted = rest.trim() === '' ? LAYOUTS[(LAYOUTS.indexOf(layout) + 1) % LAYOUTS.length] : layoutOf(rest)
+      if (wanted === null || wanted === undefined) return { text: LAYOUT_USAGE }
+
+      return { text: await changeLayout($, wanted) }
+    }
     if (request === 'questions') {
       if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
       // Not awaited: the dialog stays open for as long as the person takes.
@@ -3503,6 +3678,8 @@ export const register: Register = (on, options) => {
       if (settings.explain.mode === 'off') return { text: 'Explain is switched off. Its setting is in /config.' }
       if (explainer === null) return { text: 'Explain needs a git repository, and a moment after /bsd to get ready.' }
       await update($, tabAtom, () => 'explain')
+      // In the unified layout the tab opens above the prompt, where the answer lands.
+      await update($, unfoldedAtom, () => true)
       watchClosely($)
       const spot = rest.trim() === '' ? focus : parseTarget(rest, repoRoot)
       if (spot === null) {
@@ -3511,7 +3688,7 @@ export const register: Register = (on, options) => {
       // Not awaited: the answer goes to the pane as it arrives.
       void setFocus($, { path: spot.path, line: spot.line, ...(spot.endLine === undefined ? {} : { endLine: spot.endLine }), source: 'command' }, true)
 
-      return { text: `Explaining ${describeSpot(spot)} in the pane.` }
+      return { text: `Explaining ${describeSpot(spot)} in the ${layout === 'vertical' ? 'pane' : 'Explain tab above the prompt'}.` }
     }
     if (request === 'working') {
       if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
@@ -3550,7 +3727,7 @@ export const register: Register = (on, options) => {
     const { to, text } = transition(mode, request)
     if (to !== mode) await switchTo($, to, settings)
     // Asking for "on" again brings back a pane the user closed by hand.
-    else if (request === 'on') await openPane($)
+    else if (request === 'on') await showLayout($)
     if (request !== 'status') return { text }
 
     return { text: `${text} Voice: ${settings.persona.voice}. Engineering: ${settings.persona.engineering}.` }
@@ -3636,7 +3813,7 @@ export const register: Register = (on, options) => {
         // The notes at its end go to the project's cache, and never to the pane.
         const kept = await keepReview($, scope, e.answer)
         const shown = kept.text
-        const isUnseen = (await read($, tabAtom)) !== 'review'
+        const isUnseen = (await read($, tabAtom)) !== 'review' || !(await isTabShown($))
         // What the pane puts first: the decision points and insights the review's notes named.
         const decisions = kept.notes?.decisions ?? []
         const insights = (kept.notes?.insights ?? []).map(insight => `${insight.file}${insight.symbol === '' ? '' : `, ${insight.symbol}`}: ${insight.text}`)
@@ -3842,112 +4019,34 @@ export const register: Register = (on, options) => {
     return isDenied ? { deny: DENIAL } : next(e)
   })
 
-  on('ui.render', { component: 'Pane', requestId: 'backseat-driver' }, async ($, e) => {
-    quiet.renders += 1
-    // One round for everything the pane shows, not a dozen in a row for every frame.
-    const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech] = await Promise.all([
-      read($, modeAtom),
-      read($, tabAtom),
-      read($, notesAtom),
-      read($, selectedAtom),
-      read($, watchAtom),
-      read($, reviewAtom),
-      read($, profilesAtom),
-      read($, explainAtom),
-      read($, workingAtom),
-      read($, progressAtom),
-      read($, updateAtom),
-      read($, speechAtom),
-    ])
-    const view = {
-      mode: shownMode,
-      tab,
-      persona: settings.persona,
-      notes,
-      selected,
-      watch,
-      isAutomatic: settings.playByPlay.isAutomatic,
-      review,
-      reviewSchedule: reviewSchedule(settings.deepReview.isAfterCommit, settings.deepReview.everyMs),
-      profiles: shownProfiles,
-      explain,
-      working,
-      progress,
-      update: release,
+  on('ui.render', { component: 'Pane', requestId: 'backseat-driver' }, async ($, e) =>
+    drawTutor($, settings, $.ui.resolve(e), {
+      // The pane is the vertical layout's. Drawn while another layout is chosen, it is still drawn whole.
+      layout: 'vertical',
       isFocused: e.props.isFocused,
       columns: e.props.bodyColumns,
-      character: settings.isAnimated ? { avatar: avatarFor(settings.persona.voice), speech } : null,
       // Above the prompt rows are scarce, and other surfaces may not draw text art in a fixed-width font.
       isCompact: e.props.placement === 'inline' || e.surface !== 'terminal',
-    }
+    }),
+  )
 
-    return renderPane($.ui.resolve(e), view, {
-      onTab: (tab: Tab) => {
-        touched($, settings, 'tab', () => tab)
-        void update($, tabAtom, () => tab)
-        if (tab === 'review') void setReview($, { isUnseen: false })
-        if (tab === 'explain') watchClosely($)
-      },
-      onSelect: (id: number) => {
-        touched($, settings, 'select', () => id)
-        void update($, selectedAtom, () => id)
-      },
-      onExplain: (note: Note) => {
-        touched($, settings, 'explain', () => note)
-        // Not awaited: it resolves when the turn starts, which may be after the one now running.
-        void $.prompt.submit({ text: explainRequest(note), asUser: true })
-        // A decision point or an insight is about this one spot in their code, not an idea now explained to them.
-        if (isProblem(note.kind)) void saveSubject($, settings, languageOf(note.file) ?? GENERAL, profile => withExplained(profile, note.topic))
-      },
-      onMute: (note: Note) => {
-        touched($, settings, 'mute', () => note)
-        const entry = { topic: note.topic, text: note.topic.replaceAll('-', ' ') }
-        void hush($, settings, languageOf(note.file) ?? GENERAL, entry)
-      },
-      onUnhush: (subject: string, topic: string) => {
-        touched($, settings, 'unhush', () => ({ subject, topic }))
-        void saveSubject($, settings, subject, profile => withoutHush(profile, topic))
-      },
-      onQuestions: () => {
-        touched($, settings, 'questions')
-        void ask($, settings, firstRunQuestions(profiles.languages, false))
-      },
-      onExplainMove: (step: 1 | -1) => {
-        touched($, settings, 'explain move', () => step)
-        void moveFocus($, step)
-      },
-      onExplainFetch: () => {
-        touched($, settings, 'explain fetch')
-        void refreshView($, true)
-      },
-      onExplainAsk: () => {
-        touched($, settings, 'explain ask')
-        void read($, explainAtom).then(view => {
-          const text = explainAsk(view)
-          // A prompt the mod submits skips the mod's own `prompt.submit` hook. The text
-          // names the file and the lines, and the tutor's lookup tool has the rest.
-          if (text !== '') void $.prompt.submit({ text, asUser: true })
-        })
-      },
-      onDismiss: (note: Note) => {
-        touched($, settings, 'dismiss', () => note)
-        void update($, notesAtom, open => open.filter(other => other.id !== note.id))
-        // Remembered, so that the next look does not bring the same point back.
-        void update($, dismissedAtom, dismissed => withDismissed(dismissed, note))
-        void $.clock.now().then(at => recorder?.add({ at, kind: 'dismissed', path: note.file, line: note.line, text: note.topic }))
-      },
-      onWorking: () => {
-        touched($, settings, 'working')
-        void askWorking($)
-      },
-      onLook: () => {
-        touched($, settings, 'look now')
-        if (mode === 'on') void look($, settings, true)
-      },
-      onReview: () => {
-        touched($, settings, 'review now')
-        void reviewSince($, settings, true)
-      },
+  // In the unified layout, what the play-by-play is doing ends Claude Code's own hint line under the prompt.
+  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+    if (mode === 'off' || layout !== 'unified') return next(e)
+    const [shownMode, watch] = await Promise.all([read($, modeAtom), read($, watchAtom)])
+
+    return next({ ...e, props: { ...e.props, tail: statusEntry({ mode: shownMode, watch }) } })
+  })
+
+  // The horizontal and unified layouts draw in the band above the prompt. A survey there comes first.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (mode === 'off' || layout === 'vertical' || e.props.hasSurvey) return next(e)
+
+    return drawTutor($, settings, $.ui.resolve(e), {
+      layout,
+      isFocused: false,
+      columns: e.props.bodyColumns,
+      isCompact: layout === 'unified' || e.surface !== 'terminal',
     })
   })
 }
