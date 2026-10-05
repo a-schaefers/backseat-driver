@@ -254,6 +254,8 @@ export function stubSession(on: On, options: StubOptions = {}) {
      * job asks next. `look:overloaded`, `explain:...` or `progress:...` is for that job's next request.
      */
     failing: [] as string[],
+    /** Claude Code's id for this session. `/clear` gives a session another: a test sets it and fires `classic.SessionStart`. */
+    sessionId: SESSION_ID as string,
     /** The jobs (`look`, `explain`, `progress`) whose model requests stay open, as a slow model's do, until `release()`. */
     stalled: [] as string[],
     /** The answers held back for those requests. */
@@ -350,8 +352,8 @@ export function stubSession(on: On, options: StubOptions = {}) {
   }
 
   on('session.start', () => ({ cwd: ROOT }))
-  on('session.end', () => ({ sessionId: SESSION_ID }))
-  on('session.id', () => ({ value: SESSION_ID }))
+  on('session.end', () => ({ sessionId: session.sessionId }))
+  on('session.id', () => ({ value: session.sessionId }))
   on('session.version', () => ({ value: { version: '2.1.289', base: '2.1.289', builtAt: '2026-10-03T19:21:39Z' } }))
   on('classic.SessionStart', () => ({}))
   on('classic.StopFailure', () => ({}))

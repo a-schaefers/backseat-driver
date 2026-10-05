@@ -28,6 +28,8 @@ export type Play =
   /** Just switched on: the working tree has not been read yet. */
   | { at: 'starting' }
   | { at: 'no-git' }
+  /** Another session drives this project's background jobs. This one is for the conversation. */
+  | { at: 'following' }
   | { at: 'paused' }
   /** Nothing has changed since the last look. */
   | { at: 'watching' }
@@ -44,6 +46,8 @@ export type PlayFacts = {
   /** False until the watcher has read the working tree. */
   isReady: boolean
   hasRepo: boolean
+  /** True when another session holds this project's lease (`lease.ts`). */
+  isFollowing: boolean
   isAutomatic: boolean
   /** Whether anything differs from what the last look saw. */
   hasPending: boolean
@@ -74,6 +78,7 @@ export function playOf(facts: PlayFacts): Play {
   if (!facts.isReady) return { at: 'starting' }
   if (!facts.hasRepo) return { at: 'no-git' }
   if (facts.mode === 'paused') return { at: 'paused' }
+  if (facts.isFollowing) return { at: 'following' }
   if (facts.isLooking) return { at: 'looking' }
   if (!facts.isAutomatic) return { at: 'on-request' }
   const dueAt = paced(facts)

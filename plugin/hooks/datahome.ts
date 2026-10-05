@@ -75,6 +75,16 @@ export function projectDir(root: string, repoRoot: string): string {
   return `${root}/projects/${projectId(repoRoot)}`
 }
 
+/** The file that says which session drives a project's background jobs (`lease.ts`). */
+export function leasePath(root: string, repoRoot: string): string {
+  return `${projectDir(root, repoRoot)}/lease.json`
+}
+
+/** The folders that hold what is on record about the person, which every session reads and any may change. */
+export function sharedFolders(root: string): string[] {
+  return [`${root}/profiles`, `${root}/progress`]
+}
+
 /** The file that holds a project's journal: what the person has been doing in its code. */
 export function journalPath(root: string, repoRoot: string): string {
   return `${projectDir(root, repoRoot)}/journal.json`

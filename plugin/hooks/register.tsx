@@ -47,6 +47,7 @@ import {
   isOwnFolder,
   isRemovable,
   journalPath,
+  leasePath,
   lockRepoPath,
   MARKER,
   MARKER_TEXT,
@@ -54,6 +55,7 @@ import {
   progressPath,
   projectDir,
   projectId,
+  sharedFolders,
 } from './datahome'
 import { createDebugLog, createTracer, DEBUG_USAGE, FLUSH_MS, parseDebugRequest, parseSwitch, sessionFolder } from './debuglog'
 import type { DebugRequest } from './debuglog'
@@ -153,6 +155,8 @@ import type { Question } from './questions'
 import { createRecorder } from './recorder'
 import { createScheduler } from './scheduler'
 import type { Scheduler } from './scheduler'
+import { claimed, nextLeaseCheck, parseLease, released } from './lease'
+import type { Lease } from './lease'
 import { FOCUS_SCAN_MS, focusGapMs, scanGapMs } from './sensor'
 import { playLine, watchOf } from './status'
 import type { Recorder } from './recorder'
@@ -301,6 +305,25 @@ let reviewFailureNoted: Promise<void> | null = null
 let profiles: Profiles = NO_PROFILES
 /** The model's tools are registered the first time the tutor is switched on, and only then. */
 let areToolsRegistered = false
+
+/**
+ * Whether this session drives the project's background jobs: the looks, the
+ * reviews, the journal, the editor's view (`lease.ts`). False while another
+ * session holds the project's lease, and this one is then for the
+ * conversation only. True where there is no lease to hold: outside a
+ * repository, or with no data folder.
+ */
+let isDriver = true
+/** The id this session holds the lease under. `/clear` gives a session another id, and the lease is still its own. */
+let leaseHolder = ''
+/**
+ * The files that hold what is on record about the person, as last seen:
+ * names, sizes and times in one string. Another session may change them.
+ */
+let sharedStamp: string | null = null
+let sharedCheckedAt = 0
+/** How often a scan looks at whether those files changed. One listing per folder. */
+const SHARED_CHECK_MS = 5000
 
 /** Explain: the lookup engine, and where the person is looking. */
 let explainer: Explainer | null = null
@@ -451,6 +474,7 @@ function snapshot(): Record<string, unknown> {
     health,
     jobBlocks: Object.fromEntries(jobBlocks),
     pressure,
+    lease: { isDriver, holder: leaseHolder },
     review: {
       agentId: reviewAgentId,
       scope: reviewScope === null ? null : scopeSubject(reviewScope),
@@ -742,6 +766,7 @@ function playFacts(settings: Settings): PlayFacts {
     mode: mode === 'paused' ? 'paused' : 'on',
     isReady: isWatchReady,
     hasRepo: repoRoot !== '',
+    isFollowing: !isDriver,
     isAutomatic: settings.playByPlay.isAutomatic,
     hasPending: watcher?.hasPending() ?? false,
     lastChangeAt,
@@ -1694,6 +1719,11 @@ async function registerTools($: EngineInterface): Promise<void> {
  */
 async function look($: EngineInterface, settings: Settings, isAsked: boolean): Promise<void> {
   const active = watcher
+  if (!isDriver) {
+    if (isAsked) $.ui.toast(FOLLOWING)
+
+    return
+  }
   if (isLooking || active === null) return
   isLooking = true
   schedulerOf($).cancel('look')
@@ -1885,6 +1915,145 @@ async function startReview($: EngineInterface, settings: Settings, scope: Review
   await reviewFailed($, settings, scope, refusal, 'own')
 
   return false
+}
+
+/** What a session that does not drive says when it is asked for a look or a review. */
+const FOLLOWING = 'Another session is driving Backseat Driver in this project. Ask for it there.'
+
+/**
+ * Tries for the project's lease, or renews it, and takes up or lays down the
+ * driving when that changes who drives. Called at switch-on, when the
+ * `lease` deadline comes, and after `/clear`, which gives the session
+ * another id.
+ */
+async function keepLease($: EngineInterface, settings: Settings, run: number): Promise<void> {
+  if (run !== engagement || mode === 'off') return
+  if (repoRoot === '' || dataRoot === '') {
+    // No lease to hold: nothing else can be driving.
+    isDriver = true
+
+    return
+  }
+  const path = leasePath(dataRoot, repoRoot)
+  const me = await $.session.id()
+  const now = await $.clock.now()
+  let lease: Lease
+  try {
+    // Read first. A session that is waiting changes nothing while the lease is held, and so takes no lock.
+    const seen = parseLease(await storeOf($).read(path))
+    lease = claimed(seen, me, now, leaseHolder) === seen ? seen : await updateJson(storeOf($), path, parseLease, stored => claimed(stored, me, now, leaseHolder))
+  } catch (error) {
+    // With no lease to go by, this session carries on as it was.
+    fail($, 'could not read the lease', error)
+    lease = { v: 1, session: isDriver ? me : '', at: now }
+  }
+  // Switched off, or on again, while the lease was being read: whoever did that decides who drives.
+  if (run !== engagement) return
+  const wasDriver = isDriver
+  isDriver = lease.session === me
+  if (isDriver) leaseHolder = me
+  schedulerOf($).set('lease', nextLeaseCheck(lease, me, now, Math.random()), () => keepLease($, settings, engagement))
+  if (isDriver === wasDriver) return
+  trace($, 'state', 'lease', () => ({ isDriver, lease, me }))
+  if (isDriver) await startDriving($, settings, run)
+  else await stopDriving($, settings)
+}
+
+/** Gives the lease back, so that a session waiting for it does not have to wait for it to run out. */
+async function giveLease($: EngineInterface, path: string, holder: string): Promise<void> {
+  if (holder === '') return
+  try {
+    await updateJson(storeOf($), path, parseLease, stored => released(stored, holder))
+  } catch (error) {
+    fail($, 'could not give the lease back', error)
+  }
+}
+
+/**
+ * The session that drove this project is gone, or gave the lease back, and
+ * this one drives now. The working tree as it stands is where it starts
+ * from, as when the tutor is switched on.
+ */
+async function startDriving($: EngineInterface, settings: Settings, run: number): Promise<void> {
+  await startWatching($, settings, run)
+  if (run !== engagement || !isDriver) return
+  await startJournal($, run, false)
+  await loadQueue($)
+  await planReview($, settings)
+}
+
+/**
+ * Another session drives this project now: nothing here scans, looks,
+ * reviews or keeps the journal. What the journal held goes to disk, for the
+ * session that does.
+ */
+async function stopDriving($: EngineInterface, settings: Settings): Promise<void> {
+  const plan = schedulerOf($)
+  for (const name of ['scan', 'look', 'review', 'assess', 'review-timer', 'journal']) plan.cancel(name)
+  const leaving = recorder
+  recorder = null
+  waiting = EMPTY_QUEUE
+  if (leaving !== null) await flushJournal($, leaving, await $.clock.now(), true)
+  await showWorking($, await $.clock.now())
+  await showPlay($, settings)
+}
+
+/** The shared files' names, sizes and times, in one string. One listing per folder. */
+async function sharedPrint($: EngineInterface): Promise<string> {
+  const parts: string[] = []
+  for (const folder of sharedFolders(dataRoot)) {
+    try {
+      for (const entry of await $.fs.list(folder)) {
+        if (entry.name.endsWith('.json')) parts.push(`${folder}/${entry.name}:${entry.size}:${entry.mtimeMs}`)
+      }
+    } catch {
+      // Not there yet: nothing has been recorded.
+    }
+  }
+
+  return parts.sort().join('\n')
+}
+
+/**
+ * What is on record about the person is shared by every session, in every
+ * project, and any of them may change it: an answer, a hush, a level. When
+ * the files say one did, they are read again here, and an open note about
+ * something that was just hushed elsewhere leaves the pane.
+ */
+async function refreshShared($: EngineInterface, settings: Settings): Promise<void> {
+  if (dataRoot === '' || mode === 'off') return
+  sharedCheckedAt = await $.clock.now()
+  const print = await sharedPrint($)
+  if (print === sharedStamp) return
+  const isFirst = sharedStamp === null
+  sharedStamp = print
+  // The first reading is of what was loaded a moment ago.
+  if (isFirst) return
+
+  const subjects: Record<string, Profile> = { ...profiles.subjects }
+  for (const subject of Object.keys(profiles.subjects)) subjects[subject] = await loadSubject($, subject)
+  const areProfilesNew = JSON.stringify(subjects) !== JSON.stringify(profiles.subjects)
+  if (areProfilesNew) {
+    profiles = { ...profiles, subjects }
+    await update($, profilesAtom, () => profiles)
+    const open = await read($, notesAtom)
+    const kept = open.filter(note => !isHushed(profiles, languageOf(note.file), note.topic))
+    if (kept.length !== open.length) await update($, notesAtom, () => kept)
+  }
+  let isProgressNew = false
+  if (settings.isProgressOn) {
+    for (const language of profiles.languages) {
+      const record = await loadRecord($, language)
+      if (JSON.stringify(record) === JSON.stringify(records.get(language))) continue
+      records.set(language, record)
+      isProgressNew = true
+    }
+    if (isProgressNew) await setProgress($, { records: profiles.languages.map(language => records.get(language) ?? emptyRecord(language)) })
+  }
+  if (!areProfilesNew && !isProgressNew) return
+  trace($, 'state', 'shared', () => ({ areProfilesNew, isProgressNew }))
+  // The reviewer is told about the person when it is registered, so it is registered again.
+  await registerReviewer($, settings)
 }
 
 /** The file that holds the commits waiting in this project. */
@@ -2091,7 +2260,7 @@ function startAssessment($: EngineInterface, settings: Settings, commit: Waiting
  */
 async function planReview($: EngineInterface, settings: Settings): Promise<void> {
   const plan = schedulerOf($)
-  if (mode !== 'on' || repoRoot === '' || waiting.commits.length === 0) {
+  if (mode !== 'on' || repoRoot === '' || !isDriver || waiting.commits.length === 0) {
     plan.cancel('review')
     plan.cancel('assess')
 
@@ -2222,7 +2391,7 @@ async function keepReview($: EngineInterface, scope: ReviewScope, answer: string
  * review model, so that the faster models start from the big picture.
  */
 async function maybeSurvey($: EngineInterface, settings: Settings, run: number): Promise<void> {
-  if (project === null || project.isSurveyed || !isReviewFree()) return
+  if (project === null || project.isSurveyed || !isDriver || !isReviewFree()) return
   // With both triggers off, the deep review model runs only when asked, and that goes for this too.
   if (!settings.deepReview.isAfterCommit && settings.deepReview.everyMs === 0) return
   await withReviewSlot($, settings, async () => {
@@ -2239,6 +2408,11 @@ async function maybeSurvey($: EngineInterface, settings: Settings, run: number):
  */
 async function reviewSince($: EngineInterface, settings: Settings, isAsked: boolean): Promise<void> {
   if (mode === 'off' || (mode === 'paused' && !isAsked)) return
+  if (!isDriver) {
+    if (isAsked) $.ui.toast(FOLLOWING)
+
+    return
+  }
   // The timer holds back near the plan limit, and while Claude is not answering. A review asked for by hand does not.
   if (!isAsked && ((await readPressure($)).level === 'held' || !mayAsk(health))) return
   if (!isReviewFree()) {
@@ -2286,7 +2460,7 @@ async function startSince($: EngineInterface, settings: Settings, isAsked: boole
 
 /** Sets the timer for the next timed deep review. */
 function planTimedReview($: EngineInterface, settings: Settings, now: number): void {
-  if (settings.deepReview.everyMs <= 0 || mode === 'off' || repoRoot === '') return
+  if (settings.deepReview.everyMs <= 0 || mode === 'off' || repoRoot === '' || !isDriver) return
   schedulerOf($).set('review-timer', now + settings.deepReview.everyMs, () => timedReview($, settings))
 }
 
@@ -2328,7 +2502,7 @@ async function checkHead($: EngineInterface, settings: Settings): Promise<void> 
 
 /** Plans the next scan of the working tree, as soon after the last as `sensor.ts` says. */
 function planScan($: EngineInterface, settings: Settings, now: number): void {
-  if (mode !== 'on' || watcher === null) return
+  if (mode !== 'on' || watcher === null || !isDriver) return
   schedulerOf($).set('scan', now + scanGapMs({ now, activeAt, lastScanMs }), () => scan($, settings))
 }
 
@@ -2339,7 +2513,7 @@ function planScan($: EngineInterface, settings: Settings, now: number): void {
  */
 async function scan($: EngineInterface, settings: Settings): Promise<void> {
   const active = watcher
-  if (mode !== 'on' || active === null) return
+  if (mode !== 'on' || active === null || !isDriver) return
   if (isScanning) {
     isScanWanted = true
 
@@ -2367,6 +2541,8 @@ async function scan($: EngineInterface, settings: Settings): Promise<void> {
     if (!isWatchingClosely) await pollFocus($)
     await keepJournal($, active, now)
     await checkHead($, settings)
+    // Another session may have changed what is on record about the person.
+    if (now - sharedCheckedAt >= SHARED_CHECK_MS) await refreshShared($, settings)
     traceQuiet($)
     // A look is a deadline, set from what this scan found.
     await planLook($, settings)
@@ -2391,6 +2567,10 @@ function stopWatching(): void {
   reviewFailure = ''
   reviewFailureNoted = null
   isWatchingClosely = false
+  isDriver = true
+  leaseHolder = ''
+  sharedStamp = null
+  sharedCheckedAt = 0
   explainer?.stop()
   explainer = null
   watchedPaths.clear()
@@ -2497,7 +2677,10 @@ async function refreshView($: EngineInterface, isAsked = false): Promise<void> {
     viewedStamp = stamp
     await update($, explainAtom, () => view)
     const text = JSON.stringify(view)
-    if (text !== writtenView && dataRoot !== '') {
+    // One file serves every session and every project. It is written by the session that drives this project,
+    // and only while the editor's caret is in this project, or no editor has said where its caret is.
+    const isOurs = isDriver && (focusText === null || parseFocusFile(focusText, repoRoot) !== null)
+    if (text !== writtenView && dataRoot !== '' && isOurs) {
       writtenView = text
       await $.fs.write(`${dataRoot}/view.json`, viewFile(view, repoRoot, spot.source, await $.clock.now()))
     }
@@ -2659,8 +2842,8 @@ async function startExplaining($: EngineInterface, settings: Settings, run: numb
     project: () => ({ name: projectId(root).replace(/-[0-9a-f]{8}$/, ''), overview: project === null ? '' : overviewLine(project) }),
     insights: (path, name, symbolPrint, filePrint) =>
       project === null ? [] : insightsFor(project, path, name, symbolPrint, filePrint).map(insightLine),
-    // Paused, nothing is fetched unless it is asked for.
-    mode: () => (mode === 'off' ? 'off' : mode === 'paused' ? 'on request' : settings.explain.mode),
+    // Paused, or with another session driving this project, nothing is fetched unless it is asked for.
+    mode: () => (mode === 'off' ? 'off' : mode === 'paused' || !isDriver ? 'on request' : settings.explain.mode),
     // While Claude is not answering, or refuses this job's model, only what the person asks for is tried.
     pressure: () => (!mayAsk(health) || jobBlocks.has('explain') ? 'held' : pressure.level),
     model: settings.explain.model,
@@ -2914,7 +3097,7 @@ const PLACEMENT_COMMITS = 5
  * half, because the tutor did not watch that work arrive.
  */
 async function placeFirst($: EngineInterface, settings: Settings, run: number): Promise<void> {
-  if (!settings.isProgressOn || identity.length === 0 || repoRoot === '' || dataRoot === '') return
+  if (!settings.isProgressOn || identity.length === 0 || repoRoot === '' || dataRoot === '' || !isDriver) return
   const held = await readPressure($)
   if (held.level !== 'none' || !mayAsk(health)) return
   const mine = parseRecent((await git($, repoRoot, [...RECENT_COMMITS_ARGS])).stdout)
@@ -2957,7 +3140,10 @@ async function engage($: EngineInterface, settings: Settings, run: number, isFre
     await startWatching($, settings, run)
     if (run !== engagement) return
     tracer.inProject(repoRoot === '' ? '' : projectId(repoRoot))
-    await startJournal($, run, isFresh)
+    // Who drives this project is settled before anything that only the driver does.
+    await keepLease($, settings, run)
+    if (run !== engagement) return
+    if (isDriver) await startJournal($, run, isFresh)
     if (run !== engagement) return
     await moveOutOfStore($)
     const main = await setUpProfiles($)
@@ -2967,8 +3153,13 @@ async function engage($: EngineInterface, settings: Settings, run: number, isFre
     // Not waited for. Claude Code connects each tool before it answers, which took eight seconds a tool
     // behind a proxy in a live session, and nothing below needs them.
     void registerTools($).catch(error => fail($, 'could not register the tools', error))
-    await loadQueue($)
-    await adoptReview($, settings)
+    // The files as they are now are what was just loaded. A change from here on is another session's, or this one's own.
+    sharedStamp = null
+    await refreshShared($, settings)
+    if (isDriver) {
+      await loadQueue($)
+      await adoptReview($, settings)
+    }
     await startExplaining($, settings, run)
     // Commits that were left waiting, by an outage or a closed session, are taken up now.
     if (run === engagement) await planReview($, settings)
@@ -3020,6 +3211,8 @@ async function switchTo($: EngineInterface, next: Mode, settings: Settings): Pro
     await openPane($)
     void engage($, settings, engagement, true)
   } else {
+    // The lease goes back at once, so that a session waiting for it takes over without waiting for it to run out.
+    if (isDriver && repoRoot !== '' && dataRoot !== '') void giveLease($, leasePath(dataRoot, repoRoot), leaseHolder)
     stopWatching()
     stopAnimating()
     await update($, speechAtom, () => SILENT)
@@ -3182,6 +3375,8 @@ export const register: Register = (on, options) => {
       trace($, 'hook', 'classic.SessionStart', () => ({ source: e.source }))
       workingShown = ''
       await showWorking($, await $.clock.now())
+      // The session may go by another id now. The lease is renewed under it.
+      await keepLease($, settings, engagement)
     }
 
     return next(e)
@@ -3308,6 +3503,8 @@ export const register: Register = (on, options) => {
       explainContext(await read($, explainAtom)),
       recorder?.brief(await $.clock.now()) ?? '',
     ].filter(part => part !== '')
+    // Another session may have recorded something about the person since the last look at the files.
+    await refreshShared($, settings)
     trace($, 'hook', 'prompt.submit', () => ({ text: e.text, attached: shown }))
     // They are at the keyboard, here: what they saved a moment ago should not wait for the next scan.
     void kick($, settings, 'a prompt')
@@ -3430,9 +3627,12 @@ export const register: Register = (on, options) => {
       trace($, 'hook', 'session.end', () => ({ reason: e.reason }))
       const leaving = recorder
       if (leaving !== null) await flushJournal($, leaving, await $.clock.now(), true)
-      // After /clear and /resume this process carries on, and so does its log.
+      // After /clear and /resume this process carries on, and so do its log and its lease.
       if (e.reason === 'clear' || e.reason === 'resume') await flushDebug($)
-      else await stopDebug($, `the session ended (${e.reason})`)
+      else {
+        if (isDriver && repoRoot !== '' && dataRoot !== '') await giveLease($, leasePath(dataRoot, repoRoot), leaseHolder)
+        await stopDebug($, `the session ended (${e.reason})`)
+      }
     }
 
     return next(e)

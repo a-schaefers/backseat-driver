@@ -268,6 +268,7 @@ const FACTS: PlayFacts = {
   mode: 'on',
   isReady: true,
   hasRepo: true,
+  isFollowing: false,
   isAutomatic: true,
   hasPending: true,
   lastChangeAt: 100_000,
@@ -281,6 +282,17 @@ const FACTS: PlayFacts = {
   pressure: NO_PRESSURE,
   jobBlock: '',
 }
+
+test('a session that does not drive the project looks at nothing, and says who does', async () => {
+  const following = { ...FACTS, isFollowing: true }
+  expect(playOf(following)).toEqual({ at: 'following' })
+  expect(wakeAt(following)).toBe(null)
+  expect(isLookDue(following, 10_000_000)).toBe(false)
+  expect(playLine({ at: 'following' })).toBe('On. Another session is driving this project. This one is for the conversation.')
+  // Paused is still paused, and a folder that is no repository is still that.
+  expect(playOf({ ...following, mode: 'paused' })).toEqual({ at: 'paused' })
+  expect(playOf({ ...following, hasRepo: false })).toEqual({ at: 'no-git' })
+})
 
 test('what the play-by-play is doing follows from the facts', async () => {
   expect(playOf({ ...FACTS, isReady: false })).toEqual({ at: 'starting' })

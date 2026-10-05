@@ -32,6 +32,8 @@ export function playLine(play: Play): string {
       return 'On. Getting ready.'
     case 'no-git':
       return 'On. This folder is not a git repository, so there is no play-by-play.'
+    case 'following':
+      return 'On. Another session is driving this project. This one is for the conversation.'
     case 'watching':
       return 'On. Watching for your next save.'
     case 'on-request':
