@@ -68,6 +68,14 @@ Type `/bsd` in Claude Code. The first time you work in a language, it asks a few
 
 `Ctrl+X Tab` focuses the pane, and `Esc` leaves it. `1` to `5` switch tabs. The pane draws in the terminal and in the desktop app's Code tab. Models, pacing and persona (`torvalds`, `knuth`, `primeagen`, `eli5-tldr-kiss-terse`) live in tab `5`, Settings, or `/bsd settings`. They're in `/config` too.
 
+### Editors
+
+Plugins for Emacs, Neovim and VS Code live in [`editors/`](editors). They tell the tutor where your caret is, what you've selected and what's open, so Explain follows your cursor and the journal knows where you've been. The pane says which editor is connected. Nothing to configure.
+
+- **Neovim** (0.9+): `vim.opt.rtp:append('/path/to/backseat-driver/editors/neovim')` in `init.lua`.
+- **Emacs** (27+): `(add-to-list 'load-path "/path/to/backseat-driver/editors/emacs")`, `(require 'backseat-driver)`, `(backseat-driver-mode 1)`.
+- **VS Code**: in `editors/vscode`, `npx @vscode/vsce package --skip-license`, then `code --install-extension backseat-driver-0.1.0.vsix`.
+
 ## License
 
 MIT. The decision points and insights are adapted, with thanks, from Anthropic's [learning-output-style](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/learning-output-style) plugin, under its Apache 2.0 license. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

@@ -6,7 +6,7 @@ import { shortHash } from './hash'
  *   profiles/<language>.json   answers, hushes, lesson memory
  *   progress/<language>.json   evidence, level, report
  *   projects/<name>-<hash>/    one project's journal and cache
- *   focus.json                 written by an editor: where the caret is
+ *   editors/<editor>-<pid>.json one per running editor: where its caret is (editors.ts)
  *   debug.json, debug/         the debug log's switch, and the log (debuglog.ts)
  *   locks.git/                 a bare git repository whose refs are the locks on these files (locks.ts)
  */
@@ -90,9 +90,9 @@ export function journalPath(root: string, repoRoot: string): string {
   return `${projectDir(root, repoRoot)}/journal.json`
 }
 
-/** The file an editor writes to say where the caret is. One for every project: each tutor ignores a file outside its repository. */
-export function focusPath(root: string): string {
-  return `${root}/focus.json`
+/** The folder in which each running editor keeps one file to say where its caret is. Every tutor reads them all and keeps what is about its own repository. */
+export function editorsPath(root: string): string {
+  return `${root}/editors`
 }
 
 /** The bare repository whose refs are the locks that hold across sessions. */
@@ -124,7 +124,7 @@ export function isOwnFolder(names: readonly string[]): boolean {
 }
 
 /** What the tutor may delete: only these, directly under its own folder. */
-export const REMOVABLE = ['profiles', 'progress', 'projects', 'focus.json', 'view.json', 'update.json', 'debug', 'debug.json', 'locks.git'] as const
+export const REMOVABLE = ['profiles', 'progress', 'projects', 'editors', 'focus.json', 'view.json', 'update.json', 'debug', 'debug.json', 'locks.git'] as const
 
 /**
  * Whether `path` is something the tutor may delete: inside one of its own
