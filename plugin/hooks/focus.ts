@@ -4,13 +4,12 @@ import type { ExplainView, Spot } from '../types'
  * Where the person is looking, and the two small files that let an editor
  * take part.
  *
- * An editor writes `focus.json` in the tutor's data folder whenever the
- * cursor or the selection moves:
+ * Each running editor reports its caret in a file of its own (`editors.ts`):
  *
  *   {"file": "/abs/path/to/stats.py", "line": 12, "endLine": 15}
  *
  * `line` is 1-based. `endLine` is there only while lines are selected. The
- * tutor answers by writing `view.json` beside it: what it knows about that
+ * tutor answers by writing `view.json` in its data folder: what it knows about that
  * spot, already checked against the file on disk.
  */
 
@@ -38,7 +37,7 @@ function lineNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 1 ? Math.floor(value) : null
 }
 
-/** The spot `focus.json` names, or null when it does not parse or names a file outside this repository. */
+/** The spot an editor's report names, or null when it does not parse or names a file outside this repository. */
 export function parseFocusFile(text: string, repoRoot: string): Spot | null {
   let data: unknown
   try {

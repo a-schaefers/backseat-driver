@@ -20,7 +20,8 @@ export function parseStatus(output: string): StatusEntry[] {
     const index = field.charAt(0)
     const worktree = field.charAt(1)
     entries.push({ path: field.slice(3), index, worktree })
-    if (index === 'R' || index === 'C') i += 1
+    // A rename or copy is followed by its original path, in the index column or, after `git add -N`, the work tree's.
+    if (index === 'R' || index === 'C' || worktree === 'R' || worktree === 'C') i += 1
   }
 
   return entries

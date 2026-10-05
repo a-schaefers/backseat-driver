@@ -35,7 +35,7 @@ test('the unified layout says each note in one line, marked by its kind, and how
   expect(moreLine(6, 2)).toBe('and 4 more notes')
   expect(previewCount(30)).toBe(2)
   expect(previewCount(48)).toBe(3)
-  expect(unifiedTabs({ review: { ...NO_REVIEW, isUnseen: true }, notes: [{ ...note }] })).toEqual(['Play (1)', 'Review (new)', 'Explain', 'Progress'])
+  expect(unifiedTabs({ review: { ...NO_REVIEW, isUnseen: true }, notes: [{ ...note }] })).toEqual(['Play (1)', 'Review (new)', 'Explain', 'Progress', 'Settings'])
 })
 
 test('every layout draws the notes in one order, decisions first, and the keys start on the first one drawn', async () => {

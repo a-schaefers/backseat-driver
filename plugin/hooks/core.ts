@@ -1,10 +1,15 @@
+import type { Watch } from '../types'
 import type { Throttle } from './gate'
 import type { Health, HealthEvent, ModelResult, Outcome, Pressure, Trouble } from './health'
 import * as K from './kernel.js'
-import type { HealthWire, PlayFactsWire } from './kernel.js'
+import type { HealthWire, PlayFactsWire, WaitingWire } from './kernel.js'
 import type { Lease } from './lease'
+import type { LicenseFacts, Standing } from './license'
 import type { Play, PlayFacts, Why } from './play'
+import type { ReviewQueue, Waiting, Wanted } from './reviewqueue'
+import { clockTime } from './clock'
 import type { ScanFacts } from './sensor'
+import type { HealthFacts } from './status'
 
 /**
  * The one bridge between the kernel and the rest of the mod.
@@ -279,4 +284,264 @@ export function wakeAt(facts: PlayFacts): number | null {
 /** Whether a look may start by itself at `now`. */
 export function isLookDue(facts: PlayFacts, now: number): boolean {
   return K.isLookDueWire(factsToWire(facts))(now)
+}
+
+// --- The review queue (Kernel.Queue)
+
+/** How many commits wait at most. A newer one pushes the oldest out. */
+export const MAX_WAITING: number = K.maxWaiting
+/** A commit that has waited this long is let go. */
+export const MAX_WAIT_MS: number = K.maxWaitMs
+/** How often one stage of one commit is tried before it is given up on. */
+export const MAX_ATTEMPTS: number = K.maxAttempts
+/** After a try that got no answer, the next one waits this long, doubling. */
+export const RETRY_MS: number = K.retryBaseMs
+/** A review that has not reported back after this long is looked for. */
+export const WATCHDOG_MS: number = K.watchdogMs
+/** One that is still running then gets until this long after it started, and no longer. */
+export const WATCHDOG_LIMIT_MS: number = K.watchdogLimitMs
+/** How long a review that ended in "error" waits to be told which error. */
+export const VERDICT_MS: number = K.verdictMs
+/** What the Deep review tab says about a commit whose review is held back by the plan's limit. */
+export const PLAN_HELD: string = K.planHeld
+
+function commitsToWire(queue: ReviewQueue): WaitingWire[] {
+  return queue.commits.map(commit => ({ ...commit, attempts: Math.trunc(commit.attempts) }))
+}
+
+function queueFromWire(commits: WaitingWire[]): ReviewQueue {
+  return { v: 1, commits: commits.map(commit => ({ hash: commit.hash, title: commit.title, at: commit.at, isReviewed: commit.isReviewed, attempts: commit.attempts })) }
+}
+
+/** Whether two lists of commits are the same commits at the same stages. */
+function isSameQueue(queue: ReviewQueue, commits: WaitingWire[]): boolean {
+  return (
+    queue.commits.length === commits.length &&
+    queue.commits.every((commit, at) => {
+      const other = commits[at]
+
+      return other !== undefined && commit.hash === other.hash && commit.isReviewed === other.isReviewed && commit.attempts === other.attempts
+    })
+  )
+}
+
+/** The queue without what has waited too long. Nothing let go, the same object comes back. */
+export function current(queue: ReviewQueue, now: number): ReviewQueue {
+  const next = K.currentQueueWire(commitsToWire(queue))(now)
+
+  return isSameQueue(queue, next) ? queue : queueFromWire(next)
+}
+
+/** A commit that was just seen joins the end. One already waiting stays as it is, and the same object comes back. */
+export function withCommit(queue: ReviewQueue, commit: { hash: string; title: string }, at: number): ReviewQueue {
+  const next = K.withCommitWire(commitsToWire(queue))(commit.hash)(commit.title)(at)
+
+  return isSameQueue(queue, next) ? queue : queueFromWire(next)
+}
+
+export function withoutCommit(queue: ReviewQueue, hash: string): ReviewQueue {
+  return queueFromWire(K.withoutCommitWire(commitsToWire(queue))(hash))
+}
+
+/** The commit's review is done, or given up on: what is left is the look at the person's progress. */
+export function reviewed(queue: ReviewQueue, hash: string): ReviewQueue {
+  return queueFromWire(K.reviewedWire(commitsToWire(queue))(hash))
+}
+
+/** One more try at the commit's present stage got no answer. */
+export function withAttempt(queue: ReviewQueue, hash: string): ReviewQueue {
+  return queueFromWire(K.withAttemptWire(commitsToWire(queue))(hash))
+}
+
+/** Whether the commit's present stage has been tried as often as it will be. */
+export function isSpent(queue: ReviewQueue, hash: string): boolean {
+  return K.isSpentWire(commitsToWire(queue))(hash)
+}
+
+/** How long to wait after the nth try in a row that got no answer. */
+export function retryMs(attempts: number): number {
+  return K.retryMs(Math.trunc(attempts))
+}
+
+function nextFromWire(next: K.NextWire): Waiting | null {
+  return next.has ? queueFromWire([next.commit]).commits[0] ?? null : null
+}
+
+/** The oldest commit that still needs its review. */
+export function nextToReview(queue: ReviewQueue, wanted: Wanted): Waiting | null {
+  return nextFromWire(K.nextToReviewWire(commitsToWire(queue))(wanted))
+}
+
+/** The oldest commit whose review is done with and which still needs the look at the person's progress. */
+export function nextToAssess(queue: ReviewQueue, wanted: Wanted): Waiting | null {
+  return nextFromWire(K.nextToAssessWire(commitsToWire(queue))(wanted))
+}
+
+/** The commits that need nothing more under these settings, to be taken out. */
+export function settledIn(queue: ReviewQueue, wanted: Wanted): string[] {
+  return K.settledInWire(commitsToWire(queue))(wanted)
+}
+
+/**
+ * Why a waiting review is not running, as the tab says it. '' when nothing
+ * holds it back. `retryAt` is the review's own next try, when it has one
+ * planned: the time named is the later of the two.
+ */
+export function heldText(health: Health, pressure: Pressure, jobBlock: string | undefined, retryAt: number | null): string {
+  return K.heldTextWire(clockTime)(healthToWire(health))(pressureToWire(pressure))(jobBlock ?? '')(retryAt !== null)(retryAt ?? 0)
+}
+
+/** What the tab says after a try that got no answer: when the next one is, or that there will be none. */
+export function failedText(detail: string, retryAt: number | null): string {
+  return K.failedTextWire(clockTime)(detail)(retryAt !== null)(retryAt ?? 0)
+}
+
+// --- The store's retry policy (Kernel.Store)
+
+/** How often a file that is empty or does not parse is read again before it counts as broken. */
+export const READ_TRIES: number = K.readTries
+/** How long to wait before reading it again: a write takes a few milliseconds. */
+export const READ_RETRY_MS: number = K.readRetryMs
+/** How often a change is made again after another session's write got in its way. */
+export const WRITE_TRIES: number = K.writeTries
+
+export type AfterRead = { next: 'absent' } | { next: 'sound' } | { next: 'broken' } | { next: 'again'; waitMs: number }
+
+/** What to do after the nth read of a file found it missing, parsed, or empty or unparseable. */
+export function afterRead(attempt: number, found: 'missing' | 'parsed' | 'unreadable'): AfterRead {
+  const wire = K.afterReadWire(Math.trunc(attempt))(found)
+  switch (wire.next) {
+    case 'absent':
+      return { next: 'absent' }
+    case 'sound':
+      return { next: 'sound' }
+    case 'again':
+      return { next: 'again', waitMs: wire.waitMs }
+    default:
+      return { next: 'broken' }
+  }
+}
+
+/** What the nth try at a change does once it has the new text: nothing, check that nobody wrote first, or write. */
+export function changeStep(attempt: number, facts: { hasLock: boolean; isSound: boolean; isSame: boolean }): 'unchanged' | 'check' | 'write' {
+  const step = K.stepOfWire({ attempt: Math.trunc(attempt), ...facts })
+
+  return step === 'unchanged' || step === 'check' ? step : 'write'
+}
+
+/** Whether to keep the file as it was before writing over it. */
+export function keepsBackup(facts: { wantsBackup: boolean; isSound: boolean; exists: boolean }): boolean {
+  return K.keepsBackupWire(facts)
+}
+
+export type AfterWrite = { next: 'done' } | { next: 'unconfirmed' } | { next: 'again'; waitMs: number }
+
+/** What the nth try does after reading back what it wrote. */
+export function afterWrite(attempt: number, isConfirmed: boolean): AfterWrite {
+  const wire = K.afterWriteWire(Math.trunc(attempt))(isConfirmed)
+  switch (wire.next) {
+    case 'done':
+      return { next: 'done' }
+    case 'again':
+      return { next: 'again', waitMs: wire.waitMs }
+    default:
+      return { next: 'unconfirmed' }
+  }
+}
+
+// --- The status line (Kernel.Status)
+
+function playToWire(play: Play): K.PlayWire {
+  const wire: K.PlayWire = { at: play.at, dueAt: 0, isSpacing: false, hasUntil: false, until: 0, why: '', detail: '', trouble: '', percent: 0, window: '' }
+  switch (play.at) {
+    case 'settling':
+      return { ...wire, dueAt: play.dueAt, isSpacing: play.isSpacing }
+    case 'waiting': {
+      const waiting = { ...wire, hasUntil: play.until !== null, until: play.until ?? 0, why: play.why.kind }
+      switch (play.why.kind) {
+        case 'trouble':
+          return { ...waiting, trouble: play.why.trouble, detail: play.why.detail }
+        case 'plan':
+          return { ...waiting, percent: play.why.percent, window: play.why.window }
+        default:
+          return { ...waiting, detail: play.why.detail }
+      }
+    }
+    default:
+      return wire
+  }
+}
+
+/** A scan of the working tree that took this long is worth a word. */
+export const SLOW_SCAN_MS: number = K.slowScanMs
+
+/** What the status line says while the tutor is on or paused. */
+export function playLine(play: Play): string {
+  return K.playLineWire(clockTime)(playToWire(play))
+}
+
+/**
+ * What keeps going wrong in the background, for the dim row under the status
+ * line. '' when nothing does. It leaves out what the status line itself says.
+ */
+export function healthLine(facts: HealthFacts): string {
+  return K.healthLineWire(clockTime)({
+    play: playToWire(facts.play),
+    health: healthToWire(facts.health),
+    pressure: pressureToWire(facts.pressure),
+    lastScanMs: facts.lastScanMs,
+    failing: [...facts.failing],
+  })
+}
+
+/** The state the animated character takes its pose from. */
+export function watchState(play: Play): Watch['state'] {
+  const state = K.watchStateWire(playToWire(play))
+
+  return state === 'starting' || state === 'no-git' || state === 'looking' || state === 'settling' || state === 'waiting' ? state : 'idle'
+}
+
+// --- Deadlines (Kernel.Schedule)
+
+export type Arm = { next: 'keep' } | { next: 'disarm' } | { next: 'arm'; at: number }
+
+/** What to do with a timer armed for `armedFor` (null: none), given the deadlines as they are now. */
+export function arming(armedFor: number | null, deadlines: { name: string; at: number }[]): Arm {
+  const wire = K.armingWire(armedFor !== null)(armedFor ?? 0)(deadlines)
+  switch (wire.next) {
+    case 'keep':
+      return { next: 'keep' }
+    case 'arm':
+      return { next: 'arm', at: wire.at }
+    default:
+      return { next: 'disarm' }
+  }
+}
+
+/** How long from `now` until `at`. A time already past is now. */
+export function delayMs(at: number, now: number): number {
+  return K.delayMsWire(at)(now)
+}
+
+/** The names of the deadlines due at `now`, the earliest first, in the order given among those due together. */
+export function dueNow(deadlines: { name: string; at: number }[], now: number): string[] {
+  return K.dueNowWire(deadlines)(now)
+}
+
+// --- The license (Kernel.License)
+
+const STANDINGS: readonly Standing[] = ['unchosen', 'personal', 'licensed', 'needs-key', 'bad-key', 'expired', 'withdrawn', 'unchecked']
+
+/** Where the person stands with the license. A standing the kernel names that this file does not know is `licensed`, which shows nothing. */
+export function licenseStanding(facts: LicenseFacts): Standing {
+  const named = K.licenseStandingWire(facts)
+
+  return STANDINGS.find(standing => standing === named) ?? 'licensed'
+}
+
+/** When to ask the license server about the key, or null for not at all. */
+export function nextLicenseCheck(facts: LicenseFacts): number | null {
+  const at = K.licenseNextCheckWire(facts)
+
+  return at === 0 ? null : at
 }

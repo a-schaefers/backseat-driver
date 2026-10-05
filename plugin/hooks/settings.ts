@@ -1,5 +1,7 @@
 import type { PluginOptions } from 'claude-code'
 
+import type { SettingRow } from '../types'
+
 export type Thinking = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 /** What a persona half is called when none is chosen: Claude's own voice, or its own engineering judgment. */
@@ -120,4 +122,45 @@ export function readSettings(options: PluginOptions): Settings {
       thinking: thinking(options.explain_thinking, 'low'),
     },
   }
+}
+
+/** What a `/config` row is made of, as far as the Settings tab needs it (`ConfigRow` in Claude Code). */
+export type ConfigRowLike = {
+  key: string
+  label: string
+  description?: string
+  kind: 'boolean' | 'choice' | 'text' | 'number'
+  value: boolean | string | number | readonly string[]
+  options?: readonly string[]
+  provider: { plugin: string }
+  isLocked: boolean
+}
+
+/**
+ * This plugin's rows of `/config`, in its order, as the Settings tab shows
+ * them. A toggle becomes a pick between `on` and `off`. Every field of the
+ * plugin is a toggle or a choice, so a text or number row, should one appear,
+ * is left out rather than shown in a form it cannot be changed in.
+ */
+export function settingRows(rows: readonly ConfigRowLike[], plugin: string): SettingRow[] {
+  return rows.flatMap((row): SettingRow[] => {
+    // A copy loaded from a folder is `backseat-driver@inline` in /config, and an installed one `backseat-driver@<marketplace>`.
+    if (row.provider.plugin.split('@')[0] !== plugin.split('@')[0]) return []
+    const shared = { key: row.key, label: row.label, description: row.description ?? '', isLocked: row.isLocked }
+    if (row.kind === 'boolean') return [{ ...shared, kind: 'boolean', value: row.value === true ? 'on' : 'off', options: ['on', 'off'] }]
+    if (row.kind !== 'choice' || row.options === undefined || row.options.length === 0) return []
+    const value = typeof row.value === 'string' ? row.value : String(row.value)
+
+    return [{ ...shared, kind: 'choice', value, options: [...row.options] }]
+  })
+}
+
+/** What `$.config.set` is given for a pick in the Settings tab: a toggle's boolean, or the option itself. */
+export function configValue(row: Pick<SettingRow, 'kind'>, picked: string): boolean | string {
+  return row.kind === 'boolean' ? picked === 'on' : picked
+}
+
+/** The rows with one value changed, as the tab shows it until `/config` is read again. */
+export function withSetting(rows: readonly SettingRow[], key: string, value: string): SettingRow[] {
+  return rows.map(row => (row.key === key ? { ...row, value } : row))
 }

@@ -38,6 +38,9 @@ export function typed(command: string, args = '') {
 export const SESSION = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
 
 export const HOME = '/home/me'
+
+/** A person who said long ago how they use the tutor, so that the license question is not among the questions a test counts. */
+export const LICENSE_ANSWERED = { 'license.json': { v: 1, use: 'personal', isAsked: true } }
 /** The session's id, as `$.session.id()` answers it. */
 export const SESSION_ID = 'feedc0de-0000-4000-8000-000000000001'
 /** Where the tutor keeps its own files in a test. */
@@ -201,7 +204,7 @@ export function stubSession(on: On, options: StubOptions = {}) {
   let cloneTop = ''
   let cloneHead = commitHash(500)
   const session = {
-    /** The rows of `/config`, as `$.config.list()` answers: the plugin's layout and one of another plugin's. */
+    /** The rows of `/config`, as `$.config.list()` answers: three of the plugin's own and one of another plugin's. */
     config: [
       {
         key: 'backseat-driver.layout',
@@ -209,6 +212,24 @@ export function stubSession(on: On, options: StubOptions = {}) {
         kind: 'choice',
         value: 'unified',
         options: ['unified', 'horizontal', 'vertical'],
+        provider: { plugin: 'backseat-driver', tier: 'user' },
+        isLocked: false,
+      },
+      {
+        key: 'backseat-driver.voice',
+        label: 'Voice persona',
+        description: 'How the tutor talks.',
+        kind: 'choice',
+        value: 'default',
+        options: ['default', 'torvalds', 'knuth'],
+        provider: { plugin: 'backseat-driver', tier: 'user' },
+        isLocked: false,
+      },
+      {
+        key: 'backseat-driver.animated_persona',
+        label: 'Animated persona',
+        kind: 'boolean',
+        value: true,
         provider: { plugin: 'backseat-driver', tier: 'user' },
         isLocked: false,
       },
@@ -359,16 +380,17 @@ export function stubSession(on: On, options: StubOptions = {}) {
       session.replies.push(typeof reply === 'string' ? reply : JSON.stringify(reply))
     },
     /**
-     * Moves the cursor in an editor that reports to the tutor: it writes the
-     * focus file. `more` holds the protocol's other fields, such as `buffers`.
+     * Moves the cursor in an editor that reports to the tutor: it writes its
+     * file in the editors' folder. `more` holds the protocol's other fields,
+     * such as `buffers`, and may name the `editor` (one file each) or set `at`.
+     * By default the editor keeps beating for as long as the test runs.
      */
     editor(file: string, line: number, endLine?: number, more: Record<string, unknown> = {}) {
       writes += 1
-      session.disk.set(
-        `${DATA_HOME}/focus.json`,
-        JSON.stringify({ file, line, ...(endLine === undefined ? {} : { endLine }), ...more }),
-      )
-      mtimes.set(`${DATA_HOME}/focus.json`, writes)
+      const path = `${DATA_HOME}/editors/${String(more.editor ?? 'test')}-1.json`
+      const report = { v: 1, editor: 'test', pid: 1, at: Number.MAX_SAFE_INTEGER, changed: session.clock.now() + writes, file, line }
+      session.disk.set(path, JSON.stringify({ ...report, ...(endLine === undefined ? {} : { endLine }), ...more }))
+      mtimes.set(path, writes)
     },
     /**
      * What the explain model answers. With `when`, every request whose prompt
@@ -444,16 +466,6 @@ export function stubSession(on: On, options: StubOptions = {}) {
     session.statuses.push(e.text)
 
     return { value: undefined }
-  })
-  on('config.list', () => ({ value: session.config }))
-  on('config.set', ($, e) => {
-    session.configured.push({ key: e.key, value: e.value })
-    const deny = session.configDeny
-    session.configDeny = ''
-    if (deny !== '') return { deny }
-    session.config = session.config.map(row => (row.key === e.key ? { ...row, value: e.value } : row))
-
-    return { value: e.value }
   })
 
   on('fs.read', ($, e) => {
@@ -664,7 +676,7 @@ export function stubSession(on: On, options: StubOptions = {}) {
 
       return ok(changed.map(path => `diff --git a/${path} b/${path}\n+${files[path] ?? ''}`).join('\n'))
     }
-    if (args[0] === 'show' && !String(args[1]).startsWith('HEAD:')) {
+    if (args[0] === 'show' && !String(args[1]).includes(':')) {
       const commit = commits.find(known => known.hash === args[args.length - 1])
 
       return commit === undefined ? failed : ok(`commit ${commit.hash}\n\n${commit.message}\n\n+patch of ${commit.message}`)
@@ -681,8 +693,11 @@ export function stubSession(on: On, options: StubOptions = {}) {
       )
     }
     if (args[0] === 'show') {
-      const path = String(args[1]).replace(/^HEAD:/, '')
-      const text = head[path]
+      // `HEAD:path`, or `<hash>:path` for a file as a commit left it.
+      const [ref = '', ...rest] = String(args[1]).split(':')
+      const path = rest.join(':')
+      const tree = ref === 'HEAD' ? head : commits.find(known => known.hash === ref)?.tree
+      const text = tree?.[path]
 
       return text === undefined ? failed : ok(text)
     }
@@ -703,6 +718,8 @@ export function stubSession(on: On, options: StubOptions = {}) {
     const answer = () => {
       const queued = session.failing.findIndex(entry => !entry.includes(':') || entry.startsWith(`${job}:`))
       const failure = queued === -1 ? undefined : session.failing.splice(queued, 1)[0]?.replace(/^[a-z]+:/, '')
+      // Claude Code refusing to send at all, as for a blocked model: the call rejects.
+      if (failure === 'refused') throw new Error('refused')
       if (job === 'progress') {
         if (failure !== undefined) return refused(failure)
         const text = session.assessmentReplies.shift() ?? '{"observations": [], "level": null}'
@@ -770,6 +787,16 @@ export function stubSession(on: On, options: StubOptions = {}) {
   }))
   on('agent.offer', () => ({ isOffered: true }))
   on('turn.complete', () => ({ text: '' }))
+  on('config.list', () => ({ value: session.config }))
+  on('config.set', ($, e) => {
+    session.configured.push({ key: e.key, value: e.value })
+    const deny = session.configDeny
+    session.configDeny = ''
+    if (deny !== '') return { deny }
+    session.config = session.config.map(row => (row.key === e.key ? { ...row, value: e.value } : row))
+
+    return { value: e.value }
+  })
   on('ui.toast', ($, e) => {
     session.toasts.push(e.text)
 

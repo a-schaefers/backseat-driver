@@ -94,7 +94,8 @@ function bump(profile: Profile, topics: readonly string[], field: keyof TopicSta
     next[topic] = { ...stats, [field]: stats[field] + 1 }
   }
   const kept = Object.entries(next)
-    .sort((a, b) => b[1].flagged + b[1].explained - (a[1].flagged + a[1].explained))
+    // On a tie, what just came up stays: otherwise a full memory would forget every new topic at once.
+    .sort((a, b) => b[1].flagged + b[1].explained - (a[1].flagged + a[1].explained) || Number(topics.includes(b[0])) - Number(topics.includes(a[0])))
     .slice(0, MAX_TOPICS)
 
   return { ...profile, topics: Object.fromEntries(kept) }

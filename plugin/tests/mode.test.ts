@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { HELP, helpText, isModeRequest, parseRequest, transition } from '../hooks/mode'
 import { parseProfile, subjectKey } from '../hooks/profiles'
-import { SESSION, sessionTest, stubSession, typed } from './kit'
+import { LICENSE_ANSWERED, SESSION, sessionTest, stubSession, typed } from './kit'
 
 test('parseRequest: no argument means on, an unknown word means help', async () => {
   expect(parseRequest('')).toEqual({ request: 'on', rest: '' })
@@ -92,7 +92,7 @@ sessionTest('the tutor is still on after /clear', async ($, on) => {
 })
 
 sessionTest('/bsd answers before its setup has finished', { options: { layout: 'vertical' } }, async ($, on) => {
-  const session = stubSession(on, { head: { 'stats.py': 'x = 1\n' } })
+  const session = stubSession(on, { head: { 'stats.py': 'x = 1\n' }, data: LICENSE_ANSWERED })
   await $.session.start(SESSION)
 
   const started = await $.command.run(typed('bsd'))
@@ -130,7 +130,7 @@ sessionTest('/bsd help and an unknown word print the commands, and change nothin
 })
 
 sessionTest('/bsd questions asks again, about everything in play', async ($, on) => {
-  const session = stubSession(on, { head: { 'stats.py': 'x = 1\n' } })
+  const session = stubSession(on, { head: { 'stats.py': 'x = 1\n' }, data: LICENSE_ANSWERED })
   expect((await $.command.run(typed('bsd', 'questions'))).text).toBe('Backseat Driver is off. Run /bsd to start it.')
 
   await $.session.start(SESSION)

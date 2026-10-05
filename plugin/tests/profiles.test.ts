@@ -18,7 +18,7 @@ import {
   withoutHush,
 } from '../hooks/profiles'
 import { firstRunQuestions, groupAnswers, MAX_QUESTIONS } from '../hooks/questions'
-import { COMPOSE, PANE, SESSION, sessionTest, stubSession, typed } from './kit'
+import { COMPOSE, LICENSE_ANSWERED, PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const MEAN = 'def mean(xs):\n    return sum(xs) / len(xs)\n'
 
@@ -146,7 +146,7 @@ test('groupAnswers keeps a skipped subject, with no answers', async () => {
 })
 
 sessionTest('the first time in a project, the questions are asked and the answers are stored by language', async ($, on) => {
-  const session = stubSession(on, { head: { 'stats.py': MEAN } })
+  const session = stubSession(on, { head: { 'stats.py': MEAN }, data: LICENSE_ANSWERED })
   session.answers.push('JavaScript or TypeScript', 'A little: tutorials and small scripts', 'Write idiomatic code without looking things up', 'Bugs and risky code')
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -169,7 +169,7 @@ sessionTest('the first time in a project, the questions are asked and the answer
 })
 
 sessionTest('dismissing the questions skips them for good, and the tutor works without them', async ($, on) => {
-  const session = stubSession(on, { head: { 'stats.py': MEAN } })
+  const session = stubSession(on, { head: { 'stats.py': MEAN }, data: LICENSE_ANSWERED })
   await $.session.start(SESSION)
   const started = await $.command.run(typed('bsd'))
   await session.clock.settle()
@@ -188,7 +188,7 @@ sessionTest('a language already on record is not asked about again, in any proje
   const known = withAnswers(emptyProfile(), { level: 'For years: I know it well' })
   const session = stubSession(on, {
     head: { 'stats.py': MEAN },
-    data: { 'profiles/python.json': known, 'profiles/general.json': withAnswers(emptyProfile(), { knows: 'Python' }) },
+    data: { ...LICENSE_ANSWERED, 'profiles/python.json': known, 'profiles/general.json': withAnswers(emptyProfile(), { knows: 'Python' }) },
   })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -422,7 +422,7 @@ sessionTest('the record tool does not count as the first-run questions, and refu
 })
 
 sessionTest('the questions can be answered again from the Profile tab', async ($, on) => {
-  const session = stubSession(on, { head: { 'stats.py': MEAN } })
+  const session = stubSession(on, { head: { 'stats.py': MEAN }, data: LICENSE_ANSWERED })
   session.answers.push('Python', 'None yet', 'Understand what happens underneath', 'Idioms and style')
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))

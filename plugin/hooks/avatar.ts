@@ -4,6 +4,12 @@
  * keeps the speech in `$.state`. Everything here is plain values.
  */
 import type { Mode, Speech, Watch } from '../types'
+import CLAUDE_ART from './art/default'
+import KISS_ART from './art/eli5-tldr-kiss-terse'
+import KNUTH_ART from './art/knuth'
+import PRIME_ART from './art/primeagen'
+import LINUS_ART from './art/torvalds'
+import type { SpriteArt } from './sprite'
 
 export type Pose = 'rest' | 'talk' | 'blink' | 'think'
 
@@ -18,6 +24,9 @@ export type Avatar = {
   hello: string
   /** A theme key or a terminal color for the drawing. */
   color: string
+  /** The character in truecolor pixels, from its file in `art/`: what a terminal shows. */
+  art: SpriteArt
+  /** The character in plain text, where pixels cannot be drawn. */
   frames: Record<Pose, readonly string[]>
   /** The row of `frames` that the speech bubble's tail points at: its mouth, give or take. At least 1. */
   mouth: number
@@ -31,6 +40,7 @@ const CLAUDE: Avatar = {
   name: "Claude Code's mascot",
   hello: 'Riding along. You drive.',
   color: 'claude',
+  art: CLAUDE_ART,
   frames: {
     rest: [' ▐▛███▜▌ ', '▝▜█████▛▘', '  ▘▘ ▝▝  '],
     talk: ['▗▐▛███▜▌▖', ' ▜█████▛ ', '  ▘▘ ▝▝  '],
@@ -47,6 +57,7 @@ const LINUS: Avatar = {
   name: 'Linus Torvalds, in ASCII',
   hello: 'Ready. Save something.',
   color: 'green',
+  art: LINUS_ART,
   frames: {
     rest: ['   .,,,,.   ', '  /      \\  ', ' | [o]-[o] |', ' |    >    |', "  \\  `-'  / ", "   '-----'  "],
     talk: ['   .,,,,.   ', '  /      \\  ', ' | [o]-[o] |', ' |    >    |', '  \\   O   / ', "   '-----'  "],
@@ -63,6 +74,7 @@ const KNUTH: Avatar = {
   name: 'Donald Knuth, in ASCII',
   hello: 'Shall we read some programs together?',
   color: 'yellow',
+  art: KNUTH_ART,
   frames: {
     rest: ['   .---.   ', ' ~/     \\~ ', ' |(o)-(o)| ', ' |   >   | ', '  \\ \\_/ /  ', "   '---'   "],
     talk: ['   .---.   ', ' ~/     \\~ ', ' |(o)-(o)| ', ' |   >   | ', '  \\  O  /  ', "   '---'   "],
@@ -79,6 +91,7 @@ const PRIME: Avatar = {
   name: 'ThePrimeagen, in ASCII',
   hello: "Let's go. Write something.",
   color: 'magenta',
+  art: PRIME_ART,
   frames: {
     rest: ['   .---.   ', ' [/     \\] ', ' [| o o |] ', "  |,/^\\,|  ", '   \\_-_/   '],
     talk: ['   .---.   ', ' [/     \\] ', ' [| o o |] ', "  |,/^\\,|  ", '   \\_O_/   '],
@@ -95,6 +108,7 @@ const KISS: Avatar = {
   name: 'the KISS Linux penguin',
   hello: '"whatsoever a man soweth, that shall he also reap."',
   color: 'white',
+  art: KISS_ART,
   frames: {
     rest: ['    ____   ', '   |    |  ', ' ._|____|_.', '   |o_o |  ', '   |:_/ |  ', '  //   \\ \\ '],
     talk: ['    ____   ', '   |    |  ', ' ._|____|_.', '   |o_o |  ', '   |:o/ |  ', '  \\\\   / / '],
@@ -272,11 +286,11 @@ export function bubble(text: string, said: number, maxWidth: number, style: Bubb
  * above the mouth for the whole bubble, the tail moves down the bubble's
  * side instead, so that the bubble hangs below the drawing as little as it can.
  */
-export function bubbleColumn(avatar: Avatar, text: string, said: number, maxWidth: number): string[] {
+export function bubbleColumn(avatar: Avatar, text: string, said: number, maxWidth: number, mouth = avatar.mouth): string[] {
   const lines = Math.min(MAX_BUBBLE_LINES, wrap(text, maxWidth - 5).length)
-  const tail = Math.max(0, Math.min(lines - 1, avatar.mouth - 1))
+  const tail = Math.max(0, Math.min(lines - 1, mouth - 1))
   // A blank row is a space: an empty line of text can collapse to nothing.
-  const above = Array.from({ length: avatar.mouth - 1 - tail }, () => ' ')
+  const above = Array.from({ length: mouth - 1 - tail }, () => ' ')
 
   return [...above, ...bubble(text, said, maxWidth, avatar.bubbleStyle, tail)]
 }
