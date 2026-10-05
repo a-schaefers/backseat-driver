@@ -16,8 +16,8 @@
  * The watcher is inotifywait, from inotify-tools (Linux), in two children:
  * one over the working tree, recursive, leaving out what git ignores and
  * everything in `.git` but its logs (a commit writes `.git/logs/HEAD`); one
- * over the data folder itself and its `editors` folder, not recursive, for
- * what an editor says about its caret.
+ * over the data folder's `editors` folder, not recursive, where each running
+ * editor writes what it says about its caret.
  */
 
 /** What a reported path means to the tutor. */
@@ -26,7 +26,7 @@ export type Nudge =
   | { kind: 'tree'; paths: string[] }
   /** HEAD's log, or another of git's logs: a commit or a checkout. Scan now. */
   | { kind: 'head' }
-  /** The editor's focus file: read it now. */
+  /** An editor's report in the editors folder: read it now. */
   | { kind: 'focus' }
 
 /** The places a watcher looks at, as absolute paths without a trailing slash. */
@@ -34,7 +34,7 @@ export type WatchPlaces = {
   root: string
   /** The repository's git folder (`git rev-parse --absolute-git-dir`). */
   gitDir: string
-  /** The tutor's data folder, where an editor writes its focus file. '' for none. */
+  /** The tutor's data folder, whose editors folder holds each running editor's report. '' for none. */
   dataRoot: string
 }
 
@@ -119,13 +119,12 @@ export function treeWatchArgv(
 export const EDITORS_FOLDER = 'editors'
 
 /**
- * The focus file's watcher: the data folder itself, and its `editors`
- * folder when `hasEditors` says it is there, neither recursively.
+ * The editors' watcher: the `editors` folder of the data folder, where each
+ * running editor writes its report, not recursively. The folder is made
+ * before the watch is placed.
  */
-export function focusWatchArgv(places: WatchPlaces, hasEditors: boolean): string[] {
-  const editors = hasEditors ? [`${places.dataRoot}/${EDITORS_FOLDER}`] : []
-
-  return [INOTIFYWAIT, '-m', '--format', '%w%f', ...eventArgs(), places.dataRoot, ...editors]
+export function focusWatchArgv(places: WatchPlaces): string[] {
+  return [INOTIFYWAIT, '-m', '--format', '%w%f', ...eventArgs(), `${places.dataRoot}/${EDITORS_FOLDER}`]
 }
 
 /** True once a watcher's stderr says every watch is in place. */
@@ -166,7 +165,6 @@ export function nudgeOf(path: string, places: WatchPlaces): Nudge | null {
   if (places.gitDir !== '' && path.startsWith(`${places.gitDir}/`)) {
     return path.startsWith(`${places.gitDir}/logs/`) ? { kind: 'head' } : null
   }
-  if (places.dataRoot !== '' && path === `${places.dataRoot}/focus.json`) return { kind: 'focus' }
   if (places.dataRoot !== '' && path.startsWith(`${places.dataRoot}/${EDITORS_FOLDER}/`)) return path.endsWith('.json') ? { kind: 'focus' } : null
   if (!path.startsWith(`${places.root}/`)) return null
   const relative = path.slice(places.root.length + 1)

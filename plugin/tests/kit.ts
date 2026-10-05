@@ -330,16 +330,17 @@ export function stubSession(on: On, options: StubOptions = {}) {
       session.replies.push(typeof reply === 'string' ? reply : JSON.stringify(reply))
     },
     /**
-     * Moves the cursor in an editor that reports to the tutor: it writes the
-     * focus file. `more` holds the protocol's other fields, such as `buffers`.
+     * Moves the cursor in an editor that reports to the tutor: it writes its
+     * file in the editors' folder. `more` holds the protocol's other fields,
+     * such as `buffers`, and may name the `editor` (one file each) or set `at`.
+     * By default the editor keeps beating for as long as the test runs.
      */
     editor(file: string, line: number, endLine?: number, more: Record<string, unknown> = {}) {
       writes += 1
-      session.disk.set(
-        `${DATA_HOME}/focus.json`,
-        JSON.stringify({ file, line, ...(endLine === undefined ? {} : { endLine }), ...more }),
-      )
-      mtimes.set(`${DATA_HOME}/focus.json`, writes)
+      const path = `${DATA_HOME}/editors/${String(more.editor ?? 'test')}-1.json`
+      const report = { v: 1, editor: 'test', pid: 1, at: Number.MAX_SAFE_INTEGER, changed: session.clock.now() + writes, file, line }
+      session.disk.set(path, JSON.stringify({ ...report, ...(endLine === undefined ? {} : { endLine }), ...more }))
+      mtimes.set(path, writes)
     },
     /**
      * What the explain model answers. With `when`, every request whose prompt

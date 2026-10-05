@@ -4,8 +4,7 @@ import type { Entry, Span } from './journal'
 /**
  * Where the person's attention is, from what an editor says about itself.
  *
- * An editor writes `focus.json` in the tutor's data folder whenever the caret
- * moves. The file says where the caret is at that moment and nothing about
+ * An editor writes its report (`editors.ts`) whenever the caret moves. The file says where the caret is at that moment and nothing about
  * time. The tutor notes when each report arrives and adds the time up itself,
  * from one report to the next: which file was in front for how long, where
  * in it the caret stayed, and which files were on screen beside it. How
@@ -61,7 +60,7 @@ function listed(value: unknown, repoRoot: string, except: string | null): string
   return paths.slice(0, MAX_LISTED)
 }
 
-/** What `focus.json` says, or null when it does not parse or names no file. */
+/** What an editor's report says, or null when it does not parse or names no file. */
 export function parseEditorReport(text: string, repoRoot: string): EditorReport | null {
   let data: unknown
   try {

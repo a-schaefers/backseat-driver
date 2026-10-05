@@ -47,17 +47,15 @@ test('the tree watcher leaves out .git but its logs, and what git ignores', asyn
   expect(treeWatchArgv(worktree, [], ['logs', 'refs'], false)).not.toContain('/repo/.git/worktrees/w/logs')
   expect(treeWatchArgv(worktree, [], ['logs', 'refs'], true).filter(arg => arg.startsWith('@'))).toEqual([])
 
-  expect(focusWatchArgv(PLACES, false)).not.toContain('-r')
-  expect(focusWatchArgv(PLACES, false)[focusWatchArgv(PLACES, false).length - 1]).toBe(PLACES.dataRoot)
-  // Each running editor writes its own report into the editors folder, when it is there.
-  expect(focusWatchArgv(PLACES, true).slice(-2)).toEqual([PLACES.dataRoot, `${PLACES.dataRoot}/editors`])
+  // Each running editor writes its own report into the editors folder.
+  expect(focusWatchArgv(PLACES)).not.toContain('-r')
+  expect(focusWatchArgv(PLACES)[focusWatchArgv(PLACES).length - 1]).toBe(`${PLACES.dataRoot}/editors`)
 })
 
-test('a reported path is a save, a move of HEAD, the editor focus file, or nothing', async () => {
+test('a reported path is a save, a move of HEAD, a report from an editor, or nothing', async () => {
   expect(nudgeOf('/work/my proj/src/a.py', PLACES)).toEqual({ kind: 'tree', paths: ['src/a.py'] })
   expect(nudgeOf('/work/my proj/.git/logs/HEAD', PLACES)).toEqual({ kind: 'head' })
   expect(nudgeOf('/work/my proj/.git/index', PLACES)).toBeNull()
-  expect(nudgeOf(`${PLACES.dataRoot}/focus.json`, PLACES)).toEqual({ kind: 'focus' })
   expect(nudgeOf(`${PLACES.dataRoot}/view.json`, PLACES)).toBeNull()
   expect(nudgeOf(`${PLACES.dataRoot}/editors/nvim-412.json`, PLACES)).toEqual({ kind: 'focus' })
   expect(nudgeOf(`${PLACES.dataRoot}/editors/.nvim-412.json.tmp`, PLACES)).toBeNull()
@@ -110,7 +108,9 @@ sessionTest('with inotifywait, a save is pushed and the scan becomes a safety ne
   expect(session.watchers.length).toBe(2)
   expect(tree?.argv).toContain(ROOT)
   expect(tree?.argv).toContain(`@${ROOT}/node_modules`)
-  expect(focusFile?.argv[focusFile.argv.length - 1]).toBe(DATA_HOME)
+  expect(focusFile?.argv[focusFile.argv.length - 1]).toBe(`${DATA_HOME}/editors`)
+  // The folder is made before an editor has written, so that it can be watched.
+  expect(session.disk.has(`${DATA_HOME}/editors/.keep`)).toBe(true)
 
   // Nothing happens, and nothing is scanned: the watcher would say.
   const before = session.scans
@@ -137,7 +137,7 @@ sessionTest('with inotifywait, a save is pushed and the scan becomes a safety ne
   await session.clock.settle()
   const off = session.scans
   tree?.report(`${ROOT}/stats.py`)
-  focusFile?.report(`${DATA_HOME}/focus.json`)
+  focusFile?.report(`${DATA_HOME}/editors/nvim-1.json`)
   await session.clock.settle()
   await session.clock.advance(1000)
   expect(tree?.isStopped).toBe(true)
