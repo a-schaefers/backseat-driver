@@ -7,13 +7,13 @@ import type { Change, Seen } from './glance'
 import { compact, emptyJournal, knownEntries, MAX_NAMES, mergeSpans, parseEntry, parseJournal, sync, withEntry } from './journal'
 import type { Entry, Journal, Span } from './journal'
 import { isTrivialChange, looksBinary } from './noise'
-import { readJson, writeJson } from './storage'
-import type { Disk } from './storage'
+import type { Store } from './store'
 import { tidy } from './working'
 
 /** The effects the recorder needs. register.tsx supplies them as closures over `$`. */
 export type RecorderPorts = {
-  disk: Disk
+  /** The tutor's own files, where the journal is kept. */
+  store: Pick<Store, 'read' | 'update'>
   /** The journal's file, or '' when there is no data folder and nothing is kept between sessions. */
   file: string
   /** The repository's root, which an editor's absolute paths are taken from. */
@@ -88,7 +88,7 @@ export function createRecorder(ports: RecorderPorts) {
      * differ from HEAD: their text now is what their next save is compared with.
      */
     async start(now: number, branch: string | null, dirty: readonly string[]): Promise<void> {
-      const stored = ports.file === '' ? emptyJournal() : parseJournal(await readJson(ports.disk, ports.file))
+      const stored = ports.file === '' ? emptyJournal() : parseJournal(await ports.store.read(ports.file))
       known = knownEntries(stored)
       held = compact(stored, now)
       flushedAt = now
@@ -214,12 +214,18 @@ export function createRecorder(ports: RecorderPorts) {
         if (!isDirty) return
         isDirty = false
         flushedAt = now
-        // Read right before writing: another session may have added to it.
-        const stored = ports.file === '' ? emptyJournal() : parseJournal(await readJson(ports.disk, ports.file))
-        held = sync(stored, held, known, now)
-        const written = held
+        // Merged with what the file holds as it is written: another session may have added to it.
+        // Entries recorded while the write is under way stay in `held`, and go out with the next one.
+        let written = held
+        const merge = (stored: Journal): Journal => {
+          held = sync(stored, held, knownBefore, now)
+          written = held
+
+          return held
+        }
+        if (ports.file === '') merge(emptyJournal())
+        else await ports.store.update(ports.file, stored => ({ v: 1, ...merge(parseJournal(stored)) }))
         known = knownEntries(written)
-        if (ports.file !== '') await writeJson(ports.disk, ports.file, { v: 1, ...written })
       } catch (error) {
         // Whatever was not written is still held, and goes out with the next write.
         isDirty = true

@@ -17,8 +17,7 @@ import {
 } from './knowledge'
 import type { ExplainStatus, ExplainView, OutlineRow, Spot } from '../types'
 import type { Detail, FileKnowledge, Sym, Use } from './knowledge'
-import { readJson, writeJson } from './storage'
-import type { Disk } from './storage'
+import type { Store } from './store'
 
 /**
  * The lookup engine behind the Explain tab: what is known about a spot in
@@ -57,7 +56,8 @@ export type ExplainPorts = {
   read: (path: string) => Promise<string | null>
   /** Something that changes whenever the file does, or '' when it is not there. */
   stamp: (path: string) => Promise<string>
-  disk: Disk
+  /** The tutor's own files, where what is known about each source file is kept. */
+  store: Pick<Store, 'read' | 'update'>
   /** The file that holds what is known about a source file. */
   entryPath: (path: string) => string
   /** One request to the explain model. Null when it did not answer. */
@@ -164,7 +164,7 @@ export function createExplainer(ports: ExplainPorts) {
   async function knowledge(path: string): Promise<FileKnowledge | null> {
     const held = known.get(path)
     if (held !== undefined) return held
-    const loaded = parseKnowledge(await readJson(ports.disk, ports.entryPath(path)), path)
+    const loaded = parseKnowledge(await ports.store.read(ports.entryPath(path)), path)
     known.set(path, loaded)
 
     return loaded
@@ -183,7 +183,7 @@ export function createExplainer(ports: ExplainPorts) {
       // Forgotten in the meantime: writing it back would undo that.
       if (latest === undefined || latest === null) return
       try {
-        await writeJson(ports.disk, ports.entryPath(path), latest)
+        await ports.store.update(ports.entryPath(path), () => latest)
       } catch (error) {
         ports.log(`could not save what is known about ${path}: ${String(error)}`)
       }

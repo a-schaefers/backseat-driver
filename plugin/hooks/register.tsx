@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Register, Timer } from 'claude-code'
 
-import type { Hush, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, Spot, Tab, Watch, Working } from '../types'
+import type { Hush, LevelChange, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, Spot, Tab, Watch, Working } from '../types'
 import {
   avatarFor,
   BLINK_MS,
@@ -47,6 +47,7 @@ import {
   isOwnFolder,
   isRemovable,
   journalPath,
+  lockRepoPath,
   MARKER,
   MARKER_TEXT,
   profilePath,
@@ -166,8 +167,11 @@ import {
 import type { ReflogEntry, ReviewScope } from './review'
 import { DEFAULT_PERSONA, readSettings } from './settings'
 import type { Persona, Settings } from './settings'
-import { readJson, writeJson } from './storage'
+import { createLocks } from './locks'
+import { memoryDisk } from './storage'
 import type { Disk } from './storage'
+import { createStore, plainStore, updateJson } from './store'
+import type { Store } from './store'
 import { createWatcher } from './watcher'
 import type { Watcher } from './watcher'
 import { chosen, parseWorking, tidy, WORKING_HEADER, WORKING_QUESTION, workingChoices } from './working'
@@ -693,6 +697,68 @@ function diskOf($: EngineInterface): Disk {
   }
 }
 
+/**
+ * The tutor's JSON files. Every read and change of them goes through the
+ * store, which keeps two sessions from undoing each other's changes and never
+ * takes a half-written file for an empty one.
+ */
+let dataStore: Store | null = null
+/** What stands in for the store where there is no data folder: nothing is kept. */
+const NO_STORE = plainStore(memoryDisk())
+
+function storeOf($: EngineInterface): Store {
+  if (dataRoot === '') return NO_STORE
+  if (dataStore !== null) return dataStore
+  const disk = diskOf($)
+  const locks = createLocks(
+    {
+      git: (args, stdin) => git($, undefined, args, false, stdin),
+      modifiedAt: async path => {
+        try {
+          return (await $.fs.stat(path)).mtimeMs
+        } catch {
+          return null
+        }
+      },
+      read: async path => {
+        try {
+          return await $.fs.read(path)
+        } catch {
+          return null
+        }
+      },
+      write: (path, text) => $.fs.write(path, text),
+      now: () => $.clock.now(),
+      sleep: ms => $.clock.sleep(ms),
+      random: () => Math.random(),
+      owner: () => $.session.id(),
+    },
+    lockRepoPath(dataRoot),
+  )
+  dataStore = createStore({
+    // The marker goes in before anything else does: it is what allows deleting inside the folder later.
+    disk: {
+      ...disk,
+      write: async (path, text) => {
+        await markHome($)
+        await disk.write(path, text)
+      },
+    },
+    locks: {
+      acquire: async name => {
+        await markHome($)
+
+        return locks.acquire(name)
+      },
+      release: lock => locks.release(lock),
+    },
+    sleep: ms => $.clock.sleep(ms),
+    note: (what, detail) => trace($, 'store', what, () => detail),
+  })
+
+  return dataStore
+}
+
 /** Makes sure the data folder carries its marker before anything is written into it. */
 async function markHome($: EngineInterface): Promise<void> {
   if (isHomeMarked || dataRoot === '') return
@@ -791,22 +857,25 @@ async function git(
   cwd: string | undefined,
   args: readonly string[],
   isNetwork = false,
+  stdin?: string,
 ): Promise<{ exitCode: number; stdout: string; stderr?: string }> {
   const started = Date.now()
+  // What git is asked to do, past any option that comes before it.
+  const verb = args.find(arg => !arg.startsWith('--')) ?? ''
   try {
     // Over the network git must never ask for a password or a passphrase: there is nobody at its terminal.
     const env = isNetwork ? { GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes' } : undefined
-    const result = await $.process.run(['git', '--no-optional-locks', ...args], { cwd, timeoutMs: isNetwork ? 30_000 : 15_000, env })
+    const result = await $.process.run(['git', '--no-optional-locks', ...args], { cwd, timeoutMs: isNetwork ? 30_000 : 15_000, env, stdin })
     // The watcher asks for the status at every poll. An answer that is the same as the last one is counted, not logged.
     const isQuietPoll = args[0] === 'status' && result.exitCode === 0 && result.stdout === lastStatus
     if (args[0] === 'status') lastStatus = result.stdout
     if (isQuietPoll) quiet.polls += 1
-    else trace($, 'git', args[0] ?? '', () => ({ args, cwd, exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr }), Date.now() - started)
+    else trace($, 'git', verb, () => ({ args, cwd, exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr }), Date.now() - started)
 
     return result
   } catch (error) {
     // Git is missing, or took too long.
-    trace($, 'git', args[0] ?? '', () => ({ args, cwd, error: String(error) }), Date.now() - started)
+    trace($, 'git', verb, () => ({ args, cwd, error: String(error) }), Date.now() - started)
 
     return { exitCode: 1, stdout: '' }
   }
@@ -897,8 +966,7 @@ async function checkForUpdate($: EngineInterface, settings: Settings): Promise<v
   try {
     const { version, repository } = await ownVersion($)
     if (version === null) return
-    const disk = diskOf($)
-    const stored = parseUpdateRecord(await readJson(disk, `${dataRoot}/update.json`))
+    const stored = parseUpdateRecord(await storeOf($).read(`${dataRoot}/update.json`))
     const now = await $.clock.now()
     let latest = stored.latest
     if (isCheckDue(stored, now)) {
@@ -913,8 +981,7 @@ async function checkForUpdate($: EngineInterface, settings: Settings): Promise<v
       // Offline, or no access: try again at the next switch-on, not in six hours.
       if (listed.exitCode !== 0) return
       latest = newest === null ? '' : versionText(newest)
-      await markHome($)
-      await writeJson(disk, `${dataRoot}/update.json`, { checkedAt: now, latest })
+      await storeOf($).update(`${dataRoot}/update.json`, () => ({ checkedAt: now, latest }))
     }
     await update($, updateAtom, () => updateNotice(version, parseVersion(latest)))
   } catch (error) {
@@ -1084,15 +1151,8 @@ async function keepJournal($: EngineInterface, active: Watcher, now: number): Pr
 async function startJournal($: EngineInterface, run: number, isFresh: boolean): Promise<void> {
   const root = repoRoot
   if (root === '') return
-  const disk = diskOf($)
   const started = createRecorder({
-    disk: {
-      ...disk,
-      write: async (path, text) => {
-        await markHome($)
-        await disk.write(path, text)
-      },
-    },
+    store: storeOf($),
     file: dataRoot === '' ? '' : journalPath(dataRoot, root),
     root,
     read: path => readSource($, root, path),
@@ -1143,7 +1203,7 @@ async function askWorking($: EngineInterface): Promise<void> {
 async function loadSubject($: EngineInterface, subject: string): Promise<Profile> {
   if (dataRoot === '') return emptyProfile()
   try {
-    return parseProfile(await readJson(diskOf($), profilePath(dataRoot, subject)))
+    return parseProfile(await storeOf($).read(profilePath(dataRoot, subject)))
   } catch {
     return emptyProfile()
   }
@@ -1160,12 +1220,9 @@ async function moveOutOfStore($: EngineInterface): Promise<void> {
     for (const key of await $.store.keys()) {
       const subject = storedSubject(key)
       if (subject === null) continue
-      const path = profilePath(dataRoot, subject)
+      const kept = parseProfile(await $.store.get(key))
       // A profile already in a file is the newer one.
-      if ((await diskOf($).read(path)) === null) {
-        await markHome($)
-        await writeJson(diskOf($), path, parseProfile(await $.store.get(key)))
-      }
+      await storeOf($).update(profilePath(dataRoot, subject), stored => stored ?? kept)
       await $.store.delete(key)
     }
   } catch (error) {
@@ -1199,12 +1256,12 @@ async function saveSubject(
   subject: string,
   change: (profile: Profile) => Profile,
 ): Promise<void> {
-  // Read right before writing: another session may have changed this subject since it was loaded.
-  const next = change(await loadSubject($, subject))
-  if (dataRoot !== '') {
-    await markHome($)
-    await writeJson(diskOf($), profilePath(dataRoot, subject), next)
-  }
+  // Read, changed and written as one step: another session may be changing this subject too.
+  // The file as it was is kept beside it, because nothing can work a profile out again.
+  const next =
+    dataRoot === ''
+      ? change(profiles.subjects[subject] ?? emptyProfile())
+      : await updateJson(storeOf($), profilePath(dataRoot, subject), parseProfile, change, { keepBackup: true })
   profiles = { ...profiles, subjects: { ...profiles.subjects, [subject]: next } }
   await update($, profilesAtom, () => profiles)
   await registerReviewer($, settings)
@@ -1581,8 +1638,8 @@ async function loadProject($: EngineInterface): Promise<void> {
     return
   }
   const folder = projectDir(dataRoot, repoRoot)
-  project = parseProject(await readJson(diskOf($), `${folder}/project.json`), repoRoot)
-  reviews = parseReviews(await readJson(diskOf($), `${folder}/reviews.json`))
+  project = parseProject(await storeOf($).read(`${folder}/project.json`), repoRoot)
+  reviews = parseReviews(await storeOf($).read(`${folder}/reviews.json`))
 }
 
 /**
@@ -1601,16 +1658,22 @@ async function keepReview($: EngineInterface, scope: ReviewScope, answer: string
     for (const insight of notes?.insights ?? []) prints.set(insight, await printForInsight($, insight))
 
     const folder = projectDir(dataRoot, repoRoot)
-    const disk = diskOf($)
-    await markHome($)
-    // Read right before writing: another session may be reviewing this project too.
-    const current = parseProject(await readJson(disk, `${folder}/project.json`), repoRoot)
-    const surveyed = scope.kind === 'survey' ? { ...current, isSurveyed: true } : current
-    project = notes === null ? surveyed : withReviewNotes(surveyed, notes, commit, at, insight => prints.get(insight) ?? null)
-    await writeJson(disk, `${folder}/project.json`, project)
+    const root = repoRoot
+    // Read, changed and written as one step: another session may be reviewing this project too.
+    project = await updateJson(
+      storeOf($),
+      `${folder}/project.json`,
+      stored => parseProject(stored, root),
+      current => {
+        const surveyed = scope.kind === 'survey' ? { ...current, isSurveyed: true } : current
+
+        return notes === null ? surveyed : withReviewNotes(surveyed, notes, commit, at, insight => prints.get(insight) ?? null)
+      },
+    )
     if (scope.kind !== 'survey') {
-      reviews = withReview(parseReviews(await readJson(disk, `${folder}/reviews.json`)), { commit, subject: scopeSubject(scope), at, text })
-      await writeJson(disk, `${folder}/reviews.json`, reviews)
+      reviews = await updateJson(storeOf($), `${folder}/reviews.json`, parseReviews, kept =>
+        withReview(kept, { commit, subject: scopeSubject(scope), at, text }),
+      )
     }
   } catch (error) {
     fail($, "could not keep the deep review's notes", error)
@@ -2010,7 +2073,7 @@ async function startExplaining($: EngineInterface, settings: Settings, run: numb
   explainer = createExplainer({
     read: path => readSource($, root, path),
     stamp: path => fileStamp($, `${root}/${path}`),
-    disk: diskOf($),
+    store: storeOf($),
     entryPath: path => fileEntryPath(dataRoot, root, path),
     complete: async (prompt, maxTokens, signal) => {
       const result = await callModel(
@@ -2127,7 +2190,7 @@ async function showProgress($: EngineInterface, settings: Settings): Promise<voi
 async function loadRecord($: EngineInterface, language: string): Promise<ProgressRecord> {
   if (dataRoot === '') return emptyRecord(language)
 
-  return parseRecord(await readJson(diskOf($), progressPath(dataRoot, language)), language)
+  return parseRecord(await storeOf($).read(progressPath(dataRoot, language)), language)
 }
 
 /** Whose commits count, and the records of the languages in play. */
@@ -2184,11 +2247,23 @@ async function assess(
 
       return
     }
-    // Read again right before writing: another session may have added to this record meanwhile.
-    const latest = await loadRecord($, language)
-    const { record, change } = withAssessment(latest, assessment, fresh, name, await $.clock.now())
-    await markHome($)
-    await writeJson(diskOf($), progressPath(dataRoot, language), record)
+    // Added to the record as it stands on disk, in one step: another session may be adding to it too.
+    // The file as it was is kept beside it, because the evidence cannot be gathered again.
+    const at = await $.clock.now()
+    const made: { change: LevelChange | null } = { change: null }
+    const record = await updateJson(
+      storeOf($),
+      progressPath(dataRoot, language),
+      stored => parseRecord(stored, language),
+      latest => {
+        const added = withAssessment(latest, assessment, fresh, name, at)
+        made.change = added.change
+
+        return added.record
+      },
+      { keepBackup: true },
+    )
+    const change = made.change
     records.set(language, record)
     await setProgress($, { skipped: '' })
     await showProgress($, settings)

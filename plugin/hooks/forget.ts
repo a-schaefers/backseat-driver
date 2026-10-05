@@ -1,5 +1,6 @@
 import { profilePath, progressPath, projectDir, REMOVABLE } from './datahome'
 import { languageName } from './languages'
+import { backupPath, brokenPath } from './store'
 
 /** What can be forgotten: one project's cache, one language's record of the person, or all of it. */
 export type Scope = { kind: 'project' } | { kind: 'language'; language: string } | { kind: 'everything' }
@@ -64,7 +65,8 @@ export function scopePaths(root: string, repoRoot: string, scope: Scope): string
     case 'project':
       return repoRoot === '' ? [] : [projectDir(root, repoRoot)]
     case 'language':
-      return [profilePath(root, scope.language), progressPath(root, scope.language)]
+      // With each file go the copies the store keeps beside it.
+      return [profilePath(root, scope.language), progressPath(root, scope.language)].flatMap(path => [path, backupPath(path), brokenPath(path)])
     case 'everything':
       return REMOVABLE.map(name => `${root}/${name}`)
   }

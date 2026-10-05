@@ -16,6 +16,7 @@ import {
 } from '../hooks/knowledge'
 import type { Detail } from '../hooks/knowledge'
 import { memoryDisk } from '../hooks/storage'
+import { plainStore } from '../hooks/store'
 
 const STATS = [
   'def mean(xs):',
@@ -155,7 +156,7 @@ function world(initial: Record<string, string>) {
     createExplainer({
       read: async path => files[path] ?? null,
       stamp: async path => (path in files ? `${(files[path] ?? '').length}:${saves.get(path) ?? 0}` : ''),
-      disk,
+      store: plainStore(disk),
       entryPath: path => `/d/files/${path}.json`,
       complete: (prompt, maxTokens, signal) =>
         new Promise(resolve => {

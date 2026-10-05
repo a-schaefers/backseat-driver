@@ -166,6 +166,9 @@ export function stubSession(on: On, options: StubOptions = {}) {
       .join('\n')
   }
 
+  /** Marks the plugin made in its lock repository with `git hash-object`, by what they hold. */
+  const marks = new Map<string, string>()
+
   /** The clone's top folder, once the plugin has asked git for it, and the commit it is at. */
   let cloneTop = ''
   let cloneHead = commitHash(500)
@@ -211,6 +214,19 @@ export function stubSession(on: On, options: StubOptions = {}) {
     ),
     /** What the plugin deleted with `rm`, in order. */
     removed: [] as string[],
+    /**
+     * Files another session is in the middle of writing, by absolute path: the
+     * next reads of one find it empty, that many times, as `$.fs.write` leaves it for a moment.
+     */
+    halfWritten: new Map<string, number>(),
+    /** Every lock the plugin took and gave back, in order: `take <ref>`, `steal <ref>`, `give <ref>`, or `refused <ref>`. */
+    locking: [] as string[],
+    /** Another session's lock on a file of the data folder, taken this long ago on the test's clock. */
+    lockedElsewhere(ref: string, agoMs = 0) {
+      const file = `${options.env?.BACKSEAT_DRIVER_HOME ?? DATA_HOME}/locks.git/${ref}`
+      session.disk.set(file, `${commitHash(9999)}\n`)
+      mtimes.set(file, session.clock.now() - agoMs)
+    },
     /** The `claude` commands the plugin ran, the network git commands, and `git pull`, in order. */
     ran: [] as string[],
     /** The folder that holds what the tutor knows about the fake repository. */
@@ -341,6 +357,12 @@ export function stubSession(on: On, options: StubOptions = {}) {
       if (e.path.endsWith(suffix)) return { value: text }
     }
     if (!e.path.startsWith(`${ROOT}/`)) session.diskReads.push(e.path)
+    const emptyReads = session.halfWritten.get(e.path) ?? 0
+    if (emptyReads > 0) {
+      session.halfWritten.set(e.path, emptyReads - 1)
+
+      return { value: '' }
+    }
     const text = e.path.startsWith(`${ROOT}/`) ? files[e.path.slice(ROOT.length + 1)] : session.disk.get(e.path)
 
     return text === undefined ? { deny: `no such file: ${e.path}` } : { value: text }
@@ -413,6 +435,46 @@ export function stubSession(on: On, options: StubOptions = {}) {
     }
     if (e.argv[0] !== 'git' || e.argv[1] !== '--no-optional-locks') return { deny: `unexpected process: ${e.argv.join(' ')}` }
     const cwd = String(e.init?.cwd ?? '')
+    // The tutor's lock repository: a ref is a lock, and git changes one only when it holds what the caller expects.
+    if (args[0] === 'init' && args[1] === '--bare') {
+      session.disk.set(`${String(args[args.length - 1])}/HEAD`, 'ref: refs/heads/main\n')
+
+      return ok('')
+    }
+    if (String(args[0]).startsWith('--git-dir=')) {
+      const repo = String(args[0]).slice('--git-dir='.length)
+      if (!session.disk.has(`${repo}/HEAD`)) return failed
+      if (args[1] === 'hash-object') {
+        const held = String(e.init?.stdin ?? '')
+        if (!marks.has(held)) marks.set(held, commitHash(7000 + marks.size))
+
+        return ok(`${marks.get(held) ?? ''}\n`)
+      }
+      if (args[1] === 'update-ref') {
+        const isDelete = args[2] === '-d'
+        const [ref, next, expected] = isDelete ? [String(args[3]), '', String(args[4])] : [String(args[2]), String(args[3]), String(args[4])]
+        const file = `${repo}/${ref}`
+        const current = session.disk.get(file)?.trim()
+        const isFree = /^0+$/.test(expected)
+        if (isFree ? current !== undefined : current !== expected) {
+          session.locking.push(`refused ${ref}`)
+
+          return failed
+        }
+        if (isDelete) {
+          session.disk.delete(file)
+          session.locking.push(`give ${ref}`)
+        } else {
+          session.disk.set(file, `${next}\n`)
+          mtimes.set(file, session.clock.now())
+          session.locking.push(`${isFree ? 'take' : 'steal'} ${ref}`)
+        }
+
+        return ok('')
+      }
+
+      return failed
+    }
     if (args[0] === 'ls-remote') {
       session.ran.push(`git ${args.join(' ')}`)
       const tags = options.tags

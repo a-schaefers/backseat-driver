@@ -83,7 +83,7 @@ Every roadmap milestone is built and was seen working in short scripted real ses
   - Limits: files under 256 KiB, at most 512 files.
   - Directory installs load as `<name>@synced`.
 - Approved plan for part two: `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine (nine decisions, risks per milestone).
-- In progress: the event-driven plan, `~/.claude/plans/wild-jumping-clover.md` on the owner's machine (approved 2026-10-04). Milestones M0 probes, M1 debug log, M2 locked store, M3 kernel (events, deadlines, health, play-by-play machine, sensor), M4 deep review queue, M5 Explain and journal on deadlines, M6 one driver per project, M7 pane pass, M8 optional push sources, M9 PureScript kernel. Done so far: M0 (see "Probed live" under Mod API) and M1 (see "Debug log"; it also added the `session.end` flush of the journal). Until M3 lands, the sections below describe the polling design.
+- In progress: the event-driven plan, `~/.claude/plans/wild-jumping-clover.md` on the owner's machine (approved 2026-10-04). Milestones M0 probes, M1 debug log, M2 locked store, M3 kernel (events, deadlines, health, play-by-play machine, sensor), M4 deep review queue, M5 Explain and journal on deadlines, M6 one driver per project, M7 pane pass, M8 optional push sources, M9 PureScript kernel. Done so far: M0 (see "Probed live" under Mod API), M1 (see "Debug log"; it also added the `session.end` flush of the journal) and M2 (the store and the locks, under "Data folder"). Until M3 lands, the sections below describe the polling design.
 
 ## Repository
 
@@ -184,7 +184,9 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 | `languages.ts` | extension → language; a project's main languages |
 | `profiles.ts` | profile storage and changes: answers, hushes, lesson memory, person text |
 | `hash.ts` | fingerprints |
-| `datahome.ts`, `storage.ts` | data folder paths, what is removable, `Disk` port, JSON I/O |
+| `datahome.ts`, `storage.ts` | data folder paths, what is removable, `Disk` port, `memoryDisk()` |
+| `store.ts` | every read and change of the tutor's JSON files: half-written files, backups, one change at a time, read-back |
+| `locks.ts` | locks that hold across sessions, as refs in a bare git repository of the tutor's own |
 | `forget.ts` | forget scopes, dialog wording, paths per scope |
 | `knowledge.ts` | per-file knowledge and the freshness rule |
 | `explain-prompts.ts` | map-a-file and explain-a-symbol requests and replies |
@@ -457,11 +459,27 @@ view.json                     written by the tutor
 update.json                   last release check
 debug.json                    the debug log's switch: {"on": true}
 debug/<session>/              one session's debug log (see "Debug log")
+locks.git/                    bare git repository; its refs are the locks on the files above
+<file>.bak, <file>.broken     beside a profile or progress file: as it was before the last change; a copy that would not parse
 ```
 
 - Not `$.store`: it's capped at 4 MiB total, separate per install method, and cleared after `cleanupPeriodDays`. Editor plugins also need a findable path. `moveOutOfStore` migrates old `subject/<x>` keys at switch-on; a file wins over a key.
 - Not SQLite: the module can't load it, and the `sqlite3` binary is often missing (the owner's machine included).
-- I/O goes through `Disk` (`storage.ts`), four closures built by `diskOf($)` from `$.fs` and `$.process`. Engines take it as a port; tests use `memoryDisk()`. Writes are whole-file and non-atomic, so `readJson` treats unparseable as missing, and every writer re-reads right before writing.
+- Raw I/O is `Disk` (`storage.ts`), four closures built by `diskOf($)` from `$.fs` and `$.process`. Nothing reads or changes a JSON file of the data folder through it directly: that goes through the store, `storeOf($)`, one per load of the mod. Engines take `store: Pick<Store, 'read' | 'update'>` as a port; tests hand them `plainStore(memoryDisk())`.
+- Several sessions at once (owner: "a seatbelt and suspenders"). `$.fs.write` empties a file and then fills it (probed), so another session can read it empty, and two read-change-write cycles can undo each other. `store.ts`:
+  - Read: a file that is empty or does not parse is read again after `READ_RETRY_MS` (25 ms), `READ_TRIES` (3) times. Still broken, it is copied to `<file>.broken` and `<file>.bak` is used when there is one. It is never taken for "nothing there": that reset a profile to empty on the next write.
+  - Change: `store.update(path, apply)` and the typed `updateJson(store, path, parse, apply, { keepBackup })`. One change at a time per file in this session (a queue), under a lock that holds across sessions, then the write is read back. If the read-back differs, another session wrote at the same moment and the change is made again on top of its write, up to `WRITE_TRIES` (4). `apply` can run more than once, so it must be pure. No write when nothing changed.
+  - `keepBackup` writes the file as it was to `<file>.bak` first: profiles and progress, which nothing can work out again.
+  - Without the lock (it was held for 2 s, or git is unusable) the change is still made, with one more check that the file did not change between the read and the write.
+- The lock (`locks.ts`): `$.fs` cannot create a file only if it is absent, git can. A lock is the ref `refs/locks/<hash of the path>-<file name>` in `locks.git`, made with `git update-ref <ref> <mark> <zeros>` (create only if absent) and removed with `update-ref -d <ref> <mark>` (only its holder can). The mark is the id of a blob holding the session's id, so a lock found with this session's own mark was left before a reload and is taken at once.
+  - Waiting: retries from 15 ms doubling to 250 ms with jitter, `LOCK_WAIT_MS` (2 s) in all. A hook's own time includes `$.clock.sleep`, so a tool call can spend 2 of its 10 seconds here.
+  - A lock older than `LOCK_TTL_MS` (30 s; a write holds one for about 15 ms) belonged to a session that died, and is taken over with `update-ref <ref> <mine> <holder>`, so of two takers one wins.
+  - A lock given back between a refused try and the look at its holder is tried for again at once (live, this was first misread as a broken repository, and three of 300 changes went without their lock).
+  - A ref file git cannot read (empty, rubbish) can be neither taken over nor deleted through git. Once old, it is written afresh with `$.fs.write`.
+  - A repository that has gone (forgetting everything deletes it) is made again.
+- Every data-folder write is preceded by `markHome($)`: the store's disk and the lock both call it.
+- Live, two real sessions making 150 changes each to one file at the same moment: with the lock 300 of 300 landed, twice, at about 30 ms a change; with only the checks before and after, 292 and 294. In a tutor session every profile and journal write showed as take, write, give in the debug log, the profile got its `.bak`, and a lock a minute old was taken over.
+- `/bsd forget <language>` also deletes the `.bak` and `.broken` beside that language's files, and forgetting everything deletes `locks.git`.
 - Delete: `$.fs` has none, so `Disk.remove` runs `rm -rf -- <path>`. Guarded by `isRemovable` (only under `REMOVABLE` children, no `.` or `..` segments) and by the marker (`markHome` writes it before the first write). A misdirected `BACKSEAT_DRIVER_HOME` loses nothing.
 - `/bsd forget [project|<language>|everything]` (`forget.ts`; dialogs in `forget()`):
   - Every dialog has "Keep it" first, so Enter keeps. Only the exact "Forget it" proceeds.
@@ -483,7 +501,8 @@ For developing Backseat Driver, not for its users: everything the tutor does, in
   - `meta`: log started, log stopped (with why)
   - `cmd`: every `/bsd` request
   - `hook`: `session.start`, `classic.SessionStart`, `session.end`, `prompt.compose` (when what it adds changes), `prompt.context`, `prompt.submit` (with what was attached)
-  - `git`: argv, exit code, output
+  - `git`: argv, exit code, output, named by its verb (`status`, `update-ref`)
+  - `store`: what the store noticed (a broken file, a restore, a change without its lock, another session's write)
   - `fs`: `read`, `write`, `list`, `remove` in the data folder; `source` for a file of the repository, by size
   - `model`: the whole request and result, by job (`play-by-play`, `explain`, `progress`)
   - `agent`: `register`, `spawn`, `finished`, with prompts and answers
@@ -507,7 +526,7 @@ For developing Backseat Driver, not for its users: everything the tutor does, in
 - Model and effort per job come from `userConfig`; no model id is pinned (aliases only). Defaults: play-by-play `sonnet`/`medium`, deep review `opus`/`high`, Explain `sonnet`/`low`. "Thinking level" = Claude Code effort (`low|medium|high|xhigh|max`).
 - Hard rules are hooks; teaching style is the contract. The edit guard covers only `Edit`, `Write` and `NotebookEdit`; a shell command could still write, which rests on the contract and Claude Code's permission prompts.
 - Footprint (the README's "What it is not" states it to users):
-  - Runs `git`, reads the repo and its own plugin folder, calls models, writes only its data folder, draws a pane.
+  - Runs `git`, reads the repo and its own plugin folder, calls models, writes only its data folder, draws a pane. One of the git repositories it runs git in is its own: `locks.git` in the data folder.
   - Other processes only on request: `rm` inside the data folder (forget, `/bsd debug clear`), `claude plugin` (update, uninstall).
   - The debug log, when the user switches it on, holds their code and prompts. It stays in the data folder.
   - Network of its own: the release check (`git ls-remote`, at most every 6 h, opt-out) and `/bsd update`'s fetch.
@@ -577,6 +596,7 @@ The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above mem
 - Explain in the kit: `session.lookups`, answered with `session.explain(reply, 'text the prompt contains')`. Order isn't guaranteed. With no answer, a file maps to no symbols. `session.editor(file, line, …, extra)` writes `focus.json`. Journal tests set `explain: 'off'` (a live editor triggers the 100 ms poll and slows minute-scale tests).
 - Progress: `session.assess(reply)`, `session.assessments`. Updates: `session.ran` (claude and network git commands in order). A clone's top is the plugin folder's parent; an installed copy's `installPath` is `/`.
 - `session.logs` = `$.ui.log` output (swallowed errors appear there).
+- Several sessions in the kit: the fake git keeps the lock repository in `session.disk` (`locks.git/HEAD`, one file per held ref). `session.locking` lists `take`, `steal`, `give` and `refused` with the ref (`lockRef(path)` names it). `session.lockedElsewhere(ref, agoMs)` is another session's lock. `session.halfWritten.set(path, n)` makes the next n reads of a file find it empty. A wait in the store or for a lock is a `$.clock.sleep`, so the test has to move the clock for the call to finish: start the call, `await session.clock.advance(...)`, then await it.
 - The tutor's own debug log in the kit: seed `data: { 'debug.json': { on: true } }` (and the marker), or run `/bsd debug on`. `session.debugLog()` returns every record across chunks. Records are written `FLUSH_MS` after they are noted, so `await session.clock.advance(FLUSH_MS)` before reading. The kit stubs `session.id` (`SESSION_ID`), `session.version` and `session.end`.
 - Engines with ports are tested without the kit: `explain.test.ts` has `world()`, whose model is answered by hand with `w.answer(request, reply)`, which is how a test changes a file mid-call.
 - `sessionTest` (30 s limit) for anything that starts a session; plain `test` (5 s) for pure functions. All files run in parallel processes, and each test loads the whole mod, so a busy machine takes seconds before the first action.

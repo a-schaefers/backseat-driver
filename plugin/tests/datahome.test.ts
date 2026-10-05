@@ -112,7 +112,15 @@ test('forget: what a word names, and what each scope deletes', async () => {
 
   expect(scopePaths('/d', '/work', { kind: 'project' })).toEqual([projectDir('/d', '/work')])
   expect(scopePaths('/d', '', { kind: 'project' })).toEqual([])
-  expect(scopePaths('/d', '/work', { kind: 'language', language: 'python' })).toEqual(['/d/profiles/python.json', '/d/progress/python.json'])
+  // With each file, the copies the store keeps beside it.
+  expect(scopePaths('/d', '/work', { kind: 'language', language: 'python' })).toEqual([
+    '/d/profiles/python.json',
+    '/d/profiles/python.json.bak',
+    '/d/profiles/python.json.broken',
+    '/d/progress/python.json',
+    '/d/progress/python.json.bak',
+    '/d/progress/python.json.broken',
+  ])
   expect(scopePaths('/d', '/work', { kind: 'everything' })).toEqual([
     '/d/profiles',
     '/d/progress',
@@ -122,6 +130,7 @@ test('forget: what a word names, and what each scope deletes', async () => {
     '/d/update.json',
     '/d/debug',
     '/d/debug.json',
+    '/d/locks.git',
   ])
 
   expect(knownLanguages(['python.json', 'general.json', 'rust.json', 'python.json', 'notes.txt'])).toEqual(['python', 'rust'])

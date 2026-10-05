@@ -9,6 +9,7 @@ import { compact, emptyJournal, knownEntries, mergeSpans, parseJournal, SAVE_RUN
 import type { Entry, Journal, Span } from '../hooks/journal'
 import { createRecorder, FLUSH_MS } from '../hooks/recorder'
 import { memoryDisk } from '../hooks/storage'
+import { plainStore } from '../hooks/store'
 import { chosen, LET_IT_INFER, NOTHING_YET, parseWorking, workingChoices } from '../hooks/working'
 
 const MINUTE = 60_000
@@ -431,7 +432,7 @@ const FILE = '/data/projects/p/journal.json'
 /** A repository in memory with a recorder on it. */
 function world(head: Record<string, string>, files: Record<string, string>, disk = memoryDisk()) {
   const recorder = createRecorder({
-    disk,
+    store: plainStore(disk),
     file: FILE,
     root: '/work',
     read: async path => files[path] ?? null,
@@ -521,7 +522,7 @@ test('the editor file becomes where the caret is, and time in the file', async (
   const { recorder, files } = world({ 'stats.py': MEAN }, { 'stats.py': MEAN })
   let reads = 0
   const counted = createRecorder({
-    disk: memoryDisk(),
+    store: plainStore(memoryDisk()),
     file: FILE,
     root: '/work',
     read: async path => {

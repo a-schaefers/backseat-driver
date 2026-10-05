@@ -8,6 +8,7 @@ import { shortHash } from './hash'
  *   projects/<name>-<hash>/    one project's journal and cache
  *   focus.json                 written by an editor: where the caret is
  *   debug.json, debug/         the debug log's switch, and the log (debuglog.ts)
+ *   locks.git/                 a bare git repository whose refs are the locks on these files (locks.ts)
  */
 
 /** The folder's own name under the user's data directory. */
@@ -84,6 +85,11 @@ export function focusPath(root: string): string {
   return `${root}/focus.json`
 }
 
+/** The bare repository whose refs are the locks that hold across sessions. */
+export function lockRepoPath(root: string): string {
+  return `${root}/locks.git`
+}
+
 /** The file that says whether the debug log is on, for every session. */
 export function debugSwitchPath(root: string): string {
   return `${root}/debug.json`
@@ -108,7 +114,7 @@ export function isOwnFolder(names: readonly string[]): boolean {
 }
 
 /** What the tutor may delete: only these, directly under its own folder. */
-export const REMOVABLE = ['profiles', 'progress', 'projects', 'focus.json', 'view.json', 'update.json', 'debug', 'debug.json'] as const
+export const REMOVABLE = ['profiles', 'progress', 'projects', 'focus.json', 'view.json', 'update.json', 'debug', 'debug.json', 'locks.git'] as const
 
 /**
  * Whether `path` is something the tutor may delete: inside one of its own
