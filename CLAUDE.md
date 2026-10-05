@@ -39,6 +39,7 @@ Stance: the project is against Claude writing the user's code, not neutral. Whil
 - One profile per language, never per project (`python`, not "python project 1"). It matters only once the user works in that language. The tutor may read other profiles (e.g. explain Rust via Python).
 - The user has the last word. Pushback is weighed. A contested point goes to the deep review model for a second opinion, and the user is told. "Do it my way" always stands. The play-by-play may keep flagging until the user hushes it; a hush saves to that language's profile at once.
 - The pane's default view is the play-by-play. Tabs: 1 Play-by-play, 2 Deep review, 3 Explain, 4 Progress, 5 Settings.
+- Three layouts, one setting (owner, 2026-10-05): `unified` (the default) fits into Claude Code's own interface with no pane, `horizontal` is the whole view framed above the prompt, `vertical` is the pane. A three-way `/config` option, remembered; `/bsd layout` changes it. The unified layout was reviewed by UI/UX workers in live sessions before it was called done, as the owner asked.
 - Settings are one press away (owner, 2026-10-05: surprised `/config` had no shortcut when the tab buttons work so well). A mod cannot add a row or a button to `/config`, so the pane's Settings tab edits the same rows, and `/bsd settings` opens it.
 - First-run questions are few and single choice: the language they know best (once ever), then three per new language (level, goals, focus). Never more than ten at once. Esc skips the rest. Re-ask with `/bsd questions` or `q` in Progress.
 - Three background jobs, each with its own model and thinking level: play-by-play (while hacking), deep review (commits), Explain (reading). The conversation uses the session's model. Explain's cache is per project (profiles are per language); all three jobs feed it and read it.
@@ -254,7 +255,7 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 | `licensekey.ts` | key format, `PUBLIC_KEYS`, ECDSA P-256 verification in BigInt. Imports nothing, so the server's tests import it |
 | `questions.ts` | first-run questions |
 | `debuglog.ts` | the debug log: records, chunks, the ring of latest records, the tracer, `/bsd debug` parsing |
-| `pane.tsx` | pane tree from plain data, handlers passed in |
+| `pane.tsx` | the tutor's drawing in each layout from plain data, handlers passed in |
 
 ### Kernel (PureScript)
 
@@ -400,6 +401,21 @@ The owner wants the logic functional where it can be, "to detect, prevent and re
 - Live: commit noticed within one scan, footer showed a background agent, review in the tab 12 s later. No conversation row, notification or attachment, then or on the next turn. Contested point verdict in chat after 32 s. The 5-min timer with after-commit off reviewed uncommitted work at 5 min.
 - Live with the queue (Sonnet at low, through `scripts/outage-proxy.py`): a commit made with the connection down was queued at once, and its reviewer died 185 s later (Claude Code's own eleven tries), `classic.StopFailure` (`server_error`) and `turn.complete` arriving in the same millisecond. The tab said "Claude is not answering (server error). It is tried again at 19:23, or press r.", the commit kept all its tries, and 23 s later, when the wait was over, the review ran again and was in the tab 7 s after that. With the mod saved 2 s into a review and the connection cut, the reload came 20 s later, `adoptReview` found the running reviewer, and its answer was collected once the connection was back: one reviewer for that commit.
 - Not seen live: the watchdog (a reviewer that never reports back), a review given up on after three tries, the progress look's retries. Tests cover them (`reviewqueue.test.ts`).
+
+### Layouts
+
+- `settings.layout`: `unified | horizontal | vertical` (`layoutOf`), the `layout` row of `userConfig`. The module variable `layout` holds it; `/bsd layout [name]` (bare: the next one) calls `$.config.set` on the row whose `provider.plugin` is `backseat-driver` before any `@` (a working copy's rows are owned by `backseat-driver@inline`), then shows the new layout at once. The set reloads the mod, and Claude Code prints "options changed — reloaded" in the transcript: not avoidable from the mod.
+- `showLayout` opens the pane only for `vertical` (asking for 64 columns when docked) and closes it otherwise. It runs at switch-on, at a reload (`session.start`), on `/bsd` while on, and at switch-off.
+- One drawing for all three: `drawTutor` builds the `PaneView` and the actions, and `renderPane` picks `renderStacked` (vertical), `renderStrip` (horizontal: a round frame, the character and "Working on" in a side column beside the tab, `stripColumns`; stacked inside the frame under 44 body columns) or `renderUnified`.
+- `horizontal` and `unified` draw in the `AbovePrompt` band (`ui.render` on it; passes with `next(e)` while off, in `vertical`, and while a survey holds the band). A pane would not do: Claude Code docks a pane in fullscreen and puts it inline otherwise, and the mod cannot choose.
+- Unified:
+  - One row: the voice's mini face, its line (left out under `MIN_SPEECH` columns of room, never squeezed), the tabs with their badges. Under it the open notes one line each (`noteMark`: ◆ decision, ✘ bug, ⚠ risk, ★ insight, · the rest; text dim), at most `previewCount(rows)` (2 under 40 rows, else 3), then "and N more notes". A blank row above it, as Claude Code separates its blocks.
+  - A tab's digit opens it under the row (`unfolded`), with a heading carrying `x: fold`; the same digit or `x` folds it. It folds by itself on `prompt.submit` and on pause. `/bsd explain` opens Explain.
+  - The play-by-play's state ends Claude Code's hint line under the prompt: a `ui.render` hook on `PromptHint` sets `tail` (`statusEntry`: "backseat watching · ctrl+x tab for keys", or "· esc to leave" while the band has the keys). `$.ui.status` was tried first and rejected: it draws as a warning, "⚠ backseat-driver: …".
+  - Switch-on says where the notes are and how to reach them (`BAND_INTRO`), because nothing in the band does.
+- Keys above the prompt: Claude Code lets a bare digit typed into an EMPTY prompt press a band button (meant for surveys), so the tab buttons carry their digits only while the band has the keyboard (`hasDigits`, `bandKeys` atom). `bandKeys` comes from `ui.focus` on the band (Ctrl+X Tab raises one with the element). Esc raises nothing, so a digit pressed after it still reaches a tab button: `pressBandTab` first moves the focus ring onto that tab with `$.ui.focus`, which Claude Code refuses when the band does not hold the keyboard, and then puts the digit into the prompt with `$.prompt.fill` instead. The kit cannot answer a plugin's own `$.ui.focus`, so that refusal is checked live only.
+- The focus ring landing on a note (`note-<id>`) selects it, so `e d m` act on the note the person is on. `j`/`k` step through the notes; all layouts draw them in one order (`drawnOrder`: decisions, problems, insights) and the keys start on the first one drawn.
+- Live (2026-10-05, a stand-in model on a local port, 80 to 170 columns, main screen and fullscreen): all three layouts drawn and switched by `/bsd layout` in both directions; `vertical` docked at 64 columns in fullscreen; a digit after Esc landed in the prompt (`❯ 3`); at 80 columns the band kept its face on one row and dropped the line.
 
 ### Pane
 
@@ -802,6 +818,7 @@ The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above mem
   - subagents finished by `$.turn.complete(session.finish(n, answer))`
 - Options: `email` (default `me@example.com`, `''` = none), `data` (seed the data disk), `isNewProject`, `install: 'clone'|'installed'`, `tags`, `isCloneDirty`, `isCloneCurrent`, `head`. Registers every stub needed to start and switch modes: extend it, don't register a second stub (one stub per event).
 - Data disk: `session.disk` (absolute path → text), `session.data(rel)`, `session.removed` (rm targets). Deletion needs the marker: `session.disk.set(MARKER_PATH, …)` or a prior write.
+- The band above the prompt and the hint line under it: mount `BAND` and `HINT` (kit.ts). Beneath the plugin the kit draws `ENGINE_BAND` in the band and the hint plus any `tail`. `session.config` is `/config`'s rows (`$.config.list`), `session.configured` what `$.config.set` changed, `session.configDeny` refuses the next one. Tests that open the pane set `{ options: { layout: 'vertical' } }`.
 - Explain in the kit: `session.lookups`, answered with `session.explain(reply, 'text the prompt contains')`. Order isn't guaranteed. With no answer, a file maps to no symbols. `session.editor(file, line, …, extra)` writes `editors/<extra.editor ?? 'test'>-1.json`, beating for the whole test unless `extra.at` is given (kit time starts at 0, and an `at` of 0 does not parse: advance the clock first). Journal tests set `explain: 'off'` (a live editor triggers the 100 ms poll and slows minute-scale tests).
 - Progress: `session.assess(reply)`, `session.assessments`. Updates: `session.ran` (claude and network git commands in order). A clone's top is the plugin folder's parent; an installed copy's `installPath` is `/`.
 - `session.logs` = `$.ui.log` output (swallowed errors appear there).

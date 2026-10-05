@@ -306,6 +306,10 @@ declare module 'claude-code' {
       speech: Speech
       /** What they are working on, for the line under the status line. */
       working: Working
+      /** In the unified layout, whether the lines above the prompt are opened into the tab. */
+      unfolded: boolean
+      /** Whether the band above the prompt has the keyboard, as far as its focus ring has told. */
+      bandKeys: boolean
       /** The plugin's own `/config` rows, for the Settings tab. Read again whenever the tab is opened. */
       settings: SettingRow[]
     }

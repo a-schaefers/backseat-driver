@@ -2,7 +2,7 @@
  * Shared inputs and stubs for the tests. In a test nothing is real: each
  * stub here answers in Claude Code's place.
  */
-import type { AgentSpec, ConfigRow, ModelCompleteRequest, On, ToolSpec } from 'claude-code'
+import type { AgentSpec, ConfigRow, ModelCompleteRequest, On, RenderElement, ToolSpec } from 'claude-code'
 import { mock, test } from 'claude-code/testing'
 import type { TestBody, TestOptions, TestRest } from 'claude-code/testing'
 
@@ -86,6 +86,34 @@ export const PANE = {
     scroll: { offset: 0, bodyRows: 40 },
     view: {},
   },
+} as const
+
+/** What Claude Code passes a `ui.render` hook for the band above the prompt, apart from the surface. */
+export const BAND = {
+  plugin: 'backseat-driver',
+  component: 'AbovePrompt',
+  requestId: 'above-prompt',
+  viewport: { columns: 160, rows: 48 },
+  props: {
+    hasSurvey: false,
+    isWorking: false,
+    maxRows: 24,
+    bodyColumns: 155,
+    scroll: { offset: 0, bodyRows: 23 },
+    view: {},
+  },
+} as const
+
+/** What the kit draws in the band above the prompt in Claude Code's place. */
+export const ENGINE_BAND = 'nothing of the plugin here'
+
+/** What Claude Code passes a `ui.render` hook for the hint line under the prompt, apart from the surface. */
+export const HINT = {
+  plugin: 'backseat-driver',
+  component: 'PromptHint',
+  requestId: 'prompt-hint',
+  viewport: { columns: 160, rows: 48 },
+  props: { isDraft: false, isWorking: false, hint: '? for shortcuts' },
 } as const
 
 const USAGE = { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -191,8 +219,17 @@ export function stubSession(on: On, options: StubOptions = {}) {
   let cloneTop = ''
   let cloneHead = commitHash(500)
   const session = {
-    /** The rows of `/config`, as `$.config.list()` answers: two of the plugin's own and one of another plugin's. */
+    /** The rows of `/config`, as `$.config.list()` answers: three of the plugin's own and one of another plugin's. */
     config: [
+      {
+        key: 'backseat-driver.layout',
+        label: 'Layout',
+        kind: 'choice',
+        value: 'unified',
+        options: ['unified', 'horizontal', 'vertical'],
+        provider: { plugin: 'backseat-driver', tier: 'user' },
+        isLocked: false,
+      },
       {
         key: 'backseat-driver.voice',
         label: 'Voice persona',
@@ -219,6 +256,9 @@ export function stubSession(on: On, options: StubOptions = {}) {
     configDeny: '',
     opened: [] as string[],
     closed: [] as string[],
+    /** Every `$.ui.status` call, in order: the text, or undefined for a cleared line. */
+    statuses: [] as (string | undefined)[],
+
     /** Every prompt that reached Claude Code, and what the plugin attached to it for Claude alone. */
     submitted: [] as string[],
     contexts: [] as (readonly string[])[],
@@ -416,13 +456,33 @@ export function stubSession(on: On, options: StubOptions = {}) {
   })
   // The kit answers a redraw itself, but not the invalidation of a cached prompt event.
   on('ui.invalidate', () => ({ value: undefined }))
+  const panes: string[] = []
+  // What Claude Code draws in the band above the prompt and in the hint line under it, when no plugin draws there.
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
+    const { Text } = $.ui.resolve(e)
+
+    return h(Text, {}, ENGINE_BAND) as RenderElement
+  })
+  on('ui.render', { component: 'PromptHint' }, ($, e) => {
+    const { Text } = $.ui.resolve(e)
+
+    return h(Text, { dimColor: true }, `${e.props.hint}${e.props.tail === undefined ? '' : ` · ${e.props.tail}`}`) as RenderElement
+  })
   on('ui.open', ($, e) => {
     session.opened.push(e.id)
+    if (!panes.includes(e.id)) panes.push(e.id)
 
     return { value: { isPlaced: true } }
   })
   on('ui.close', ($, e) => {
     session.closed.push(e.id)
+    panes.splice(panes.indexOf(e.id), 1)
+
+    return { value: undefined }
+  })
+  on('ui.panes', () => ({ value: panes.map(id => ({ id, title: 'Backseat', isShown: true, isFocused: false, isPlaced: true })) }))
+  on('ui.status', ($, e) => {
+    session.statuses.push(e.text)
 
     return { value: undefined }
   })
