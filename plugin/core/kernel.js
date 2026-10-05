@@ -1,5 +1,29 @@
 // The kernel of Backseat Driver, compiled from PureScript (kernel/src in the repository) by scripts/build-kernel.sh. Do not edit: change the source and build again.
 
+// output/Control.Semigroupoid/index.js
+var semigroupoidFn = {
+  compose: function(f) {
+    return function(g) {
+      return function(x) {
+        return f(g(x));
+      };
+    };
+  }
+};
+
+// output/Control.Category/index.js
+var identity = function(dict) {
+  return dict.identity;
+};
+var categoryFn = {
+  identity: function(x) {
+    return x;
+  },
+  Semigroupoid0: function() {
+    return semigroupoidFn;
+  }
+};
+
 // output/Data.Array/foreign.js
 var replicateFill = function(count, value) {
   if (count < 1) {
@@ -29,11 +53,14 @@ var findIndexImpl = function(just, nothing, f, xs) {
   }
   return nothing;
 };
+var reverse = function(l) {
+  return l.slice().reverse();
+};
 var filterImpl = function(f, xs) {
   return xs.filter(f);
 };
 var sortByImpl = /* @__PURE__ */ (function() {
-  function mergeFromTo(compare2, fromOrdering, xs1, xs2, from, to) {
+  function mergeFromTo(compare3, fromOrdering, xs1, xs2, from, to) {
     var mid;
     var i;
     var j;
@@ -42,15 +69,15 @@ var sortByImpl = /* @__PURE__ */ (function() {
     var y;
     var c;
     mid = from + (to - from >> 1);
-    if (mid - from > 1) mergeFromTo(compare2, fromOrdering, xs2, xs1, from, mid);
-    if (to - mid > 1) mergeFromTo(compare2, fromOrdering, xs2, xs1, mid, to);
+    if (mid - from > 1) mergeFromTo(compare3, fromOrdering, xs2, xs1, from, mid);
+    if (to - mid > 1) mergeFromTo(compare3, fromOrdering, xs2, xs1, mid, to);
     i = from;
     j = mid;
     k = from;
     while (i < mid && j < to) {
       x = xs2[i];
       y = xs2[j];
-      c = fromOrdering(compare2(x)(y));
+      c = fromOrdering(compare3(x)(y));
       if (c > 0) {
         xs1[k++] = y;
         ++j;
@@ -66,11 +93,11 @@ var sortByImpl = /* @__PURE__ */ (function() {
       xs1[k++] = xs2[j++];
     }
   }
-  return function(compare2, fromOrdering, xs) {
+  return function(compare3, fromOrdering, xs) {
     var out;
     if (xs.length < 2) return xs;
     out = xs.slice(0);
-    mergeFromTo(compare2, fromOrdering, out, xs.slice(0), 0, xs.length);
+    mergeFromTo(compare3, fromOrdering, out, xs.slice(0), 0, xs.length);
     return out;
   };
 })();
@@ -100,34 +127,17 @@ var arrayMap = function(f) {
   };
 };
 
-// output/Control.Semigroupoid/index.js
-var semigroupoidFn = {
-  compose: function(f) {
-    return function(g) {
-      return function(x) {
-        return f(g(x));
-      };
-    };
-  }
-};
-
-// output/Control.Category/index.js
-var identity = function(dict) {
-  return dict.identity;
-};
-var categoryFn = {
-  identity: function(x) {
-    return x;
-  },
-  Semigroupoid0: function() {
-    return semigroupoidFn;
-  }
-};
-
 // output/Data.Boolean/index.js
 var otherwise = true;
 
 // output/Data.Function/index.js
+var flip = function(f) {
+  return function(b) {
+    return function(a) {
+      return f(a)(b);
+    };
+  };
+};
 var $$const = function(a) {
   return function(v) {
     return a;
@@ -163,6 +173,31 @@ var semigroupArray = {
 };
 var append = function(dict) {
   return dict.append;
+};
+
+// output/Control.Apply/foreign.js
+var arrayApply = function(fs) {
+  return function(xs) {
+    var l = fs.length;
+    var k = xs.length;
+    var result = new Array(l * k);
+    var n = 0;
+    for (var i = 0; i < l; i++) {
+      var f = fs[i];
+      for (var j = 0; j < k; j++) {
+        result[n++] = f(xs[j]);
+      }
+    }
+    return result;
+  };
+};
+
+// output/Control.Apply/index.js
+var applyArray = {
+  apply: arrayApply,
+  Functor0: function() {
+    return functorArray;
+  }
 };
 
 // output/Control.Applicative/index.js
@@ -207,6 +242,12 @@ var arrayBind = typeof Array.prototype.flatMap === "function" ? function(arr) {
 };
 
 // output/Control.Bind/index.js
+var bindArray = {
+  bind: arrayBind,
+  Apply0: function() {
+    return applyArray;
+  }
+};
 var bind = function(dict) {
   return dict.bind;
 };
@@ -227,6 +268,8 @@ var ap = function(dictMonad) {
 };
 
 // output/Data.Bounded/foreign.js
+var topInt = 2147483647;
+var bottomInt = -2147483648;
 var topChar = String.fromCharCode(65535);
 var bottomChar = String.fromCharCode(0);
 var topNumber = Number.POSITIVE_INFINITY;
@@ -246,6 +289,7 @@ var unsafeCompareImpl = function(lt) {
 };
 var ordIntImpl = unsafeCompareImpl;
 var ordNumberImpl = unsafeCompareImpl;
+var ordStringImpl = unsafeCompareImpl;
 
 // output/Data.Eq/foreign.js
 var refEq = function(r1) {
@@ -276,10 +320,10 @@ var eq = function(dict) {
 };
 var eq2 = /* @__PURE__ */ eq(eqBoolean);
 var notEq = function(dictEq) {
-  var eq32 = eq(dictEq);
+  var eq33 = eq(dictEq);
   return function(x) {
     return function(y) {
-      return eq2(eq32(x)(y))(false);
+      return eq2(eq33(x)(y))(false);
     };
   };
 };
@@ -306,8 +350,77 @@ var EQ = /* @__PURE__ */ (function() {
   EQ2.value = new EQ2();
   return EQ2;
 })();
+var eqOrdering = {
+  eq: function(v) {
+    return function(v1) {
+      if (v instanceof LT && v1 instanceof LT) {
+        return true;
+      }
+      ;
+      if (v instanceof GT && v1 instanceof GT) {
+        return true;
+      }
+      ;
+      if (v instanceof EQ && v1 instanceof EQ) {
+        return true;
+      }
+      ;
+      return false;
+    };
+  }
+};
+
+// output/Data.Semiring/foreign.js
+var intAdd = function(x) {
+  return function(y) {
+    return x + y | 0;
+  };
+};
+var intMul = function(x) {
+  return function(y) {
+    return x * y | 0;
+  };
+};
+var numAdd = function(n1) {
+  return function(n2) {
+    return n1 + n2;
+  };
+};
+var numMul = function(n1) {
+  return function(n2) {
+    return n1 * n2;
+  };
+};
+
+// output/Data.Semiring/index.js
+var zero = function(dict) {
+  return dict.zero;
+};
+var semiringNumber = {
+  add: numAdd,
+  zero: 0,
+  mul: numMul,
+  one: 1
+};
+var semiringInt = {
+  add: intAdd,
+  zero: 0,
+  mul: intMul,
+  one: 1
+};
+var add = function(dict) {
+  return dict.add;
+};
 
 // output/Data.Ord/index.js
+var ordString = /* @__PURE__ */ (function() {
+  return {
+    compare: ordStringImpl(LT.value)(EQ.value)(GT.value),
+    Eq0: function() {
+      return eqString;
+    }
+  };
+})();
 var ordNumber = /* @__PURE__ */ (function() {
   return {
     compare: ordNumberImpl(LT.value)(EQ.value)(GT.value),
@@ -334,6 +447,32 @@ var comparing = function(dictOrd) {
       return function(y) {
         return compare3(f(x))(f(y));
       };
+    };
+  };
+};
+var greaterThanOrEq = function(dictOrd) {
+  var compare3 = compare(dictOrd);
+  return function(a1) {
+    return function(a2) {
+      var v = compare3(a1)(a2);
+      if (v instanceof LT) {
+        return false;
+      }
+      ;
+      return true;
+    };
+  };
+};
+var lessThanOrEq = function(dictOrd) {
+  var compare3 = compare(dictOrd);
+  return function(a1) {
+    return function(a2) {
+      var v = compare3(a1)(a2);
+      if (v instanceof GT) {
+        return false;
+      }
+      ;
+      return true;
     };
   };
 };
@@ -380,15 +519,30 @@ var min = function(dictOrd) {
   };
 };
 var clamp = function(dictOrd) {
-  var min1 = min(dictOrd);
-  var max13 = max(dictOrd);
+  var min12 = min(dictOrd);
+  var max15 = max(dictOrd);
   return function(low) {
     return function(hi) {
       return function(x) {
-        return min1(hi)(max13(low)(x));
+        return min12(hi)(max15(low)(x));
       };
     };
   };
+};
+
+// output/Data.Bounded/index.js
+var top = function(dict) {
+  return dict.top;
+};
+var boundedInt = {
+  top: topInt,
+  bottom: bottomInt,
+  Ord0: function() {
+    return ordInt;
+  }
+};
+var bottom = function(dict) {
+  return dict.bottom;
 };
 
 // output/Data.Show/foreign.js
@@ -452,6 +606,15 @@ var functorMaybe = {
 };
 var fromMaybe = function(a) {
   return maybe(a)(identity2);
+};
+var fromJust = function() {
+  return function(v) {
+    if (v instanceof Just) {
+      return v.value0;
+    }
+    ;
+    throw new Error("Failed pattern match at Data.Maybe (line 288, column 1 - line 288, column 46): " + [v.constructor.name]);
+  };
 };
 var eqMaybe = function(dictEq) {
   var eq4 = eq(dictEq);
@@ -560,6 +723,7 @@ function unsafeFreezeThawImpl(xs) {
   return xs;
 }
 var unsafeFreezeImpl = unsafeFreezeThawImpl;
+var unsafeThawImpl = unsafeFreezeThawImpl;
 function copyImpl(xs) {
   return xs.slice();
 }
@@ -587,6 +751,7 @@ var runSTFn2 = function runSTFn22(fn) {
 };
 
 // output/Data.Array.ST/index.js
+var unsafeThaw = /* @__PURE__ */ runSTFn1(unsafeThawImpl);
 var unsafeFreeze = /* @__PURE__ */ runSTFn1(unsafeFreezeImpl);
 var thaw = /* @__PURE__ */ runSTFn1(thawImpl);
 var withArray = function(f) {
@@ -626,6 +791,27 @@ var foldlArray = function(f) {
   };
 };
 
+// output/Data.Tuple/index.js
+var Tuple = /* @__PURE__ */ (function() {
+  function Tuple2(value0, value1) {
+    this.value0 = value0;
+    this.value1 = value1;
+  }
+  ;
+  Tuple2.create = function(value0) {
+    return function(value1) {
+      return new Tuple2(value0, value1);
+    };
+  };
+  return Tuple2;
+})();
+var snd = function(v) {
+  return v.value1;
+};
+var fst = function(v) {
+  return v.value0;
+};
+
 // output/Data.Foldable/index.js
 var foldr = function(dict) {
   return dict.foldr;
@@ -633,15 +819,21 @@ var foldr = function(dict) {
 var foldl = function(dict) {
   return dict.foldl;
 };
+var sum = function(dictFoldable) {
+  var foldl22 = foldl(dictFoldable);
+  return function(dictSemiring) {
+    return foldl22(add(dictSemiring))(zero(dictSemiring));
+  };
+};
 var foldMapDefaultR = function(dictFoldable) {
   var foldr2 = foldr(dictFoldable);
   return function(dictMonoid) {
-    var append2 = append(dictMonoid.Semigroup0());
+    var append3 = append(dictMonoid.Semigroup0());
     var mempty2 = mempty(dictMonoid);
     return function(f) {
       return foldr2(function(x) {
         return function(acc) {
-          return append2(f(x))(acc);
+          return append3(f(x))(acc);
         };
       })(mempty2);
     };
@@ -684,11 +876,37 @@ var runFn4 = function(fn) {
   };
 };
 
+// output/Data.FunctorWithIndex/foreign.js
+var mapWithIndexArray = function(f) {
+  return function(xs) {
+    var l = xs.length;
+    var result = Array(l);
+    for (var i = 0; i < l; i++) {
+      result[i] = f(i)(xs[i]);
+    }
+    return result;
+  };
+};
+
+// output/Data.FunctorWithIndex/index.js
+var mapWithIndex = function(dict) {
+  return dict.mapWithIndex;
+};
+var functorWithIndexArray = {
+  mapWithIndex: mapWithIndexArray,
+  Functor0: function() {
+    return functorArray;
+  }
+};
+
 // output/Data.Array/index.js
 var $$void2 = /* @__PURE__ */ $$void(functorST);
 var map2 = /* @__PURE__ */ map(functorMaybe);
+var map1 = /* @__PURE__ */ map(functorArray);
 var map22 = /* @__PURE__ */ map(functorST);
+var fromJust2 = /* @__PURE__ */ fromJust();
 var when2 = /* @__PURE__ */ when(applicativeST);
+var notEq2 = /* @__PURE__ */ notEq(eqOrdering);
 var unsafeIndex = function() {
   return runFn2(unsafeIndexImpl);
 };
@@ -716,20 +934,76 @@ var sortWith = function(dictOrd) {
     return sortBy(comparing2(f));
   };
 };
+var sortWith1 = /* @__PURE__ */ sortWith(ordInt);
 var snoc = function(xs) {
   return function(x) {
     return withArray(push(x))(xs)();
   };
 };
 var slice = /* @__PURE__ */ runFn3(sliceImpl);
+var take = function(n) {
+  return function(xs) {
+    var $152 = n < 1;
+    if ($152) {
+      return [];
+    }
+    ;
+    return slice(0)(n)(xs);
+  };
+};
+var singleton2 = function(a) {
+  return [a];
+};
 var $$null = function(xs) {
   return length(xs) === 0;
 };
+var mapWithIndex2 = /* @__PURE__ */ mapWithIndex(functorWithIndexArray);
 var index = /* @__PURE__ */ (function() {
   return runFn4(indexImpl)(Just.create)(Nothing.value);
 })();
 var last = function(xs) {
   return index(xs)(length(xs) - 1 | 0);
+};
+var head = function(xs) {
+  return index(xs)(0);
+};
+var nubBy = function(comp) {
+  return function(xs) {
+    var indexedAndSorted = sortBy(function(x) {
+      return function(y) {
+        return comp(snd(x))(snd(y));
+      };
+    })(mapWithIndex2(Tuple.create)(xs));
+    var v = head(indexedAndSorted);
+    if (v instanceof Nothing) {
+      return [];
+    }
+    ;
+    if (v instanceof Just) {
+      return map1(snd)(sortWith1(fst)((function __do() {
+        var result = unsafeThaw(singleton2(v.value0))();
+        foreach(indexedAndSorted)(function(v1) {
+          return function __do2() {
+            var lst = map22(/* @__PURE__ */ (function() {
+              var $183 = function($185) {
+                return fromJust2(last($185));
+              };
+              return function($184) {
+                return snd($183($184));
+              };
+            })())(unsafeFreeze(result))();
+            return when2(notEq2(comp(lst)(v1.value1))(EQ.value))($$void2(push(v1)(result)))();
+          };
+        })();
+        return unsafeFreeze(result)();
+      })()));
+    }
+    ;
+    throw new Error("Failed pattern match at Data.Array (line 1115, column 17 - line 1123, column 28): " + [v.constructor.name]);
+  };
+};
+var nub = function(dictOrd) {
+  return nubBy(compare(dictOrd));
 };
 var foldl2 = /* @__PURE__ */ foldl(foldableArray);
 var findIndex = /* @__PURE__ */ (function() {
@@ -742,10 +1016,10 @@ var find2 = function(f) {
 };
 var filter = /* @__PURE__ */ runFn2(filterImpl);
 var elemIndex = function(dictEq) {
-  var eq23 = eq(dictEq);
+  var eq24 = eq(dictEq);
   return function(x) {
     return findIndex(function(v) {
-      return eq23(v)(x);
+      return eq24(v)(x);
     });
   };
 };
@@ -772,8 +1046,17 @@ var takeEnd = function(n) {
     return drop(length(xs) - n | 0)(xs);
   };
 };
+var concatMap = /* @__PURE__ */ flip(/* @__PURE__ */ bind(bindArray));
+var mapMaybe = function(f) {
+  return concatMap((function() {
+    var $189 = maybe([])(singleton2);
+    return function($190) {
+      return $189(f($190));
+    };
+  })());
+};
 var any2 = /* @__PURE__ */ runFn2(anyImpl);
-var nubByEq = function(eq23) {
+var nubByEq = function(eq24) {
   return function(xs) {
     return (function __do() {
       var arr = newSTArray();
@@ -781,7 +1064,7 @@ var nubByEq = function(eq23) {
         return function __do2() {
           var e = map22((function() {
             var $194 = any2(function(v) {
-              return eq23(v)(x);
+              return eq24(v)(x);
             });
             return function($195) {
               return !$194($195);
@@ -796,11 +1079,19 @@ var nubByEq = function(eq23) {
 };
 
 // output/Data.Int/foreign.js
+var fromNumberImpl = function(just) {
+  return function(nothing) {
+    return function(n) {
+      return (n | 0) === n ? just(n) : nothing;
+    };
+  };
+};
 var toNumber = function(n) {
   return n;
 };
 
 // output/Data.Number/foreign.js
+var isFiniteImpl = isFinite;
 var floor = Math.floor;
 var pow = function(n) {
   return function(p) {
@@ -808,6 +1099,649 @@ var pow = function(n) {
   };
 };
 var round = Math.round;
+
+// output/Data.Int/index.js
+var top2 = /* @__PURE__ */ top(boundedInt);
+var bottom2 = /* @__PURE__ */ bottom(boundedInt);
+var fromNumber = /* @__PURE__ */ (function() {
+  return fromNumberImpl(Just.create)(Nothing.value);
+})();
+var unsafeClamp = function(x) {
+  if (!isFiniteImpl(x)) {
+    return 0;
+  }
+  ;
+  if (x >= toNumber(top2)) {
+    return top2;
+  }
+  ;
+  if (x <= toNumber(bottom2)) {
+    return bottom2;
+  }
+  ;
+  if (otherwise) {
+    return fromMaybe(0)(fromNumber(x));
+  }
+  ;
+  throw new Error("Failed pattern match at Data.Int (line 72, column 1 - line 72, column 29): " + [x.constructor.name]);
+};
+var floor2 = function($39) {
+  return unsafeClamp(floor($39));
+};
+
+// output/Kernel.Growth/index.js
+var map3 = /* @__PURE__ */ map(functorArray);
+var sum2 = /* @__PURE__ */ sum(foldableArray);
+var sum1 = /* @__PURE__ */ sum2(semiringNumber);
+var nub2 = /* @__PURE__ */ nub(ordString);
+var max3 = /* @__PURE__ */ max(ordNumber);
+var min3 = /* @__PURE__ */ min(ordNumber);
+var max1 = /* @__PURE__ */ max(ordInt);
+var compare2 = /* @__PURE__ */ compare(ordInt);
+var append2 = /* @__PURE__ */ append(semigroupArray);
+var elem3 = /* @__PURE__ */ elem2(eqString);
+var sum22 = /* @__PURE__ */ sum2(semiringInt);
+var min1 = /* @__PURE__ */ min(ordInt);
+var identity3 = /* @__PURE__ */ identity(categoryFn);
+var Beginner = /* @__PURE__ */ (function() {
+  function Beginner2() {
+  }
+  ;
+  Beginner2.value = new Beginner2();
+  return Beginner2;
+})();
+var Junior = /* @__PURE__ */ (function() {
+  function Junior2() {
+  }
+  ;
+  Junior2.value = new Junior2();
+  return Junior2;
+})();
+var Mid = /* @__PURE__ */ (function() {
+  function Mid2() {
+  }
+  ;
+  Mid2.value = new Mid2();
+  return Mid2;
+})();
+var Senior = /* @__PURE__ */ (function() {
+  function Senior2() {
+  }
+  ;
+  Senior2.value = new Senior2();
+  return Senior2;
+})();
+var skillStates = /* @__PURE__ */ (function() {
+  var step2 = function(states) {
+    return function(seen) {
+      var v = find2(function(state) {
+        return state.skill === seen.skill;
+      })(states);
+      if (v instanceof Nothing) {
+        return snoc(states)({
+          skill: seen.skill,
+          commit: seen.commit,
+          rank: seen.rank,
+          shownNow: seen.isShown,
+          missedNow: !seen.isShown,
+          shownBefore: false,
+          missedBefore: false
+        });
+      }
+      ;
+      if (v instanceof Just) {
+        return map3(function(state) {
+          var $64 = state.skill !== seen.skill;
+          if ($64) {
+            return state;
+          }
+          ;
+          var $65 = state.commit === seen.commit;
+          if ($65) {
+            return {
+              commit: state.commit,
+              skill: state.skill,
+              missedBefore: state.missedBefore,
+              rank: state.rank,
+              shownBefore: state.shownBefore,
+              shownNow: state.shownNow || seen.isShown,
+              missedNow: state.missedNow || !seen.isShown
+            };
+          }
+          ;
+          return {
+            skill: seen.skill,
+            commit: seen.commit,
+            rank: seen.rank,
+            shownNow: seen.isShown,
+            missedNow: !seen.isShown,
+            shownBefore: v.value0.shownBefore || v.value0.shownNow,
+            missedBefore: v.value0.missedBefore || v.value0.missedNow
+          };
+        })(states);
+      }
+      ;
+      throw new Error("Failed pattern match at Kernel.Growth (line 226, column 22 - line 243, column 15): " + [v.constructor.name]);
+    };
+  };
+  return foldl2(step2)([]);
+})();
+var selfStep = 0.25;
+var recurringTimes = 3;
+var reach = 4;
+var rankOf = function(n) {
+  if (n <= 0) {
+    return Beginner.value;
+  }
+  ;
+  if (n === 1) {
+    return Junior.value;
+  }
+  ;
+  if (n === 2) {
+    return Mid.value;
+  }
+  ;
+  if (otherwise) {
+    return Senior.value;
+  }
+  ;
+  throw new Error("Failed pattern match at Kernel.Growth (line 66, column 1 - line 66, column 22): " + [n.constructor.name]);
+};
+var rankNumber = function(v) {
+  if (v instanceof Beginner) {
+    return 0;
+  }
+  ;
+  if (v instanceof Junior) {
+    return 1;
+  }
+  ;
+  if (v instanceof Mid) {
+    return 2;
+  }
+  ;
+  if (v instanceof Senior) {
+    return 3;
+  }
+  ;
+  throw new Error("Failed pattern match at Kernel.Growth (line 73, column 1 - line 73, column 26): " + [v.constructor.name]);
+};
+var placeObservations = 5;
+var placeCommits = 2;
+var ownAtLeast = 2;
+var lessonCap = 2;
+var item = function(kind) {
+  return function(what) {
+    return function(count) {
+      return function(total) {
+        return {
+          kind,
+          what,
+          count,
+          total
+        };
+      };
+    };
+  };
+};
+var isStillMissed = function(state) {
+  return !state.shownNow && !state.shownBefore;
+};
+var isSlipping = function(state) {
+  return !state.shownNow && state.shownBefore;
+};
+var isRecurring = function(topic) {
+  return topic.flagged >= recurringTimes;
+};
+var isImproved = function(state) {
+  return state.shownNow && (!state.missedNow && state.missedBefore);
+};
+var isFinished = function(lesson) {
+  return lesson.steps > 0 && lesson.done >= lesson.steps;
+};
+var isUnderWay = function(lesson) {
+  return lesson.done > 0 && !isFinished(lesson);
+};
+var habitPoints = 5;
+var habitLooks = 12;
+var isHabitImproved = function(topic) {
+  return isRecurring(topic) && topic.sinceLooks >= habitLooks;
+};
+var isStillComing = function(topic) {
+  return isRecurring(topic) && topic.sinceLooks < habitLooks;
+};
+var habitCap = 20;
+var evidenceSpan = 80;
+var eqRank = {
+  eq: function(x) {
+    return function(y) {
+      if (x instanceof Beginner && y instanceof Beginner) {
+        return true;
+      }
+      ;
+      if (x instanceof Junior && y instanceof Junior) {
+        return true;
+      }
+      ;
+      if (x instanceof Mid && y instanceof Mid) {
+        return true;
+      }
+      ;
+      if (x instanceof Senior && y instanceof Senior) {
+        return true;
+      }
+      ;
+      return false;
+    };
+  }
+};
+var eq22 = /* @__PURE__ */ eq(eqRank);
+var eq3 = /* @__PURE__ */ eq(/* @__PURE__ */ eqMaybe(eqRank));
+var ordRank = {
+  compare: function(x) {
+    return function(y) {
+      if (x instanceof Beginner && y instanceof Beginner) {
+        return EQ.value;
+      }
+      ;
+      if (x instanceof Beginner) {
+        return LT.value;
+      }
+      ;
+      if (y instanceof Beginner) {
+        return GT.value;
+      }
+      ;
+      if (x instanceof Junior && y instanceof Junior) {
+        return EQ.value;
+      }
+      ;
+      if (x instanceof Junior) {
+        return LT.value;
+      }
+      ;
+      if (y instanceof Junior) {
+        return GT.value;
+      }
+      ;
+      if (x instanceof Mid && y instanceof Mid) {
+        return EQ.value;
+      }
+      ;
+      if (x instanceof Mid) {
+        return LT.value;
+      }
+      ;
+      if (y instanceof Mid) {
+        return GT.value;
+      }
+      ;
+      if (x instanceof Senior && y instanceof Senior) {
+        return EQ.value;
+      }
+      ;
+      throw new Error("Failed pattern match at Kernel.Growth (line 0, column 0 - line 0, column 0): " + [x.constructor.name, y.constructor.name]);
+    };
+  },
+  Eq0: function() {
+    return eqRank;
+  }
+};
+var greaterThanOrEq2 = /* @__PURE__ */ greaterThanOrEq(ordRank);
+var lessThanOrEq1 = /* @__PURE__ */ lessThanOrEq(ordRank);
+var ownAt = function(facts) {
+  return function(rank) {
+    return sum1(map3(function(v) {
+      return v.weight;
+    })(filter(function(seen) {
+      return seen.isShown && greaterThanOrEq2(seen.rank)(rank);
+    })(facts.seen)));
+  };
+};
+var commitCount = function(seen) {
+  return length(nub2(map3(function(v) {
+    return v.commit;
+  })(seen)));
+};
+var isPlaced = function(facts) {
+  return length(facts.seen) >= placeObservations && commitCount(facts.seen) >= placeCommits;
+};
+var clamp$prime = function(low) {
+  return function(high) {
+    return function(x) {
+      return max3(low)(min3(high)(x));
+    };
+  };
+};
+var checkedStep = 0.5;
+var lessonCredit = function(lesson) {
+  return toNumber(lesson.checked) * checkedStep + toNumber(max1(0)(lesson.done - lesson.checked | 0)) * selfStep;
+};
+var evidenceAt = function(facts) {
+  return function(rank) {
+    var missed = sum1(map3(function(v) {
+      return v.weight;
+    })(filter(function(seen) {
+      return !seen.isShown && lessThanOrEq1(seen.rank)(rank);
+    })(facts.seen)));
+    var lessons = min3(lessonCap)(sum1(map3(lessonCredit)(filter(function(lesson) {
+      return lesson.isCounted && greaterThanOrEq2(lesson.rank)(rank);
+    })(facts.lessons))));
+    return ownAt(facts)(rank) + lessons - missed;
+  };
+};
+var holds = function(facts) {
+  return function(rank) {
+    return evidenceAt(facts)(rank) >= reach && ownAt(facts)(rank) >= ownAtLeast;
+  };
+};
+var levelOf = function(facts) {
+  if (!isPlaced(facts)) {
+    return Nothing.value;
+  }
+  ;
+  if (otherwise) {
+    return new Just(fromMaybe(Beginner.value)(find2(holds(facts))([Senior.value, Mid.value, Junior.value])));
+  }
+  ;
+  throw new Error("Failed pattern match at Kernel.Growth (line 215, column 1 - line 215, column 31): " + [facts.constructor.name]);
+};
+var byCount = /* @__PURE__ */ sortBy(function(a) {
+  return function(b) {
+    return compare2(b.count)(a.count);
+  };
+});
+var alt2 = function(v) {
+  return function(v1) {
+    if (v instanceof Just) {
+      return new Just(v.value0);
+    }
+    ;
+    if (v instanceof Nothing) {
+      return v1;
+    }
+    ;
+    throw new Error("Failed pattern match at Kernel.Growth (line 372, column 1 - line 372, column 47): " + [v.constructor.name, v1.constructor.name]);
+  };
+};
+var above = function(v) {
+  if (v instanceof Beginner) {
+    return new Just(Junior.value);
+  }
+  ;
+  if (v instanceof Junior) {
+    return new Just(Mid.value);
+  }
+  ;
+  if (v instanceof Mid) {
+    return new Just(Senior.value);
+  }
+  ;
+  if (v instanceof Senior) {
+    return Nothing.value;
+  }
+  ;
+  throw new Error("Failed pattern match at Kernel.Growth (line 79, column 1 - line 79, column 28): " + [v.constructor.name]);
+};
+var growthOf = function(facts) {
+  var states = skillStates(facts.seen);
+  var placeItem = (function() {
+    var $78 = isPlaced(facts);
+    if ($78) {
+      return [];
+    }
+    ;
+    return [item("place")("")(max1(0)(placeObservations - length(facts.seen) | 0))(max1(0)(placeCommits - commitCount(facts.seen) | 0))];
+  })();
+  var open = filter(function(lesson) {
+    return lesson.isCounted && !isFinished(lesson);
+  })(facts.lessons);
+  var nub$prime = function(lessons) {
+    return foldl2(function(kept2) {
+      return function(lesson) {
+        var $79 = any2(function(other) {
+          return other.id === lesson.id;
+        })(kept2);
+        if ($79) {
+          return kept2;
+        }
+        ;
+        return snoc(kept2)(lesson);
+      };
+    })([])(lessons);
+  };
+  var level = levelOf(facts);
+  var target = (function() {
+    if (level instanceof Nothing) {
+      return Nothing.value;
+    }
+    ;
+    if (level instanceof Just) {
+      return above(level.value0);
+    }
+    ;
+    throw new Error("Failed pattern match at Kernel.Growth (line 340, column 12 - line 342, column 28): " + [level.constructor.name]);
+  })();
+  var nextSkills = (function() {
+    if (target instanceof Nothing) {
+      return [];
+    }
+    ;
+    if (target instanceof Just) {
+      return map3(function(state) {
+        return item("skill")(state.skill)(rankNumber(target.value0))(0);
+      })(filter(function(state) {
+        return eq22(state.rank)(target.value0) && !state.shownNow;
+      })(states));
+    }
+    ;
+    throw new Error("Failed pattern match at Kernel.Growth (line 345, column 16 - line 347, column 147): " + [target.constructor.name]);
+  })();
+  var ownItem = (function() {
+    if (target instanceof Just && ownAt(facts)(target.value0) < ownAtLeast) {
+      return [item("own")("")(rankNumber(target.value0))(0)];
+    }
+    ;
+    return [];
+  })();
+  var habits = filter(isHabitImproved)(facts.topics);
+  var improved = take(5)(append2(map3(function(topic) {
+    return item("habit")(topic.topic)(topic.flagged)(topic.sinceLooks);
+  })(habits))(append2(map3(function(state) {
+    return item("skill")(state.skill)(0)(0);
+  })(reverse(filter(isImproved)(states))))(map3(function(lesson) {
+    return item("lesson")(lesson.title)(lesson.steps)(0);
+  })(filter(isFinished)(facts.lessons)))));
+  var habitLift = min3(habitCap)(toNumber(length(habits)) * habitPoints);
+  var encouragement = (function() {
+    if (improved.length === 0) {
+      return Nothing.value;
+    }
+    ;
+    return alt2(alt2(find2(function(it) {
+      return it.kind === "habit";
+    })(improved))(find2(function(it) {
+      return it.kind === "skill";
+    })(improved)))(find2(function(it) {
+      return it.kind === "lesson";
+    })(improved));
+  })();
+  var coming = filter(isStillComing)(facts.topics);
+  var comingDrag = min3(habitCap)(toNumber(length(coming)) * habitPoints);
+  var toNext = (function() {
+    if (level instanceof Nothing) {
+      return 0;
+    }
+    ;
+    if (level instanceof Just) {
+      var carried = (function() {
+        var v = above(level.value0);
+        if (v instanceof Just) {
+          return clamp$prime(0)(1)(evidenceAt(facts)(v.value0) / reach) * evidenceSpan;
+        }
+        ;
+        if (v instanceof Nothing) {
+          return clamp$prime(0)(1)(evidenceAt(facts)(level.value0) / (2 * reach)) * evidenceSpan;
+        }
+        ;
+        throw new Error("Failed pattern match at Kernel.Growth (line 303, column 19 - line 306, column 91): " + [v.constructor.name]);
+      })();
+      return floor2(clamp$prime(0)(99)(carried + habitLift - comingDrag));
+    }
+    ;
+    throw new Error("Failed pattern match at Kernel.Growth (line 299, column 12 - line 308, column 67): " + [level.constructor.name]);
+  })();
+  var score = (function() {
+    if (level instanceof Nothing) {
+      return -1 | 0;
+    }
+    ;
+    if (level instanceof Just) {
+      return (rankNumber(level.value0) * 100 | 0) + toNext | 0;
+    }
+    ;
+    throw new Error("Failed pattern match at Kernel.Growth (line 310, column 11 - line 312, column 48): " + [level.constructor.name]);
+  })();
+  var focus = append2(map3(function(v) {
+    return v.skill;
+  })(filter(function(state) {
+    return isSlipping(state) || isStillMissed(state);
+  })(states)))(map3(function(v) {
+    return v.topic;
+  })(coming));
+  var fits = function(lesson) {
+    return any2(function(skill) {
+      return elem3(skill)(focus);
+    })(lesson.skills);
+  };
+  var neededHelp = take(5)(byCount(append2(map3(function(topic) {
+    return item("asked")(topic.topic)(topic.explained)(0);
+  })(filter(function(topic) {
+    return topic.explained > 0;
+  })(facts.topics)))(append2(map3(function(topic) {
+    return item("flagged")(topic.topic)(topic.flagged)(0);
+  })(coming))(map3(function(lesson) {
+    return item("lesson")(lesson.title)(lesson.helped)(0);
+  })(filter(function(lesson) {
+    return lesson.helped > 0;
+  })(facts.lessons))))));
+  var workOn = take(6)(append2(map3(function(state) {
+    return item("slipping")(state.skill)(0)(0);
+  })(filter(isSlipping)(states)))(append2(map3(function(topic) {
+    return item("recurring")(topic.topic)(topic.flagged)(0);
+  })(sortBy(function(a) {
+    return function(b) {
+      return compare2(b.flagged)(a.flagged);
+    };
+  })(coming)))(append2(map3(function(state) {
+    return item("missed")(state.skill)(0)(0);
+  })(filter(isStillMissed)(states)))(map3(function(lesson) {
+    return item("lesson")(lesson.title)(lesson.done)(lesson.steps);
+  })(filter(isUnderWay)(facts.lessons))))));
+  var atLeast = function(lesson) {
+    if (level instanceof Nothing) {
+      return true;
+    }
+    ;
+    if (level instanceof Just) {
+      return greaterThanOrEq2(lesson.rank)(level.value0);
+    }
+    ;
+    throw new Error("Failed pattern match at Kernel.Growth (line 352, column 20 - line 354, column 37): " + [level.constructor.name]);
+  };
+  var suggested = take(2)(nub$prime(append2(filter(fits)(open))(append2(filter(function(lesson) {
+    return eq3(new Just(lesson.rank))(target);
+  })(open))(filter(atLeast)(open)))));
+  var lessonItems = map3(function(lesson) {
+    return item("lesson")(lesson.title)(lesson.done)(lesson.steps);
+  })(suggested);
+  var toRaise = take(5)(append2(placeItem)(append2(nextSkills)(append2(ownItem)(lessonItems))));
+  return {
+    level,
+    score,
+    toNext,
+    shown: sum1(map3(function(v) {
+      return v.weight;
+    })(filter(function(v) {
+      return v.isShown;
+    })(facts.seen))),
+    missed: sum1(map3(function(v) {
+      return v.weight;
+    })(filter(function($97) {
+      return !(function(v) {
+        return v.isShown;
+      })($97);
+    })(facts.seen))),
+    lessonSteps: sum22(map3(function(v) {
+      return v.done;
+    })(facts.lessons)),
+    habitsImproved: length(habits),
+    stillComing: length(coming),
+    workOn,
+    neededHelp,
+    improved,
+    toRaise,
+    encouragement
+  };
+};
+var growthWire = function(wire) {
+  var maybe$prime2 = function(fallback) {
+    return function(f) {
+      return function(v) {
+        if (v instanceof Nothing) {
+          return fallback;
+        }
+        ;
+        if (v instanceof Just) {
+          return f(v.value0);
+        }
+        ;
+        throw new Error("Failed pattern match at Kernel.Growth (line 424, column 23 - line 426, column 18): " + [v.constructor.name]);
+      };
+    };
+  };
+  var grown = growthOf({
+    seen: map3(function(seen) {
+      return {
+        commit: seen.commit,
+        isShown: seen.isShown,
+        skill: seen.skill,
+        rank: rankOf(seen.rank),
+        weight: clamp$prime(0)(1)(seen.weight)
+      };
+    })(wire.seen),
+    lessons: map3(function(lesson) {
+      return {
+        steps: lesson.steps,
+        helped: lesson.helped,
+        id: lesson.id,
+        isCounted: lesson.isCounted,
+        skills: lesson.skills,
+        title: lesson.title,
+        rank: rankOf(lesson.rank),
+        done: min1(lesson.steps)(max1(0)(lesson.done)),
+        checked: max1(0)(min1(lesson.done)(lesson.checked))
+      };
+    })(wire.lessons),
+    topics: wire.topics
+  });
+  return {
+    rank: maybe$prime2(-1 | 0)(rankNumber)(grown.level),
+    score: grown.score,
+    toNext: grown.toNext,
+    shown: grown.shown,
+    missed: grown.missed,
+    lessonSteps: grown.lessonSteps,
+    habitsImproved: grown.habitsImproved,
+    stillComing: grown.stillComing,
+    workOn: grown.workOn,
+    neededHelp: grown.neededHelp,
+    improved: grown.improved,
+    toRaise: grown.toRaise,
+    encouragement: mapMaybe(identity3)([grown.encouragement])
+  };
+};
 
 // output/Data.String.Common/foreign.js
 var replaceAll = function(s1) {
@@ -824,10 +1758,10 @@ var joinWith = function(s) {
 };
 
 // output/Kernel.Health/index.js
-var min3 = /* @__PURE__ */ min(ordNumber);
-var max3 = /* @__PURE__ */ max(ordInt);
-var max1 = /* @__PURE__ */ max(ordNumber);
-var elem3 = /* @__PURE__ */ elem2(eqString);
+var min4 = /* @__PURE__ */ min(ordNumber);
+var max4 = /* @__PURE__ */ max(ordInt);
+var max12 = /* @__PURE__ */ max(ordNumber);
+var elem4 = /* @__PURE__ */ elem2(eqString);
 var show2 = /* @__PURE__ */ show(showInt);
 var RateLimit = /* @__PURE__ */ (function() {
   function RateLimit2() {
@@ -1226,19 +2160,19 @@ var eqTrouble = {
     };
   }
 };
-var eq3 = /* @__PURE__ */ eq(eqTrouble);
+var eq32 = /* @__PURE__ */ eq(eqTrouble);
 var retryDelayMs = function(trouble) {
   return function(failures) {
     return function(random) {
       var first = (function() {
-        var $54 = eq3(trouble)(Offline.value) || eq3(trouble)(Timeout.value);
+        var $54 = eq32(trouble)(Offline.value) || eq32(trouble)(Timeout.value);
         if ($54) {
           return firstWaitOfflineMs;
         }
         ;
         return firstWaitMs;
       })();
-      var whole = min3(longestWaitMs)(first * pow(2)(toNumber(max3(0)(failures - 1 | 0))));
+      var whole = min4(longestWaitMs)(first * pow(2)(toNumber(max4(0)(failures - 1 | 0))));
       return round(whole / 2 + random * whole / 2);
     };
   };
@@ -1293,7 +2227,7 @@ var step = function($copy_v) {
       ;
       if (v1 instanceof Failed) {
         var reopens = (function() {
-          if (v1.value0.resetsAt instanceof Just && (eq3(v1.value0.trouble)(RateLimit.value) && v1.value0.resetsAt.value0 > v1.value0.at)) {
+          if (v1.value0.resetsAt instanceof Just && (eq32(v1.value0.trouble)(RateLimit.value) && v1.value0.resetsAt.value0 > v1.value0.at)) {
             return new Just(v1.value0.resetsAt.value0);
           }
           ;
@@ -1335,7 +2269,7 @@ var step = function($copy_v) {
         })();
         var kept2 = (function() {
           if (v instanceof Waiting) {
-            return max1(v.value0.until)(until);
+            return max12(v.value0.until)(until);
           }
           ;
           return until;
@@ -1407,11 +2341,11 @@ var troubleOf = function(error) {
     return Overloaded.value;
   }
   ;
-  if (elem3(error)(accountErrors)) {
+  if (elem4(error)(accountErrors)) {
     return Account.value;
   }
   ;
-  if (elem3(error)(jobErrors)) {
+  if (elem4(error)(jobErrors)) {
     return Job.value;
   }
   ;
@@ -1460,8 +2394,8 @@ var troubleOfWire = function($90) {
 };
 
 // output/Kernel.Lease/index.js
-var max4 = /* @__PURE__ */ max(ordNumber);
-var min4 = /* @__PURE__ */ min(ordNumber);
+var max5 = /* @__PURE__ */ max(ordNumber);
+var min5 = /* @__PURE__ */ min(ordNumber);
 var ttlMs = 6e4;
 var soonestCheckMs = 1e3;
 var slackMs = 2e3;
@@ -1517,7 +2451,7 @@ var nextCheck = function(lease) {
         }
         ;
         if (otherwise) {
-          return max4(now + soonestCheckMs)(min4(now + beatMs)(lease.at + ttlMs + round(random * slackMs)));
+          return max5(now + soonestCheckMs)(min5(now + beatMs)(lease.at + ttlMs + round(random * slackMs)));
         }
         ;
         throw new Error("Failed pattern match at Kernel.Lease (line 78, column 1 - line 78, column 59): " + [lease.constructor.name, me.constructor.name, now.constructor.name, random.constructor.name]);
@@ -1527,7 +2461,7 @@ var nextCheck = function(lease) {
 };
 
 // output/Kernel.License/index.js
-var max5 = /* @__PURE__ */ max(ordNumber);
+var max6 = /* @__PURE__ */ max(ordNumber);
 var Unchosen = /* @__PURE__ */ (function() {
   function Unchosen2() {
   }
@@ -1789,7 +2723,7 @@ var eqKeyState = {
   }
 };
 var eq12 = /* @__PURE__ */ eq(eqKeyState);
-var notEq2 = /* @__PURE__ */ notEq(eqKeyState);
+var notEq3 = /* @__PURE__ */ notEq(eqKeyState);
 var eqAnswer = {
   eq: function(x) {
     return function(y) {
@@ -1813,7 +2747,7 @@ var eqAnswer = {
     };
   }
 };
-var eq22 = /* @__PURE__ */ eq(eqAnswer);
+var eq23 = /* @__PURE__ */ eq(eqAnswer);
 var dayMs = 864e5;
 var everyMs = /* @__PURE__ */ (function() {
   return 7 * dayMs;
@@ -1843,11 +2777,11 @@ var standingOf = function(facts) {
       return Expired.value;
     }
     ;
-    if (eq22(facts.answer)(Revoked.value)) {
+    if (eq23(facts.answer)(Revoked.value)) {
       return Withdrawn.value;
     }
     ;
-    if (facts.hasServer && facts.now - max5(facts.answeredAt)(facts.keySince) >= quietMs) {
+    if (facts.hasServer && facts.now - max6(facts.answeredAt)(facts.keySince) >= quietMs) {
       return Unchecked.value;
     }
     ;
@@ -1864,7 +2798,7 @@ var licenseStandingWire = function($34) {
 };
 var retryMs = dayMs;
 var nextCheckAt = function(facts) {
-  if (facts.use instanceof Commercial && (facts.hasServer && (notEq2(facts.key)(NoKey.value) && (notEq2(facts.key)(Malformed.value) && notEq2(facts.key)(Forged.value))))) {
+  if (facts.use instanceof Commercial && (facts.hasServer && (notEq3(facts.key)(NoKey.value) && (notEq3(facts.key)(Malformed.value) && notEq3(facts.key)(Forged.value))))) {
     var $32 = facts.triedAt === 0;
     if ($32) {
       return facts.now;
@@ -1885,8 +2819,8 @@ var licenseNextCheckWire = function($35) {
 };
 
 // output/Kernel.Pace/index.js
-var max6 = /* @__PURE__ */ max(ordNumber);
-var min5 = /* @__PURE__ */ min(ordNumber);
+var max7 = /* @__PURE__ */ max(ordNumber);
+var min6 = /* @__PURE__ */ min(ordNumber);
 var slowedGapMs = function(minGapMs) {
   return function(factor) {
     if (factor === 1) {
@@ -1894,7 +2828,7 @@ var slowedGapMs = function(minGapMs) {
     }
     ;
     if (otherwise) {
-      return max6(minGapMs)(6e4) * factor;
+      return max7(minGapMs)(6e4) * factor;
     }
     ;
     throw new Error("Failed pattern match at Kernel.Pace (line 59, column 1 - line 59, column 42): " + [minGapMs.constructor.name, factor.constructor.name]);
@@ -1940,14 +2874,14 @@ var backoffMs = function(failures) {
   }
   ;
   if (otherwise) {
-    return min5(6e5)(3e4 * pow(2)(toNumber(failures - 1 | 0)));
+    return min6(6e5)(3e4 * pow(2)(toNumber(failures - 1 | 0)));
   }
   ;
   throw new Error("Failed pattern match at Kernel.Pace (line 66, column 1 - line 66, column 27): " + [failures.constructor.name]);
 };
 
 // output/Kernel.Play/index.js
-var max7 = /* @__PURE__ */ max(ordNumber);
+var max8 = /* @__PURE__ */ max(ordNumber);
 var LookFailed = /* @__PURE__ */ (function() {
   function LookFailed2(value0) {
     this.value0 = value0;
@@ -2318,7 +3252,7 @@ var paced = function(facts) {
       }
       ;
       if (facts.lastLookAt instanceof Just) {
-        return max7(facts.lastChangeAt.value0 + facts.quietMs)(facts.lastLookAt.value0 + slowedGapMs(facts.minGapMs)(gapFactor(facts.pressure.percent)) + backoffMs(facts.failures));
+        return max8(facts.lastChangeAt.value0 + facts.quietMs)(facts.lastLookAt.value0 + slowedGapMs(facts.minGapMs)(gapFactor(facts.pressure.percent)) + backoffMs(facts.failures));
       }
       ;
       throw new Error("Failed pattern match at Kernel.Play (line 98, column 7 - line 101, column 110): " + [facts.lastLookAt.constructor.name]);
@@ -2410,7 +3344,7 @@ var playOf = function(facts) {
         ;
         if (facts.health instanceof Waiting) {
           return new Waiting2({
-            until: new Just(max7(facts.health.value0.until)(dueAt)),
+            until: new Just(max8(facts.health.value0.until)(dueAt)),
             why: orTrouble(facts.health.value0.trouble)(facts.health.value0.detail)
           });
         }
@@ -2557,10 +3491,10 @@ var wakeAtWire = function(facts) {
 };
 
 // output/Kernel.Queue/index.js
-var max8 = /* @__PURE__ */ max(ordInt);
-var map3 = /* @__PURE__ */ map(functorMaybe);
-var max12 = /* @__PURE__ */ max(ordNumber);
-var map1 = /* @__PURE__ */ map(functorArray);
+var max9 = /* @__PURE__ */ max(ordInt);
+var map4 = /* @__PURE__ */ map(functorMaybe);
+var max13 = /* @__PURE__ */ max(ordNumber);
+var map12 = /* @__PURE__ */ map(functorArray);
 var ToReview = /* @__PURE__ */ (function() {
   function ToReview2() {
   }
@@ -2612,7 +3546,7 @@ var toCommits = function(v) {
 };
 var retryBaseMs = 6e4;
 var retryMs2 = function(attempts) {
-  return retryBaseMs * pow(2)(toNumber(max8(0)(attempts - 1 | 0)));
+  return retryBaseMs * pow(2)(toNumber(max9(0)(attempts - 1 | 0)));
 };
 var planHeld = "you are close to your plan limit. Press r to run it anyway.";
 var maxWaiting = 3;
@@ -2645,7 +3579,7 @@ var maxWaitMs = /* @__PURE__ */ (function() {
 var maxAttempts = 3;
 var isSpent = function(hash) {
   return function(v) {
-    return fromMaybe(0)(map3(function(v1) {
+    return fromMaybe(0)(map4(function(v1) {
       return v1.attempts;
     })(find2(function(commit) {
       return commit.hash === hash;
@@ -2690,7 +3624,7 @@ var heldText = function(clock) {
           }
           ;
           if (health instanceof Waiting) {
-            return notAnswering(health.value0.detail)("at " + clock(max12(health.value0.until)(fromMaybe(0)(retryAt))));
+            return notAnswering(health.value0.detail)("at " + clock(max13(health.value0.until)(fromMaybe(0)(retryAt))));
           }
           ;
           if (health instanceof Probing) {
@@ -2743,7 +3677,7 @@ var fromCommits = /* @__PURE__ */ (function() {
   };
 })();
 var fromWire2 = /* @__PURE__ */ (function() {
-  var $76 = map1(waitingFromWire);
+  var $76 = map12(waitingFromWire);
   return function($77) {
     return fromCommits($76($77));
   };
@@ -2824,7 +3758,7 @@ var settledIn = function(wanted) {
     }
     ;
     if (otherwise) {
-      return map1(function(v1) {
+      return map12(function(v1) {
         return v1.hash;
       })(filter(isPastReview(wanted))(v));
     }
@@ -2895,7 +3829,7 @@ var nextToReviewWire = function(commits) {
   };
 };
 var toWire = /* @__PURE__ */ (function() {
-  var $78 = map1(waitingToWire);
+  var $78 = map12(waitingToWire);
   return function($79) {
     return $78(toCommits($79));
   };
@@ -2937,7 +3871,7 @@ var currentQueueWire = function(commits) {
 var changed = function(hash) {
   return function(change) {
     return function(v) {
-      return map1(function(commit) {
+      return map12(function(commit) {
         var $72 = commit.hash === hash;
         if ($72) {
           return change(commit);
@@ -2982,10 +3916,10 @@ var withAttemptWire = function(commits) {
 };
 
 // output/Kernel.Schedule/index.js
-var min6 = /* @__PURE__ */ min(ordNumber);
-var map4 = /* @__PURE__ */ map(functorArray);
+var min7 = /* @__PURE__ */ min(ordNumber);
+var map5 = /* @__PURE__ */ map(functorArray);
 var sortWith2 = /* @__PURE__ */ sortWith(ordNumber);
-var max9 = /* @__PURE__ */ max(ordNumber);
+var max10 = /* @__PURE__ */ max(ordNumber);
 var eq14 = /* @__PURE__ */ eq(/* @__PURE__ */ eqMaybe(eqNumber));
 var Keep = /* @__PURE__ */ (function() {
   function Keep2() {
@@ -3019,7 +3953,7 @@ var earliest = /* @__PURE__ */ (function() {
       }
       ;
       if (v instanceof Just) {
-        return new Just(min6(v.value0)(v1.at));
+        return new Just(min7(v.value0)(v1.at));
       }
       ;
       throw new Error("Failed pattern match at Kernel.Schedule (line 54, column 3 - line 54, column 44): " + [v.constructor.name, v1.constructor.name]);
@@ -3028,7 +3962,7 @@ var earliest = /* @__PURE__ */ (function() {
   return foldl2(first)(Nothing.value);
 })();
 var dueNow = function(now) {
-  var $32 = map4(function(v) {
+  var $32 = map5(function(v) {
     return v.name;
   });
   var $33 = sortWith2(function(v) {
@@ -3048,7 +3982,7 @@ var dueNowWire = function(deadlines) {
 };
 var delayMs = function(at) {
   return function(now) {
-    return max9(0)(at - now);
+    return max10(0)(at - now);
   };
 };
 var delayMsWire = delayMs;
@@ -3107,8 +4041,8 @@ var armingWire = function(isArmed) {
 };
 
 // output/Kernel.Sensor/index.js
-var min7 = /* @__PURE__ */ min(ordNumber);
-var max10 = /* @__PURE__ */ max(ordNumber);
+var min8 = /* @__PURE__ */ min(ordNumber);
+var max11 = /* @__PURE__ */ max(ordNumber);
 var slowScanWaitMs = 2e3;
 var slowScanStepMs = 250;
 var scanMs = 2e3;
@@ -3148,7 +4082,7 @@ var scanGapMs = function(facts) {
     ;
     throw new Error("Failed pattern match at Kernel.Sensor (line 100, column 10 - line 106, column 28): " + [facts.activeAt.constructor.name]);
   })();
-  return min7(longestScanGapMs)(base + slowness);
+  return min8(longestScanGapMs)(base + slowness);
 };
 var scanGapMsWire = function(w) {
   return scanGapMs({
@@ -3171,15 +4105,15 @@ var focusGapMs = function(facts) {
   }
   ;
   if (otherwise) {
-    return min7(longestFocusGapMs)(max10(focusScanMs)(facts.tookMs * 4));
+    return min8(longestFocusGapMs)(max11(focusScanMs)(facts.tookMs * 4));
   }
   ;
   throw new Error("Failed pattern match at Kernel.Sensor (line 134, column 1 - line 134, column 35): " + [facts.constructor.name]);
 };
 
 // output/Kernel.Sessions/index.js
-var max11 = /* @__PURE__ */ max(ordNumber);
-var map5 = /* @__PURE__ */ map(functorArray);
+var max14 = /* @__PURE__ */ max(ordNumber);
+var map6 = /* @__PURE__ */ map(functorArray);
 var sortWith3 = /* @__PURE__ */ sortWith(ordNumber);
 var Drawn = /* @__PURE__ */ (function() {
   function Drawn2() {
@@ -3215,7 +4149,7 @@ var keepMs = 864e5;
 var kept = function(entries) {
   return function(now) {
     return filter(function(entry) {
-      return now - max11(entry.at)(entry.leftAt) <= keepMs;
+      return now - max14(entry.at)(entry.leftAt) <= keepMs;
     })(entries);
   };
 };
@@ -3240,7 +4174,7 @@ var left = function(entries) {
         ;
         throw new Error("Failed pattern match at Kernel.Sessions (line 136, column 3 - line 138, column 24): " + [entry.constructor.name]);
       };
-      return kept(map5(mark)(entries))(now);
+      return kept(map6(mark)(entries))(now);
     };
   };
 };
@@ -3927,6 +4861,7 @@ export {
   focusGapMs,
   focusScanMs,
   gapFactor,
+  growthWire,
   healthLineWire,
   heldTextWire,
   hotForMs,

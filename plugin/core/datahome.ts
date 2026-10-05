@@ -67,6 +67,16 @@ export function progressPath(root: string, language: string): string {
   return `${root}/progress/${safeName(language)}.json`
 }
 
+/** Where they are in each lesson of one language: a folder, so that forgetting the language takes it whole. */
+export function lessonsDir(root: string, language: string): string {
+  return `${root}/lessons/${safeName(language)}`
+}
+
+/** Where they are in one lesson. */
+export function lessonPath(root: string, language: string, id: string): string {
+  return `${lessonsDir(root, language)}/${safeName(id)}.json`
+}
+
 /** A project is its repository's root folder: its name for a person to read, and a hash of the path to tell two apart. */
 export function projectId(repoRoot: string): string {
   return `${safeName(baseName(repoRoot))}-${shortHash(trimSlash(repoRoot))}`
@@ -135,7 +145,7 @@ export function isOwnFolder(names: readonly string[]): boolean {
 }
 
 /** What the tutor may delete: only these, directly under its own folder. */
-export const REMOVABLE = ['profiles', 'progress', 'projects', 'editors', 'focus.json', 'view.json', 'update.json', 'license.json', 'sessions.json', 'debug', 'debug.json', 'locks.git'] as const
+export const REMOVABLE = ['profiles', 'progress', 'lessons', 'projects', 'editors', 'focus.json', 'view.json', 'update.json', 'license.json', 'sessions.json', 'debug', 'debug.json', 'locks.git'] as const
 
 /**
  * Whether `path` is something the tutor may delete: inside one of its own

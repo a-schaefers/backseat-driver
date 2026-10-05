@@ -238,11 +238,11 @@ sessionTest('your commit is assessed after its review, on your own lines, and tw
   await session.clock.settle()
 
   expect(parseRecord(session.data('progress/python.json'), 'python').level).toBe('junior')
-  expect(session.toasts).toContain('Python: junior (provisional). See the Progress tab.')
+  expect(session.toasts).toContain('Python: junior (provisional). See the Growth tab.')
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-profile' })
-  expect(await ui.find({ type: 'Text', text: 'Level: junior (provisional)' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'From your commits alone: junior (provisional)' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'Next level: Design a module with a clear interface.' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'Steady work.' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: `- Showed edge cases in work (${second.slice(0, 7)}): stats.py: edge-cases.` })).toBeDefined()

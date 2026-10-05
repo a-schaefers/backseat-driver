@@ -5,7 +5,8 @@
 -- | Only plain data crosses: records, numbers, strings and booleans in, the
 -- | same out. The types that carry the rules stay inside.
 module Kernel.Main
-  ( module Kernel.Health
+  ( module Kernel.Growth
+  , module Kernel.Health
   , module Kernel.License
   , module Kernel.Pace
   , module Kernel.Play
@@ -35,6 +36,7 @@ module Kernel.Main
   , sessionsCheckEveryMs
   ) where
 
+import Kernel.Growth (growthWire)
 import Kernel.Health (mayAskWire, outcomeOfErrorWire, outcomeOfWire, retryDelayMsWire, stepWire, troubleOfWire)
 import Kernel.Lease (Lease)
 import Kernel.Lease as Lease

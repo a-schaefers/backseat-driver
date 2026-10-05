@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, PluginOptions, Register, Timer, UiFocusResult } from 'claude-code'
 
-import type { ExplainView, Hush, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, SettingRow, Speech, Spot, Tab, Watch, Working } from '../types'
+import type { ExplainView, Hush, LessonsView, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, SettingRow, Speech, Spot, Tab, Watch, Working } from '../types'
 import {
   avatarFor,
   BLINK_MS,
@@ -46,6 +46,7 @@ import {
 } from '../core/datahome'
 import { debugCommand as runDebugCommand, flushDebug as flushDebugLog, followSwitch as followDebugSwitch, freshDebuggingState, startDebug as startDebugLog, stopDebug as stopDebugLog, trace as noteTrace } from '../core/debugging'
 import type { DebuggingPorts, DebuggingState } from '../core/debugging'
+import type { Host } from '../core/host'
 import { DEBUG_USAGE, parseDebugRequest } from '../core/debuglog'
 import type { DebugRequest } from '../core/debuglog'
 import { createExplainer, NO_VIEW } from '../core/explainer'
@@ -132,6 +133,10 @@ import {
 } from '../core/update'
 import type { Install } from '../core/update'
 import { emptyRecord, progressText, recordText } from '../core/progress'
+import { growthOf, growthText } from '../core/growth'
+import type { Growth } from '../core/growth'
+import { freshLearningState, lessonTool as lessonToolOf, lessonViews, loadLessons as loadLessonsOf, markDone as markDoneOf, selectLesson as selectLessonOf, showLessons as showLessonsOf, startStep as startStepOf } from '../core/learning'
+import type { LearningPorts, LearningState } from '../core/learning'
 import {
   assessCommit as assessCommitOf,
   freshProgressState,
@@ -307,6 +312,8 @@ const profilesAtom = atom({ plugin: 'backseat-driver', key: 'profiles' } as cons
 const explainAtom = atom({ plugin: 'backseat-driver', key: 'explain' } as const, NO_VIEW)
 const NO_PROGRESS: ProgressView = { isOn: true, identity: [], records: [], busy: '', skipped: '' }
 const progressAtom = atom({ plugin: 'backseat-driver', key: 'progress' } as const, NO_PROGRESS)
+const NO_LESSONS: LessonsView = { paths: [], selected: null, problems: [] }
+const lessonsAtom = atom({ plugin: 'backseat-driver', key: 'lessons' } as const, NO_LESSONS)
 const updateAtom = atom({ plugin: 'backseat-driver', key: 'update' } as const, '')
 const licenseAtom = atom({ plugin: 'backseat-driver', key: 'license' } as const, '')
 const speechAtom = atom({ plugin: 'backseat-driver', key: 'speech' } as const, SILENT)
@@ -518,6 +525,9 @@ let project: ProjectKnowledge | null = null
  */
 const progressState: ProgressState = freshProgressState()
 
+/** Lessons: the learning paths in the plugin's lessons folder, and where the person is in each. */
+const learningState: LearningState = freshLearningState()
+
 /** The fingerprint of each noted file's text as the look that raised its notes saw it, so that kept notes come back only while true. */
 const notePrints = new Map<string, string>()
 let progressInstructions = ''
@@ -695,6 +705,7 @@ async function fullState($: EngineInterface): Promise<Record<string, unknown>> {
       explain: await read($, explainAtom),
       working: await read($, workingAtom),
       progress: await read($, progressAtom),
+      lessons: await read($, lessonsAtom),
       update: await read($, updateAtom),
       license: await read($, licenseAtom),
       speech: await read($, speechAtom),
@@ -702,22 +713,50 @@ async function fullState($: EngineInterface): Promise<Record<string, unknown>> {
   }
 }
 
+/**
+ * Claude Code as the engines' host: every shared port, each made from `$`
+ * and read at the moment an engine needs it. An engine's ports are this and
+ * what is its own. `settings` is for the model calls, which only engines that
+ * have settings take: without them, a request is refused before it is sent.
+ */
+function hostOf($: EngineInterface, settings: Settings | null): Host {
+  return {
+    now: async () => await $.clock.now(),
+    after: (ms, run) => $.clock.after(ms, run),
+    deadline: { set: (name, at, run) => schedulerOf($).set(name, at, run), cancel: name => void deadlines?.cancel(name) },
+    trace: (kind, name, detail) => trace($, kind, name, detail),
+    fail: (what, error) => fail($, what, error),
+    toast: text => toastPerson($, text),
+    sessionId: async () => await $.session.id(),
+    mode: () => mode,
+    isOn: () => mode !== 'off',
+    isDriver: () => leaseState.isDriver,
+    engagement: () => engagement,
+    repoRoot: () => repoRoot,
+    dataRoot: () => dataRoot,
+    store: () => storeOf($),
+    markHome: () => markHome($),
+    list: async path => await $.fs.list(path),
+    readFile: async path => await $.fs.read(path),
+    writeFile: async (path, text) => void (await $.fs.write(path, text)),
+    git: (root, args) => git($, root, args),
+    ask: (job, request) =>
+      settings === null ? Promise.reject(new Error(`no settings to ask the ${job} model with`)) : callModel($, settings, job, request),
+    readPressure: () => readPressure($),
+  }
+}
+
 /** What running the debug log needs from this session. `settings` is for the two that write them down. */
 function debugPortsOf($: EngineInterface, settings: Settings | null = null): DebuggingPorts {
+  const host = hostOf($, settings)
+
   return {
+    ...host,
     settings,
-    now: () => $.clock.now(),
-    after: (ms, run) => $.clock.after(ms, run),
-    read: path => $.fs.read(path),
-    write: (path, text) => $.fs.write(path, text),
-    list: path => $.fs.list(path),
+    read: host.readFile,
+    write: host.writeFile,
     remove: path => diskOf($).remove(path),
-    markHome: () => markHome($),
     resolveHome: () => resolveHome($),
-    dataRoot: () => dataRoot,
-    repoRoot: () => repoRoot,
-    mode: () => mode,
-    sessionId: () => $.session.id(),
     versions: async () => {
       const [claudeCode, own] = await Promise.all([$.session.version(), ownVersion($)])
 
@@ -1823,24 +1862,16 @@ async function runUninstall($: EngineInterface, settings: Settings): Promise<voi
 /** What keeping the journal needs from Claude Code. */
 function journalPortsOf($: EngineInterface): JournalPorts {
   return {
-    now: async () => await $.clock.now(),
-    trace: (kind, name, detail) => trace($, kind, name, detail),
+    ...hostOf($, null),
     showWorking: async working => void (await update($, workingAtom, (): Working => working)),
-    isOn: () => mode !== 'off',
-    store: () => storeOf($),
     file: root => (dataRoot === '' ? '' : journalPath(dataRoot, root)),
-    repoRoot: () => repoRoot,
     read: (root, path) => readSource($, root, path),
-    git: (root, args) => git($, root, args),
     readEditor: async () => {
       await readFocus($)
 
       return followState.focusText
     },
     watcher: () => watcher,
-    engagement: () => engagement,
-    deadline: { set: (name, at, run) => schedulerOf($).set(name, at, run), cancel: name => void deadlines?.cancel(name) },
-    fail: (what, error) => fail($, what, error),
   }
 }
 
@@ -1951,9 +1982,11 @@ async function saveSubject(
     dataRoot === ''
       ? change(profiles.subjects[subject] ?? emptyProfile())
       : await updateJson(storeOf($), profilePath(dataRoot, subject), parseProfile, change, { keepBackup: true })
+  const before = aboutPerson()
   profiles = { ...profiles, subjects: { ...profiles.subjects, [subject]: next } }
   await update($, profilesAtom, () => profiles)
-  await registerReviewer($, settings)
+  // Every look counts itself in the profile. The reviewer is told only what changes what it is told.
+  if (aboutPerson() !== before) await registerReviewer($, settings)
 }
 
 /** Loads the profiles of languages that have just come into play. */
@@ -1966,6 +1999,8 @@ async function bringIntoPlay($: EngineInterface, languages: readonly string[]): 
   await update($, profilesAtom, () => profiles)
   for (const language of added) progressState.records.set(language, await loadRecord($, language))
   await setProgress($, { records: profiles.languages.map(language => progressState.records.get(language) ?? emptyRecord(language)) })
+  // The lessons of the languages in play are listed first.
+  await showLessons($)
 }
 
 /**
@@ -2092,6 +2127,19 @@ async function registerTools($: EngineInterface): Promise<void> {
     inputSchema: { type: 'object', properties: { language }, required: ['language'] },
   })
   await $.tool.register({
+    name: 'lesson',
+    description:
+      'Backseat Driver: the learning paths (lessons) installed, and where the user is in each. Without a path it lists them. With a path and no outcome it reads that path to you, step by step, with what is done. With an outcome it records one step: "done" once the user has shown you, in their own code or their own words, that they can do it (never for work you did); "help" when they needed you to walk them through part of it. A step that is not named is the next one not done. Call it with no arguments when they ask what lessons there are or what to study.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'The path id, as the list gives it.' },
+        step: { type: 'number', description: 'The step number, from 1. Leave it out for the next step not done.' },
+        outcome: { type: 'string', enum: ['done', 'help'], description: 'What to record. Leave it out to read the path.' },
+      },
+    },
+  })
+  await $.tool.register({
     name: 'profile',
     description:
       'Backseat Driver: read what is on record about the user for a language that is not in play in this project, for example to explain an idea by comparison with a language they know.',
@@ -2134,13 +2182,10 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
 /** What a look asks of Claude Code, each made from `$` and read at the moment the look needs it. */
 function lookPortsOf($: EngineInterface, settings: Settings): LookPorts {
   return {
+    ...hostOf($, settings),
     settings,
     watcher: () => watcher,
-    now: async () => await $.clock.now(),
     lastChangeAt: () => lastChangeAt,
-    ask: (job, request) => callModel($, settings, job, request),
-    trace: (kind, name, detail) => trace($, kind, name, detail),
-    toast: text => toastPerson($, text),
     showPlay: () => showPlay($, settings),
     holdDeadline: () => schedulerOf($).cancel('look'),
     planNext: () => planLook($, settings),
@@ -2162,7 +2207,6 @@ function lookPortsOf($: EngineInterface, settings: Settings): LookPorts {
     recorder: () => journalState.recorder,
     showWorking: now => showWorking($, now),
     say: text => say($, text),
-    fail: (what, error) => fail($, what, error),
   }
 }
 
@@ -2268,6 +2312,7 @@ async function restorePane($: EngineInterface, settings: Settings): Promise<void
   const kept = carried
   carried = null
   void showSettings($)
+  void showLessons($)
   if (kept === null) {
     await update($, profilesAtom, () => profiles)
     await showProgress($, settings)
@@ -2324,10 +2369,10 @@ async function pressBandTab($: EngineInterface, tab: Tab, isFolding: boolean): P
 }
 
 /** The tabs in the order of their digits. */
-const TAB_ORDER: readonly Tab[] = ['play', 'review', 'explain', 'profile', 'settings']
+const TAB_ORDER: readonly Tab[] = ['play', 'review', 'explain', 'profile', 'lessons', 'settings']
 
 /** Said once at switch-on in the layouts with no pane, which do not say by themselves how to reach them. */
-const BAND_INTRO = 'Notes show above the prompt. Ctrl+X Tab gives it the keyboard, then 1 to 5 open its tabs. /bsd layout switches to a pane.'
+const BAND_INTRO = 'Notes show above the prompt. Ctrl+X Tab gives it the keyboard, then 1 to 6 open its tabs. /bsd layout switches to a pane.'
 
 /** Said once in a process that carries the tutor on from the one its conversation left. */
 const CARRIED_ON = 'Backseat Driver is still on. It came along with the conversation.'
@@ -2335,17 +2380,10 @@ const CARRIED_ON = 'Backseat Driver is still on. It came along with the conversa
 /** What carrying the tutor from one process of a conversation to the next needs from Claude Code. */
 function carryPortsOf($: EngineInterface, settings: Settings): CarryPorts {
   return {
-    now: async () => await $.clock.now(),
-    trace: (kind, name, detail) => trace($, kind, name, detail),
-    fail: (what, error) => fail($, what, error),
-    dataRoot: () => dataRoot,
-    mode: () => mode,
-    sessionId: async () => await $.session.id(),
+    ...hostOf($, settings),
     born: async () => (await $.session.usage()).startedAt,
     cwd: async () => await $.session.cwd(),
     surfaces: async () => (await $.session.surfaces()).length,
-    store: () => storeOf($),
-    deadline: { set: (name, at, run) => schedulerOf($).set(name, at, run) },
     comeUp: (to, from) => comeUp($, settings, to, from),
     standDown: () => standDown($, settings),
   }
@@ -2426,16 +2464,7 @@ async function giveLease($: EngineInterface, path: string, holder: string): Prom
 /** What holding the lease needs from Claude Code. */
 function leasePortsOf($: EngineInterface, settings: Settings): LeasePorts {
   return {
-    now: async () => await $.clock.now(),
-    trace: (kind, name, detail) => trace($, kind, name, detail),
-    fail: (what, error) => fail($, what, error),
-    isOn: () => mode !== 'off',
-    engagement: () => engagement,
-    repoRoot: () => repoRoot,
-    dataRoot: () => dataRoot,
-    sessionId: async () => await $.session.id(),
-    store: () => storeOf($),
-    deadline: { set: (name, at, run) => schedulerOf($).set(name, at, run) },
+    ...hostOf($, settings),
     startDriving: run => startDriving($, settings, run),
     stopDriving: () => stopDriving($, settings),
   }
@@ -2664,10 +2693,8 @@ async function reviewCommitNow($: EngineInterface, settings: Settings, commit: {
 /** What the waiting commits and their reviews ask of Claude Code, each made from `$` and read when it is needed. */
 function reviewPortsOf($: EngineInterface, settings: Settings): ReviewPorts {
   return {
+    ...hostOf($, settings),
     settings,
-    now: async () => await $.clock.now(),
-    trace: (kind, name, detail) => trace($, kind, name, detail),
-    deadline: { set: (name, at, run) => schedulerOf($).set(name, at, run), cancel: name => schedulerOf($).cancel(name) },
     git: args => git($, repoRoot, args),
     changeQueue: change => changeQueue($, change),
     setReview: change => setReview($, change),
@@ -2680,11 +2707,9 @@ function reviewPortsOf($: EngineInterface, settings: Settings): ReviewPorts {
     isActive: () => mode === 'on' && repoRoot !== '' && leaseState.isDriver,
     agents: async () => await $.agent.list(),
     startReview: scope => startReview($, settings, scope),
-    engagement: () => engagement,
     reviewText: commit => reviews.find(known => known.commit === commit)?.text,
     assess: (hash, review) => assessCommit($, settings, hash, review),
     queueProgress: work => queueProgress($, work),
-    fail: (what, error) => fail($, what, error),
   }
 }
 
@@ -3185,18 +3210,8 @@ async function startWatching($: EngineInterface, settings: Settings, run: number
 /** What following the spot in focus needs from Claude Code. */
 function followPortsOf($: EngineInterface): FollowPorts {
   return {
-    now: async () => await $.clock.now(),
-    trace: (kind, name, detail) => trace($, kind, name, detail),
-    fail: (what, error) => fail($, what, error),
-    repoRoot: () => repoRoot,
-    dataRoot: () => dataRoot,
-    isOn: () => mode !== 'off',
-    isDriver: () => leaseState.isDriver,
-    engagement: () => engagement,
+    ...hostOf($, null),
     stamp: path => fileStamp($, path),
-    list: async path => await $.fs.list(path),
-    readFile: async path => await $.fs.read(path),
-    writeFile: async (path, text) => void (await $.fs.write(path, text)),
     countStat: () => void (quiet.stats += 1),
     readView: () => read($, explainAtom),
     setView: async change => void (await update($, explainAtom, change)),
@@ -3205,9 +3220,6 @@ function followPortsOf($: EngineInterface): FollowPorts {
     markActive: now => void (activeAt = now),
     feedJournal: (text, now) => journalState.recorder?.editor(text, now, false),
     isPushed: role => isPushed(role),
-    deadline: { set: (name, at, run) => schedulerOf($).set(name, at, run), cancel: name => void deadlines?.cancel(name) },
-    after: (ms, run) => $.clock.after(ms, run),
-    markHome: () => markHome($),
   }
 }
 
@@ -3342,8 +3354,56 @@ async function lookUp($: EngineInterface, spot: Spot): Promise<string> {
 /** What every prompt is told about the person: their profile, and what has been seen of their own work. */
 function aboutPerson(): string {
   const seen = profiles.languages.map(language => progressState.records.get(language)).filter(record => record !== undefined)
+  const grown = growths()
+    .filter(({ growth }) => growth.level !== null)
+    .map(({ language, growth }) => growthText(language, growth))
+  const growthPart = grown.length === 0 ? '' : ['## Their growth, all of it counted: own commits, lessons, help needed, habits', ...grown].join('\n')
 
-  return [personText(profiles), progressText(seen)].filter(part => part !== '').join('\n\n')
+  return [personText(profiles), progressText(seen), growthPart].filter(part => part !== '').join('\n\n')
+}
+
+/** Growth for the pane, from what it shows. */
+function shownGrowth(progress: ProgressView, shown: Profiles, lessons: LessonsView): { language: string; growth: Growth }[] {
+  return progress.records.map(record => ({ language: record.language, growth: growthOf(record, shown.subjects[record.language], lessons.paths) }))
+}
+
+/** A lesson changed: growth with it, and so what the reviewer is told about the person. */
+async function lessonChanged($: EngineInterface, settings: Settings, change: () => Promise<void>): Promise<void> {
+  const before = aboutPerson()
+  await change()
+  if (aboutPerson() !== before) await registerReviewer($, settings)
+}
+
+/** Growth in each language in play that has a record. */
+function growths(): { language: string; growth: Growth }[] {
+  const lessons = lessonViews(learningState, profiles.languages)
+
+  return profiles.languages.flatMap(language => {
+    const record = progressState.records.get(language)
+
+    return record === undefined ? [] : [{ language, growth: growthOf(record, profiles.subjects[language], lessons) }]
+  })
+}
+
+/** What the lessons need from Claude Code. */
+function learningPortsOf($: EngineInterface): LearningPorts {
+  return {
+    ...hostOf($, null),
+    pluginRoot: () => $.plugin.root,
+    languages: () => profiles.languages,
+    setLessons: async view => {
+      trace($, 'state', 'lessons', () => ({ paths: view.paths.length, selected: view.selected, problems: view.problems }))
+      await update($, lessonsAtom, (): LessonsView => view)
+    },
+  }
+}
+
+async function loadLessons($: EngineInterface): Promise<void> {
+  await loadLessonsOf(learningPortsOf($), learningState)
+}
+
+async function showLessons($: EngineInterface): Promise<void> {
+  await showLessonsOf(learningPortsOf($), learningState)
 }
 
 /** Runs one piece of progress work after the ones before it, so that two never write one record at once. */
@@ -3359,25 +3419,15 @@ async function setProgress($: EngineInterface, change: Partial<ProgressView>): P
 /** What the look at the person's progress needs from Claude Code. */
 function progressPortsOf($: EngineInterface, settings: Settings): ProgressPorts {
   return {
+    ...hostOf($, settings),
     settings,
-    now: async () => await $.clock.now(),
-    ask: (job, request) => callModel($, settings, job, request),
     git: args => git($, repoRoot === '' ? undefined : repoRoot, args),
-    store: () => storeOf($),
-    repoRoot: () => repoRoot,
-    dataRoot: () => dataRoot,
     projectName: () => projectId(repoRoot).replace(/-[0-9a-f]{8}$/, ''),
-    isOn: () => mode !== 'off',
-    isDriver: () => leaseState.isDriver,
-    engagement: () => engagement,
     profiles: () => profiles,
     instructions: () => progressInstructions,
-    readPressure: () => readPressure($),
     mayAsk: () => mayAsk(health),
     setProgress: change => setProgress($, change),
     registerReviewer: () => registerReviewer($, settings),
-    toast: text => toastPerson($, text),
-    fail: (what, error) => fail($, what, error),
   }
 }
 
@@ -3450,6 +3500,7 @@ async function engage(
     // What the pane showed when the tutor was last on here: notes still true, and the last review.
     if (leaseState.isDriver) await restorePaneFromDisk($, isFresh || takesUp !== null)
     await setUpProgress($, settings)
+    await loadLessons($)
     await registerReviewer($, settings)
     // Not waited for. Claude Code connects each tool before it answers, which took eight seconds a tool
     // behind a proxy in a live session, and nothing below needs them.
@@ -3672,6 +3723,7 @@ async function forget($: EngineInterface, settings: Settings, named: Scope | nul
     if (scope.kind !== 'project' && mode !== 'off') {
       await setUpProfiles($)
       await setUpProgress($, settings)
+      await loadLessons($)
       await registerReviewer($, settings)
     }
     tellPerson($, `Forgot ${describeScope(scope, projectName)}.`)
@@ -3689,7 +3741,7 @@ async function drawTutor(
 ) {
   quiet.renders += 1
   // One round for everything the pane shows, not a dozen in a row for every frame.
-  const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, shownSettings, licensing, backdrop, isUnfolded] = await Promise.all([
+  const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, shownSettings, licensing, backdrop, isUnfolded, lessons] = await Promise.all([
     read($, modeAtom),
     read($, tabAtom),
     read($, notesAtom),
@@ -3707,6 +3759,7 @@ async function drawTutor(
     // The character's pixels are dimmed toward the terminal's background, which only the theme tells.
     settings.isAnimated ? themeBackdrop($) : ('dark' as const),
     read($, unfoldedAtom),
+    read($, lessonsAtom),
   ])
   const view: PaneView = {
     mode: shownMode,
@@ -3722,6 +3775,9 @@ async function drawTutor(
     explain,
     working,
     progress,
+    // Worked out only while the Growth tab is open, from what the pane shows: the records, the profiles and the lessons.
+    growth: tab === 'profile' ? shownGrowth(progress, shownProfiles, lessons) : [],
+    lessons,
     update: release,
     license: licensing,
     layout: where.layout,
@@ -3776,6 +3832,26 @@ async function drawTutor(
     onUnhush: (subject: string, topic: string) => {
       touched($, settings, 'unhush', () => ({ subject, topic }))
       void saveSubject($, settings, subject, profile => withoutHush(profile, topic))
+    },
+    onLessonOpen: (id: string | null) => {
+      touched($, settings, 'lesson open', () => id)
+      void selectLessonOf(learningPortsOf($), learningState, id)
+    },
+    onLessonStart: (id: string) => {
+      touched($, settings, 'lesson start', () => id)
+      if (layout === 'unified') void update($, unfoldedAtom, () => false)
+      void startStepOf(learningPortsOf($), learningState, id).then(text => {
+        // Not awaited: it resolves when the turn starts. The text carries the step, since this prompt skips the mod's own hook.
+        if (text !== '') void submitForPerson($, text)
+        else toastPerson($, 'Every step of this lesson is done.')
+      })
+    },
+    onLessonDone: (id: string) => {
+      touched($, settings, 'lesson done', () => id)
+      void lessonChanged($, settings, async () => {
+        const title = await markDoneOf(learningPortsOf($), learningState, id)
+        if (title !== '') toastPerson($, `Marked done: ${title}. The tutor seeing you do it counts for more.`)
+      })
     },
     onQuestions: () => {
       touched($, settings, 'questions')
@@ -4304,7 +4380,21 @@ export const register: Register = (on, options) => {
     const record = progressState.records.get(language) ?? (await loadRecord($, language))
     const whose = progressState.identity.length === 0 ? 'Git has no user.email here, so no commit can be confirmed as theirs.' : `Only commits by ${progressState.identity.join(' or ')} count.`
 
-    return answered($, e, record.observations.length === 0 ? `Nothing is on record for ${language} yet. ${whose}` : `${recordText(record)}\n\n${whose}`)
+    const growth = growthOf(record, profiles.subjects[language], lessonViews(learningState, profiles.languages))
+    const grown = growthText(language, growth)
+
+    return answered($, e, record.observations.length === 0 ? `Nothing is on record for ${language} yet. ${whose}\n\n${grown}` : `${recordText(record)}\n\n${grown}\n\n${whose}`)
+  })
+
+  on('tool.call', { tool: 'mcp__backseat-driver__lesson' }, async ($, e) => {
+    if (mode === 'off') return answered($, e, 'Backseat Driver is off.')
+    const asked = { path: e.path, step: e.step, outcome: e.outcome }
+    const answer: { text: string } = { text: '' }
+    await lessonChanged($, settings, async () => {
+      answer.text = await lessonToolOf(learningPortsOf($), learningState, asked)
+    })
+
+    return answered($, e, answer.text)
   })
 
   on('tool.call', { tool: 'mcp__backseat-driver__profile' }, async ($, e) => {

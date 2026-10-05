@@ -10,14 +10,14 @@
 
 import type { Note, Profile, Profiles } from '../types'
 import { QUIET_LOOKS_BEFORE_REMARK } from './avatar'
-import type { AskModel, Trace } from './host'
+import type { Host } from './host'
 import { outcomeOf } from './health'
 import { sourcePrint } from './knowledge'
 import { languageOf } from './languages'
 import { applyReply, isProblem, parseReply } from './notes'
 import type { Bubble } from './prompts'
 import { playByPlayPrompt } from './prompts'
-import { GENERAL, isHushed, withFlagged } from './profiles'
+import { GENERAL, isHushed, withFlagged, withLooked } from './profiles'
 import type { KeptInsight } from './project'
 import type { Recorder } from './recorder'
 import type { Settings } from './settings'
@@ -43,17 +43,12 @@ export function freshLookState(): LookState {
 }
 
 /** What a look needs from its host. Each is read or done at the moment the look needs it, not before. */
-export type LookPorts = {
+export type LookPorts = Pick<Host, 'now' | 'ask' | 'trace' | 'toast' | 'fail'> & {
   settings: Settings
   /** The watcher of the working tree, or null before there is one. */
   watcher: () => Watcher | null
-  now: () => Promise<number>
   /** When the working tree last changed, as far as the scan has seen. */
   lastChangeAt: () => number | null
-  /** The model of the play-by-play job. */
-  ask: AskModel
-  trace: Trace
-  toast: (text: string) => void
   /** Puts what the pane says about the look right, and takes the look's deadline away while this one runs. */
   showPlay: () => Promise<unknown>
   holdDeadline: () => void
@@ -84,7 +79,6 @@ export type LookPorts = {
   recorder: () => Recorder | null
   showWorking: (now: number) => Promise<void>
   say: (text: string) => Promise<void>
-  fail: (what: string, error: unknown) => void
 }
 
 /**
@@ -194,8 +188,12 @@ export async function runLook(ports: LookPorts, state: LookState, isAsked: boole
         const subject = languageOf(note.file) ?? GENERAL
         raised.set(subject, [...(raised.get(subject) ?? []), note.topic])
       }
+      // Each language this look saw counts the look, so that a topic that stops coming back shows as a habit improved.
+      for (const subject of new Set(paths.map(path => languageOf(path)).filter(language => language !== null))) {
+        if (!raised.has(subject)) raised.set(subject, [])
+      }
       for (const [subject, topics] of raised) {
-        await ports.saveSubject(subject, profile => withFlagged(profile, topics))
+        await ports.saveSubject(subject, profile => withFlagged(withLooked(profile), topics))
       }
 
       // The persona's line is about this look, so a quiet look leaves it quiet.

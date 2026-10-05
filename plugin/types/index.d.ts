@@ -2,7 +2,7 @@
 export type Mode = 'off' | 'on' | 'paused'
 
 /** The pane's tabs. `play` is the play-by-play and the default view. */
-export type Tab = 'play' | 'review' | 'explain' | 'profile' | 'settings'
+export type Tab = 'play' | 'review' | 'explain' | 'profile' | 'lessons' | 'settings'
 
 /** One of the plugin's own `/config` rows, as the Settings tab shows it. */
 export type SettingRow = {
@@ -130,6 +130,8 @@ export type TopicStats = {
   flagged: number
   /** Times they asked for it to be explained. */
   explained: number
+  /** The profile's `looks` when it was last raised: how many looks since then tells whether it stopped coming back. */
+  lastLook: number
 }
 
 /** What the tutor remembers about a person for one language, or in general. */
@@ -140,6 +142,8 @@ export type Profile = {
   isAsked: boolean
   hushed: Hush[]
   topics: Record<string, TopicStats>
+  /** How many looks of the play-by-play have seen their code in this language. */
+  looks: number
 }
 
 /** The profiles in play this session, for the pane's Profile tab and for every prompt. */
@@ -261,6 +265,31 @@ export type ProgressRecord = {
   assessed: string[]
 }
 
+/** One step of a lesson as the Lessons tab shows it. `checked` is done with the tutor watching, `done` marked done by them. */
+export type LessonStepView = { title: string; state: 'checked' | 'done' | 'started' | ''; helped: number }
+
+/** One learning path, and where they are in it. */
+export type LessonView = {
+  id: string
+  title: string
+  language: string
+  level: Level
+  summary: string
+  skills: string[]
+  steps: LessonStepView[]
+  /** The step to do next, 0-based, or -1 once every step is done. */
+  next: number
+}
+
+/** The Lessons tab's view: the paths found, in the order shown, and the one opened. */
+export type LessonsView = {
+  paths: LessonView[]
+  /** The path opened in the tab, or null for the list. */
+  selected: string | null
+  /** Files in the lessons folder that are not a path, and why. */
+  problems: string[]
+}
+
 /** The Progress tab's view: the records of the languages in play, and whose commits count. */
 export type ProgressView = {
   /** Off when the setting is off. */
@@ -285,6 +314,7 @@ declare module 'claude-code' {
     'mcp__backseat-driver__working': { on: string }
     'mcp__backseat-driver__activity': Record<never, never>
     'mcp__backseat-driver__progress': { language: string }
+    'mcp__backseat-driver__lesson': { path?: string; step?: number; outcome?: 'done' | 'help' }
   }
 
   interface PluginState {
@@ -302,6 +332,8 @@ declare module 'claude-code' {
       /** What the Explain tab shows about the spot in focus. */
       explain: ExplainView
       progress: ProgressView
+      /** The Lessons tab: the learning paths found, and where they are in each. */
+      lessons: LessonsView
       /** What the pane says about a newer release, or ''. */
       update: string
       /** What the pane says about the license, or '': usually nothing. */

@@ -10,8 +10,7 @@
 
 import type { LevelChange, ProgressRecord, ProgressView } from '../types'
 import { addedLines, byLanguage, commitInfoArgs, commitPatchArgs, identityOf, judge, MIN_LINES, parseCommitInfo, parseRecent, RECENT_COMMITS_ARGS, sizeOf } from './authorship'
-import type { Pressure } from './health'
-import type { AskModel } from './host'
+import type { Host } from './host'
 import { languageName } from './languages'
 import { progressPath } from './datahome'
 import { ANSWER_LABELS, GENERAL } from './profiles'
@@ -21,7 +20,6 @@ import type { AssessedCommit, CommitForAssessment } from './progress'
 import { shortHash } from './review'
 import type { Settings } from './settings'
 import { updateJson } from './store'
-import type { Store } from './store'
 
 /** What the look at progress remembers: whose commits count, the watched files, the records in play, and the one-at-a-time queue. */
 export type ProgressState = {
@@ -40,32 +38,23 @@ export function freshProgressState(): ProgressState {
 }
 
 /** What the look at progress needs from its host. Each is read or done when it is needed. */
-export type ProgressPorts = {
+export type ProgressPorts = Pick<
+  Host,
+  'now' | 'ask' | 'store' | 'repoRoot' | 'dataRoot' | 'isOn' | 'isDriver' | 'engagement' | 'readPressure' | 'toast' | 'fail'
+> & {
   settings: Settings
-  now: () => Promise<number>
-  ask: AskModel
   /** Runs git in the repository, or wherever the host is when there is none. -1 is git not answering. */
   git: (args: readonly string[]) => Promise<{ exitCode: number; stdout: string }>
-  store: () => Pick<Store, 'read' | 'update'>
-  repoRoot: () => string
-  dataRoot: () => string
   /** The project's name, without its hash. */
   projectName: () => string
-  /** False while the tutor is off. */
-  isOn: () => boolean
-  isDriver: () => boolean
-  engagement: () => number
   profiles: () => Profiles
   /** The instructions for the assessing model. */
   instructions: () => string
-  readPressure: () => Promise<Pressure>
   /** Whether Claude is answering. */
   mayAsk: () => boolean
   /** Changes what the Progress tab says, and records the change. */
   setProgress: (change: Partial<ProgressView>) => Promise<void>
   registerReviewer: () => Promise<void>
-  toast: (text: string) => void
-  fail: (what: string, error: unknown) => void
 }
 
 /** Runs one piece of progress work after the ones before it, so that two never write one record at once. */
@@ -168,7 +157,7 @@ export async function assess(
     await ports.setProgress({ skipped: '' })
     await showProgress(ports, state)
     await ports.registerReviewer()
-    if (change !== null) ports.toast(`${languageName(language)}: ${change.to}${record.isProvisional ? ' (provisional)' : ''}. See the Progress tab.`)
+    if (change !== null) ports.toast(`${languageName(language)}: ${change.to}${record.isProvisional ? ' (provisional)' : ''}. See the Growth tab.`)
 
     return true
   } finally {

@@ -34,7 +34,7 @@ So the machine goes where it belongs: the back seat. You drive. It watches the r
 
 ## What it is
 
-Type `/bsd`. A pane opens beside your conversation, with five tabs.
+Type `/bsd`. A pane opens beside your conversation, with six tabs.
 
 **1. Play-by-play.** Live commentary on your code as you write it. Save, pause for a few seconds, and a fast model reads what changed. Worth saying? A short note lands in the pane: a bug, a risky pattern, a better idiom for that language. One idea per note. A hint, never a fix. Fix the code and the note goes away on its own. Nothing worth saying, it says nothing.
 
@@ -45,9 +45,11 @@ Type `/bsd`. A pane opens beside your conversation, with five tabs.
 
 **3. Explain.** Move your cursor (with an editor plugin, below), point at a line (`/bsd explain src/app.py:42`), or just save, and it tells you what that code does, how, why it's there, what to watch out for and what it relies on. Step through a file symbol by symbol with `n` and `p`. Change the code and the old explanation disappears before it can lie to you.
 
-**4. Progress.** An honest level per language, from beginner to senior: where you are, why, and what the next level takes. Judged only on commits you wrote yourself, not imports, not generated code, not anything co-written with an AI. It follows you across projects. It can go down.
+**4. Growth.** An honest level and a score per language, from beginner to senior. Your own commits count most: not imports, not generated code, not anything co-written with an AI. Lessons you finish, help you needed and habits you fixed count too. It says what to work on, where you needed help, what would raise the score and what you've already improved. It follows you across projects. It can go down. No flattery.
 
-**5. Settings.** Change the voice, the models, how hard they think and how often it looks, right in the tab. Same rows as `/config`.
+**5. Lessons.** Learning paths, done in your own code, one step at a time. Start a step and the tutor teaches it in chat; you write it. Skip them all and it costs you nothing. Each path is a markdown file in the plugin's `lessons` folder: merge a new one and everyone has it.
+
+**6. Settings.** Change the voice, the models, how hard they think and how often it looks, right in the tab. Same rows as `/config`.
 
 **And the conversation.** Claude is still there in chat, as a tutor. Ask it anything. Ask it to write your code and you get a nudge, then the concept, then a small example somewhere else, one step at a time. Questions about the language get straight answers. Push back and it weighs your argument; a point you contest goes to the deep reviewer for a second opinion. Tell it to drop a topic and it stays dropped, in every project in that language. You have the last word.
 
@@ -89,9 +91,9 @@ Type `/bsd` in Claude Code. The first time you work in a language, it asks a few
 | `/bsd update`, `/bsd uninstall` | Fetch a newer release when it announces one, or remove the plugin |
 | `/bsd help` | Every command and key |
 
-`Ctrl+X Tab` hands it the keyboard, and `Esc` takes it back. `1` to `5` open the tabs. On a note, `e` explains it, `d` dismisses it, `m` mutes that topic for good. `l` looks at your changes now, `r` reviews now. It draws in the terminal and in the desktop app's Code tab. Send the conversation to the background and the tutor goes with it.
+`Ctrl+X Tab` hands it the keyboard, and `Esc` takes it back. `1` to `6` open the tabs. On a note, `e` explains it, `d` dismisses it, `m` mutes that topic for good. `l` looks at your changes now, `r` reviews now. It draws in the terminal and in the desktop app's Code tab. Send the conversation to the background and the tutor goes with it.
 
-Models, thinking levels, pacing and personas live in tab `5`, Settings, or `/bsd settings`. They're in `/config` too.
+Models, thinking levels, pacing and personas live in tab `6`, Settings, or `/bsd settings`. They're in `/config` too.
 
 ### Editors
 
