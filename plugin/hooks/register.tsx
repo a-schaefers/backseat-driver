@@ -30,7 +30,6 @@ import {
   dataHome,
   debugRoot,
   debugSwitchPath,
-  editorsPath,
   fileEntryPath,
   isOwnFolder,
   isRemovable,
@@ -50,11 +49,24 @@ import type { DebugRequest } from '../core/debuglog'
 import { createExplainer, NO_VIEW } from '../core/explainer'
 import { EDITORS_FOLDER, focusWatchArgv, ignoredFolders, isEstablished, lineSplitter, nudgesOf, treeWatchArgv, watcherComplaint } from '../core/filewatch'
 import type { Nudge, WatchPlaces, WatchRole } from '../core/filewatch'
-import type { Explainer, Intent } from '../core/explainer'
-import { connectedHere, editorsLine, isConnected, parseEditorFile, speaker } from '../core/editors'
-import type { EditorSeen } from '../core/editors'
-import { describeSpot, parseFocusFile, parseTarget, relativeTo, viewFile, viewText } from '../core/focus'
+import { describeSpot, parseTarget, relativeTo } from '../core/focus'
 import type { Focus } from '../core/focus'
+import {
+  fastPoll as fastPollOf,
+  followEditor as followEditorOf,
+  followSaves as followSavesOf,
+  freshFollowState,
+  isWatched as isWatchedOf,
+  lookUp as lookUpOf,
+  moveFocus as moveFocusOf,
+  pollFocus as pollFocusOf,
+  readFocus as readFocusOf,
+  refreshView as refreshViewOf,
+  setFocus as setFocusOf,
+  startExplaining as startExplainingOf,
+  watchClosely as watchCloselyOf,
+} from '../core/following'
+import type { FollowPorts, FollowState } from '../core/following'
 import {
   confirmQuestion,
   describeScope,
@@ -183,7 +195,7 @@ import { createScheduler } from '../core/scheduler'
 import type { Scheduler } from '../core/scheduler'
 import { claimed, nextLeaseCheck, parseLease, released } from '../core/lease'
 import type { Lease } from '../core/lease'
-import { FOCUS_SCAN_MS, focusGapMs, scanGapMs } from '../core/sensor'
+import { scanGapMs } from '../core/sensor'
 import { healthLine, playLine, watchOf } from '../core/status'
 import type { Recorder } from '../core/recorder'
 import {
@@ -427,29 +439,7 @@ let sharedCheckedAt = 0
 const SHARED_CHECK_MS = 5000
 
 /** Explain: the lookup engine, and where the person is looking. */
-let explainer: Explainer | null = null
-let focus: Focus | null = null
-/** When an editor last moved the focus, in clock milliseconds. A save does not move the focus away from a live editor. */
-let editorFocusAt = 0
-/**
- * True while the spot in focus is being checked ten times a second, which it
- * is for as long as someone can see the Explain view (`fastPoll`).
- */
-let isWatchingClosely = false
-/** Each editor's file as last read (`editors.ts`), by name: its size and modification time, and what it said. */
-const editorFiles = new Map<string, { stamp: string; seen: EditorSeen | null }>()
-/** What the editor that speaks for this project says, without what changes on every write; null when no editor does. */
-let focusText: string | null = null
-/** Whether any editor is open, in this project or another. */
-let isAnyEditor = false
-/** Counts refreshes of the Explain view, so that a slower, older one does not overwrite a newer one. */
-let viewRun = 0
-/** The focused file's stamp when the view was last made. A different stamp now means the view may describe code that is gone. */
-let viewedStamp = ''
-let writtenView = ''
-const EDITOR_LIVE_MS = 600_000
-/** The lookup tool waits this long for what it was asked about. A hook has ten seconds of its own. */
-const LOOKUP_WAIT_MS = 6000
+const followState: FollowState = freshFollowState()
 
 /** The animated persona's timers: one moves its mouth while it talks, the other makes it blink now and then. */
 let talkTimer: Timer | null = null
@@ -597,7 +587,7 @@ function snapshot(): Record<string, unknown> {
       lastHead,
       headLog,
     },
-    explain: { isOn: explainer !== null, waiting: explainer?.pending() ?? 0, focus, editorFocusAt, isWatchingClosely },
+    explain: { isOn: followState.explainer !== null, waiting: followState.explainer?.pending() ?? 0, focus: followState.focus, editorFocusAt: followState.editorFocusAt, isWatchingClosely: followState.isWatchingClosely },
     timers: { talk: talkTimer !== null, blink: blinkTimer !== null },
     profiles: { languages: profiles.languages, subjects: Object.keys(profiles.subjects) },
     progress: { identity: progressState.identity, records: [...progressState.records.keys()], watchedPaths: [...progressState.watchedPaths] },
@@ -874,7 +864,7 @@ async function wake($: EngineInterface, settings: Settings): Promise<void> {
   try {
     await planLook($, settings)
     await planReview($, settings)
-    await explainer?.wake()
+    await followState.explainer?.wake()
   } catch (error) {
     // Not the caller's failure: a look whose model answered would otherwise be counted as failed and its notes lost.
     fail($, 'could not plan what was waiting', error)
@@ -1766,7 +1756,7 @@ function journalPortsOf($: EngineInterface): JournalPorts {
     readEditor: async () => {
       await readFocus($)
 
-      return focusText
+      return followState.focusText
     },
     watcher: () => watcher,
     engagement: () => engagement,
@@ -2563,7 +2553,7 @@ function reviewPortsOf($: EngineInterface, settings: Settings): ReviewPorts {
 
 /** The fingerprint of the code an insight is about, as that code is now. Null when its file cannot be read. */
 async function printForInsight($: EngineInterface, insight: Insight): Promise<{ print: string; of: 'symbol' | 'file' } | null> {
-  if (explainer !== null) return explainer.printFor(insight.file, insight.symbol)
+  if (followState.explainer !== null) return followState.explainer.printFor(insight.file, insight.symbol)
   try {
     return { print: sourcePrint(await $.fs.read(`${repoRoot}/${insight.file}`)), of: 'file' }
   } catch {
@@ -2886,11 +2876,11 @@ function runPusher(
 async function nudged($: EngineInterface, settings: Settings, nudge: Nudge): Promise<void> {
   if (mode !== 'on' || watcher === null || !isDriver) return
   trace($, 'push', nudge.kind, () => nudge)
-  const spot = focus
+  const spot = followState.focus
   const isSpotChanged = nudge.kind === 'focus' || (nudge.kind === 'tree' && spot !== null && nudge.paths.includes(spot.path))
   // While someone watches the spot in focus, its check runs now. The scan leaves the focus file to it.
-  if (isWatchingClosely && isSpotChanged) schedulerOf($).set('focus', await $.clock.now(), () => fastPoll($))
-  if (nudge.kind !== 'focus' || !isWatchingClosely) await kick($, settings, `pushed: ${nudge.kind}`)
+  if (followState.isWatchingClosely && isSpotChanged) schedulerOf($).set('focus', await $.clock.now(), () => fastPoll($))
+  if (nudge.kind !== 'focus' || !followState.isWatchingClosely) await kick($, settings, `pushed: ${nudge.kind}`)
 }
 
 /**
@@ -2925,7 +2915,7 @@ async function scan($: EngineInterface, settings: Settings): Promise<void> {
       await followSaves($, active.changed(), now)
     }
     // Until an editor has written its focus file, looking for it this often is enough.
-    if (!isWatchingClosely) await pollFocus($)
+    if (!followState.isWatchingClosely) await pollFocus($)
     await keepJournal($, active, now)
     await checkHead($, settings)
     // Another session may have changed what is on record about the person.
@@ -2959,23 +2949,23 @@ function stopWatching(): void {
   jobBlocks.clear()
   reviewState.reviewFailure = ''
   reviewState.reviewFailureNoted = null
-  isWatchingClosely = false
+  followState.isWatchingClosely = false
   isDriver = true
   leaseHolder = ''
   sharedStamp = null
   sharedCheckedAt = 0
-  explainer?.stop()
-  explainer = null
+  followState.explainer?.stop()
+  followState.explainer = null
   progressState.watchedPaths.clear()
   notePrints.clear()
   project = null
   reviews = []
-  focus = null
-  editorFiles.clear()
-  focusText = null
-  isAnyEditor = false
-  writtenView = ''
-  viewedStamp = ''
+  followState.focus = null
+  followState.editorFiles.clear()
+  followState.focusText = null
+  followState.isAnyEditor = false
+  followState.writtenView = ''
+  followState.viewedStamp = ''
   watcher = null
   // A review still running finishes in the background, and its answer is ignored.
   // The commits that were waiting stay in the project's folder, for the next time the tutor is on here.
@@ -3053,88 +3043,47 @@ async function startWatching($: EngineInterface, settings: Settings, run: number
   planTimedReview($, settings, now)
 }
 
-/**
- * Shows what is known about the spot in focus, and writes it where an editor
- * can read it. `isAsked` is true when the person named the spot just now,
- * which fetches what is missing at once. Every other refresh is the tutor
- * keeping up: with a save, or with whatever else moved the focus there.
- */
-async function refreshView($: EngineInterface, isAsked = false): Promise<void> {
-  const engine = explainer
-  const spot = focus
-  if (engine === null || spot === null) return
-  viewRun += 1
-  const run = viewRun
-  try {
-    const intent: Intent = isAsked ? 'asked' : spot.source === 'save' ? 'following' : 'browsing'
-    const stamp = await fileStamp($, `${repoRoot}/${spot.path}`)
-    const view = await engine.view(spot, intent)
-    // A newer refresh started while this one was reading the file: its answer is the one to show.
-    if (run !== viewRun || engine !== explainer) return
-    viewedStamp = stamp
-    await update($, explainAtom, () => view)
-    const text = JSON.stringify(view)
-    // One file serves every session and every project. It is written by the session that drives this project,
-    // and only while an editor's caret is in this project, or no editor is open at all.
-    const isOurs = isDriver && (focusText !== null || !isAnyEditor)
-    if (text !== writtenView && dataRoot !== '' && isOurs) {
-      writtenView = text
-      await $.fs.write(`${dataRoot}/view.json`, viewFile(view, repoRoot, spot.source, await $.clock.now()))
-    }
-  } catch (error) {
-    fail($, 'showing what Explain knows', error)
+/** What following the spot in focus needs from Claude Code. */
+function followPortsOf($: EngineInterface): FollowPorts {
+  return {
+    now: async () => await $.clock.now(),
+    trace: (kind, name, detail) => trace($, kind, name, detail),
+    fail: (what, error) => fail($, what, error),
+    repoRoot: () => repoRoot,
+    dataRoot: () => dataRoot,
+    isOn: () => mode !== 'off',
+    isDriver: () => isDriver,
+    engagement: () => engagement,
+    stamp: path => fileStamp($, path),
+    list: async path => await $.fs.list(path),
+    readFile: async path => await $.fs.read(path),
+    writeFile: async (path, text) => void (await $.fs.write(path, text)),
+    countStat: () => void (quiet.stats += 1),
+    readView: () => read($, explainAtom),
+    setView: async change => void (await update($, explainAtom, change)),
+    showEditors: line => showEditors($, line),
+    isExplainShown: async () => (await read($, tabAtom)) === 'explain' && (await isTabShown($)),
+    markActive: now => void (activeAt = now),
+    feedJournal: (text, now) => journalState.recorder?.editor(text, now, false),
+    isPushed: role => isPushed(role),
+    deadline: { set: (name, at, run) => schedulerOf($).set(name, at, run), cancel: name => void deadlines?.cancel(name) },
+    after: (ms, run) => $.clock.after(ms, run),
+    markHome: () => markHome($),
   }
+}
+
+/** Shows what is known about the spot in focus, and writes it where an editor can read it. */
+async function refreshView($: EngineInterface, isAsked = false): Promise<void> {
+  await refreshViewOf(followPortsOf($), followState, isAsked)
 }
 
 async function setFocus($: EngineInterface, next: Focus, isAsked: boolean): Promise<void> {
-  focus = next
-  await refreshView($, isAsked)
+  await setFocusOf(followPortsOf($), followState, next, isAsked)
 }
 
-/**
- * Reads the editors' files (`editors.ts`): one listing of their folder, and a
- * read of each file that changed since. Shows which editors are connected to
- * this project, and resolves true when what the editor that speaks for it
- * says has changed. One read serves the journal and Explain both. A source
- * that pushes editor events would call this.
- */
+/** Reads the editors' files: which are connected to this project, and what the one that speaks for it says. */
 async function readFocus($: EngineInterface): Promise<boolean> {
-  if (dataRoot === '') return false
-  const folder = editorsPath(dataRoot)
-  quiet.stats += 1
-  let listed: { name: string; kind: string; size: number; mtimeMs: number }[] = []
-  try {
-    listed = await $.fs.list(folder)
-  } catch {
-    // No editor has written yet.
-  }
-  const names = new Set<string>()
-  for (const entry of listed) {
-    if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
-    names.add(entry.name)
-    const stamp = `${entry.size}:${entry.mtimeMs}`
-    if (editorFiles.get(entry.name)?.stamp === stamp) continue
-    let seen: EditorSeen | null = null
-    try {
-      seen = parseEditorFile(await $.fs.read(`${folder}/${entry.name}`))
-    } catch {
-      // Gone between the listing and the read.
-    }
-    // A file caught half-written does not parse: what it said before stands, and it is read again next time.
-    if (seen === null && entry.size > 0) continue
-    editorFiles.set(entry.name, { stamp, seen })
-  }
-  for (const name of [...editorFiles.keys()]) if (!names.has(name)) editorFiles.delete(name)
-
-  const now = await $.clock.now()
-  const editors = [...editorFiles.values()].flatMap(file => (file.seen === null ? [] : [file.seen]))
-  isAnyEditor = editors.some(seen => isConnected(seen, now))
-  await showEditors($, editorsLine(connectedHere(editors, repoRoot, now)))
-  const text = speaker(editors, repoRoot, now)?.text ?? null
-  if (text === focusText) return false
-  focusText = text
-
-  return true
+  return await readFocusOf(followPortsOf($), followState)
 }
 
 /** Tells the pane which editors are connected to this project, when that changed. */
@@ -3151,23 +3100,12 @@ async function showEditors($: EngineInterface, line: string): Promise<void> {
 
 /** Explain follows the spot the editor's focus file names, when it names one in this repository. */
 async function followEditor($: EngineInterface, now: number): Promise<void> {
-  if (explainer === null || focusText === null) return
-  // A file caught half-written does not parse. The editor's next write is read whole.
-  const spot = parseFocusFile(focusText, repoRoot)
-  if (spot === null) return
-  editorFocusAt = now
-  // An editor is reporting its cursor: from now on its file is checked ten times a second.
-  watchClosely($)
-  await setFocus($, { ...spot, source: 'editor' }, false)
+  await followEditorOf(followPortsOf($), followState, now)
 }
 
 /** Hands what an editor says, when it has said something new, to the journal and to Explain. */
 async function pollFocus($: EngineInterface): Promise<void> {
-  if (mode === 'off' || repoRoot === '' || !(await readFocus($))) return
-  const now = await $.clock.now()
-  activeAt = now
-  journalState.recorder?.editor(focusText, now, false)
-  await followEditor($, now)
+  await pollFocusOf(followPortsOf($), followState)
 }
 
 /** Whether the tab that is chosen can be seen: in the unified layout, only while it is opened. */
@@ -3177,191 +3115,83 @@ async function isTabShown($: EngineInterface): Promise<boolean> {
 
 /** Whether anyone can see the Explain view: the tab is open, or an editor is showing it. */
 async function isWatched($: EngineInterface): Promise<boolean> {
-  if ((await read($, tabAtom)) === 'explain' && (await isTabShown($))) return true
-
-  return focus?.source === 'editor' && (await $.clock.now()) - editorFocusAt < EDITOR_LIVE_MS
+  return await isWatchedOf(followPortsOf($), followState)
 }
 
-/**
- * While the Explain view is being watched, the file in focus is checked for
- * changes far more often than the working tree is scanned, so that an edit
- * takes the old explanation off the screen in a tenth of a second and an
- * editor's caret is followed as it moves. Each check plans the next, until
- * nobody is watching.
- */
+/** While the Explain view is being watched, the file in focus is checked far more often than the tree is scanned. */
 async function fastPoll($: EngineInterface): Promise<void> {
-  if (!isWatchingClosely) return
-  let isStillWatched = false
-  const started = await $.clock.now()
-  try {
-    if (explainer !== null) {
-      await pollFocus($)
-      const spot = focus
-      if (spot !== null && (await fileStamp($, `${repoRoot}/${spot.path}`)) !== viewedStamp) await refreshView($)
-      isStillWatched = explainer !== null && (await isWatched($))
-    }
-  } catch (error) {
-    fail($, 'checking the spot in focus', error)
-    isStillWatched = explainer !== null
-  }
-  // Switched off, or on again, while this check ran: whoever did that decides what runs now.
-  if (!isWatchingClosely) return
-  if (!isStillWatched) {
-    trace($, 'timer', 'nobody is watching the focus')
-    isWatchingClosely = false
-
-    return
-  }
-  const now = await $.clock.now()
-  schedulerOf($).set('focus', now + focusGapMs({ tookMs: now - started, isPushed: isPushed('focus') }), () => fastPoll($))
+  await fastPollOf(followPortsOf($), followState)
 }
 
 function watchClosely($: EngineInterface): void {
-  if (explainer === null || isWatchingClosely) return
-  isWatchingClosely = true
-  trace($, 'timer', 'watching the focus closely', () => ({ everyMs: FOCUS_SCAN_MS, focus }))
-  // The first check is due at once: the scheduler runs a deadline whose time has passed straight away.
-  schedulerOf($).set('focus', 0, () => fastPoll($))
+  watchCloselyOf(followPortsOf($), followState)
 }
 
 /** Saved files are mapped again, and the focus follows the save unless an editor is reporting its cursor. */
 async function followSaves($: EngineInterface, saved: readonly string[], now: number): Promise<void> {
-  const engine = explainer
-  if (engine === null || saved.length === 0) return
-  for (const path of saved) await engine.touch(path)
-  const first = saved[0]
-  const isEditorLive = focus?.source === 'editor' && now - editorFocusAt < EDITOR_LIVE_MS
-  if (first === undefined || isEditorLive) {
-    await refreshView($)
-
-    return
-  }
-  await setFocus($, { path: first, line: await engine.where(first), source: 'save' }, false)
+  await followSavesOf(followPortsOf($), followState, saved, now)
 }
 
 /** Starts the lookup engine for this repository. `run` is the switch-on this belongs to. */
 async function startExplaining($: EngineInterface, settings: Settings, run: number): Promise<void> {
-  if (repoRoot === '' || dataRoot === '') return
-  if (settings.explain.mode === 'off') {
-    await update($, explainAtom, (): typeof NO_VIEW => ({ ...NO_VIEW, status: 'off' }))
+  await startExplainingOf(
+    {
+      ...followPortsOf($),
+      isExplainOff: () => settings.explain.mode === 'off',
+      createExplainer: ({ root, onChange, wakeAt }) =>
+        createExplainer({
+          read: path => readSource($, root, path),
+          stamp: path => fileStamp($, `${root}/${path}`),
+          store: storeOf($),
+          entryPath: path => fileEntryPath(dataRoot, root, path),
+          complete: async (prompt, maxTokens, signal) => {
+            const result = await callModel(
+              $,
+              settings,
+              'explain',
+              {
+                model: settings.explain.model,
+                effort: settings.explain.thinking,
+                system: reviewerSystem(explainInstructions, [aboutPerson()], persona),
+                prompt,
+                maxTokens,
+                timeoutMs: 90_000,
+              },
+              signal,
+            )
 
-    return
-  }
-  const root = repoRoot
-  await markHome($)
-  if (run !== engagement) return
-
-  explainer = createExplainer({
-    read: path => readSource($, root, path),
-    stamp: path => fileStamp($, `${root}/${path}`),
-    store: storeOf($),
-    entryPath: path => fileEntryPath(dataRoot, root, path),
-    complete: async (prompt, maxTokens, signal) => {
-      const result = await callModel(
-        $,
-        settings,
-        'explain',
-        {
+            return result.isAnswered ? result.text : null
+          },
+          now: () => $.clock.now(),
+          project: () => ({ name: projectId(root).replace(/-[0-9a-f]{8}$/, ''), overview: project === null ? '' : overviewLine(project) }),
+          insights: (path, name, symbolPrint, filePrint) =>
+            project === null ? [] : insightsFor(project, path, name, symbolPrint, filePrint).map(insightLine),
+          // Paused, or with another session driving this project, nothing is fetched unless it is asked for.
+          mode: () => (mode === 'off' ? 'off' : mode === 'paused' || !isDriver ? 'on request' : settings.explain.mode),
+          // While Claude is not answering, or refuses this job's model, only what the person asks for is tried.
+          pressure: () => (!mayAsk(health) || jobBlocks.has('explain') ? 'held' : pressure.level),
           model: settings.explain.model,
-          effort: settings.explain.thinking,
-          system: reviewerSystem(explainInstructions, [aboutPerson()], persona),
-          prompt,
-          maxTokens,
-          timeoutMs: 90_000,
-        },
-        signal,
-      )
-
-      return result.isAnswered ? result.text : null
+          onChange,
+          wakeAt,
+          log: line => {
+            $.ui.log(line, { to: 'debug' })
+            trace($, 'explain', 'log', () => line)
+          },
+        }),
     },
-    now: () => $.clock.now(),
-    project: () => ({ name: projectId(root).replace(/-[0-9a-f]{8}$/, ''), overview: project === null ? '' : overviewLine(project) }),
-    insights: (path, name, symbolPrint, filePrint) =>
-      project === null ? [] : insightsFor(project, path, name, symbolPrint, filePrint).map(insightLine),
-    // Paused, or with another session driving this project, nothing is fetched unless it is asked for.
-    mode: () => (mode === 'off' ? 'off' : mode === 'paused' || !isDriver ? 'on request' : settings.explain.mode),
-    // While Claude is not answering, or refuses this job's model, only what the person asks for is tried.
-    pressure: () => (!mayAsk(health) || jobBlocks.has('explain') ? 'held' : pressure.level),
-    model: settings.explain.model,
-    onChange: () => {
-      void refreshView($)
-    },
-    wakeAt: at => {
-      if (at === null) deadlines?.cancel('explain')
-      else schedulerOf($).set('explain', at, () => explainer?.wake())
-    },
-    log: line => {
-      $.ui.log(line, { to: 'debug' })
-      trace($, 'explain', 'log', () => line)
-    },
-  })
-  // After a reload, the pane still holds the spot it was showing. The view is made again from the file as it is now.
-  const shown = (await read($, explainAtom)).spot
-  if (shown !== null) focus = { ...shown, source: 'pane' }
-  else await update($, explainAtom, () => NO_VIEW)
-  await refreshView($)
-  // The journal may have read the focus file already. What it said is followed either way.
-  await readFocus($)
-  await followEditor($, await $.clock.now())
-  if (await isWatched($)) watchClosely($)
+    followState,
+    run,
+  )
 }
 
 /** Moves the Explain tab's focus through the file's symbols. */
 async function moveFocus($: EngineInterface, step: 1 | -1): Promise<void> {
-  const view = await read($, explainAtom)
-  if (view.spot === null || view.outline.length === 0) return
-  const { target, outline } = view
-  const at = target === null ? -1 : outline.findIndex(row => row.startLine === target.startLine && row.endLine === target.endLine)
-  // From between symbols, "next" is the first one below the line and "previous" the last one above it.
-  const line = view.spot.line
-  const below = outline.findIndex(row => row.startLine > line)
-  const next =
-    at !== -1
-      ? Math.max(0, Math.min(outline.length - 1, at + step))
-      : step === 1
-        ? (below === -1 ? outline.length - 1 : below)
-        : Math.max(0, (below === -1 ? outline.length : below) - 1)
-  const row = outline[next]
-  if (row !== undefined) await setFocus($, { path: view.spot.path, line: row.startLine, source: 'pane' }, true)
-}
-
-/** Resolves when `wanted` does, or after `ms`, whichever comes first. */
-function soonest($: EngineInterface, wanted: Promise<void>, ms: number): Promise<void> {
-  return new Promise(resolve => {
-    const timer = $.clock.after(ms, () => resolve())
-    void wanted.then(() => {
-      timer.cancel()
-      resolve()
-    })
-  })
+  await moveFocusOf(followPortsOf($), followState, step)
 }
 
 /** What the lookup tool and `/bsd explain` share: move the focus to a spot and say what is known about it. */
 async function lookUp($: EngineInterface, spot: Spot): Promise<string> {
-  const engine = explainer
-  if (engine === null) return ''
-  await setFocus($, { ...spot, source: 'command' }, true)
-  let view = await engine.view(spot, 'asked')
-  // A lookup takes the model a few seconds, and a hook has ten of its own. This waits for the lookup to
-  // land and answers the moment it does, or with what there is when the wait is over.
-  const until = (await $.clock.now()) + LOOKUP_WAIT_MS
-  while (view.status === 'updating' && engine.pending() > 0) {
-    const left = until - (await $.clock.now())
-    if (left <= 0) break
-    await soonest($, engine.changed(), left)
-    view = await engine.view(spot, 'asked')
-  }
-  const known = viewText(view)
-  const more =
-    view.status === 'updating'
-      ? 'More is being looked up and will be in the Explain tab shortly. Read the code itself for what is not covered here.'
-      : view.status === 'failed'
-        ? 'The lookup failed, so read the code itself.'
-        : view.status === 'no-file'
-          ? 'There is no such file in this project.'
-          : ''
-
-  return [known === '' && more === '' ? `Nothing is known about ${describeSpot(spot)} yet.` : known, more].filter(part => part !== '').join('\n\n')
+  return await lookUpOf(followPortsOf($), followState, spot)
 }
 
 /** What every prompt is told about the person: their profile, and what has been seen of their own work. */
@@ -3647,9 +3477,9 @@ async function forget($: EngineInterface, settings: Settings, named: Scope | nul
       reviews = []
       reviewState.waiting = EMPTY_QUEUE
       reviewState.reviewRetryAt = null
-      explainer?.reset()
+      followState.explainer?.reset()
       notePrints.clear()
-      writtenView = ''
+      followState.writtenView = ''
       await update($, explainAtom, () => NO_VIEW)
       await update($, notesAtom, () => [])
       await update($, dismissedAtom, () => [])
@@ -3925,12 +3755,12 @@ export const register: Register = (on, options) => {
     if (request === 'explain') {
       if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
       if (settings.explain.mode === 'off') return { text: 'Explain is switched off. Its setting is in /config.' }
-      if (explainer === null) return { text: 'Explain needs a git repository, and a moment after /bsd to get ready.' }
+      if (followState.explainer === null) return { text: 'Explain needs a git repository, and a moment after /bsd to get ready.' }
       await update($, tabAtom, () => 'explain')
       // In the unified layout the tab opens above the prompt, where the answer lands.
       await update($, unfoldedAtom, () => true)
       watchClosely($)
-      const spot = rest.trim() === '' ? focus : parseTarget(rest, repoRoot)
+      const spot = rest.trim() === '' ? followState.focus : parseTarget(rest, repoRoot)
       if (spot === null) {
         return { text: rest.trim() === '' ? 'Name a file and a line: /bsd explain src/app.py:42' : `That is not a file in this project: ${rest.trim()}` }
       }
@@ -4212,7 +4042,7 @@ export const register: Register = (on, options) => {
   })
 
   on('tool.call', { tool: 'mcp__backseat-driver__lookup' }, async ($, e) => {
-    if (mode === 'off' || explainer === null) return answered($, e, 'Nothing is cached, because Explain is not running. Read the file instead.')
+    if (mode === 'off' || followState.explainer === null) return answered($, e, 'Nothing is cached, because Explain is not running. Read the file instead.')
     const path = relativeTo(repoRoot, String(e.file ?? ''))
     if (path === null) return answered($, e, 'That file is not in this project.')
     const line = Math.floor(Number(e.line ?? 1))
