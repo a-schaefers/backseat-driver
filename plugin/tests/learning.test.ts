@@ -102,7 +102,7 @@ sessionTest('decision points and insights each get their own section in the play
   expect(decisionAt >= 0 && decisionAt < bugAt && bugAt < insightAt).toBe(true)
   expect((await ui.find({ type: 'Text', text: DECISION_HEADING }))?.props.color).toBe('magenta')
   expect(await ui.find({ key: 'note-1', text: '1  stats.py · line 2' })).toBeDefined()
-  expect(await ui.find({ key: 'note-2', text: '2  bug · line 2' })).toBeDefined()
+  expect(await ui.find({ key: 'note-2', text: '2  ✘ bug · line 2' })).toBeDefined()
   expect(await ui.find({ key: 'note-3', text: '3  stats.py · line 1' })).toBeDefined()
 
   // Selecting the decision point and pressing e asks to have it laid out, without deciding.

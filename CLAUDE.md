@@ -138,6 +138,7 @@ license-server/                     reference license server: issue, check, revo
 .github/workflows/check.yml         npm run check on push/PR, pinned Claude Code
 .github/workflows/nightly.yml       same check daily on newest Claude Code
 research/                           research notes for the owner (not shipped): opencode.md, the plan for an OpenCode client
+research/personas/                  one file per persona: how the person speaks and judges code, with sources; what the persona prompts are checked against
 ```
 
 The ground rules in README ("Claude does not edit your files" etc.) describe end-user product behavior, not rules for working in this repo.
@@ -194,6 +195,7 @@ scripts/outage-proxy.py 18080    # a proxy for staging an outage in a live sessi
 - Contract: `SKILL.md`, the single source of tutor behavior. The mod injects it and never carries a copy.
   - `SKILL.md` describes behavior only. Anything naming this plugin's commands, tools or agents goes in `SESSION_NOTES` in `contract.ts`, so the skill works alone (as `/backseat-driver:tutor`) with mods off. That fallback is a conversational tutor without background reviews.
 - Personas: the chosen engineering file, then the voice file, are injected after the contract and into both review prompts. Each persona file states which half it is and that it leaves the other alone; a new persona file needs that paragraph too.
+  - `research/personas/` holds the research behind each persona (voice and engineering judgment, with sources, folklore marked) and where the prompts diverge from it (2026-10-05). Read it before changing a persona prompt; a new persona gets a research file first.
 - Mod: `plugin/hooks/` (the adapter) over `plugin/core/` (shared). Commands via `$.command.register` (`/backseat-driver`, `/bsd`, `/backseat-driver-update`); tools via `$.tool.register` (`hush`, `unhush`, `record`, `lookup`, `progress`, `profile`, `working`, `activity`); pane via `$.ui.open` plus a `ui.render` hook, contents in `$.state`. Why a mod, not a skill plus a monitor: a monitor would turn every save into a conversation turn on the main model. The mod reviews out of band.
 
 ### Module shape (enforced by Claude Code)
@@ -439,6 +441,7 @@ The owner wants the logic functional where it can be, "to detect, prevent and re
   - Switch-on says where the notes are and how to reach them (`BAND_INTRO`), because nothing in the band does.
 - Keys above the prompt: Claude Code lets a bare digit typed into an EMPTY prompt press a band button (meant for surveys), so the tab buttons carry their digits only while the band has the keyboard (`hasDigits`, `bandKeys` atom). `bandKeys` comes from `ui.focus` on the band (Ctrl+X Tab raises one with the element). Esc raises nothing, so a digit pressed after it still reaches a tab button: `pressBandTab` first moves the focus ring onto that tab with `$.ui.focus`, which Claude Code refuses when the band does not hold the keyboard, and then puts the digit into the prompt with `$.prompt.fill` instead. The kit cannot answer a plugin's own `$.ui.focus`, so that refusal is checked live only.
 - Folded, the preview lines have no keys of their own, so while the band has the keyboard a `j` button ("open the notes") unfolds the play-by-play; `e d m` then act on an open tab and never fall into the prompt. `bandKeys` is also reset on every `/bsd` command and on a reload, since Esc raises no event.
+- Open play tab polish: a problem's row carries its `noteMark` glyph; muting is undone with an "unmute" button (not `x`, which folds) beside "Muted: …"; dismissing moves the selection to the next note drawn; `f` ("look this up") toasts "Looking this file up…" so a file that maps to nothing doesn't look like a dead key.
 - The focus ring landing on a note (`note-<id>`) selects it, so `e d m` act on the note the person is on. `j`/`k` step through the notes; all layouts draw them in one order (`drawnOrder`: decisions, problems, insights) and the keys start on the first one drawn.
 - Live (2026-10-05, a stand-in model on a local port, 80 to 170 columns, main screen and fullscreen): all three layouts drawn and switched by `/bsd layout` in both directions; `vertical` docked at 64 columns in fullscreen; a digit after Esc landed in the prompt (`❯ 3`); at 80 columns the band kept its face on one row and dropped the line.
 
