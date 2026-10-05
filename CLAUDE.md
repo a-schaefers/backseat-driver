@@ -8,7 +8,7 @@ AI-only reference for this repository. Terse by design. `README.md` is the only 
 - Record product decisions here (section "Product") the session the owner states them.
 - Commit and push to `origin main` when work is complete, unasked. Never force-push or rewrite pushed history without asking. Other sessions push to `main` too: fetch and rebase before pushing, stage by path, never `git add -A`. To push without publishing another session's unpushed local commit, commit from a worktree based on `origin/main` and `git push origin HEAD:main`.
 - README rules:
-  - Sections only: why, what it is, what it is not, who it's for (and not for), how to use it. Nothing said twice. Short.
+  - Sections only: why, what it is, who it's for (and not for), how to use it. Nothing said twice. Short.
   - Owner's voice, as in their Enchant Games Journal (https://enchant.games/?slug=journal, feed `/rss.xml`, articles are YAML under `/news/`, listed in `/news.json`): first person, short punchy lines, blunt, a little irreverent, quotes as punctuation. Keep that voice.
   - No internal status (what was or wasn't tried, tested or installed): the owner called it invasive.
   - Never tell users how to run their workflow (which terminal or editor, where to run `claude`). State what works and where.
@@ -16,7 +16,7 @@ AI-only reference for this repository. Terse by design. `README.md` is the only 
   - Never apologize for the project or hedge it ("trying to", "I see the irony"). State what it does with confidence.
   - Never suggest autosave to make it closer to live: editor plugins are the answer.
   - Never link to this file or to design detail. A new feature gets a line at most.
-  - It carries facts that must stay true: install commands, minimum Claude Code version (text and badge), the `/bsd` command table, the footprint line under "What it is not".
+  - It carries facts that must stay true: install commands, minimum Claude Code version (text and badge), the `/bsd` command table, the footprint paragraph at the end of "What it is".
 - Pronouns: the owner's are not stated. Use "the owner" or they/them.
 
 ## Product
@@ -32,7 +32,7 @@ Stance: the project is against Claude writing the user's code, not neutral. Whil
 
 ### Decisions (do not re-propose rejected ones; do not design around the rest)
 
-- Learning happens through the user's own projects. No exercises, quizzes or practice mode (rejected). The tutor chimes in from the background; the user tunes how often, how deeply, in what voice.
+- Learning happens through the user's own projects. Exercises are planned but not built: until they are, the contract forbids them and the README doesn't promise or rule them out. The README calls nothing "not a linter" (the owner: it's quite similar to one). The tutor chimes in from the background; the user tunes how often, how deeply, in what voice.
 - One command, then hands off: `/backseat-driver` or `/bsd`. Every setting has a default, every question is skippable, setup never blocks work. A language first met mid-session gets defaults; its questions are offered in the pane, never interrupting.
 - One profile per language, never per project (`python`, not "python project 1"). It matters only once the user works in that language. The tutor may read other profiles (e.g. explain Rust via Python).
 - The user has the last word. Pushback is weighed. A contested point goes to the deep review model for a second opinion, and the user is told. "Do it my way" always stands. The play-by-play may keep flagging until the user hushes it; a hush saves to that language's profile at once.
@@ -551,7 +551,7 @@ For developing Backseat Driver, not for its users: everything the tutor does, in
 - Background reviews never become conversation turns. Only what the user does in chat or the pane does. Verified live for `$.model.complete` and `$.agent.spawn`.
 - Model and effort per job come from `userConfig`; no model id is pinned (aliases only). Defaults: play-by-play `sonnet`/`medium`, deep review `opus`/`high`, Explain `sonnet`/`low`. "Thinking level" = Claude Code effort (`low|medium|high|xhigh|max`).
 - Hard rules are hooks; teaching style is the contract. The edit guard covers only `Edit`, `Write` and `NotebookEdit`; a shell command could still write, which rests on the contract and Claude Code's permission prompts.
-- Footprint (the README's "What it is not" states it to users):
+- Footprint (the paragraph closing the README's "What it is" states it to users):
   - Runs `git`, reads the repo and its own plugin folder, calls models, writes only its data folder, draws a pane. One of the git repositories it runs git in is its own: `locks.git` in the data folder.
   - Other processes only on request: `rm` inside the data folder (forget, `/bsd debug clear`), `claude plugin` (update, uninstall).
   - The debug log, when the user switches it on, holds their code and prompts. It stays in the data folder.

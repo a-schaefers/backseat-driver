@@ -55,12 +55,7 @@ Backseat Driver puts the machine where it belongs: in the back seat. You drive. 
 - **Progress.** An honest level per language, beginner to senior, judged only on commits you wrote. It follows you across projects, and it can go down.
 - **Conversation.** Ask anything. Push back, and a contested point gets a second opinion. Tell it to drop a topic, and it's dropped for good. You have the last word.
 
-## What it is not
-
-- **Not a ghostwriter.** While it's on, Claude does not edit your files. A hook blocks its editing tools, so this doesn't hang on the model behaving.
-- **Not a course.** No exercises, no quizzes. The project you chose to build is the lesson.
-- **Not a linter.** It stays quiet unless something matters.
-- **Not in your repository.** No git hooks, and it never writes to your working tree. What it remembers stays in `~/.local/share/backseat-driver/`. Its only network request of its own is a check for a newer release, at most every six hours.
+While it's on, a hook blocks Claude's editing tools, so your code stays yours no matter what the model decides. It installs no git hooks and never writes to your working tree. What it remembers stays in `~/.local/share/backseat-driver/`. Its only network request of its own is a check for a newer release, at most every six hours.
 
 ## Who it's for
 
