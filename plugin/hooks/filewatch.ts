@@ -16,7 +16,8 @@
  * The watcher is inotifywait, from inotify-tools (Linux), in two children:
  * one over the working tree, recursive, leaving out what git ignores and
  * everything in `.git` but its logs (a commit writes `.git/logs/HEAD`); one
- * over the data folder itself, not recursive, for the editor's focus file.
+ * over the data folder itself and its `editors` folder, not recursive, for
+ * what an editor says about its caret.
  */
 
 /** What a reported path means to the tutor. */
@@ -114,9 +115,17 @@ export function treeWatchArgv(
   return [INOTIFYWAIT, '-m', '-r', '--format', '%w%f', ...eventArgs(), '--exclude', treeExclude(places, ignored), ...paths, ...leftOut]
 }
 
-/** The focus file's watcher: the data folder itself, not what is inside its folders. */
-export function focusWatchArgv(places: WatchPlaces): string[] {
-  return [INOTIFYWAIT, '-m', '--format', '%w%f', ...eventArgs(), places.dataRoot]
+/** The folder of the data folder where each running editor writes its own report (the editor plugins). */
+export const EDITORS_FOLDER = 'editors'
+
+/**
+ * The focus file's watcher: the data folder itself, and its `editors`
+ * folder when `hasEditors` says it is there, neither recursively.
+ */
+export function focusWatchArgv(places: WatchPlaces, hasEditors: boolean): string[] {
+  const editors = hasEditors ? [`${places.dataRoot}/${EDITORS_FOLDER}`] : []
+
+  return [INOTIFYWAIT, '-m', '--format', '%w%f', ...eventArgs(), places.dataRoot, ...editors]
 }
 
 /** True once a watcher's stderr says every watch is in place. */
@@ -158,6 +167,7 @@ export function nudgeOf(path: string, places: WatchPlaces): Nudge | null {
     return path.startsWith(`${places.gitDir}/logs/`) ? { kind: 'head' } : null
   }
   if (places.dataRoot !== '' && path === `${places.dataRoot}/focus.json`) return { kind: 'focus' }
+  if (places.dataRoot !== '' && path.startsWith(`${places.dataRoot}/${EDITORS_FOLDER}/`)) return path.endsWith('.json') ? { kind: 'focus' } : null
   if (!path.startsWith(`${places.root}/`)) return null
   const relative = path.slice(places.root.length + 1)
   // The repository's own `.git` folder, when the git folder is elsewhere it is a file. Nothing to look at.

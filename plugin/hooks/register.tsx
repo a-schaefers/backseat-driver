@@ -60,7 +60,7 @@ import {
 import { createDebugLog, createTracer, DEBUG_USAGE, FLUSH_MS, parseDebugRequest, parseSwitch, sessionFolder } from './debuglog'
 import type { DebugRequest } from './debuglog'
 import { createExplainer, NO_VIEW } from './explainer'
-import { focusWatchArgv, ignoredFolders, isEstablished, lineSplitter, nudgesOf, treeWatchArgv, watcherComplaint } from './filewatch'
+import { EDITORS_FOLDER, focusWatchArgv, ignoredFolders, isEstablished, lineSplitter, nudgesOf, treeWatchArgv, watcherComplaint } from './filewatch'
 import type { Nudge, WatchPlaces, WatchRole } from './filewatch'
 import type { Explainer, Intent } from './explainer'
 import { describeSpot, parseFocusFile, parseTarget, relativeTo, viewFile, viewText } from './focus'
@@ -2654,9 +2654,10 @@ async function startPushing($: EngineInterface, settings: Settings): Promise<voi
   const isGitOutside = gitDir !== `${root}/.git`
   const hasOutsideLogs = isGitOutside && (await $.fs.exists(`${gitDir}/logs`).catch(() => false))
   const hasDataRoot = dataRoot !== '' && (await $.fs.exists(dataRoot).catch(() => false))
+  const hasEditors = hasDataRoot && (await $.fs.exists(`${dataRoot}/${EDITORS_FOLDER}`).catch(() => false))
   if (run !== pushRun) return
   // The focus file's watcher is started once the tree's runs: where there is no inotifywait, it is looked for once.
-  const watchFocus = () => (hasDataRoot ? runPusher($, settings, 'focus', focusWatchArgv(places), places, run) : undefined)
+  const watchFocus = () => (hasDataRoot ? runPusher($, settings, 'focus', focusWatchArgv(places, hasEditors), places, run) : undefined)
   runPusher($, settings, 'tree', treeWatchArgv(places, ignored, gitFolders, hasOutsideLogs), places, run, watchFocus)
 }
 

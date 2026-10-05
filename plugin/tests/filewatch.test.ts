@@ -47,8 +47,10 @@ test('the tree watcher leaves out .git but its logs, and what git ignores', asyn
   expect(treeWatchArgv(worktree, [], ['logs', 'refs'], false)).not.toContain('/repo/.git/worktrees/w/logs')
   expect(treeWatchArgv(worktree, [], ['logs', 'refs'], true).filter(arg => arg.startsWith('@'))).toEqual([])
 
-  expect(focusWatchArgv(PLACES)).not.toContain('-r')
-  expect(focusWatchArgv(PLACES)[focusWatchArgv(PLACES).length - 1]).toBe(PLACES.dataRoot)
+  expect(focusWatchArgv(PLACES, false)).not.toContain('-r')
+  expect(focusWatchArgv(PLACES, false)[focusWatchArgv(PLACES, false).length - 1]).toBe(PLACES.dataRoot)
+  // Each running editor writes its own report into the editors folder, when it is there.
+  expect(focusWatchArgv(PLACES, true).slice(-2)).toEqual([PLACES.dataRoot, `${PLACES.dataRoot}/editors`])
 })
 
 test('a reported path is a save, a move of HEAD, the editor focus file, or nothing', async () => {
@@ -57,6 +59,8 @@ test('a reported path is a save, a move of HEAD, the editor focus file, or nothi
   expect(nudgeOf('/work/my proj/.git/index', PLACES)).toBeNull()
   expect(nudgeOf(`${PLACES.dataRoot}/focus.json`, PLACES)).toEqual({ kind: 'focus' })
   expect(nudgeOf(`${PLACES.dataRoot}/view.json`, PLACES)).toBeNull()
+  expect(nudgeOf(`${PLACES.dataRoot}/editors/nvim-412.json`, PLACES)).toEqual({ kind: 'focus' })
+  expect(nudgeOf(`${PLACES.dataRoot}/editors/.nvim-412.json.tmp`, PLACES)).toBeNull()
   expect(nudgeOf('/elsewhere/a.py', PLACES)).toBeNull()
   // The root's .git file, when the git folder is elsewhere.
   expect(nudgeOf('/work/my proj/.git', { ...PLACES, gitDir: '/repo/.git/worktrees/w' })).toBeNull()
