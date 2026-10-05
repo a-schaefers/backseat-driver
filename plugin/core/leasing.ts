@@ -13,9 +13,8 @@
 import { leasePath } from './datahome'
 import { claimed, nextLeaseCheck, parseLease, released } from './lease'
 import type { Lease } from './lease'
-import type { Trace } from './host'
+import type { Deadlines, Host } from './host'
 import { updateJson } from './store'
-import type { Store } from './store'
 
 /** What holding the lease remembers. */
 export type LeaseState = {
@@ -34,19 +33,8 @@ export function freshLeaseState(): LeaseState {
 }
 
 /** What holding the lease needs from its host. Each is read or done when it is needed. */
-export type LeasePorts = {
-  now: () => Promise<number>
-  trace: Trace
-  fail: (what: string, error: unknown) => void
-  /** False while the tutor is off. */
-  isOn: () => boolean
-  engagement: () => number
-  repoRoot: () => string
-  dataRoot: () => string
-  /** The session's id now. */
-  sessionId: () => Promise<string>
-  store: () => Pick<Store, 'read' | 'update'>
-  deadline: { set: (name: string, at: number, run: () => Promise<unknown> | unknown) => void }
+export type LeasePorts = Pick<Host, 'now' | 'trace' | 'fail' | 'isOn' | 'engagement' | 'repoRoot' | 'dataRoot' | 'sessionId' | 'store'> & {
+  deadline: Pick<Deadlines, 'set'>
   /** This session drives from now on, or has to stop. `run` is the switch-on it belongs to. */
   startDriving: (run: number) => Promise<void>
   stopDriving: () => Promise<void>

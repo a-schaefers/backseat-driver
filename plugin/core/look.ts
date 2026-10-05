@@ -10,7 +10,7 @@
 
 import type { Note, Profile, Profiles } from '../types'
 import { QUIET_LOOKS_BEFORE_REMARK } from './avatar'
-import type { AskModel, Trace } from './host'
+import type { Host } from './host'
 import { outcomeOf } from './health'
 import { sourcePrint } from './knowledge'
 import { languageOf } from './languages'
@@ -43,17 +43,12 @@ export function freshLookState(): LookState {
 }
 
 /** What a look needs from its host. Each is read or done at the moment the look needs it, not before. */
-export type LookPorts = {
+export type LookPorts = Pick<Host, 'now' | 'ask' | 'trace' | 'toast' | 'fail'> & {
   settings: Settings
   /** The watcher of the working tree, or null before there is one. */
   watcher: () => Watcher | null
-  now: () => Promise<number>
   /** When the working tree last changed, as far as the scan has seen. */
   lastChangeAt: () => number | null
-  /** The model of the play-by-play job. */
-  ask: AskModel
-  trace: Trace
-  toast: (text: string) => void
   /** Puts what the pane says about the look right, and takes the look's deadline away while this one runs. */
   showPlay: () => Promise<unknown>
   holdDeadline: () => void
@@ -84,7 +79,6 @@ export type LookPorts = {
   recorder: () => Recorder | null
   showWorking: (now: number) => Promise<void>
   say: (text: string) => Promise<void>
-  fail: (what: string, error: unknown) => void
 }
 
 /**

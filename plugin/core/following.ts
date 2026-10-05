@@ -18,7 +18,7 @@ import type { Explainer, Intent } from './explainer'
 import { describeSpot, parseFocusFile, viewFile, viewText } from './focus'
 import type { Focus } from './focus'
 import type { WatchRole } from './filewatch'
-import type { Trace } from './host'
+import type { Host } from './host'
 import { editorsPath } from './datahome'
 import { FOCUS_SCAN_MS, focusGapMs } from './sensor'
 
@@ -66,23 +66,25 @@ export function freshFollowState(): FollowState {
 }
 
 /** What following the focus needs from its host. Each is read or done when it is needed. */
-export type FollowPorts = {
-  now: () => Promise<number>
-  trace: Trace
-  fail: (what: string, error: unknown) => void
-  repoRoot: () => string
-  dataRoot: () => string
-  /** False while the tutor is off. */
-  isOn: () => boolean
-  /** True where this session drives the project (or there is no lease to hold). */
-  isDriver: () => boolean
-  engagement: () => number
+export type FollowPorts = Pick<
+  Host,
+  | 'now'
+  | 'trace'
+  | 'fail'
+  | 'repoRoot'
+  | 'dataRoot'
+  | 'isOn'
+  | 'isDriver'
+  | 'engagement'
+  | 'list'
+  | 'readFile'
+  | 'writeFile'
+  | 'deadline'
+  | 'after'
+  | 'markHome'
+> & {
   /** A file's size and modification time as text, '' when it cannot be read. `path` is absolute. */
   stamp: (path: string) => Promise<string>
-  /** The data folder's files: a listing (rejects when the folder is missing), a read, and a write. */
-  list: (path: string) => Promise<{ name: string; kind: string; size: number; mtimeMs: number }[]>
-  readFile: (path: string) => Promise<string>
-  writeFile: (path: string, text: string) => Promise<void>
   /** Counts a stat for the debug log's summary. */
   countStat: () => void
   /** Reads, or changes, what the Explain tab shows. */
@@ -97,10 +99,6 @@ export type FollowPorts = {
   markActive: (now: number) => void
   /** Whether a watcher pushes the changes of this role. */
   isPushed: (role: WatchRole) => boolean
-  deadline: { set: (name: string, at: number, run: () => Promise<unknown> | unknown) => void; cancel: (name: string) => void }
-  after: (ms: number, run: () => void) => { cancel: () => void }
-  /** Makes the data folder's marker, so that anything may be written to it. */
-  markHome: () => Promise<void>
 }
 
 /** What starting the lookup engine needs besides that. */
