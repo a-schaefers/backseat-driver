@@ -1,3 +1,5 @@
+import { arming, delayMs, dueNow } from './core'
+
 /**
  * Deadlines: what the tutor has to do at a time it already knows.
  *
@@ -6,6 +8,10 @@
  * is a named deadline here, and one timer is kept armed for whichever comes
  * first. Nothing ticks in between, and nothing is compared against the clock
  * over and over to find out whether its time has come.
+ *
+ * When to arm the timer, for how long, and which deadlines are due in what
+ * order are the kernel's (kernel/src/Kernel/Schedule.purs), through core.ts.
+ * The work and the timer are here.
  */
 
 export type SchedulerPorts = {
@@ -26,29 +32,25 @@ export function createScheduler(ports: SchedulerPorts) {
   /** Counts the times the timer was asked for, so that an older request that is still reading the clock gives way. */
   let request = 0
 
-  function earliest(): number | null {
-    let first: number | null = null
-    for (const deadline of deadlines.values()) {
-      if (first === null || deadline.at < first) first = deadline.at
-    }
-
-    return first
+  function listed(): { name: string; at: number }[] {
+    return [...deadlines].map(([name, deadline]) => ({ name, at: deadline.at }))
   }
 
   /** Arms the timer for the earliest deadline, when it is not armed for that already. */
   function arm(): void {
-    const first = earliest()
-    if (first === armedFor) return
+    const arm = arming(armedFor, listed())
+    if (arm.next === 'keep') return
     request += 1
     const mine = request
     timer?.cancel()
     timer = null
-    armedFor = first
-    if (first === null) return
+    armedFor = arm.next === 'arm' ? arm.at : null
+    if (arm.next === 'disarm') return
+    const first = arm.at
     void ports.now().then(now => {
       // Asked again while the clock was being read: the later request arms it.
       if (mine !== request) return
-      timer = ports.after(Math.max(0, first - now), () => {
+      timer = ports.after(delayMs(first, now), () => {
         if (mine !== request) return
         timer = null
         armedFor = null
@@ -60,10 +62,10 @@ export function createScheduler(ports: SchedulerPorts) {
   /** Does everything that is due, earliest first. Work that takes long is started, not waited for. */
   async function fire(): Promise<void> {
     const now = await ports.now()
-    const due = [...deadlines].filter(([, deadline]) => deadline.at <= now).sort((a, b) => a[1].at - b[1].at)
+    const due = dueNow(listed(), now).map(name => [name, deadlines.get(name)] as const)
     for (const [name, deadline] of due) {
       // Moved or dropped by the work of one that came before it.
-      if (deadlines.get(name) !== deadline) continue
+      if (deadline === undefined || deadlines.get(name) !== deadline) continue
       deadlines.delete(name)
       void Promise.resolve()
         .then(() => deadline.run())

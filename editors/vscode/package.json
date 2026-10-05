@@ -1,0 +1,22 @@
+{
+  "name": "backseat-driver",
+  "displayName": "Backseat Driver",
+  "description": "Tells Backseat Driver, the Claude Code tutor, where you are in your code.",
+  "version": "0.1.0",
+  "publisher": "a-schaefers",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "repository": { "type": "git", "url": "https://github.com/a-schaefers/backseat-driver" },
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Backseat Driver",
+      "properties": {
+        "backseatDriver.enabled": { "type": "boolean", "default": true, "description": "Tell Backseat Driver where you are in your code." },
+        "backseatDriver.home": { "type": "string", "default": "", "description": "Backseat Driver's data folder. Empty finds it the way Backseat Driver does." }
+      }
+    }
+  }
+}

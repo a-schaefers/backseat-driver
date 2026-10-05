@@ -54,6 +54,8 @@ export type Watch = {
   line: string
   /** What keeps going wrong in the background, as a sentence for the dim row under the status line. Absent or '' when nothing does. */
   health?: string
+  /** Which editors are connected to this project, as a sentence (`editors.ts`). Absent or '' when none is. */
+  editors?: string
 }
 
 /** A deep review as it was written: what the tab shows of one. */

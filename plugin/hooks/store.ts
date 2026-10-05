@@ -1,5 +1,9 @@
+import { afterRead, afterWrite, changeStep, keepsBackup } from './core'
 import type { Lock } from './locks'
 import type { Disk } from './storage'
+
+// When to read again, write again or give up is the kernel's (kernel/src/Kernel/Store.purs), through core.ts. The reading and writing are here.
+export { READ_RETRY_MS, READ_TRIES, WRITE_TRIES } from './core'
 
 /**
  * The tutor's JSON files, safe with several sessions at once.
@@ -36,13 +40,6 @@ export type UpdateOptions = {
   keepBackup?: boolean
 }
 
-/** How often a file that is empty or does not parse is read again before it counts as broken. */
-export const READ_TRIES = 3
-/** How long to wait before reading it again: a write takes a few milliseconds. */
-export const READ_RETRY_MS = 25
-/** How often a change is made again after another session's write got in its way. */
-export const WRITE_TRIES = 4
-
 export function backupPath(path: string): string {
   return `${path}.bak`
 }
@@ -71,17 +68,22 @@ export function createStore(ports: StorePorts) {
 
   async function load(path: string): Promise<Loaded> {
     let text: string | null = null
-    for (let attempt = 1; attempt <= READ_TRIES; attempt += 1) {
+    for (let attempt = 1; ; attempt += 1) {
       text = await ports.disk.read(path)
-      if (text === null) return { text, value: null, isSound: true }
-      if (text.trim() !== '') {
+      let value: unknown = null
+      let found: 'missing' | 'parsed' | 'unreadable' = text === null ? 'missing' : 'unreadable'
+      if (text !== null && text.trim() !== '') {
         try {
-          return { text, value: JSON.parse(text) as unknown, isSound: true }
+          value = JSON.parse(text) as unknown
+          found = 'parsed'
         } catch {
           // Caught while another session was writing it, or broken. The next read tells.
         }
       }
-      if (attempt < READ_TRIES) await ports.sleep(READ_RETRY_MS)
+      const next = afterRead(attempt, found)
+      if (next.next === 'absent' || next.next === 'sound') return { text, value, isSound: true }
+      if (next.next === 'broken') break
+      await ports.sleep(next.waitMs)
     }
 
     // Still empty or unreadable: whoever was writing it did not finish. It is kept aside, never thrown away.
@@ -114,10 +116,11 @@ export function createStore(ports: StorePorts) {
         const before = await load(path)
         const value = apply(before.value)
         const text = toText(value)
+        const step = changeStep(attempt, { hasLock: lock !== null, isSound: before.isSound, isSame: text === before.text })
         // Nothing to change, and the file already says so.
-        if (before.isSound && text === before.text) return value
+        if (step === 'unchanged') return value
 
-        if (lock === null && attempt < WRITE_TRIES) {
+        if (step === 'check') {
           // Without a lock, make sure at least that nobody wrote since this was read.
           const now = await ports.disk.read(path)
           if (now !== before.text) {
@@ -125,18 +128,21 @@ export function createStore(ports: StorePorts) {
             continue
           }
         }
-        if (options.keepBackup === true && before.isSound && before.text !== null) await ports.disk.write(backupPath(path), before.text)
+        if (keepsBackup({ wantsBackup: options.keepBackup === true, isSound: before.isSound, exists: before.text !== null }) && before.text !== null) {
+          await ports.disk.write(backupPath(path), before.text)
+        }
         await ports.disk.write(path, text)
 
         // Read back: what is there now must be what was just written.
-        if ((await ports.disk.read(path)) === text) return value
-        if (attempt >= WRITE_TRIES) {
+        const after = afterWrite(attempt, (await ports.disk.read(path)) === text)
+        if (after.next === 'done') return value
+        if (after.next === 'unconfirmed') {
           ports.note('a change could not be confirmed', { path, attempts: attempt })
 
           return value
         }
         ports.note('another session wrote the file at the same moment', { path, attempt })
-        await ports.sleep(READ_RETRY_MS * attempt)
+        await ports.sleep(after.waitMs)
       }
     } finally {
       if (lock !== null) await ports.locks?.release(lock)

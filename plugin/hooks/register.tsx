@@ -42,8 +42,8 @@ import {
   dataHome,
   debugRoot,
   debugSwitchPath,
+  editorsPath,
   fileEntryPath,
-  focusPath,
   isOwnFolder,
   isRemovable,
   journalPath,
@@ -62,6 +62,8 @@ import { createDebugLog, createTracer, DEBUG_USAGE, FLUSH_MS, parseDebugRequest,
 import type { DebugRequest } from './debuglog'
 import { createExplainer, NO_VIEW } from './explainer'
 import type { Explainer, Intent } from './explainer'
+import { connectedHere, editorsLine, isConnected, parseEditorFile, speaker } from './editors'
+import type { EditorSeen } from './editors'
 import { describeSpot, parseFocusFile, parseTarget, relativeTo, viewFile, viewText } from './focus'
 import type { Focus } from './focus'
 import {
@@ -382,9 +384,12 @@ let editorFocusAt = 0
  * is for as long as someone can see the Explain view (`fastPoll`).
  */
 let isWatchingClosely = false
-/** The editor's focus file as last read: its size and modification time, and its text, null when it is not there. */
-let focusStamp = ''
+/** Each editor's file as last read (`editors.ts`), by name: its size and modification time, and what it said. */
+const editorFiles = new Map<string, { stamp: string; seen: EditorSeen | null }>()
+/** What the editor that speaks for this project says, without what changes on every write; null when no editor does. */
 let focusText: string | null = null
+/** Whether any editor is open, in this project or another. */
+let isAnyEditor = false
 /** Counts refreshes of the Explain view, so that a slower, older one does not overwrite a newer one. */
 let viewRun = 0
 /** The focused file's stamp when the view was last made. A different stamp now means the view may describe code that is gone. */
@@ -848,7 +853,8 @@ async function showPlay($: EngineInterface, settings: Settings): Promise<Play> {
   const shown = await read($, watchAtom)
   if (shown.state !== next.state || shown.line !== next.line || shown.lastLookAt !== next.lastLookAt || (shown.health ?? '') !== (next.health ?? '')) {
     trace($, 'state', 'watch', () => ({ ...next, play }))
-    await update($, watchAtom, (): Watch => next)
+    // The row about connected editors is kept up by `readFocus`.
+    await update($, watchAtom, (w): Watch => (w.editors === undefined ? next : { ...next, editors: w.editors }))
   }
 
   return play
@@ -2844,8 +2850,9 @@ function stopWatching(): void {
   project = null
   reviews = []
   focus = null
-  focusStamp = ''
+  editorFiles.clear()
   focusText = null
+  isAnyEditor = false
   writtenView = ''
   viewedStamp = ''
   watcher = null
@@ -2945,8 +2952,8 @@ async function refreshView($: EngineInterface, isAsked = false): Promise<void> {
     await update($, explainAtom, () => view)
     const text = JSON.stringify(view)
     // One file serves every session and every project. It is written by the session that drives this project,
-    // and only while the editor's caret is in this project, or no editor has said where its caret is.
-    const isOurs = isDriver && (focusText === null || parseFocusFile(focusText, repoRoot) !== null)
+    // and only while an editor's caret is in this project, or no editor is open at all.
+    const isOurs = isDriver && (focusText !== null || !isAnyEditor)
     if (text !== writtenView && dataRoot !== '' && isOurs) {
       writtenView = text
       await $.fs.write(`${dataRoot}/view.json`, viewFile(view, repoRoot, spot.source, await $.clock.now()))
@@ -2962,27 +2969,61 @@ async function setFocus($: EngineInterface, next: Focus, isAsked: boolean): Prom
 }
 
 /**
- * Reads the file an editor writes its cursor to, again when it has changed.
- * Resolves true when it had. One read serves the journal and Explain both.
+ * Reads the editors' files (`editors.ts`): one listing of their folder, and a
+ * read of each file that changed since. Shows which editors are connected to
+ * this project, and resolves true when what the editor that speaks for it
+ * says has changed. One read serves the journal and Explain both. A source
+ * that pushes editor events would call this.
  */
 async function readFocus($: EngineInterface): Promise<boolean> {
   if (dataRoot === '') return false
-  const path = focusPath(dataRoot)
-  const stamp = await fileStamp($, path)
-  if (stamp === focusStamp) return false
-  let text: string | null = null
-  if (stamp !== '') {
-    try {
-      text = await $.fs.read(path)
-    } catch {
-      // Gone between the stat and the read. The next poll looks again.
-      return false
-    }
+  const folder = editorsPath(dataRoot)
+  quiet.stats += 1
+  let listed: { name: string; kind: string; size: number; mtimeMs: number }[] = []
+  try {
+    listed = await $.fs.list(folder)
+  } catch {
+    // No editor has written yet.
   }
-  focusStamp = stamp
+  const names = new Set<string>()
+  for (const entry of listed) {
+    if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
+    names.add(entry.name)
+    const stamp = `${entry.size}:${entry.mtimeMs}`
+    if (editorFiles.get(entry.name)?.stamp === stamp) continue
+    let seen: EditorSeen | null = null
+    try {
+      seen = parseEditorFile(await $.fs.read(`${folder}/${entry.name}`))
+    } catch {
+      // Gone between the listing and the read.
+    }
+    // A file caught half-written does not parse: what it said before stands, and it is read again next time.
+    if (seen === null && entry.size > 0) continue
+    editorFiles.set(entry.name, { stamp, seen })
+  }
+  for (const name of [...editorFiles.keys()]) if (!names.has(name)) editorFiles.delete(name)
+
+  const now = await $.clock.now()
+  const editors = [...editorFiles.values()].flatMap(file => (file.seen === null ? [] : [file.seen]))
+  isAnyEditor = editors.some(seen => isConnected(seen, now))
+  await showEditors($, editorsLine(connectedHere(editors, repoRoot, now)))
+  const text = speaker(editors, repoRoot, now)?.text ?? null
+  if (text === focusText) return false
   focusText = text
 
   return true
+}
+
+/** Tells the pane which editors are connected to this project, when that changed. */
+async function showEditors($: EngineInterface, line: string): Promise<void> {
+  const shown = await read($, watchAtom)
+  if ((shown.editors ?? '') === line) return
+  trace($, 'state', 'editors', () => ({ line }))
+  await update($, watchAtom, (w): Watch => {
+    const { editors: _editors, ...rest } = w
+
+    return line === '' ? rest : { ...rest, editors: line }
+  })
 }
 
 /** Explain follows the spot the editor's focus file names, when it names one in this repository. */
