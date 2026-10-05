@@ -126,11 +126,11 @@ sessionTest('a finished review is announced when the tab is not open', async ($,
 
   expect(session.toasts).toEqual(['Deep review ready: commit 0000000: Add mean'])
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  // The test's pane is 60 columns wide, where the tabs go by their short names once one says "(new)".
+  // The test's pane is 60 columns wide, where the five tabs go by their short names.
   expect(await ui.find({ key: 'tab-review', text: 'Review (new)' })).toBeDefined()
   await ui.press({ key: 'tab-review' })
   expect(await ui.find({ key: 'tab-review', text: 'Review (new)' })).toBeUndefined()
-  expect(await ui.find({ key: 'tab-review', text: 'Deep review' })).toBeDefined()
+  expect(await ui.find({ key: 'tab-review', text: 'Review' })).toBeDefined()
   await ui.unmount()
 })
 

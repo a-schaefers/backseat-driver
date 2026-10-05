@@ -4,9 +4,9 @@ import type { Mode } from '../types'
 export type ModeRequest = 'on' | 'off' | 'pause' | 'resume' | 'status'
 
 /** Everything `/bsd <word>` can ask for. */
-export type Request = ModeRequest | 'explain' | 'questions' | 'working' | 'forget' | 'update' | 'uninstall' | 'debug' | 'help'
+export type Request = ModeRequest | 'explain' | 'settings' | 'questions' | 'working' | 'forget' | 'update' | 'uninstall' | 'debug' | 'help'
 
-const WORDS: readonly Request[] = ['on', 'off', 'pause', 'resume', 'status', 'explain', 'questions', 'working', 'forget', 'update', 'uninstall', 'debug', 'help']
+const WORDS: readonly Request[] = ['on', 'off', 'pause', 'resume', 'status', 'explain', 'settings', 'questions', 'working', 'forget', 'update', 'uninstall', 'debug', 'help']
 
 export type Parsed = {
   request: Request
@@ -30,6 +30,7 @@ export function parseRequest(args: string): Parsed {
 export function isModeRequest(request: Request): request is ModeRequest {
   return (
     request !== 'explain' &&
+    request !== 'settings' &&
     request !== 'questions' &&
     request !== 'working' &&
     request !== 'forget' &&
@@ -50,6 +51,7 @@ export const HELP = [
   '  /bsd resume      carry on',
   '  /bsd status      whether it is on, its voice and its engineering persona',
   '  /bsd explain     explain a spot in the code: /bsd explain src/app.py:42',
+  '  /bsd settings    change its settings in the pane, as in /config',
   '  /bsd questions   answer the first-run questions again',
   '  /bsd working     say what you are working on: /bsd working on the parser',
   '                   /bsd working clear lets it work that out again',
@@ -60,7 +62,7 @@ export const HELP = [
   '  /bsd help        this list',
   '',
   'In the pane. Ctrl+X Tab or a click gives it the keyboard, and Esc gives it back:',
-  '  1 2 3 4   switch tabs',
+  '  1 2 3 4 5 switch tabs: 5 is Settings, where a pick and Enter changes one',
   '  e d m     explain, dismiss or mute the selected note',
   '  l         look at your changes now',
   '  r         run a deep review now',
@@ -68,8 +70,11 @@ export const HELP = [
   '  w         say what you are working on',
   '  q         answer the questions again',
   '',
-  'Models, thinking levels, pacing, the voice and the engineering persona are in /config: search for "backseat".',
+  'Models, thinking levels, pacing, the voice and the engineering persona are in the Settings tab, and in /config: search for "backseat".',
 ].join('\n')
+
+/** What `/bsd settings` says while the tutor is off, when there is no pane to show them in. */
+export const SETTINGS_OFF = 'Backseat Driver is off. Its settings are in /config (search for "backseat"), or run /bsd and press 5 in the pane.'
 
 /** What `/bsd help` prints, with a first line about a word that is not a command. */
 export function helpText(unknown?: string): string {
