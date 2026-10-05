@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Register, Timer } from 'claude-code'
 
-import type { ExplainView, Hush, LevelChange, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, Spot, Tab, Watch, Working } from '../types'
+import type { ExplainView, Hush, LevelChange, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, SettingRow, Spot, Tab, Watch, Working } from '../types'
 import {
   avatarFor,
   BLINK_MS,
@@ -44,12 +44,13 @@ import {
   dataHome,
   debugRoot,
   debugSwitchPath,
+  editorsPath,
   fileEntryPath,
-  focusPath,
   isOwnFolder,
   isRemovable,
   journalPath,
   leasePath,
+  licensePath,
   lockRepoPath,
   MARKER,
   MARKER_TEXT,
@@ -63,6 +64,8 @@ import { createDebugLog, createTracer, DEBUG_USAGE, FLUSH_MS, parseDebugRequest,
 import type { DebugRequest } from './debuglog'
 import { createExplainer, NO_VIEW } from './explainer'
 import type { Explainer, Intent } from './explainer'
+import { connectedHere, editorsLine, isConnected, parseEditorFile, speaker } from './editors'
+import type { EditorSeen } from './editors'
 import { describeSpot, parseFocusFile, parseTarget, relativeTo, viewFile, viewText } from './focus'
 import type { Focus } from './focus'
 import {
@@ -114,11 +117,11 @@ import {
 import type { Install } from './update'
 import { assessmentRequest, emptyRecord, parseAssessment, parseRecord, progressText, recordText, withAssessment } from './progress'
 import type { AssessedCommit, CommitForAssessment } from './progress'
-import { helpText, isModeRequest, parseRequest, transition } from './mode'
+import { helpText, isModeRequest, parseRequest, SETTINGS_OFF, transition } from './mode'
 import { isNoiseFile } from './noise'
 import { isLookDue, playOf, wakeAt } from './play'
 import type { Play, PlayFacts } from './play'
-import { applyReply, isProblem, parseReply, withDismissed } from './notes'
+import { applyReply, isProblem, keepNotes, parseKeptNotes, parseReply, stillOpen, withDismissed } from './notes'
 import { renderPane, reviewSchedule } from './pane'
 import {
   ANSWER_LABELS,
@@ -139,6 +142,7 @@ import {
 import {
   emptyProject,
   insightLine,
+  insightLines,
   insightsFor,
   overviewLine,
   parseProject,
@@ -199,7 +203,7 @@ import {
   withoutCommit,
 } from './reviewqueue'
 import type { ReviewQueue, Waiting } from './reviewqueue'
-import { DEFAULT_PERSONA, readSettings } from './settings'
+import { configValue, DEFAULT_PERSONA, readSettings, settingRows, withSetting } from './settings'
 import type { Persona, Settings } from './settings'
 import { createLocks } from './locks'
 import { memoryDisk } from './storage'
@@ -207,6 +211,30 @@ import type { Disk } from './storage'
 import { createStore, plainStore, updateJson } from './store'
 import type { Store } from './store'
 import { createWatcher } from './watcher'
+import {
+  checkUrl,
+  COMMERCIAL_CHOICE,
+  KEY_CHOICES,
+  KEY_HEADER,
+  KEY_QUESTION,
+  LICENSE_SERVER,
+  licenseFacts,
+  licenseLine,
+  licenseStanding,
+  licenseStatus,
+  nextLicenseCheck,
+  parseAnswer,
+  parseLicense,
+  parseLicenseRequest,
+  USE_CHOICES,
+  USE_HEADER,
+  USE_QUESTION,
+  useOfAnswer,
+  withKey,
+} from './license'
+import type { LicenseRecord, LicenseRequest, Standing } from './license'
+import { checkKey, cleanKey, looksLikeKey } from './licensekey'
+import type { KeyCheck } from './licensekey'
 import type { Watcher } from './watcher'
 import { chosen, parseWorking, tidy, WORKING_HEADER, WORKING_QUESTION, workingChoices } from './working'
 
@@ -229,8 +257,10 @@ const explainAtom = atom({ plugin: 'backseat-driver', key: 'explain' } as const,
 const NO_PROGRESS: ProgressView = { isOn: true, identity: [], records: [], busy: '', skipped: '' }
 const progressAtom = atom({ plugin: 'backseat-driver', key: 'progress' } as const, NO_PROGRESS)
 const updateAtom = atom({ plugin: 'backseat-driver', key: 'update' } as const, '')
+const licenseAtom = atom({ plugin: 'backseat-driver', key: 'license' } as const, '')
 const speechAtom = atom({ plugin: 'backseat-driver', key: 'speech' } as const, SILENT)
 const workingAtom = atom({ plugin: 'backseat-driver', key: 'working' } as const, NO_WORKING)
+const settingsAtom = atom({ plugin: 'backseat-driver', key: 'settings' } as const, [])
 
 /**
  * The mode is kept twice, because each copy is lost by a different event.
@@ -358,9 +388,12 @@ let editorFocusAt = 0
  * is for as long as someone can see the Explain view (`fastPoll`).
  */
 let isWatchingClosely = false
-/** The editor's focus file as last read: its size and modification time, and its text, null when it is not there. */
-let focusStamp = ''
+/** Each editor's file as last read (`editors.ts`), by name: its size and modification time, and what it said. */
+const editorFiles = new Map<string, { stamp: string; seen: EditorSeen | null }>()
+/** What the editor that speaks for this project says, without what changes on every write; null when no editor does. */
 let focusText: string | null = null
+/** Whether any editor is open, in this project or another. */
+let isAnyEditor = false
 /** Counts refreshes of the Explain view, so that a slower, older one does not overwrite a newer one. */
 let viewRun = 0
 /** The focused file's stamp when the view was last made. A different stamp now means the view may describe code that is gone. */
@@ -392,6 +425,9 @@ let project: ProjectKnowledge | null = null
  */
 let identity: string[] = []
 const watchedPaths = new Set<string>()
+
+/** The fingerprint of each noted file's text as the look that raised its notes saw it, so that kept notes come back only while true. */
+const notePrints = new Map<string, string>()
 const records = new Map<string, ProgressRecord>()
 let progressQueue: Promise<void> = Promise.resolve()
 let progressInstructions = ''
@@ -550,6 +586,7 @@ async function fullState($: EngineInterface): Promise<Record<string, unknown>> {
       working: await read($, workingAtom),
       progress: await read($, progressAtom),
       update: await read($, updateAtom),
+      license: await read($, licenseAtom),
       speech: await read($, speechAtom),
     },
   }
@@ -699,7 +736,14 @@ async function callModel(
   if (health.state === 'waiting' && (await $.clock.now()) >= health.until) health = stepHealth(health, { type: 'due' })
   if (health.state === 'recovering') health = stepHealth(health, { type: 'probing' })
   const started = Date.now()
-  const result = signal === undefined ? await $.model.complete(request) : await $.model.complete(request, { signal })
+  let result: ModelCompleteResult
+  try {
+    result = signal === undefined ? await $.model.complete(request) : await $.model.complete(request, { signal })
+  } catch (error) {
+    // Refused before it was sent, which says nothing about Claude: if it was finding out, the next request does.
+    await probeEnded($, settings)
+    throw error
+  }
   trace($, 'model', job, () => ({ request, result }), Date.now() - started)
   // Cut short by the tutor itself, as a lookup is when its file is saved again: that says nothing about Claude.
   if (signal?.aborted !== true) await noteOutcome($, settings, job, outcomeOf(result))
@@ -748,11 +792,13 @@ async function noteOutcome($: EngineInterface, settings: Settings, job: string, 
   } else {
     // A rate limit is the plan's window when the plan says one is spent: the wait is then until it reopens.
     const spent = outcome.trouble === 'rate-limit' ? await readPressure($) : null
+    // Everything awaited before the step: what another outcome did to the health meanwhile is stepped on, not over.
+    const at = await $.clock.now()
     health = stepHealth(health, {
       type: 'failed',
       trouble: outcome.trouble,
       detail: outcome.detail,
-      at: await $.clock.now(),
+      at,
       random: Math.random(),
       resetsAt: spent !== null && spent.percent >= 99 ? spent.resetsAt : null,
     })
@@ -788,9 +834,14 @@ async function probeEnded($: EngineInterface, settings: Settings): Promise<void>
 /** Something that held work back has changed. Everything that was waiting looks again at whether it can go. */
 async function wake($: EngineInterface, settings: Settings): Promise<void> {
   if (mode === 'off') return
-  await planLook($, settings)
-  await planReview($, settings)
-  await explainer?.wake()
+  try {
+    await planLook($, settings)
+    await planReview($, settings)
+    await explainer?.wake()
+  } catch (error) {
+    // Not the caller's failure: a look whose model answered would otherwise be counted as failed and its notes lost.
+    fail($, 'could not plan what was waiting', error)
+  }
   void refreshView($)
 }
 
@@ -823,7 +874,8 @@ async function showPlay($: EngineInterface, settings: Settings): Promise<Play> {
   const shown = await read($, watchAtom)
   if (shown.state !== next.state || shown.line !== next.line || shown.lastLookAt !== next.lastLookAt || (shown.health ?? '') !== (next.health ?? '')) {
     trace($, 'state', 'watch', () => ({ ...next, play }))
-    await update($, watchAtom, (): Watch => next)
+    // The row about connected editors is kept up by `readFocus`.
+    await update($, watchAtom, (w): Watch => (w.editors === undefined ? next : { ...next, editors: w.editors }))
   }
 
   return play
@@ -1076,6 +1128,38 @@ async function markHome($: EngineInterface): Promise<void> {
 
 async function openPane($: EngineInterface): Promise<void> {
   await $.ui.open({ id: 'backseat-driver', title: 'Backseat' })
+  // Not awaited: the Settings tab can wait for its rows, switching on cannot.
+  void showSettings($)
+}
+
+/** Reads the plugin's own `/config` rows again, for the Settings tab. */
+async function showSettings($: EngineInterface): Promise<void> {
+  try {
+    const rows = settingRows(await $.config.list(), $.plugin.name)
+    await update($, settingsAtom, () => rows)
+  } catch (error) {
+    fail($, 'could not read the settings from /config', error)
+  }
+}
+
+/**
+ * Changes one of the plugin's `/config` rows from the Settings tab, as the
+ * person would in `/config`. Claude Code then loads the mod again with the
+ * new value, so the tab shows it at once and the rest follows the reload.
+ */
+async function changeSetting($: EngineInterface, row: SettingRow, picked: string): Promise<void> {
+  await update($, settingsAtom, rows => withSetting(rows, row.key, picked))
+  try {
+    const { deny } = await $.config.set({ key: row.key, value: configValue(row, picked) })
+    trace($, 'state', 'setting', () => ({ key: row.key, value: picked, deny }))
+    if (deny !== undefined) {
+      await update($, settingsAtom, rows => withSetting(rows, row.key, row.value))
+      $.ui.toast(`${row.label} stays ${row.value}: ${deny}`)
+    }
+  } catch (error) {
+    await update($, settingsAtom, rows => withSetting(rows, row.key, row.value))
+    fail($, `could not change ${row.key}`, error)
+  }
 }
 
 function stopTalking(): void {
@@ -1185,10 +1269,10 @@ async function git(
 
     return result
   } catch (error) {
-    // Git is missing, or took too long.
+    // Git is missing, or took too long. -1 is no exit code of git's: a caller can tell "git did not answer" from "git said no".
     trace($, 'git', verb, () => ({ args, cwd, error: String(error) }), Date.now() - started)
 
-    return { exitCode: 1, stdout: '' }
+    return { exitCode: -1, stdout: '' }
   }
 }
 
@@ -1251,6 +1335,155 @@ async function marketplaceClone($: EngineInterface, name: string): Promise<strin
     return marketplaceLocation(await $.fs.read(`${config}/plugins/known_marketplaces.json`), name)
   } catch {
     return ''
+  }
+}
+
+// --- The license: personal or commercial use, and the commercial key. Nothing here ever stops the tutor.
+
+/** `license.json` as it stands. */
+async function readLicense($: EngineInterface): Promise<LicenseRecord> {
+  await resolveHome($)
+
+  return dataRoot === '' ? parseLicense(null) : parseLicense(await storeOf($).read(licensePath(dataRoot)))
+}
+
+/** Changes `license.json`, and the pane's line with it. */
+async function changeLicense($: EngineInterface, change: (record: LicenseRecord) => LicenseRecord): Promise<LicenseRecord> {
+  await resolveHome($)
+  if (dataRoot === '') return change(parseLicense(null))
+  const record = await updateJson(storeOf($), licensePath(dataRoot), parseLicense, change)
+  trace($, 'state', 'license', () => ({ use: record.use, hasKey: record.key !== '', answer: record.answer }))
+
+  return record
+}
+
+/** Whether a server may be asked about a key: there is one, and Claude Code's own switch for inessential traffic is not on. */
+async function hasLicenseServer($: EngineInterface): Promise<boolean> {
+  return LICENSE_SERVER !== '' && (await $.env.get('CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC')) === undefined
+}
+
+/** Where the person stands, worked out from the record and the key. */
+async function standingOf($: EngineInterface, record: LicenseRecord): Promise<{ standing: Standing; check: KeyCheck | null }> {
+  const check = record.key === '' ? null : await checkKey(record.key)
+  const facts = licenseFacts(record, check, await $.clock.now(), await hasLicenseServer($))
+
+  return { standing: licenseStanding(facts), check }
+}
+
+/** Puts the license's line under the pane's status line, or takes it away. */
+async function showLicense($: EngineInterface, given?: LicenseRecord): Promise<void> {
+  try {
+    const record = given ?? (await readLicense($))
+    const { standing, check } = await standingOf($, record)
+    await update($, licenseAtom, () => licenseLine(standing, check, record))
+  } catch (error) {
+    fail($, 'could not show the license', error)
+  }
+}
+
+/** At a fresh switch-on: the question, once ever, then a look at the key when one is due. */
+async function startLicense($: EngineInterface): Promise<void> {
+  let record = await readLicense($)
+  if (!record.isAsked) record = await askLicense($)
+  await showLicense($, record)
+  void checkLicense($, record)
+}
+
+/**
+ * Personal or commercial, and for commercial the key. Dismissing either
+ * question is an answer too: nothing is chosen, and nothing is asked again
+ * unprompted. `/bsd license` changes it at any time.
+ */
+async function askLicense($: EngineInterface): Promise<LicenseRecord> {
+  let answer: string
+  try {
+    answer = await $.ui.ask(USE_QUESTION, { options: [...USE_CHOICES], header: USE_HEADER })
+  } catch {
+    return await changeLicense($, record => ({ ...record, isAsked: true }))
+  }
+  const use = useOfAnswer(answer)
+  // A key typed straight into the first question is taken as commercial use with that key.
+  if (use === null && looksLikeKey(answer)) return await addKey($, answer)
+  const chosen = await changeLicense($, record => ({ ...record, isAsked: true, use: use ?? record.use }))
+  if (answer !== COMMERCIAL_CHOICE || chosen.key !== '') return chosen
+  try {
+    const key = await $.ui.ask(KEY_QUESTION, { options: [...KEY_CHOICES], header: KEY_HEADER })
+    if (looksLikeKey(key)) return await addKey($, key)
+  } catch {
+    // Later, then.
+  }
+
+  return chosen
+}
+
+/** Keeps a pasted key, says what was made of it, and asks the server about it when there is one. */
+async function addKey($: EngineInterface, pasted: string): Promise<LicenseRecord> {
+  const now = await $.clock.now()
+  const record = await changeLicense($, stored => withKey(stored, cleanKey(pasted), now))
+  await showLicense($, record)
+  void checkLicense($, record)
+
+  return record
+}
+
+/**
+ * Asks the license server whether the key still stands, when that is due:
+ * about once a week, a day after a try that got no answer. No answer is no
+ * news: the key keeps counting as good. Only the key's id is sent.
+ */
+async function checkLicense($: EngineInterface, record: LicenseRecord): Promise<void> {
+  try {
+    if (record.key === '' || !(await hasLicenseServer($))) return
+    const check = await checkKey(record.key)
+    const now = await $.clock.now()
+    const due = nextLicenseCheck(licenseFacts(record, check, now, true))
+    if (due === null || due > now || check.state === 'malformed') return
+    await changeLicense($, stored => (stored.key === record.key ? { ...stored, triedAt: now } : stored))
+    let answer: ReturnType<typeof parseAnswer> = null
+    try {
+      const response = await $.http.fetch(checkUrl(LICENSE_SERVER, check.payload.id), { headers: { accept: 'application/json' } })
+      answer = parseAnswer(response.status, response.text)
+      trace($, 'license', 'checked', () => ({ status: response.status, answer }))
+    } catch (error) {
+      trace($, 'license', 'not reached', () => ({ error: String(error) }))
+    }
+    if (answer === null) return
+    const kept = await changeLicense($, stored => (stored.key === record.key ? { ...stored, answer, answeredAt: now } : stored))
+    await showLicense($, kept)
+  } catch (error) {
+    fail($, 'could not check the license key', error)
+  }
+}
+
+/** `/bsd license`: where they stand, a change of use, a key, or the key taken away. Works while the tutor is off. */
+async function licenseCommand($: EngineInterface, asked: LicenseRequest): Promise<string> {
+  try {
+    await resolveHome($)
+    if (dataRoot === '') return 'There is no home directory, so there is nowhere to keep that.'
+    let record: LicenseRecord
+    switch (asked.kind) {
+      case 'status':
+        record = await readLicense($)
+        break
+      case 'use':
+        record = await changeLicense($, stored => ({ ...stored, isAsked: true, use: asked.use }))
+        break
+      case 'clear-key':
+        record = await changeLicense($, stored => ({ ...stored, key: '', keySince: 0, answer: null, answeredAt: 0, triedAt: 0 }))
+        break
+      case 'key':
+        if (!looksLikeKey(asked.key)) return 'That is not a license key: one starts with BSD1. /bsd license personal, commercial or clear change the rest.'
+        record = await addKey($, asked.key)
+        break
+    }
+    await showLicense($, record)
+    const { standing, check } = await standingOf($, record)
+
+    return licenseStatus(standing, check)
+  } catch (error) {
+    fail($, 'could not change the license', error)
+
+    return 'Could not do that just now. Nothing was changed.'
   }
 }
 
@@ -1658,6 +1891,7 @@ async function hush($: EngineInterface, settings: Settings, subject: string, ent
     note => note.topic !== entry.topic || (subject !== GENERAL && languageOf(note.file) !== subject),
   )
   await update($, notesAtom, () => kept)
+  if (kept.length !== open.length) void saveNotes($)
 
   return open.length - kept.length
 }
@@ -1841,6 +2075,9 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
       const dismissed = await read($, dismissedAtom)
       const dealtWith = (await read($, notesAtom)).filter(note => reply.resolved.includes(note.id))
       await update($, notesAtom, open => applyReply(open, reply, paths, firstId, dismissed).notes)
+      // The notes about these files are about the text this look saw.
+      for (const change of shown) notePrints.set(change.path, sourcePrint(change.after))
+      void saveNotes($)
 
       // Lesson memory: which ideas reached the pane, by language. A repeat
       // of a note that is already open is not a second time it came up.
@@ -1911,8 +2148,9 @@ async function withReviewSlot($: EngineInterface, settings: Settings, work: () =
     await work()
   } finally {
     isReviewBusy = false
+    // Planned even when the work threw: a commit that waits would otherwise wait for the next commit or wake.
+    if (reviewAgentId === null) await planReview($, settings).catch(error => fail($, 'could not plan the next review', error))
   }
-  if (reviewAgentId === null) await planReview($, settings)
 }
 
 /**
@@ -1923,8 +2161,8 @@ async function withReviewSlot($: EngineInterface, settings: Settings, work: () =
 async function startReview($: EngineInterface, settings: Settings, scope: ReviewScope): Promise<boolean> {
   const subject = scopeSubject(scope)
   await setReview($, { state: 'running', subject, text: '', isUnseen: false, decisions: [], insights: [] })
-  // After a wait, this review is the request that finds out whether Claude is back.
-  if (health.state === 'recovering') health = stepHealth(health, { type: 'probing' })
+  // Not the request that finds out whether Claude is back after a wait: a reviewer says so only when it ends,
+  // minutes later, and every look and lookup would wait that long. The first model request finds out.
   let refusal = 'the reviewer did not start'
   await setReview($, { since: await $.clock.now() })
   try {
@@ -1988,6 +2226,7 @@ async function carryPane($: EngineInterface): Promise<void> {
 async function restorePane($: EngineInterface, settings: Settings): Promise<void> {
   const kept = carried
   carried = null
+  void showSettings($)
   if (kept === null) {
     await update($, profilesAtom, () => profiles)
     await showProgress($, settings)
@@ -2137,7 +2376,10 @@ async function refreshShared($: EngineInterface, settings: Settings): Promise<vo
     await update($, profilesAtom, () => profiles)
     const open = await read($, notesAtom)
     const kept = open.filter(note => !isHushed(profiles, languageOf(note.file), note.topic))
-    if (kept.length !== open.length) await update($, notesAtom, () => kept)
+    if (kept.length !== open.length) {
+      await update($, notesAtom, () => kept)
+      void saveNotes($)
+    }
   }
   let isProgressNew = false
   if (settings.isProgressOn) {
@@ -2153,6 +2395,61 @@ async function refreshShared($: EngineInterface, settings: Settings): Promise<vo
   trace($, 'state', 'shared', () => ({ areProfilesNew, isProgressNew }))
   // The reviewer is told about the person when it is registered, so it is registered again.
   await registerReviewer($, settings)
+}
+
+/** Where the project's open and dismissed notes are kept, or '' where there is no project folder. */
+function notesPath(): string {
+  return repoRoot === '' || dataRoot === '' ? '' : `${projectDir(dataRoot, repoRoot)}/notes.json`
+}
+
+/**
+ * Keeps the open and dismissed notes in the project's folder, so that a
+ * session that is closed, or a machine that restarts, finds them again.
+ * Only the driver writes them: it is the one that looks.
+ */
+async function saveNotes($: EngineInterface): Promise<void> {
+  const path = notesPath()
+  if (path === '' || !isDriver || mode === 'off') return
+  try {
+    const [notes, dismissed] = await Promise.all([read($, notesAtom), read($, dismissedAtom)])
+    const kept = keepNotes(notes, dismissed, notePrints)
+    await updateJson(storeOf($), path, parseKeptNotes, () => kept)
+  } catch (error) {
+    fail($, 'could not keep the notes', error)
+  }
+}
+
+/**
+ * Takes up what the project's folder holds from an earlier session: the notes
+ * whose files still read as they did when the notes were raised, the
+ * dismissed notes, and, when the tab has nothing to show, the last deep
+ * review. A note about text that has changed since is left out: the next look
+ * at that file says what is true of it.
+ */
+async function restorePaneFromDisk($: EngineInterface, isFresh: boolean): Promise<void> {
+  const path = notesPath()
+  if (path === '') return
+  const kept = parseKeptNotes(await storeOf($).read(path))
+  const now = new Map<string, string>()
+  for (const file of Object.keys(kept.prints)) {
+    const text = await readSource($, repoRoot, file)
+    if (text !== null) now.set(file, sourcePrint(text))
+  }
+  for (const [file, print] of Object.entries(kept.prints)) {
+    if (!notePrints.has(file) && now.get(file) === print) notePrints.set(file, print)
+  }
+  if (!isFresh) return
+  const open = stillOpen(kept, now)
+  if (open.length > 0 && (await read($, notesAtom)).length === 0) {
+    await update($, notesAtom, () => open)
+    nextNoteId = Math.max(nextNoteId, ...open.map(note => note.id + 1))
+  }
+  if (kept.dismissed.length > 0 && (await read($, dismissedAtom)).length === 0) await update($, dismissedAtom, () => kept.dismissed)
+  const last = reviews.at(-1)
+  if (last !== undefined && (await read($, reviewAtom)).state === 'none') {
+    await setReview($, { state: 'done', subject: last.subject, text: last.text, isUnseen: false, decisions: last.decisions ?? [], insights: last.insights ?? [] })
+  }
+  trace($, 'state', 'pane taken up from disk', () => ({ notes: open.length, of: kept.notes.length, review: last?.subject ?? null }))
 }
 
 /** The file that holds the commits waiting in this project. */
@@ -2189,6 +2486,12 @@ async function changeQueue($: EngineInterface, change: (queue: ReviewQueue) => R
 /** Reviews one commit now. Resolves false when no review started. The caller holds the review slot. */
 async function reviewCommitNow($: EngineInterface, settings: Settings, commit: { hash: string; title: string }): Promise<boolean> {
   const shown = await git($, repoRoot, showCommitArgs(commit.hash))
+  if (shown.exitCode === -1) {
+    // Git did not answer, which says nothing about the commit: one try, and it is tried again.
+    await reviewFailed($, settings, { kind: 'commit', hash: commit.hash, title: commit.title, patch: '' }, 'git did not answer', 'own')
+
+    return false
+  }
   if (shown.exitCode !== 0 || shown.stdout.trim() === '') {
     // It is not in this repository any more: rebased away, or thrown out.
     trace($, 'agent', 'commit gone', () => ({ commit, exitCode: shown.exitCode }))
@@ -2331,27 +2634,35 @@ async function adoptReview($: EngineInterface, settings: Settings): Promise<void
 /** The look at the person's progress for a waiting commit, after the ones already under way. */
 function startAssessment($: EngineInterface, settings: Settings, commit: Waiting): void {
   isAssessing = true
+  const run = engagement
   queueProgress($, async () => {
     let isSettled = false
     try {
+      // Switched off since: the commit stays waiting in the project's folder, for the next time the tutor is on here.
+      if (run !== engagement) return
       // With its review for context, when it has one.
       const review = reviews.find(known => known.commit === shortHash(commit.hash))?.text ?? ''
       isSettled = await assessCommit($, settings, commit.hash, review)
     } finally {
-      assessRetryAt = null
-      if (isSettled) {
-        await changeQueue($, queue => withoutCommit(queue, commit.hash))
-      } else if (mayAsk(health) && !jobBlocks.has('progress')) {
-        // Claude is answering, and nothing came of it all the same: that is one try.
-        await changeQueue($, queue => withAttempt(queue, commit.hash))
-        if (isSpent(waiting, commit.hash)) await changeQueue($, queue => withoutCommit(queue, commit.hash))
-        else assessRetryAt = (await $.clock.now()) + retryMs(waiting.commits.find(known => known.hash === commit.hash)?.attempts ?? 1)
-      }
-      // Otherwise it was Claude's doing, which is no try: it waits until Claude answers again.
-      isAssessing = false
-      await planReview($, settings)
+      if (run === engagement) await settleAssessment($, settings, commit, isSettled)
     }
   })
+}
+
+/** What came of the look at a waiting commit's progress: done with, one try, or a wait that is Claude's doing. */
+async function settleAssessment($: EngineInterface, settings: Settings, commit: Waiting, isSettled: boolean): Promise<void> {
+  assessRetryAt = null
+  if (isSettled) {
+    await changeQueue($, queue => withoutCommit(queue, commit.hash))
+  } else if (mayAsk(health) && !jobBlocks.has('progress')) {
+    // Claude is answering, and nothing came of it all the same: that is one try.
+    await changeQueue($, queue => withAttempt(queue, commit.hash))
+    if (isSpent(waiting, commit.hash)) await changeQueue($, queue => withoutCommit(queue, commit.hash))
+    else assessRetryAt = (await $.clock.now()) + retryMs(waiting.commits.find(known => known.hash === commit.hash)?.attempts ?? 1)
+  }
+  // Otherwise it was Claude's doing, which is no try: it waits until Claude answers again.
+  isAssessing = false
+  await planReview($, settings)
 }
 
 /**
@@ -2423,6 +2734,13 @@ async function printForInsight($: EngineInterface, insight: Insight): Promise<{ 
   }
 }
 
+/** Whether a file reads now as that commit left it. */
+async function isAsCommitted($: EngineInterface, hash: string, file: string): Promise<boolean> {
+  const [committed, now] = await Promise.all([git($, repoRoot, ['show', `${hash}:${file}`]), readSource($, repoRoot, file)])
+
+  return committed.exitCode === 0 && now !== null && sourcePrint(committed.stdout) === sourcePrint(now)
+}
+
 /** The deep review's insights on these files whose code is still exactly what it was when they were written. */
 async function currentInsights($: EngineInterface, files: readonly string[]): Promise<Set<KeptInsight>> {
   const current = new Set<KeptInsight>()
@@ -2461,7 +2779,12 @@ async function keepReview($: EngineInterface, scope: ReviewScope, answer: string
     // A survey looked at the project as of HEAD. Work since a review may include uncommitted changes, so it names no commit.
     const commit = scope.kind === 'commit' ? shortHash(scope.hash) : scope.kind === 'survey' && lastHead !== '' ? shortHash(lastHead) : ''
     const prints = new Map<Insight, { print: string; of: 'symbol' | 'file' } | null>()
-    for (const insight of notes?.insights ?? []) prints.set(insight, await printForInsight($, insight))
+    // A commit's review is about the code as committed. A file changed since then would tie the insight to code it was not written about.
+    const asCommitted = new Map<string, boolean>()
+    for (const insight of notes?.insights ?? []) {
+      if (scope.kind === 'commit' && !asCommitted.has(insight.file)) asCommitted.set(insight.file, await isAsCommitted($, scope.hash, insight.file))
+      prints.set(insight, asCommitted.get(insight.file) === false ? null : await printForInsight($, insight))
+    }
 
     const folder = projectDir(dataRoot, repoRoot)
     const root = repoRoot
@@ -2478,7 +2801,7 @@ async function keepReview($: EngineInterface, scope: ReviewScope, answer: string
     )
     if (scope.kind !== 'survey') {
       reviews = await updateJson(storeOf($), `${folder}/reviews.json`, parseReviews, kept =>
-        withReview(kept, { commit, subject: scopeSubject(scope), at, text }),
+        withReview(kept, { commit, subject: scopeSubject(scope), at, text, decisions: notes?.decisions ?? [], insights: insightLines(notes) }),
       )
     }
   } catch (error) {
@@ -2676,11 +2999,13 @@ function stopWatching(): void {
   explainer?.stop()
   explainer = null
   watchedPaths.clear()
+  notePrints.clear()
   project = null
   reviews = []
   focus = null
-  focusStamp = ''
+  editorFiles.clear()
   focusText = null
+  isAnyEditor = false
   writtenView = ''
   viewedStamp = ''
   watcher = null
@@ -2780,8 +3105,8 @@ async function refreshView($: EngineInterface, isAsked = false): Promise<void> {
     await update($, explainAtom, () => view)
     const text = JSON.stringify(view)
     // One file serves every session and every project. It is written by the session that drives this project,
-    // and only while the editor's caret is in this project, or no editor has said where its caret is.
-    const isOurs = isDriver && (focusText === null || parseFocusFile(focusText, repoRoot) !== null)
+    // and only while an editor's caret is in this project, or no editor is open at all.
+    const isOurs = isDriver && (focusText !== null || !isAnyEditor)
     if (text !== writtenView && dataRoot !== '' && isOurs) {
       writtenView = text
       await $.fs.write(`${dataRoot}/view.json`, viewFile(view, repoRoot, spot.source, await $.clock.now()))
@@ -2797,27 +3122,61 @@ async function setFocus($: EngineInterface, next: Focus, isAsked: boolean): Prom
 }
 
 /**
- * Reads the file an editor writes its cursor to, again when it has changed.
- * Resolves true when it had. One read serves the journal and Explain both.
+ * Reads the editors' files (`editors.ts`): one listing of their folder, and a
+ * read of each file that changed since. Shows which editors are connected to
+ * this project, and resolves true when what the editor that speaks for it
+ * says has changed. One read serves the journal and Explain both. A source
+ * that pushes editor events would call this.
  */
 async function readFocus($: EngineInterface): Promise<boolean> {
   if (dataRoot === '') return false
-  const path = focusPath(dataRoot)
-  const stamp = await fileStamp($, path)
-  if (stamp === focusStamp) return false
-  let text: string | null = null
-  if (stamp !== '') {
-    try {
-      text = await $.fs.read(path)
-    } catch {
-      // Gone between the stat and the read. The next poll looks again.
-      return false
-    }
+  const folder = editorsPath(dataRoot)
+  quiet.stats += 1
+  let listed: { name: string; kind: string; size: number; mtimeMs: number }[] = []
+  try {
+    listed = await $.fs.list(folder)
+  } catch {
+    // No editor has written yet.
   }
-  focusStamp = stamp
+  const names = new Set<string>()
+  for (const entry of listed) {
+    if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
+    names.add(entry.name)
+    const stamp = `${entry.size}:${entry.mtimeMs}`
+    if (editorFiles.get(entry.name)?.stamp === stamp) continue
+    let seen: EditorSeen | null = null
+    try {
+      seen = parseEditorFile(await $.fs.read(`${folder}/${entry.name}`))
+    } catch {
+      // Gone between the listing and the read.
+    }
+    // A file caught half-written does not parse: what it said before stands, and it is read again next time.
+    if (seen === null && entry.size > 0) continue
+    editorFiles.set(entry.name, { stamp, seen })
+  }
+  for (const name of [...editorFiles.keys()]) if (!names.has(name)) editorFiles.delete(name)
+
+  const now = await $.clock.now()
+  const editors = [...editorFiles.values()].flatMap(file => (file.seen === null ? [] : [file.seen]))
+  isAnyEditor = editors.some(seen => isConnected(seen, now))
+  await showEditors($, editorsLine(connectedHere(editors, repoRoot, now)))
+  const text = speaker(editors, repoRoot, now)?.text ?? null
+  if (text === focusText) return false
   focusText = text
 
   return true
+}
+
+/** Tells the pane which editors are connected to this project, when that changed. */
+async function showEditors($: EngineInterface, line: string): Promise<void> {
+  const shown = await read($, watchAtom)
+  if ((shown.editors ?? '') === line) return
+  trace($, 'state', 'editors', () => ({ line }))
+  await update($, watchAtom, (w): Watch => {
+    const { editors: _editors, ...rest } = w
+
+    return line === '' ? rest : { ...rest, editors: line }
+  })
 }
 
 /** Explain follows the spot the editor's focus file names, when it names one in this repository. */
@@ -3158,7 +3517,10 @@ async function assess(
  */
 async function assessCommit($: EngineInterface, settings: Settings, hash: string, review: string): Promise<boolean> {
   if (!settings.isProgressOn || repoRoot === '' || dataRoot === '' || mode === 'off') return true
-  const info = parseCommitInfo((await git($, repoRoot, commitInfoArgs(hash))).stdout)
+  const asked = await git($, repoRoot, commitInfoArgs(hash))
+  // Git did not answer: worth another try. A commit git says it does not have is let go.
+  if (asked.exitCode === -1) return false
+  const info = parseCommitInfo(asked.stdout)
   if (info === null) return true
   const files = addedLines((await git($, repoRoot, commitPatchArgs(hash))).stdout)
   const verdict = judge(info, identity, files)
@@ -3250,6 +3612,8 @@ async function engage($: EngineInterface, settings: Settings, run: number, isFre
     await moveOutOfStore($)
     const main = await setUpProfiles($)
     await loadProject($)
+    // What the pane showed when the tutor was last on here: notes still true, and the last review.
+    if (isDriver) await restorePaneFromDisk($, isFresh)
     await setUpProgress($, settings)
     await registerReviewer($, settings)
     // Not waited for. Claude Code connects each tool before it answers, which took eight seconds a tool
@@ -3271,6 +3635,8 @@ async function engage($: EngineInterface, settings: Settings, run: number, isFre
     if (isFresh) void checkForUpdate($, settings)
     // Last, so that everything already works if the questions are dismissed.
     if (isFresh && run === engagement) await ask($, settings, unasked(main))
+    // After the questions about their code: how they use the tutor, asked once ever, never in the way.
+    if (isFresh && run === engagement) await startLicense($)
   } catch (error) {
     fail($, 'could not finish starting', error)
   }
@@ -3410,6 +3776,7 @@ async function forget($: EngineInterface, settings: Settings, named: Scope | nul
       waiting = EMPTY_QUEUE
       reviewRetryAt = null
       explainer?.reset()
+      notePrints.clear()
       writtenView = ''
       await update($, explainAtom, () => NO_VIEW)
       await update($, notesAtom, () => [])
@@ -3457,7 +3824,7 @@ export const register: Register = (on, options) => {
         await $.command.register({
           name,
           description: 'Turn the Backseat Driver tutor on. /bsd help lists the rest',
-          argumentHint: '[off | pause | resume | status | explain | questions | working | forget | update | uninstall | debug | help]',
+          argumentHint: '[off | pause | resume | status | explain | settings | questions | working | forget | license | update | uninstall | debug | help]',
           immediate: true,
         })
       } catch (error) {
@@ -3479,6 +3846,7 @@ export const register: Register = (on, options) => {
       await restorePane($, settings)
       workingShown = ''
       await showWorking($, await $.clock.now())
+      await showLicense($)
       // The session may go by another id now. The lease is renewed under it.
       await keepLease($, settings, engagement)
     }
@@ -3502,12 +3870,21 @@ export const register: Register = (on, options) => {
 
       return { text: asked === null ? DEBUG_USAGE : await debugCommand($, settings, asked) }
     }
+    if (request === 'license') return { text: await licenseCommand($, parseLicenseRequest(rest)) }
     if (request === 'questions') {
       if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
       // Not awaited: the dialog stays open for as long as the person takes.
       void ask($, settings, firstRunQuestions(profiles.languages, false))
 
       return { text: 'Here are the questions again. Esc stops at any point, and the answers so far are kept.' }
+    }
+    if (request === 'settings') {
+      if (mode === 'off') return { text: SETTINGS_OFF }
+      await update($, tabAtom, () => 'settings')
+      // Asking again brings back a pane the user closed by hand, and reads the rows again.
+      await openPane($)
+
+      return { text: 'The settings are in the pane. Ctrl+X Tab gives it the keyboard, then pick a row and press Enter.' }
     }
     if (request === 'explain') {
       if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
@@ -3650,7 +4027,7 @@ export const register: Register = (on, options) => {
         const isUnseen = (await read($, tabAtom)) !== 'review'
         // What the pane puts first: the decision points and insights the review's notes named.
         const decisions = kept.notes?.decisions ?? []
-        const insights = (kept.notes?.insights ?? []).map(insight => `${insight.file}${insight.symbol === '' ? '' : `, ${insight.symbol}`}: ${insight.text}`)
+        const insights = insightLines(kept.notes)
         await setReview($, { state: 'done', text: fitReview(shown), isUnseen, decisions, insights })
         // A survey reviewed none of their work, so it is not part of the record of it.
         if (scope.kind !== 'survey') recorder?.add({ at: await $.clock.now(), kind: 'review', text: scopeSubject(scope) })
@@ -3856,7 +4233,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: 'backseat-driver' }, async ($, e) => {
     quiet.renders += 1
     // One round for everything the pane shows, not a dozen in a row for every frame.
-    const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, backdrop] = await Promise.all([
+    const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, shownSettings, licensing, backdrop] = await Promise.all([
       read($, modeAtom),
       read($, tabAtom),
       read($, notesAtom),
@@ -3869,6 +4246,8 @@ export const register: Register = (on, options) => {
       read($, progressAtom),
       read($, updateAtom),
       read($, speechAtom),
+      read($, settingsAtom),
+      read($, licenseAtom),
       // The character's pixels are dimmed toward the terminal's background, which only the theme tells.
       settings.isAnimated ? themeBackdrop($) : ('dark' as const),
     ])
@@ -3887,11 +4266,13 @@ export const register: Register = (on, options) => {
       working,
       progress,
       update: release,
+      license: licensing,
       isFocused: e.props.isFocused,
       columns: e.props.bodyColumns,
       character: settings.isAnimated ? { avatar: avatarFor(settings.persona.voice), speech, backdrop } : null,
       // Above the prompt rows are scarce, and other surfaces may not draw text art in a fixed-width font.
       isCompact: e.props.placement === 'inline' || e.surface !== 'terminal',
+      settings: shownSettings,
     }
 
     return renderPane($.ui.resolve(e), view, {
@@ -3900,6 +4281,8 @@ export const register: Register = (on, options) => {
         void update($, tabAtom, () => tab)
         if (tab === 'review') void setReview($, { isUnseen: false })
         if (tab === 'explain') watchClosely($)
+        // Read again each time: a change made in /config meanwhile shows.
+        if (tab === 'settings') void showSettings($)
       },
       onSelect: (id: number) => {
         touched($, settings, 'select', () => id)
@@ -3944,14 +4327,20 @@ export const register: Register = (on, options) => {
       },
       onDismiss: (note: Note) => {
         touched($, settings, 'dismiss', () => note)
-        void update($, notesAtom, open => open.filter(other => other.id !== note.id))
         // Remembered, so that the next look does not bring the same point back.
-        void update($, dismissedAtom, dismissed => withDismissed(dismissed, note))
+        void Promise.all([
+          update($, notesAtom, open => open.filter(other => other.id !== note.id)),
+          update($, dismissedAtom, dismissed => withDismissed(dismissed, note)),
+        ]).then(() => saveNotes($))
         void $.clock.now().then(at => recorder?.add({ at, kind: 'dismissed', path: note.file, line: note.line, text: note.topic }))
       },
       onWorking: () => {
         touched($, settings, 'working')
         void askWorking($)
+      },
+      onSetting: (row: SettingRow, value: string) => {
+        touched($, settings, 'setting', () => ({ key: row.key, value }))
+        void changeSetting($, row, value)
       },
       onLook: () => {
         touched($, settings, 'look now')

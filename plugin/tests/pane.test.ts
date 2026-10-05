@@ -28,6 +28,7 @@ const VIEW: PaneView = {
   columns: 76,
   character: null,
   isCompact: false,
+  settings: [],
 }
 
 const note = (id: number, overrides: Partial<Note> = {}): Note => ({
@@ -140,16 +141,16 @@ test('a tab says what is going on behind it', async () => {
 
 test('the tab row keeps what the tabs say for as long as there is room, and never wraps', async () => {
   const busy = { ...VIEW, notes: [note(1), note(2)], review: { ...DONE, isUnseen: true }, explain: { ...NO_VIEW, status: 'updating' as const } }
-  expect(tabRow({ ...busy, columns: 90 })).toEqual({ labels: ['Play-by-play (2)', 'Deep review (new)', 'Explain (…)', 'Progress'], gap: 3 })
+  expect(tabRow({ ...busy, columns: 90 })).toEqual({ labels: ['Play-by-play (2)', 'Deep review (new)', 'Explain (…)', 'Progress', 'Settings'], gap: 3 })
   // Too narrow for the full names: the short ones, still saying it.
-  expect(tabRow({ ...busy, columns: 58 })).toEqual({ labels: ['Play (2)', 'Review (new)', 'Explain (…)', 'Progress'], gap: 2 })
-  expect(tabRow({ ...busy, columns: 54 })).toEqual({ labels: ['Play (2)', 'Review (new)', 'Explain (…)', 'Progress'], gap: 1 })
+  expect(tabRow({ ...busy, columns: 70 })).toEqual({ labels: ['Play (2)', 'Review (new)', 'Explain (…)', 'Progress', 'Settings'], gap: 2 })
+  expect(tabRow({ ...busy, columns: 66 })).toEqual({ labels: ['Play (2)', 'Review (new)', 'Explain (…)', 'Progress', 'Settings'], gap: 1 })
   // Narrower still: the review's word is the one that asks for a look, so it is the one kept.
-  expect(tabRow({ ...busy, columns: 48 })).toEqual({ labels: ['Play', 'Review (new)', 'Explain', 'Progress'], gap: 2 })
+  expect(tabRow({ ...busy, columns: 60 })).toEqual({ labels: ['Play', 'Review (new)', 'Explain', 'Progress', 'Settings'], gap: 2 })
   // Every row fits its pane.
-  for (const columns of [90, 58, 54]) {
+  for (const columns of [90, 70, 66]) {
     const row = tabRow({ ...busy, columns })
-    expect(row.labels.reduce((sum, label) => sum + label.length + 3, 0) + row.gap * 3 <= columns).toBe(true)
+    expect(row.labels.reduce((sum, label) => sum + label.length + 3, 0) + row.gap * 4 <= columns).toBe(true)
   }
 })
 

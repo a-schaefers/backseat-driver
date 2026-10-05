@@ -57,7 +57,15 @@ export type ProjectKnowledge = {
 }
 
 /** One deep review, as remembered: enough for the next one to follow up on. */
-export type ReviewRecord = { commit: string; subject: string; at: number; text: string }
+export type ReviewRecord = {
+  commit: string
+  subject: string
+  at: number
+  text: string
+  /** What the Deep review tab showed beside the text. Absent in records written before they were kept. */
+  decisions?: DecisionPoint[]
+  insights?: string[]
+}
 
 export const MAX_ROLES = 300
 export const MAX_INSIGHTS = 200
@@ -132,20 +140,24 @@ function parseNotes(block: string): ReviewNotes | null {
     }
   }
 
+  return {
+    overview: text(stored.overview, MAX_OVERVIEW),
+    files: files.slice(0, 40),
+    insights: insights.slice(0, 20),
+    decisions: parseDecisions(stored.decisions),
+  }
+}
+
+function parseDecisions(value: unknown): DecisionPoint[] {
   const decisions: DecisionPoint[] = []
-  for (const item of Array.isArray(stored.decisions) ? stored.decisions : []) {
+  for (const item of Array.isArray(value) ? value : []) {
     const decision = asRecord(item)
     const path = cleanPath(decision?.file)
     if (decision === null || path === '' || text(decision.choice) === '') continue
     decisions.push({ file: path, line: Math.max(0, whole(decision.line)), choice: text(decision.choice, 200), tradeoff: text(decision.tradeoff, 400) })
   }
 
-  return {
-    overview: text(stored.overview, MAX_OVERVIEW),
-    files: files.slice(0, 40),
-    insights: insights.slice(0, 20),
-    decisions: decisions.slice(0, MAX_DECISIONS),
-  }
+  return decisions.slice(0, MAX_DECISIONS)
 }
 
 /** A review names at most this many decision points: more than that and none of them stands out. */
@@ -292,7 +304,16 @@ export function parseReviews(value: unknown): ReviewRecord[] {
   for (const item of Array.isArray(value) ? value : []) {
     const review = asRecord(item)
     if (review !== null && text(review.text, 12_000) !== '') {
-      reviews.push({ commit: text(review.commit, 12), subject: text(review.subject, 200), at: whole(review.at), text: text(review.text, 12_000) })
+      const decisions = parseDecisions(review.decisions)
+      const insights = (Array.isArray(review.insights) ? review.insights : []).map(insight => text(insight)).filter(insight => insight !== '').slice(0, 20)
+      reviews.push({
+        commit: text(review.commit, 12),
+        subject: text(review.subject, 200),
+        at: whole(review.at),
+        text: text(review.text, 12_000),
+        ...(decisions.length > 0 ? { decisions } : {}),
+        ...(insights.length > 0 ? { insights } : {}),
+      })
     }
   }
 
@@ -313,4 +334,9 @@ export function reviewDigest(reviews: readonly ReviewRecord[], limit = 3): strin
     .slice(0, limit)
     .map(review => `### ${review.subject}\n${review.text.length <= DIGEST_CHARS ? review.text : `${review.text.slice(0, DIGEST_CHARS)}…`}`)
     .join('\n\n')
+}
+
+/** A review's insights as the Deep review tab lists them. */
+export function insightLines(notes: ReviewNotes | null): string[] {
+  return (notes?.insights ?? []).map(insight => `${insight.file}${insight.symbol === '' ? '' : `, ${insight.symbol}`}: ${insight.text}`)
 }

@@ -36,13 +36,18 @@ Stance: the project is against Claude writing the user's code, not neutral. Whil
 - One command, then hands off: `/backseat-driver` or `/bsd`. Every setting has a default, every question is skippable, setup never blocks work. A language first met mid-session gets defaults; its questions are offered in the pane, never interrupting.
 - One profile per language, never per project (`python`, not "python project 1"). It matters only once the user works in that language. The tutor may read other profiles (e.g. explain Rust via Python).
 - The user has the last word. Pushback is weighed. A contested point goes to the deep review model for a second opinion, and the user is told. "Do it my way" always stands. The play-by-play may keep flagging until the user hushes it; a hush saves to that language's profile at once.
-- The pane's default view is the play-by-play. Tabs: 1 Play-by-play, 2 Deep review, 3 Explain, 4 Progress.
+- The pane's default view is the play-by-play. Tabs: 1 Play-by-play, 2 Deep review, 3 Explain, 4 Progress, 5 Settings.
+- Settings are one press away (owner, 2026-10-05: surprised `/config` had no shortcut when the tab buttons work so well). A mod cannot add a row or a button to `/config`, so the pane's Settings tab edits the same rows, and `/bsd settings` opens it.
 - First-run questions are few and single choice: the language they know best (once ever), then three per new language (level, goals, focus). Never more than ten at once. Esc skips the rest. Re-ask with `/bsd questions` or `q` in Progress.
 - Three background jobs, each with its own model and thinking level: play-by-play (while hacking), deep review (commits), Explain (reading). The conversation uses the session's model. Explain's cache is per project (profiles are per language); all three jobs feed it and read it.
 - Learning and Explanatory modes, read-only (owner, 2026-10-04): take the good parts of Anthropic's `learning-output-style` plugin and leave all the driving to the user. Its decision-point criteria and its `★ Insight` format are adapted into the play-by-play, the deep review and the contract. A decision point is pointed out as the user's call, with what each way costs, never handed over to be written. Insights are about this codebase and this code, never general concepts, and never a defect in disguise.
-- License: MIT (owner's preference). The adapted parts stay under Apache-2.0: `THIRD_PARTY_NOTICES.md` (root and `plugin/`, identical; `npm run licenses` compares them) holds the attribution, what changed and the license text. Each adapted prompt credits it in an HTML comment at its top, which `stripComments` removes before a model sees the file. Credit the same way when adapting anything else.
+- License (owner, 2026-10-05): source-available, free for personal use, paid for commercial use. The terms are the PolyForm Noncommercial License 1.0.0 (`LICENSE`, root and `plugin/`, with a `Required Notice:` copyright line on top), plus `COMMERCIAL-LICENSE.md` (root and `plugin/`): who needs it, what it grants, no lockouts, "not on sale yet". Never call it open source. Each commit is under its own `LICENSE`: commits that carry MIT (everything before this change) stay MIT for whoever has them. SPDX `PolyForm-Noncommercial-1.0.0` in `plugin.json`, `package.json`, `editors/vscode/package.json` and the Emacs header. Until 2026-10-05 the license was MIT.
+- Licensing is light (owner: "this is not Microsoft, don't be paranoid, a way for ethical companies to pay us"). Asked once at the first switch-on, personal or commercial; commercial asks for a key. Nothing ever stops working: a missing, bad, expired or withdrawn key only puts one dim line in the pane. Payment and deploying the server are for a later discussion with the owner.
+- The adapted parts (an audit on 2026-10-05 found the decision-point lists and the `★ Insight` box are close paraphrases or copies of `learning-output-style`; everything else, and all 50 commits, are the owner's own) stay under Apache-2.0: `THIRD_PARTY_NOTICES.md` (root and `plugin/`, identical; `npm run licenses` compares them) holds the attribution, what changed and the license text. Each adapted prompt credits it in an HTML comment at its top, which `stripComments` removes before a model sees the file. Credit the same way when adapting anything else.
 - Explain is never stale: freshness beats speed. Nothing is shown unless it matches the file on disk at that moment.
-- No editor plugins yet (vim and emacs come later). Build only the side they talk to (`focus.json`/`view.json`, below).
+- Editor plugins (owner, 2026-10-05): Emacs, Neovim in Lua, and VS Code, in this repository under `editors/`. Simple and plug and play: they send what is useful (open files, the focused one, the caret's line and column, the selection, unsaved changes, whether the editor has the keyboard), and the pane says when an editor is connected. More editors can come; the protocol is the contract (see "Editor protocol").
+  - Transport (decided by the editor-plugins thread, 2026-10-05): files, one per running editor, in the data folder. The mod cannot listen on a socket (no Node, and no network of its own is a footprint invariant), and the data folder is already where every session looks. An editor that finds no data folder writes nothing.
+  - Two tutors at once: every driver reads every editor's file and keeps what is about its own repository. One editor serves every project it has files in; two editors in one project, the last caret to move speaks for it; a caret in a repository nested in another goes to the inner one's tutor. Within one project only the lease holder reads (see "Several sessions").
 - Progress is honest: one report per language across projects. A level (beginner, junior, mid, senior), why, what the next level needs, recent notes, and encouragement kept apart from the level. Only the user's own work counts. A level can come back down. It stays in step with deep reviews. The owner says it is worth the token burn.
 - State is never cleared by accident: clearing is deliberate and confirmed (one project, one language, or everything). Uninstalling can clear everything.
 - Users stay up to date: a newer release is announced in the pane, one command fetches it, and the tutor comes back on by itself.
@@ -69,8 +74,10 @@ Every roadmap milestone is built and was seen working in short scripted real ses
   - the journal's sitting roll-up, two sessions sharing a journal, and the deep reviewer reading the journal
   - the deep review's watchdog, a review given up on after three tries, and the retries of the look at progress
 - Never run: the `primeagen` engineering persona.
+- The Settings tab and `/bsd settings`: tests only (the kit stubs `config.list` and `config.set`). Not yet seen live: how a pick looks in a real terminal, and the reload that follows it.
+- The license question, `/bsd license` and the key check: tests only. No server is deployed and `PUBLIC_KEYS` is empty, so a well-formed key is taken on trust.
 - Persona pairs run live: `eli5-tldr-kiss-terse`+`knuth`, `primeagen`+`torvalds`. Every voice's character has been seen live.
-- The editor side has been tried only with a script writing `focus.json`.
+- Editor plugins: each was run for real (Neovim 0.9.5 and Emacs 29.3 headless, the VS Code extension under Node against a stand-in `vscode` module and packaged with vsce) and wrote, beat and removed its file as the protocol says. Not yet seen: one of them driving a live tutor session (the cloud session that built them could not log in interactively), real VS Code, Windows.
 - Decision points and insights (from `learning-output-style`): seen live in the play-by-play, the deep review and the conversation on Sonnet at low thinking. A play-by-play `insight` has not been seen live.
 - Marketplace install, `/bsd update` and `/bsd uninstall` were run against a local git server at one project's scope, not GitHub. No release has been published, so installed copies stay at 0.1.0.
 - The event-driven plan's last check (2026-10-04): one real session with the debug log on, through a save, ten seconds on the Explain tab, a commit with its review and progress look, and a hundred idle seconds. No errors. What runs in the background, read from the log: a scan of the working tree every second for a minute after something happened and every two seconds after that (five after ten idle minutes, by test); two stats ten times a second only while the Explain tab was open; a lease renewal every 20 s (two git calls, two small reads, one write); a journal write when something is new; and, with the animated persona on, its blink. Nothing else polled, retried or redrew.
@@ -78,15 +85,15 @@ Every roadmap milestone is built and was seen working in short scripted real ses
   - which ref new installs get (see Updates)
   - whether to submit to Anthropic's directory
   - whether the mod may name watch paths at session start, while still off (open since M0, 2026-10-04). It would give pushed commits (`.git/logs/HEAD`), a pushed editor caret and pushed changes from other sessions, about 0.6 s after the write, with no file read. It bends "dormant until switched on": Claude Code would watch a handful of paths in every session that has the plugin. Saves in the working tree stay on the sensor either way, because a watched folder reports its direct children only.
-  - (settled by doing: the machines were written in TypeScript first, as approved, and are being ported. New decision logic is born in PureScript from here on, see "Kernel".)
+  - (settled by doing: the machines were written in TypeScript first, as approved, and then ported. New decision logic is born in PureScript from here on, see "Kernel".)
 - Directory facts (checked 2026-10-04):
   - It lists mods, for Claude Code only.
   - Submit at claude.ai/directory/manage. It tracks a branch or tag, and the plugin path can be `plugin`.
-  - Blocking: no README of 40+ words inside `plugin/`. (A LICENSE was the other blocker; `plugin/LICENSE` and `"license": "MIT"` now settle it.)
+  - Blocking: no README of 40+ words inside `plugin/`. (A LICENSE was the other blocker; `plugin/LICENSE` settles it. Whether the directory takes a noncommercial license is not known.)
   - Limits: files under 256 KiB, at most 512 files.
   - Directory installs load as `<name>@synced`.
 - Approved plan for part two: `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine (nine decisions, risks per milestone).
-- In progress: the event-driven plan, `~/.claude/plans/wild-jumping-clover.md` on the owner's machine (approved 2026-10-04). Milestones M0 probes, M1 debug log, M2 locked store, M3 kernel (events, deadlines, health, play-by-play machine, sensor), M4 deep review queue, M5 Explain and journal on deadlines, M6 one driver per project, M7 pane pass, M8 optional push sources, M9 PureScript kernel. Done so far: M0 (see "Probed live" under Mod API), M1 (see "Debug log"; it also added the `session.end` flush of the journal) and M2 (the store and the locks, under "Data folder"). M3 (the kernel: deadlines, the scan, health, the play-by-play's state and status line; under "Play-by-play and watcher") and M4 (the queue of commits waiting for their review, its retries and watchdog; under "Deep review") are done too, and so is M5 (Explain and the journal on deadlines, the caret's fast lane, attention from timestamps; under "Explain" and "Journal"). Nothing in the mod runs on a repeating timer now except the animated persona's mouth and blink. M6 (one session drives a project, and what is on record about the person is read again when another session changes it; under "Several sessions") and M7 (the pane pass, under "Pane") are done as well. M8 is a set of optional push sources that each need the owner's decision (see the open decisions above), so nothing of it is built. M9, the PureScript kernel, is under way (see "Kernel"): the toolchain, the membrane, the check that the committed bundle is what the source builds, and five modules: health, the play-by-play's decision, the pacing arithmetic, the scan cadence and the lease. The other decision modules are ported one at a time, each after a parity run against the TypeScript it replaces: `PORTED` and `TO PORT` in "Kernel" say where that stands.
+- In progress: the event-driven plan, `~/.claude/plans/wild-jumping-clover.md` on the owner's machine (approved 2026-10-04). Milestones M0 probes, M1 debug log, M2 locked store, M3 kernel (events, deadlines, health, play-by-play machine, sensor), M4 deep review queue, M5 Explain and journal on deadlines, M6 one driver per project, M7 pane pass, M8 optional push sources, M9 PureScript kernel. Done so far: M0 (see "Probed live" under Mod API), M1 (see "Debug log"; it also added the `session.end` flush of the journal) and M2 (the store and the locks, under "Data folder"). M3 (the kernel: deadlines, the scan, health, the play-by-play's state and status line; under "Play-by-play and watcher") and M4 (the queue of commits waiting for their review, its retries and watchdog; under "Deep review") are done too, and so is M5 (Explain and the journal on deadlines, the caret's fast lane, attention from timestamps; under "Explain" and "Journal"). Nothing in the mod runs on a repeating timer now except the animated persona's mouth and blink. M6 (one session drives a project, and what is on record about the person is read again when another session changes it; under "Several sessions") and M7 (the pane pass, under "Pane") are done as well. M8 is a set of optional push sources that each need the owner's decision (see the open decisions above), so nothing of it is built. M9, the PureScript kernel, is ported (see "Kernel"): the toolchain, the membrane, the check that the committed bundle is what the source builds, and nine modules: health, the play-by-play's decision, the pacing arithmetic, the scan cadence, the lease, the review queue, the store's retry policy, the status line and the deadlines. Each was ported after a parity run against the TypeScript it replaced. The last four (2026-10-05) have been run in tests only, not yet in a live session.
 
 ## Repository
 
@@ -98,7 +105,8 @@ plugin/.claude-plugin/plugin.json   manifest + userConfig (source of truth for s
 plugin/skills/tutor/SKILL.md        the contract
 plugin/personas/{voice,engineering}/*.md
 plugin/prompts/                     play-by-play.md, deep-review.md, explain.md, progress.md, speech-bubble.md
-LICENSE, plugin/LICENSE             MIT, identical
+LICENSE, plugin/LICENSE             PolyForm Noncommercial 1.0.0, identical
+COMMERCIAL-LICENSE.md (also plugin/) the commercial terms, identical
 THIRD_PARTY_NOTICES.md (also plugin/) the Apache-2.0 parts: learning-output-style, adapted
 plugin/hooks/hooks.json             {"modules": ["./register.tsx"]}
 plugin/hooks/register.tsx           all effects
@@ -117,8 +125,11 @@ scripts/toolchain.py                fetches the pinned compiler into local/bin (
 scripts/build-kernel.sh             kernel/src -> plugin/hooks/kernel.js
 scripts/release.sh                  cut a release
 scripts/persona-preview.ts          the persona art as a terminal shows it, and as PNGs
+editors/                            editor plugins: neovim/, emacs/, vscode/ (dev side: not shipped with the mod)
+license-server/                     reference license server: issue, check, revoke keys (dev tooling: not shipped, not deployed)
 .github/workflows/check.yml         npm run check on push/PR, pinned Claude Code
 .github/workflows/nightly.yml       same check daily on newest Claude Code
+research/                           research notes for the owner (not shipped): opencode.md, the plan for an OpenCode client
 ```
 
 The ground rules in README ("Claude does not edit your files" etc.) describe end-user product behavior, not rules for working in this repo.
@@ -127,13 +138,14 @@ The ground rules in README ("Claude does not edit your files" etc.) describe end
 
 ```bash
 npm install                      # once: TypeScript, and spago and esbuild for the kernel
-npm run check                    # kernel + validate + licenses + test + typecheck
+npm run check                    # kernel + validate + licenses + test + typecheck + server
 npm run build:kernel             # kernel/src -> plugin/hooks/kernel.js (fetches the pinned compiler the first time)
 npm run kernel                   # fails when plugin/hooks/kernel.js is not what kernel/src builds
-npm run licenses                 # LICENSE and THIRD_PARTY_NOTICES.md: root and plugin/ copies identical
+npm run licenses                 # LICENSE, COMMERCIAL-LICENSE.md, THIRD_PARTY_NOTICES.md: root and plugin/ copies identical
 npm run validate                 # claude plugin validate . --strict && ./plugin --strict
 npm test                         # claude plugin test ./plugin
 npm run typecheck                # tsc -p plugin/tsconfig.json
+npm run server                   # the license server's typecheck and node:test tests (they check its keys with the plugin's checker)
 scripts/dev-session.sh           # live session in tmux (default session name bsd)
 scripts/release.sh minor --push  # patch|minor|major|X.Y.Z: bump plugin.json, check, commit, tag, push
 npm run persona -- [dir] [voice] # print the persona art in truecolor, and write PNGs of every pose to dir (default local/persona-preview)
@@ -191,28 +203,29 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 
 | File | Holds |
 | --- | --- |
-| `settings.ts` | `/config` values as typed settings |
+| `settings.ts` | `/config` values as typed settings; the plugin's `/config` rows for the Settings tab |
 | `mode.ts` | `/bsd` argument parsing, mode transitions, `HELP` (the authoritative command and key list) |
 | `contract.ts` | system prompt contents, `SESSION_NOTES`, instruction-file reframing |
 | `guard.ts` | which paths are the user's |
 | `git.ts`, `noise.ts`, `diff.ts` | `git status` parsing, files and edits never worth a look, line diff |
 | `watcher.ts` | change since the last look (ports; tests use an in-memory tree) |
 | `gate.ts` | the pacing arithmetic's types, and `usagePressure`. The arithmetic is the kernel's (`Kernel.Pace`) |
-| `scheduler.ts` | deadlines: named things to do at a known time, one timer for the earliest |
+| `scheduler.ts` | deadlines: named things to do at a known time, one timer for the earliest. When to arm it and what is due are the kernel's (`Kernel.Schedule`) |
 | `sensor.ts` | how often the working tree is scanned, and how often the spot in focus is checked while someone watches it. The kernel's (`Kernel.Sensor`) |
 | `health.ts` | whether Claude is answering: the types, and the plan's pressure. The decisions are the kernel's (`Kernel.Health`) |
 | `core.ts` | the membrane: the one file that imports `kernel.js`, turning the kernel's flat records into the mod's tagged unions and back |
 | `kernel.js`, `kernel.d.ts` | the kernel, compiled from PureScript, and what it exports |
 | `play.ts` | what the play-by-play is doing and when it looks next, worked out from the facts: the types. The decision is the kernel's (`Kernel.Play`) |
-| `status.ts` | the pane's status line as a sentence, with a clock time for every wait |
+| `status.ts` | the pane's status line as a sentence, with a clock time for every wait. The wording is the kernel's (`Kernel.Status`) |
+| `clock.ts` | `clockTime`: a time of day in the person's time zone, handed to the kernel wherever its wording names a time |
 | `notes.ts`, `prompts.ts` | reviewer reply → notes; reviewer and conversation prompt text |
 | `review.ts` | deep review scope: reflog, what counts as a commit, the request |
-| `reviewqueue.ts` | the commits waiting for their deep review and the look at progress after it: the queue, how often a stage is tried and how far apart, what the tab says while one waits |
+| `reviewqueue.ts` | the commits waiting for their deep review and the look at progress after it: the types and reading `queue.json`. The queue's rules, how often a stage is tried and how far apart, and what the tab says while one waits are the kernel's (`Kernel.Queue`) |
 | `languages.ts` | extension → language; a project's main languages |
 | `profiles.ts` | profile storage and changes: answers, hushes, lesson memory, person text |
 | `hash.ts` | fingerprints |
 | `datahome.ts`, `storage.ts` | data folder paths, what is removable, `Disk` port, `memoryDisk()` |
-| `store.ts` | every read and change of the tutor's JSON files: half-written files, backups, one change at a time, read-back |
+| `store.ts` | every read and change of the tutor's JSON files: half-written files, backups, one change at a time, read-back. When to read again, write again or give up is the kernel's (`Kernel.Store`) |
 | `locks.ts` | locks that hold across sessions, as refs in a bare git repository of the tutor's own |
 | `lease.ts` | which session drives a project's background jobs: the lease as stored. Who may take it and when to look again are the kernel's (`Kernel.Lease`) |
 | `forget.ts` | forget scopes, dialog wording, paths per scope |
@@ -227,12 +240,15 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 | `progress.ts` | ledger, level rules, assessment request, report text |
 | `project.ts` | project knowledge from deep reviews; what reviewers are told |
 | `journal.ts` | journal storage: entries, save runs, sitting roll-up, cross-session merge |
-| `attention.ts` | `focus.json` beyond the spot; caret and on-screen time |
+| `editors.ts` | the editors' files: which editors are connected, and which one speaks for this project |
+| `attention.ts` | an editor's report beyond the spot; caret and on-screen time |
 | `enclosing.ts` | enclosing definition name by indentation, no parser |
 | `glance.ts` | journal as text for pane, reviewers, conversation |
 | `recorder.ts` | journal engine (ports) |
 | `working.ts` | "What are you working on right now?" and `/bsd working` |
 | `update.ts` | install kind, versions, release tags, update and uninstall commands |
+| `license.ts` | `license.json`, the first-switch-on question, `/bsd license` words, the pane's line, the server's answer. The standing is the kernel's (`Kernel.License`) |
+| `licensekey.ts` | key format, `PUBLIC_KEYS`, ECDSA P-256 verification in BigInt. Imports nothing, so the server's tests import it |
 | `questions.ts` | first-run questions |
 | `debuglog.ts` | the debug log: records, chunks, the ring of latest records, the tracer, `/bsd debug` parsing |
 | `pane.tsx` | pane tree from plain data, handlers passed in |
@@ -242,11 +258,11 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 The owner wants the logic functional where it can be, "to detect, prevent and reduce bugs" (Product). The decisions the mod makes live in `kernel/src/Kernel/*.purs`. Their types carry the rules: a state that cannot happen cannot be built, and a transition that is not handled does not compile. Modeled on `../merecatholicity.com` (`purescript/src/Domain/*`, `app/core.ts`).
 
 - Rule: new decision logic is written in PureScript. TypeScript is the shell (`register.tsx`: effects), the pane, the engines with ports, text parsing, and the membrane. Claude Code reads `on(...)` and `$` calls from TypeScript source, so those cannot move.
-- `PORTED`: `Kernel.Health` (the shared wait after failures, what an API error means), `Kernel.Play` (what the play-by-play is doing, when to come back, whether a look is due), `Kernel.Pace` (backoff after failed looks, the gap near the plan limit), `Kernel.Sensor` (how often to scan, and to check the spot in focus), `Kernel.Lease` (who may take a project's lease, and when to look at it again). Their TypeScript files (`health.ts`, `play.ts`, `gate.ts`, `sensor.ts`, `lease.ts`) keep the types and the parsing and re-export the kernel's functions from `core.ts`.
-- `TO PORT`, in this order: `reviewqueue.ts` (the queue of waiting commits, tries and their spacing), the store's retry policy, `status.ts` (the status line and the health row), `scheduler.ts`. Not for the kernel: anything that parses text or JSON from outside (`parseLease`, `pressureOf`'s dates), which stays at the edge.
+- `PORTED`: `Kernel.Health` (the shared wait after failures, what an API error means), `Kernel.Play` (what the play-by-play is doing, when to come back, whether a look is due), `Kernel.Pace` (backoff after failed looks, the gap near the plan limit), `Kernel.Sensor` (how often to scan, and to check the spot in focus), `Kernel.Lease` (who may take a project's lease, and when to look at it again), `Kernel.Queue` (the commits waiting for their review: at most three, each once, one stage at a time, the tries and their spacing, what the tab says while one waits), `Kernel.Store` (the store's retry policy: when a file is read again, counts as broken, is checked before a write without the lock, is written again, or given up on, and when the old copy is kept), `Kernel.Status` (the status line, the row under it, and the state the character's pose comes from), `Kernel.Schedule` (when the one timer is armed and for how long, which deadlines are due and in what order). Born there: `Kernel.License` (where the person stands with the license, when to ask the server). Their TypeScript files (`health.ts`, `play.ts`, `gate.ts`, `sensor.ts`, `lease.ts`, `reviewqueue.ts`, `store.ts`, `status.ts`, `scheduler.ts`) keep the types and the parsing and re-export the kernel's functions from `core.ts`.
+- `TO PORT`: nothing. The engines with ports (`explainer.ts`, `recorder.ts`, `watcher.ts`) hold effects and text and stay TypeScript; a decision found in one of them is a candidate. Not for the kernel: anything that parses text or JSON from outside (`parseLease`, `parseQueue`, `pressureOf`'s dates), which stays at the edge.
 - How it reaches the mod:
   - `scripts/build-kernel.sh` (`npm run build:kernel`): `scripts/toolchain.py` puts `purs` 0.15.16 in `local/bin` (downloaded from the GitHub release, tarball and binary each checked against the sha256 in `kernel/toolchain.json`), `spago build` compiles `kernel/src` with the package set pinned in `kernel/spago.yaml` and `spago.lock`, and esbuild (pinned exactly in `package.json`) bundles the entry module `Kernel.Main` into one ES module, `plugin/hooks/kernel.js`.
-  - `kernel.js` is committed: installs copy the repository, and nothing is built on a user's machine. It is 40 KB for five modules (the limit for a file in a plugin directory listing is 256 KiB). Never edit it.
+  - `kernel.js` is committed: installs copy the repository, and nothing is built on a user's machine. It is 89 KB for ten modules (the limit for a file in a plugin directory listing is 256 KiB). Never edit it.
   - `npm run kernel` builds beside it and compares. `npm run check` starts with it, and so does CI, which keeps `local/bin` and `kernel/.spago` between runs.
   - `Kernel.Main` re-exports what crosses. What it does not export is not in the bundle.
 - The membrane, `core.ts`, is the only importer of `kernel.js`:
@@ -254,15 +270,23 @@ The owner wants the logic functional where it can be, "to detect, prevent and re
   - What crosses is plain data, as flat records in which every field is always present (`HealthWire`: `{ state, trouble, detail, until, failures }`), because one PureScript record type cannot be a union of shapes. The kernel turns them into its own types and back (`healthFromWire`, `healthToWire`), and `core.ts` turns them into the tagged unions the rest of the mod uses. A tag the kernel does not know becomes the safe value (`Ok`, a server error), never an exception.
   - The membrane keeps identity: when an event changes nothing, `stepHealth` hands back the object it was given, and `ok` is always the one `HEALTHY`. `noteOutcome` tells a change by `health === before`.
   - Keep it thin. A decision made in `core.ts` is one the kernel's types did not check.
+  - Wording that names a time of day takes `clockTime` (`clock.ts`) as its first argument, a plain `Number -> String`: the kernel cannot read the time zone, and the edge can.
+  - Opaque types keep a rule no caller can break: `Kernel.Queue`'s `Queue` is made only by `fromCommits` (the latest three, each hash once) and the functions beside it.
 - Porting a module: write `Kernel.X` with the same rules, export its `…Wire` functions from `Kernel.Main`, declare them in `kernel.d.ts`, write the membrane functions in `core.ts` under the names the TypeScript module exported, and re-export them from that module so that no caller changes. Then copy the old TypeScript into a temporary reference under `plugin/tests/` and run both over seeded random histories. When they agree, delete the reference and the old logic, and keep property tests (the rules, over random histories) beside the table tests.
 - The second parity run (2026-10-04) agreed everywhere on the first try: the pacing arithmetic at every half percent and every failure count, the scan cadence over 20,000 random facts and its exact edges, 40,000 random steps of the lease with its same-object rule, and 60,000 random sets of facts through `playOf`, `wakeAt` and `isLookDue` at four moments each, every state and every reason reached. The one thing the compiler caught on the way that TypeScript would not have: `Waiting` meant two things (Claude not answering, and a look held back), and the play module would not compile until each use said which.
 - Health's parity run (2026-10-04): 60,000 random steps of `stepHealth` and `mayAsk`, 20,000 retry delays, every error word and 500 model results agreed, with one difference that is meant: an API error with an empty word used to leave the detail empty ("The last look failed ()") and now names the status ("error 503").
+- The queue's parity run (2026-10-05): 2,000 random histories of 30 steps (a commit seen, let go, reviewed, a try that failed, time passing up to a day), every query (`isSpent`, `nextToReview`, `nextToAssess`, `settledIn`) under all four settings after each step, and 20,000 sets of health, pressure, refusal and retry time through `heldText` and `failedText`, agreed on the first run, the same-object rule of `current` and `withCommit` included. The one change that is meant: the stage is a type (`ToReview | ToAssess`), not a flag beside a count, and a queue read from disk naming a commit twice keeps it once.
+- The store's parity run (2026-10-05): 3,000 random histories of twelve reads and changes, with no locks, locks, or locks refused, and another session emptying, half-writing or rewriting the file or its backup between any two steps. Every read, write, wait, note and result agreed with the old store, step for step, every note and every wait reached. `store.ts` keeps the reading and writing; each decision in its two loops is one call (`afterRead`, `changeStep`, `keepsBackup`, `afterWrite`).
+- The status line's parity run (2026-10-05): 60,000 random states of the play-by-play, every reason for a wait, with and without a time, against every health, pressure, scan time and list of failures, through `playLine`, `healthLine` and `watchOf`. They agreed on the first run. The kernel reads a `Play` back from the wire (`playFromWire`) for this: a state it does not know is `Starting`, a reason it does not know a failed look.
+- The scheduler's parity run (2026-10-05): 2,000 random histories of 40 steps, with deadlines set, moved, cancelled and cleared from the shell and from inside a deadline's own work, some of it throwing, and the clock moved by fake timers. Every timer armed and cancelled, every run, failure, `at` and `all` agreed in order. Due deadlines at the same time run in the order the scheduler's `Map` lists them, which is the order their names were first set (moving one keeps its place), as before.
 - PureScript things that bite here:
   - `Int` is 32 bits. Clock times are `Number`.
   - `type` is a reserved word, so an event's tag is `kind` on the wire.
   - `Data.Number.round` is JavaScript's `Math.round`, so the arithmetic matches the TypeScript it replaced to the millisecond.
   - Two modules may name a constructor alike (`Health.Waiting`, `Play.Waiting`). Import one of them qualified.
   - `Kernel.Main` can only re-export a name as it is. Where a module's names are too plain to stand alone in the bundle (`claimed`, `isHeld`), `Main` gives them a prefixed alias with its own signature (`leaseClaimed`).
+- Where `packages.registry.purescript.org` is blocked (a cloud sandbox), spago cannot fetch the package set. Clone each package of `spago.lock` at its tag into `kernel/.spago/p/<name>-<version>` (`git clone --depth 1 --branch v<version> https://github.com/purescript/purescript-<name>.git`, then drop its `.git`): spago builds from there, and the bundle came out byte-identical.
+- `claude plugin test` runs every test file. To run some, copy `plugin/` without its other tests to a scratch folder (symlinks are refused as path traversal) and run it there.
 - `npm audit` reports three "high" findings, all one advisory: `braces` through `micromatch` through spago, a stack exhaustion on a hostile glob pattern. spago is a dev tool that globs this repository's own files, nothing of it ships, and the fix npm offers is a downgrade of spago. The reference repository lives with the same one.
 - Live with the five modules (2026-10-04): a save was seen at the next scan, the pane said "Saw your save. Looking when you pause.", the look started 10.0 s after it, two notes came back, and the session held its project's lease.
 - Live (2026-10-04): a real session on the bundle went through an outage and back: no connection, `waiting offline failures=1`, the wait over 12 s later, a lookup answered, `ok`. The mod loads `kernel.js` through `register.tsx` → `health.ts` → `core.ts`.
@@ -294,13 +318,14 @@ The owner wants the logic functional where it can be, "to detect, prevent and re
 - The one thing the mod polls is the working tree, because nothing tells it about the person's own saves, their commits in their own terminal, or their editor's caret (see "Probed live": no watch in `$.fs`, `FileChanged` only for paths named at session start, no watcher installed). `scan` in `register.tsx` is that poll, one at a time, the next planned when it finishes:
   - `sensor.ts`: 1 s apart for a minute after something happened (`activeAt`: a save, a caret move, a prompt, a key in the pane, switch-on), 2 s otherwise, 5 s once nothing has happened for ten minutes. Each quarter second a scan took adds 2 s, up to 32 s.
   - `kick` scans at once: on `prompt.submit`, when a turn of the conversation ends, on a key in the pane, on resume.
-  - The fast lane (`fastPoll`, deadline `focus`): while someone can see the Explain view, two stats ten times a second, the file in focus and the editor's `focus.json`. Each check plans the next, `focusGapMs` after it (100 ms, four times what the check took when that is more, 2 s at most), and none is planned once nobody is watching. While it runs, the scan leaves `focus.json` to it.
+  - The fast lane (`fastPoll`, deadline `focus`): while someone can see the Explain view, a stat of the file in focus and a listing of the editors' folder, ten times a second. Each check plans the next, `focusGapMs` after it (100 ms, four times what the check took when that is more, 2 s at most), and none is planned once nobody is watching. While it runs, the scan leaves the editors' folder to it.
   - Paused, nothing scans and no look is due.
   - A scan never calls a model. It feeds the journal and Explain, checks HEAD, and calls `planLook`.
 - Failures (owner: told apart, retried with delayed backoff, nothing pending lost). `health.ts`:
-  - `outcomeOf` reads a `$.model.complete` result, `outcomeOfError` one of Claude Code's error words. Troubles: `rate-limit`, `overloaded`, `server`, `offline` (no HTTP status at all), `timeout`, `account` (login, billing, account on hold), `job` (`model_not_found`, `invalid_request`), `reply` (empty).
+  - `outcomeOf` reads a `$.model.complete` result, `outcomeOfError` one of Claude Code's error words. Troubles: `rate-limit`, `overloaded`, `server`, `offline` (no HTTP status at all), `timeout`, `account` (login, billing, account on hold, cloud credentials), `job` (`model_not_found`, `invalid_request`), `reply` (empty).
   - `callModel` reports every outcome to `noteOutcome`. So does `classic.StopFailure` (the conversation's turn or a subagent died on an API error) and a conversation turn that ended with an answer.
   - The shared wait: a `rate-limit`, `overloaded`, `server`, `offline` or `timeout` makes every background job wait (`waiting(until)`), 30 s doubling to 10 min (15 s first for `offline` and `timeout`), somewhere in the upper half so sessions do not come back together. At `until` the state is `recovering`: the next job that asks is the probe (`probing`), and the others wait for its answer. Any answer, a background job's or the conversation's, ends it at once (`ok`).
+  - A deep reviewer is never the probe: it reports only when it ends, minutes later, and every look and lookup would wait that long. A `$.model.complete` that rejects (Claude Code refused to send it) ends a probe as `abandoned` too.
   - The probe cannot leave the others waiting for good. One that was cut short by the tutor itself, never started, or came back with a problem of its own (`job`, `reply`) is `abandoned`: the state goes back to `recovering` and the next job asks (`probeEnded`). Until M4 such a probe left every job waiting until the conversation next answered.
   - A `rate-limit` while the plan says a window is 99% spent waits until that window's `resetsAt`, plus up to 30 s.
   - `account` blocks every job until something is answered again. `job` blocks that job only (`jobBlocks`), until it is asked for by hand and answered, or the mod reloads with other settings. `reply` is the look's own business.
@@ -322,7 +347,7 @@ The owner wants the logic functional where it can be, "to detect, prevent and re
 - A file the last look saw changed, and that is clean again with other text than that look saw (`returned`), is still pending: it was changed once more and committed, or put back, between two polls, and git no longer lists it. `poll()` reads such a file once, when it turns clean. Until M7 it was dropped, and a note about code that had been fixed and committed in one breath stayed in the pane (seen live).
 - `collect()` returns real changes. `settle()` records what a look saw, using collection-time fingerprints, so a file changed during the model call stays pending.
 - A failed look settles nothing. An unparseable reply is settled and dropped, never retried or shown. Files beyond the prompt size limit stay unsettled for the next look. After a reload the watcher restarts from the current tree; notes survive in state.
-- The play-by-play is one `$.model.complete`, no tools, no history. It is given the open notes and the dismissed notes for the files shown. `applyReply` drops a note with the same file and topic slug as either. Dismissed notes live in state until switch-off. Lesson memory counts only notes that reached the pane.
+- The play-by-play is one `$.model.complete`, no tools, no history. It is given the open notes and the dismissed notes for the files shown. `applyReply` drops a note with the same file and topic slug as either. Dismissed notes live in state until switch-off, and on disk (below). Lesson memory counts only notes that reached the pane.
 - The prompt says one idea per note, under 40 words (the first live note bundled three).
 - Note kinds, in sort order: `bug`, `risk`, `decision`, `idiom`, `tip`, `insight`. `decision` marks a meaningful choice (just made, or ahead in a stub or TODO: the one exception to "no notes on unfinished code"), framed as theirs with its trade-offs. `insight` is an implementation choice or a codebase pattern. Priority, in the prompt only: a bug or a risk before a decision, a decision before anything else, never more than one insight (a cap of one decision was dropped: a live save with two real open choices got both, which was right). The pane draws decisions first under `◆ Your call` (magenta), the problems by file, then insights under `★ Insight` (cyan) (`DECISION_HEADING`, `INSIGHT_HEADING`). `isProblem` is false for both: they never count in the lesson memory (`flagged` or `explained`). `e` on a decision asks the conversation to lay out the options and leave the choice to the user; on an insight, where else it shows up.
 - Live (decision points): a TODO for the even-count median got `◆ Your call` with the trade-off (the textbook median versus keeping the input's type) and no choice made, beside a separate `risk` for an unclosed file. An uncommented tie rule in `mode()` was flagged as an open decision, and adding a comment that made it deliberate resolved the note at the next look. `e` on a decision got six options with their costs and the questions that decide between them, then "tell me which way you're leaning". "Which would you pick?" got a question back about what they weighed. No play-by-play `insight` has been seen live yet: the model has preferred decisions.
@@ -343,12 +368,12 @@ The owner wants the logic functional where it can be, "to detect, prevent and re
 - A timed review covers `git diff <base>` against the working tree, plus untracked files by name. A scope fingerprint prevents re-reviewing the same uncommitted work; it is skipped when nothing changed.
 - `$.agent.spawn` resolves at start, with `agentId`. The answer arrives as a `turn.complete` carrying that id and goes to state, never the conversation. One review at a time. Done → short notice, and the tab is marked new.
 - Commits wait in a queue (`reviewqueue.ts`, `projects/<id>/queue.json`). A commit goes in the moment `checkHead` sees it and comes out when its review and the look at the person's progress are both done with. So a commit made while Claude is not answering, at the plan limit, behind a running review, or just before the session closed is still reviewed: when things are back, or the next time the tutor is on in this project.
-  - At most `MAX_WAITING` (3) wait, a newer one pushing the oldest out, for at most 24 h. An amend replaces the commit it amended. A waiting commit that `git show` no longer finds is let go.
+  - At most `MAX_WAITING` (3) wait, a newer one pushing the oldest out, for at most 24 h. An amend replaces the commit it amended. A waiting commit that `git show` no longer finds is let go. Git that did not answer at all (missing, timed out: `git()` gives exit code -1) is one try, never a commit let go. A look at progress under way when the tutor is switched off leaves its commit waiting.
   - `planReview` starts whatever is next when nothing stands in the way. It is called whenever that may have changed: a commit, the end of a review or of a progress look, `wake` (Claude answering again, the plan's pressure changing), resume, switch-on. The review of the oldest commit without one and the progress look of the oldest commit past its review run side by side, one of each at a time. The deadlines `review` and `assess` are a retry's time or the plan window's `resetsAt`.
   - While something holds a waiting review back, the tab says what and until when (`heldText`): Claude not answering, the plan limit, a refused account, a model the plan does not have.
   - The review slot is `reviewAgentId`, `isReviewBusy` and `endedReview` together (`isReviewFree`). `withReviewSlot` holds it while a review is started or its end is put on record, and calls `planReview` when it lets go with nothing running. Without it two events arriving together start the same review twice: in the first version a review's own answer woke the planner (`noteOutcome` → `wake`) before the queue had been marked, and the commit was reviewed again.
   - A review that ends without a review (`reviewFailed`), for a waiting commit:
-    - `service`: `classic.StopFailure` named an API error. It is no try. The commit waits for the shared health, however long, and when that wait ends the review is the request that finds out. An outage costs a commit none of its tries.
+    - `service`: `classic.StopFailure` named an API error. It is no try. The commit waits for the shared health, however long, and when that wait ends it is started again. An outage costs a commit none of its tries.
     - `own`: nothing says why (it said nothing, did not start, did not report back, or an `error` nobody explained). One try of `MAX_ATTEMPTS` (3), 60 s doubling apart. Then the review is given up on, the tab says "Press r to run it again", and the commit still goes on to the progress look.
     - `final`: stopped by the person, or refused by the model. Not tried again.
     - A review asked for by hand, a timed one and the look around are not retried: the tab says why it failed.
@@ -370,7 +395,10 @@ The owner wants the logic functional where it can be, "to detect, prevent and re
 - Tabs say what is behind them (`tabBadge`): `Play-by-play (3)` for open notes, `Deep review (new)` until it is opened, `(…)` while a review runs, Explain is looking something up or Progress is assessing, `(!)` for a review that did not finish. `tabRow` keeps the badges for as long as the row fits: full names, then short names with a gap of 2, then 1, then only the review's badge, which is the one that asks for a look.
 - The Deep review tab always has something to read. A review that finished stays, as `Review.last`, while a newer one runs, waits or has failed (`withReviewChange`, which every write of the review state goes through; `readableReview` is what the tab and the conversation's context use). Above it: "Reviewing commit a1b2c3d: Title since 12:01." or why it did not finish, and how many more commits wait (`Review.waiting`, set by `changeQueue`).
 - The row under the status line (`Watch.health`, from `healthLine` in `status.ts`) says what keeps going wrong in the background and is otherwise absent: Claude not answering and until when, a refused account, the plan limit, a scan of the working tree that took over 1.5 s, and anything `fail()` reported twice within five minutes ("Keeps failing: … /bsd debug dump saves the details."). It leaves out what the status line already says, which is the case whenever a look is the thing held back. Until M7 those errors went to `claude --debug` only.
-- New fields in `$.state` are optional (`Watch.health`, `Review.since`, `Review.waiting`, `Review.last`): after an update the state still holds what the older version wrote.
+- After a restart (or `/bsd off` and on), the pane comes back from the project's folder (`restorePaneFromDisk`, in `engage`, driver only): the open notes whose file still reads as the look that raised them saw it (`notes.json`, `stillOpen`), the dismissed notes, and the last review in `reviews.json` with its decisions and insights. A note about text changed since is never shown: the next look at that file says what is true. The driver writes `notes.json` after every look, dismissal and hush.
+- Under the health row, `Watch.editors` names the connected editors with something of this project open (`editorsLine`), from `readFocus`. `showPlay` keeps it when it rewrites the watch atom. Hidden while paused.
+- Settings tab (5, `settings`): the plugin's own rows of `/config`, read with `$.config.list()` (`showSettings`: when the pane opens, when the tab is opened, after `/clear`) and kept to rows whose `provider.plugin` is `$.plugin.name` (`settingRows`). Each row is a `Select`: a choice's options, a toggle as `on`/`off`. A pick goes through `$.config.set` (`changeSetting`), exactly as a change in `/config`, which reloads the mod with the new options; the row shows the pick at once and goes back with a toast if refused. A locked row is text. A surface without `Select` shows the values as text and says to use `/config`.
+- New fields in `$.state` are optional (`Watch.health`, `Watch.editors`, `Review.since`, `Review.waiting`, `Review.last`): after an update the state still holds what the older version wrote.
 - Live (2026-10-04): "1: Play (2)  2: Review (new)  3: Explain  4: Progress" after a save with two notes, "Review (…)" while a commit was reviewed. During the second commit's review the tab read "Reviewing commit 5554aa7: Sort a copy since 20:17." then "The review before it:" and the first review. After `/clear` the two notes and the review were still in the pane, on the tab that had been open. With `play_by_play` on request and no connection: "On. Looking only when you ask." and under it "There is no connection to Claude. Background work waits until 20:25.", gone once a lookup was answered. A fix saved and committed within one scan took its note out of the pane at the next look, and left the note that was still true.
 - Not seen live: the git-is-slow and keeps-failing parts of the row, the `(!)` badge. Tests cover them (`kernel.test.ts`, `pane.test.ts`).
 
@@ -390,7 +418,7 @@ The owner wants the logic functional where it can be, "to detect, prevent and re
 ### Explain
 
 - Spot = whichever moved last:
-  - the editor's `focus.json`
+  - the caret of the editor that speaks for this project (`editors.ts`)
   - `/bsd explain path:line[-end]`
   - `n`/`p` in the tab
   - the `lookup` tool
@@ -416,22 +444,29 @@ The owner wants the logic functional where it can be, "to detect, prevent and re
 - While Claude is not answering, or the plan is at its limit (`pressure()` is `held`), only what was asked for by name starts: a request made into an outage fails and lengthens everyone's wait. A lookup that failed while held is not marked failed. It goes back in the queue as something looked at, and runs when `wake` says Claude is back, without the minute's wait.
 - `changed()` resolves when the next lookup ends. The `lookup` tool and `/bsd explain` wait on it (`lookUp`, `soonest`), up to `LOOKUP_WAIT_MS` (6 s) in all, and answer the moment what they asked about lands. Before M5 they slept half a second at a time.
 - Setting `explain`: `automatic | on request | off`. Near limits, `automatic` degrades to on-request (saves first, then everything).
-- `register.tsx`: `startExplaining` (in `engage`) builds the ports. `refreshView` builds the focused view into state and writes `view.json`. While the tab is open or an editor is live, `fastPoll` stats the focused file and `focus.json` every 100 ms and refreshes on change, which is why stale text leaves the screen within about 0.1 s. It stops when nobody watches (see the fast lane under "Play-by-play and watcher"). `readFocus` is the only reader of `focus.json`; `pollFocus` feeds the journal, then Explain (`followEditor`).
+- `register.tsx`: `startExplaining` (in `engage`) builds the ports. `refreshView` builds the focused view into state and writes `view.json`. While the tab is open or an editor is live, `fastPoll` stats the focused file and lists the editors' folder every 100 ms and refreshes on change, which is why stale text leaves the screen within about 0.1 s. It stops when nobody watches (see the fast lane under "Play-by-play and watcher"). `readFocus` is the only reader of the editors' files: one `$.fs.list`, a read of each file whose size or time changed, then `focusText` is what the speaking editor says without its times (so a beat is not a move). It also writes the pane's editors row. A source that pushes editor events calls it. `pollFocus` feeds the journal, then Explain (`followEditor`).
 - Live: first explanation in an unseen file in 6.6 s; cached `n`/`p` in 40–80 ms; edit removed the explanation in about 60 ms, new one after 9 s; a script's `focus.json` → `view.json` in 40–80 ms; the tutor called `lookup` with no permission prompt when it hadn't already read the file.
 - Live on deadlines (2026-10-04): the mapping request left 2.52 s after the scan that saw the save; an edit to the function in focus rewrote `view.json` 50 ms after the save, without the old explanation; a caret written to `focus.json` was followed in 68 and 108 ms. The `lookup` tool's wait on `changed()` has been seen in tests only.
 
-### Editor protocol (for future vim and emacs plugins)
+### Editor protocol
 
-Both files are in the data folder. The editor writes `focus.json` atomically (temp file plus rename) on cursor, selection or field change; a few writes a second is plenty.
+The plugins are in `editors/` (dev side of the repository, not shipped with the mod): `neovim/` (`plugin/backseat-driver.lua` starts `lua/backseat-driver/init.lua`), `emacs/backseat-driver.el` (`backseat-driver-mode`), `vscode/` (`package.json`, `extension.js`, plain JavaScript, no build; `npx @vscode/vsce package --skip-license` makes the `.vsix`). Install lines are in README. `editors.ts` is the mod's side.
+
+Each running editor keeps one file, `editors/<editor>-<pid>.json` in the data folder, written whole (temp file `.<name>.tmp`, then rename) when what it says changes (debounced 150 ms), and every `EDITOR_BEAT_MS` (20 s) while nothing does:
 
 ```json
-{ "file": "/abs/path/src/stats.py", "line": 12, "endLine": 15, "modified": true,
-  "buffers": ["/abs/..."], "visible": ["/abs/..."], "active": true }
+{ "v": 1, "editor": "neovim", "pid": 4242, "at": 1759653120000, "changed": 1759653118000,
+  "root": "/abs/repo", "file": "/abs/repo/src/stats.py", "line": 12, "column": 5, "endLine": 15,
+  "modified": true, "buffers": ["/abs/..."], "visible": ["/abs/..."], "active": true }
 ```
 
-- `file` is absolute; files outside the session's repo are ignored, so sessions can share one focus file. `line` is 1-based. `endLine` only while selecting.
-- Explain needs only `file` and `line`. The rest feed the journal: `modified` = unsaved changes in the caret's buffer, `buffers` = open files, `visible` = other files on screen, `active: false` = the editor window lacks the keyboard.
-- The editor never reports durations; the tutor credits time per poll.
+- `at` is when written, `changed` when what it says last changed (ms since 1970). `root` is the nearest folder above the caret's file with a `.git`. Paths are real paths (symlinks resolved), because the tutor's root comes from git.
+- `line` and `column` are 1-based, the column in characters. `endLine` only while more than one line is selected (then `line` is the selection's first). `modified` = unsaved changes in the caret's buffer, `buffers` = open files, `visible` = other files on screen, `active: false` = the editor window lacks the keyboard. Explain reads `file` and `line`; the journal reads the rest. `column` is sent for later use.
+- When the current buffer is not a file (a terminal, help), the last file's report stands and keeps beating.
+- An editor writes nothing until the data folder has its marker (`.backseat-driver`), makes `editors/` when missing, removes its own file on exit, and at start removes files in `editors/` untouched for a day (editors that crashed).
+- The tutor: an editor whose `at` is more than `EDITOR_TTL_MS` (60 s) old is closed. The speaker for a project is the connected editor whose caret is in it (`root` equal to the repository, or, without `root`, the file inside it) with the latest `changed`. The pane's row under the status line names the connected editors with anything of this project open ("Neovim is connected.").
+- The editor never reports durations; the tutor credits time per report (`attention.ts`), and a beat that changes nothing is not a report.
+- Before 2026-10-05 the protocol was one shared `focus.json`, which two editors would have overwritten. It is no longer read; `focus.json` stays in `REMOVABLE` so an old one can be forgotten.
 
 The tutor writes `view.json` in answer and whenever its knowledge of the spot changes: `{ v: 1, at, root, source, spot: {path, line}, status, fileSummary, outline: [{name, kind, startLine, endLine, summary}], isOutlineCurrent, isMappable, target, detail: {what, how, why, watch, uses} }`.
 
@@ -441,7 +476,8 @@ The tutor writes `view.json` in answer and whenever its knowledge of the spot ch
 
 ### Project cache
 
-- `projects/<name>-<hash>/`: `project.json` (overview, file roles, insights), `reviews.json` (text of the last 12 reviews), `files/<hash>-<name>.json` (Explain), `journal.json`.
+- `projects/<name>-<hash>/`: `project.json` (overview, file roles, insights), `reviews.json` (the last 12 reviews: text, decisions, insights), `notes.json` (the open and dismissed notes, with each noted file's fingerprint), `files/<hash>-<name>.json` (Explain), `journal.json`.
+- A commit review's insight is kept only for a file that still reads as the commit left it (`isAsCommitted`): a review that waited in the queue would otherwise tie it to code edited since.
 - Each deep review ends with a fenced `backseat-notes` JSON block (asked for in `deep-review.md`). `splitReview` strips it before the pane, parsed or not. `keepReview` re-reads `project.json`, merges (`withReviewNotes`), and appends to `reviews.json`.
 - Each insight is kept with the fingerprint of its symbol (when mapped) or of its file, and which one it is; one that can't be fingerprinted isn't kept. `insightsFor` (Explain) and `currentInsights` (play-by-play) pass it only while the fingerprint matches. For the play-by-play the file just changed, so file-level insights drop and symbol-level ones survive for unedited symbols.
 - The overview is project-wide and unfingerprintable. It carries its commit, and the reviewer is told to correct it.
@@ -461,7 +497,7 @@ The tutor writes `view.json` in answer and whenever its knowledge of the spot ch
   - A stretch of more than `MAX_GAP_MS` (60 s) in which nothing here looked at the clock is not credited: the laptop slept, or the tutor was paused. A scan is never further apart than that.
   - Every `SLICE_MS` (2 min) → `focus` entries: up to 3 regions per file plus the remainder. A region is lines within 20 of each other inside one definition, named for the line held longest. Visible files get `screen` entries.
   - The definition name is resolved at the next scan, so one read per caret position.
-  - `focus.json` from before switch-on is a baseline and earns no time until rewritten.
+  - What an editor said before switch-on is a baseline and earns no time until it changes.
 - Sittings: an hour idle ends one. On every read or write, finished sittings roll up (`digest`: files, commit titles, statements); only the open sitting keeps entries. Keep the last 20. A sitting with no save, no commit and under 1 min of editor time leaves nothing.
 - Writes: at most every 30 s when something is new; at once on a working-on statement; at switch-off; and when the session ends (`session.end`).
   - The recorder says when it next has something to do (`wakeAt`: a write that is due, or a slice of attention long enough to keep), and `journalDue` runs then, on the deadline `journal`. A scan no longer asks "is a write due?": it only records what was saved and names where the caret is.
@@ -542,6 +578,16 @@ The tutor writes `view.json` in answer and whenever its knowledge of the spot ch
 - Tests find the drawing as `{ type: 'Raster', key: 'persona' }` and compare its `cells` with `rasterCells` for the pose they expect. The kit has no theme, so a test session is dark.
 - Live: all ASCII characters seen saying hello with mouth movement, blinking, sleeping when paused, and with the tail at the mouth. One-line mode at 100 columns. The pixel art has not been seen in a real session yet (cloud sessions have no login): tests and PNG renders only.
 
+### License
+
+- `license.json` (data folder, about the person): `use` (`personal | commercial | null`), `isAsked`, `key`, `keySince`, `answer` (`active | revoked | unknown | null`), `answeredAt`, `triedAt`. Forgetting everything removes it, and the question comes back.
+- Asked once ever, at a fresh switch-on, after the language questions (`startLicense` in `engage`, `askLicense`): personal or commercial; commercial then asks for the key, with "add it later" as the one option and the key typed as free text. A key typed into the first question counts as commercial. Dismissing either is an answer: `isAsked` is set and nothing is asked again unprompted. Kit tests that count questions seed `LICENSE_ANSWERED`.
+- Kept in the data folder, not `userConfig`: it outlives a reinstall and another install method, and changing it does not reload the mod. `/bsd license [personal | commercial | <key> | clear]` changes it, works while off, and answers with where they stand.
+- A key is `BSD1.<payload>.<signature>`: payload JSON in base64url (`v, kid, id, to, seats, iat, exp`), ECDSA P-256 SHA-256 over the payload's base64url text, r‖s. `checkKey` says `malformed`, `forged` (signature fails, or an unknown `kid`), `unverified` (no public key or no SHA-256) or `valid`. `PUBLIC_KEYS` is empty until the owner runs `keygen`.
+- The standing (`Kernel.License`): `unchosen`, `personal`, `licensed`, `needs-key`, `bad-key`, `expired`, `withdrawn`, and `unchecked` (a fine key, a server, and no answer for 30 days since the last answer or the paste). A server's `unknown` counts as no news. `licenseLine` gives the pane one dim line under the update notice for the commercial problems only (`license` state key; recomputed after `/clear`).
+- The server is asked (`checkLicense`) at a fresh switch-on and when a key is pasted, when `nextLicenseCheck` says it is due: at once for a new key, 7 days after an answer, 1 day after a try with none. `GET <server>/v1/keys/<id>`; a 404 is `unknown`, anything unreadable is no answer.
+- `license-server/` (dev tooling, Node 22.18+ running TypeScript directly, `"type": "module"`): `keys.ts` makes signing keys and signs, `store.ts` keeps issued licenses (memory, or one JSON file written by rename), `server.ts` answers `GET /v1/keys/<id>`, `GET /v1/public-keys`, and for the owner's bearer token `POST /v1/licenses`, `POST /v1/licenses/<id>/revoke|restore`, `GET /v1/licenses` (closed without a token). `cli.ts`: `keygen`, `issue`, `revoke`, `serve`. No payment, no deployment, no secrets in the repository (`.gitignore` covers `license-server/*.pem` and `licenses.json`). Its tests check every key it signs with the plugin's own `checkKey`.
+
 ### Updates and uninstall
 
 - `update.ts` is pure. Effects live in `detectInstall`, `checkForUpdate`, `runUpdate`, `removeHome` and `runUninstall` in `register.tsx`.
@@ -586,7 +632,7 @@ The tutor writes `view.json` in answer and whenever its knowledge of the spot ch
   - The lease is given back at switch-off and at `session.end`, except for `clear` and `resume`, after which the process carries on.
   - `/clear` gives the session another id (`session.end` says so, and no `session.start` fires). `leaseHolder` is the id the lease is held under, and `claimed(lease, me, now, also)` treats that id as this session, so the session goes on driving under its new id instead of waiting a minute for itself.
 - What is on record about the person (profiles, progress) is shared by every session in every project. `refreshShared` lists the two folders (`sharedFolders`: one `$.fs.list` each, about 3 ms), and when names, sizes or times differ from the last look it reads the profiles and records in play again, takes open notes about a topic hushed elsewhere out of the pane, and registers the reviewer again. It runs before every prompt (`prompt.submit`) and, in the driver, from the scan at most every `SHARED_CHECK_MS` (5 s). This session's own writes change the listing too: the read that follows finds nothing new.
-- `view.json` has one writer: the session that drives the project the editor's caret is in. `refreshView` writes it only when `isDriver` and `focus.json` names a file in this repository, or no editor has written `focus.json` at all. Before M6 two sessions in two projects overwrote each other's.
+- `view.json` has one writer: the session that drives the project the editor's caret is in. `refreshView` writes it only when `isDriver` and an editor's caret is in this repository, or no editor is connected at all. Before M6 two sessions in two projects overwrote each other's.
 - Not yet: a session that does not drive does not show the driver's notes or reviews (the owner approved "chat only" with the plan). Two sessions in one project both ask the first-run questions if both are switched on before either is answered.
 - Live (2026-10-04, three real sessions sharing one data folder, Sonnet at low): with two sessions in one project the second said "Another session is driving this project", made no `git status` call at all, and a commit got one reviewer, from the first. The first was killed with `kill -9`: the second held the lease 61 s after the first's last renewal (47 s after the kill), its status line went back to normal, and the next commit was reviewed by it. A third session in another project was told in chat never to bring up missing type hints in Python: the tutor called `hush`, and the session in the first project read the profile again within its next look at the shared files and registered its reviewer with "Do not bring up: missing type hints in Python".
 - Not seen live: a driver giving way after a sleep, `/clear` while driving, an open note leaving the pane for a hush made elsewhere. Tests cover them (`lease.test.ts`).
@@ -599,10 +645,11 @@ The tutor writes `view.json` in answer and whenever its knowledge of the spot ch
 .backseat-driver              marker; required before any delete
 profiles/<language>.json      answers, hushes, lesson memory
 progress/<language>.json      evidence, level, report
-projects/<name>-<hash>/       journal.json, project.json, reviews.json, queue.json, lease.json, files/
-focus.json                    written by an editor
+projects/<name>-<hash>/       journal.json, project.json, reviews.json, notes.json, queue.json, lease.json, files/
+editors/<editor>-<pid>.json   one per running editor (see "Editor protocol")
 view.json                     written by the tutor
 update.json                   last release check
+license.json                  personal or commercial, the key, what the server last said
 debug.json                    the debug log's switch: {"on": true}
 debug/<session>/              one session's debug log (see "Debug log")
 locks.git/                    bare git repository; its refs are the locks on the files above
@@ -667,15 +714,16 @@ For developing Backseat Driver, not for its users: everything the tutor does, in
 
 ## Invariants
 
-- Dormant until switched on. While off, every hook passes through with `next(e)`: no pane, model call, prompt change or denial. No reads or writes at session start. Only `/bsd forget`, `/bsd help`, `/bsd debug` (and update or uninstall when asked) act while off. The debug log itself is written only while the tutor is on.
+- Dormant until switched on. While off, every hook passes through with `next(e)`: no pane, model call, prompt change or denial. No reads or writes at session start. Only `/bsd forget`, `/bsd help`, `/bsd debug`, `/bsd license` (and update or uninstall when asked) act while off. The debug log itself is written only while the tutor is on.
 - Background reviews never become conversation turns. Only what the user does in chat or the pane does. Verified live for `$.model.complete` and `$.agent.spawn`.
 - Model and effort per job come from `userConfig`; no model id is pinned (aliases only). Defaults: play-by-play `sonnet`/`medium`, deep review `opus`/`high`, Explain `sonnet`/`low`. "Thinking level" = Claude Code effort (`low|medium|high|xhigh|max`).
 - Hard rules are hooks; teaching style is the contract. The edit guard covers only `Edit`, `Write` and `NotebookEdit`; a shell command could still write, which rests on the contract and Claude Code's permission prompts.
 - Footprint (the paragraph closing the README's "What it is" states it to users):
   - Runs `git`, reads the repo and its own plugin folder, calls models, writes only its data folder, draws a pane. One of the git repositories it runs git in is its own: `locks.git` in the data folder.
+  - Changes Claude Code's own settings only when the person picks a value in the Settings tab, through `$.config.set`, as `/config` would.
   - Other processes only on request: `rm` inside the data folder (forget, `/bsd debug clear`), `claude plugin` (update, uninstall).
   - The debug log, when the user switches it on, holds their code and prompts. It stays in the data folder.
-  - Network of its own: the release check (`git ls-remote`, at most every 6 h, opt-out) and `/bsd update`'s fetch.
+  - Network of its own: the release check (`git ls-remote`, at most every 6 h, opt-out), `/bsd update`'s fetch, and the license check (`$.http.fetch`, only with a commercial key and a `LICENSE_SERVER`, about weekly, only the key's id, off with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`). `LICENSE_SERVER` is '' until the owner deploys one, so it sends nothing yet.
   - No git hooks, never writes the working tree.
   - Any new kind of call in the validator's `calls:` (`http.fetch`, a write outside the data folder, another process) breaks this and needs the owner's decision plus a README update.
   - `env reads:` must stay `BACKSEAT_DRIVER_HOME, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, CLAUDE_CONFIG_DIR, HOME, USERPROFILE, XDG_DATA_HOME`.
@@ -695,6 +743,7 @@ The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above mem
 - `update($, atom, fn)` gives a misleading "Atom<…> is not assignable to StateRef" when `fn` returns literal-union fields. Annotate: `(w): Watch => ({ ...w, state: 'looking' })`.
 - `userConfig` `options` pickers work on string fields only. A stored value outside the options reads as the default, with a warning (in tests too). A `/config` change reloads the mod with new options, and the tutor stays on. For the working copy, values go to `~/.claude/settings.json` `pluginConfigs["backseat-driver@inline"]`: restore the owner's settings after a check.
 - `$.ui.ask`: one question, 2–4 options plus free text. It rejects on dismiss (first-run treats that as skip all) and under `claude -p`. In tests it reaches the `tool.call` stub as `AskUserQuestion`.
+- `/config` and a mod: `$.config.list()` returns every row (`key` `<plugin>.<field>` for a `userConfig` field, `kind`, `value`, `options`, `provider`, `isLocked`), and `$.config.set({ key, value })` changes one as the menu would, resolving `{ value }` or `{ deny }`. A mod cannot add a row, a button or a shortcut to the menu: `config.describe` only relabels, re-describes or hides an existing row. `Select` is missing from one surface's element table (`Kit` takes it as optional).
 - `$.store`: 4 MiB total, per install, expires (unused now). `get`, `set`, `delete`, `keys`.
 - `$.fs`: `read` (≤4 MiB), `write` (makes folders), `list`, `exists`, `stat`, `ancestors`. No delete or rename. `list`/`read` reject on missing. Absolute paths outside the project work without a prompt.
 - `$.env.get` takes a string literal; the validator lists the names.
@@ -711,7 +760,8 @@ The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above mem
 
 - `$.fs.write` truncates in place (same inode; a hard link sees the new text): not atomic. 1 KB 2 ms, 128 KB 3 ms, 2 MB 15 ms. `stat` 2 ms. `list` 3 ms, and it returns `{ name, kind, size, mtimeMs }` per entry, so one call stamps a whole folder.
 - Module environment:
-  - Present: `Date` in the local time zone, `Intl`, `toLocaleTimeString`, `Math.random`, `setTimeout`, `setInterval`, `AbortController`, `crypto`, `structuredClone`.
+  - Present: `Date` in the local time zone, `Intl`, `toLocaleTimeString`, `Math.random`, `setTimeout`, `setInterval`, `AbortController`, `crypto`, `structuredClone`, `BigInt`.
+  - `crypto.subtle` is `digest` only (the types say so, and in `claude plugin test` there is no `generateKey`, `importKey` or `verify`). Hence the license key's signature is checked in BigInt (`licensekey.ts`); tests use keys signed once by Node.
   - Absent: `queueMicrotask`, `process`, `fetch`, `WeakRef`.
   - `Date.now()` agrees with `$.clock.now()`. Keep `$.clock.now()`: tests move that clock.
 - `$.clock.after(ms)` fires 15 to 80 ms late. `cancel()` holds.
@@ -740,7 +790,7 @@ The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above mem
   - subagents finished by `$.turn.complete(session.finish(n, answer))`
 - Options: `email` (default `me@example.com`, `''` = none), `data` (seed the data disk), `isNewProject`, `install: 'clone'|'installed'`, `tags`, `isCloneDirty`, `isCloneCurrent`, `head`. Registers every stub needed to start and switch modes: extend it, don't register a second stub (one stub per event).
 - Data disk: `session.disk` (absolute path → text), `session.data(rel)`, `session.removed` (rm targets). Deletion needs the marker: `session.disk.set(MARKER_PATH, …)` or a prior write.
-- Explain in the kit: `session.lookups`, answered with `session.explain(reply, 'text the prompt contains')`. Order isn't guaranteed. With no answer, a file maps to no symbols. `session.editor(file, line, …, extra)` writes `focus.json`. Journal tests set `explain: 'off'` (a live editor triggers the 100 ms poll and slows minute-scale tests).
+- Explain in the kit: `session.lookups`, answered with `session.explain(reply, 'text the prompt contains')`. Order isn't guaranteed. With no answer, a file maps to no symbols. `session.editor(file, line, …, extra)` writes `editors/<extra.editor ?? 'test'>-1.json`, beating for the whole test unless `extra.at` is given (kit time starts at 0, and an `at` of 0 does not parse: advance the clock first). Journal tests set `explain: 'off'` (a live editor triggers the 100 ms poll and slows minute-scale tests).
 - Progress: `session.assess(reply)`, `session.assessments`. Updates: `session.ran` (claude and network git commands in order). A clone's top is the plugin folder's parent; an installed copy's `installPath` is `/`.
 - `session.logs` = `$.ui.log` output (swallowed errors appear there).
 - Failures in the kit: `session.failing.push('overloaded')` makes the next model request fail that way, whichever job makes it; `'look:overloaded'`, `'explain:…'`, `'progress:…'` name the job. Words: Claude Code's API errors, or `offline`, `timeout`, `empty`. Explain asks 2.5 s after a save, before the look, so name the job or set `explain: 'off'`. `$.classic.StopFailure({ error })` is a turn that died, `$.turn.complete(session.turnEnded())` a conversation turn that answered, `$.session.measure({ context, rateLimits, changed: ['rateLimits'] })` the plan's limits arriving (set `session.limits` too: the tutor reads them again before a look). `session.scans` counts `git status` calls.

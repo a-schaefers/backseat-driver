@@ -66,8 +66,21 @@ Type `/bsd` in Claude Code. The first time you work in a language, it asks a few
 | `/bsd update`, `/bsd uninstall` | Fetch a newer release when the pane announces one, or remove the plugin |
 | `/bsd help` | Every command and key |
 
-`Ctrl+X Tab` focuses the pane, and `Esc` leaves it. `1` to `4` switch tabs. The pane draws in the terminal and in the desktop app's Code tab. Models, pacing and persona (`torvalds`, `knuth`, `primeagen`, `eli5-tldr-kiss-terse`) are set in `/config`.
+`Ctrl+X Tab` focuses the pane, and `Esc` leaves it. `1` to `5` switch tabs. The pane draws in the terminal and in the desktop app's Code tab. Models, pacing and persona (`torvalds`, `knuth`, `primeagen`, `eli5-tldr-kiss-terse`) live in tab `5`, Settings, or `/bsd settings`. They're in `/config` too.
+
+### Editors
+
+Plugins for Emacs, Neovim and VS Code live in [`editors/`](editors). They tell the tutor where your caret is, what you've selected and what's open, so Explain follows your cursor and the journal knows where you've been. The pane says which editor is connected. Nothing to configure.
+
+- **Neovim** (0.9+): `vim.opt.rtp:append('/path/to/backseat-driver/editors/neovim')` in `init.lua`.
+- **Emacs** (27+): `(add-to-list 'load-path "/path/to/backseat-driver/editors/emacs")`, `(require 'backseat-driver)`, `(backseat-driver-mode 1)`.
+- **VS Code**: in `editors/vscode`, `npx @vscode/vsce package --skip-license`, then `code --install-extension backseat-driver-0.1.0.vsix`.
 
 ## License
 
-MIT. The decision points and insights are adapted, with thanks, from Anthropic's [learning-output-style](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/learning-output-style) plugin, under its Apache 2.0 license. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Source-available, not open source. Read it, change it, share it.
+
+- **Personal use is free.** Learning, hobby projects, unpaid open source. Schools and charities too.
+- **Commercial use is paid.** Using it for a business needs a [commercial license](COMMERCIAL-LICENSE.md). You'll pick personal or commercial the first time you switch it on, and `/bsd license` changes it. No lockouts. A missing key gets a note in the pane, nothing more. A commercial key is checked with our server about once a week, and nothing changes if it can't be reached.
+
+The terms are the [PolyForm Noncommercial License 1.0.0](LICENSE). Commits that carry the MIT license stay MIT. The decision points and insights are adapted, with thanks, from Anthropic's [learning-output-style](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/learning-output-style) plugin, under its Apache 2.0 license. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

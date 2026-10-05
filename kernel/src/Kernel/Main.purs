@@ -6,8 +6,13 @@
 -- | same out. The types that carry the rules stay inside.
 module Kernel.Main
   ( module Kernel.Health
+  , module Kernel.License
   , module Kernel.Pace
   , module Kernel.Play
+  , module Kernel.Queue
+  , module Kernel.Store
+  , module Kernel.Status
+  , module Kernel.Schedule
   , module Kernel.Sensor
   , leaseIsHeld
   , leaseClaimed
@@ -21,8 +26,13 @@ module Kernel.Main
 import Kernel.Health (mayAskWire, outcomeOfErrorWire, outcomeOfWire, retryDelayMsWire, stepWire, troubleOfWire)
 import Kernel.Lease (Lease)
 import Kernel.Lease as Lease
+import Kernel.License (licenseNextCheckWire, licenseStandingWire)
 import Kernel.Pace (backoffMs, gapFactor, isHeldAt, slowedGapMs)
 import Kernel.Play (isLookDueWire, playOfWire, wakeAtWire)
+import Kernel.Queue (currentQueueWire, failedTextWire, heldTextWire, isSpentWire, maxAttempts, maxWaitMs, maxWaiting, nextToAssessWire, nextToReviewWire, planHeld, retryBaseMs, retryMs, reviewedWire, settledInWire, verdictMs, watchdogLimitMs, watchdogMs, withAttemptWire, withCommitWire, withoutCommitWire)
+import Kernel.Store (afterReadWire, afterWriteWire, keepsBackupWire, readRetryMs, readTries, stepOfWire, writeTries)
+import Kernel.Status (healthLineWire, playLineWire, slowScanMs, watchStateWire)
+import Kernel.Schedule (armingWire, delayMsWire, dueNowWire)
 import Kernel.Sensor (focusGapMs, focusScanMs, hotForMs, hotScanMs, idleAfterMs, idleScanMs, longestFocusGapMs, longestScanGapMs, scanGapMsWire, scanMs)
 
 leaseIsHeld :: Lease -> Number -> Boolean

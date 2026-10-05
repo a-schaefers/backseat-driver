@@ -1,6 +1,6 @@
 # Third-party notices
 
-Backseat Driver is under the MIT License (see `LICENSE`), except for the parts listed here, which are adapted from other work and remain under that work's license.
+Backseat Driver is under the PolyForm Noncommercial License 1.0.0 (see `LICENSE`), or a commercial license (see `COMMERCIAL-LICENSE.md`), except for the parts listed here, which are adapted from other work and remain under that work's license. Those parts may be used, commercially or not, under that license alone.
 
 ## learning-output-style, by Anthropic
 
