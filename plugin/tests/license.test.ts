@@ -236,7 +236,7 @@ sessionTest('dismissing the question chooses nothing, asks nothing again, and th
   const started = await $.command.run(typed('bsd'))
   await session.clock.settle()
 
-  expect(started.text).toBe('Backseat Driver is on. You drive.')
+  expect(started.text).toMatch(/^Backseat Driver is on. You drive./)
   expect(session.data('license.json')).toMatchObject({ use: null, isAsked: true })
   await $.command.run(typed('bsd', 'off'))
   await $.command.run(typed('bsd'))

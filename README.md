@@ -34,20 +34,20 @@ So the machine goes where it belongs: the back seat. You drive. It watches the r
 
 ## What it is
 
-Type `/bsd`. A pane opens beside the conversation with five tabs.
+Type `/bsd`. It shows up right above your prompt, with five tabs. No extra window.
 
-**1. Play-by-play.** Live commentary on your code as you write it. Save, pause for a few seconds, and a fast model reads what changed. Worth saying? A short note lands in the pane: a bug, a risky pattern, a better idiom for that language. One idea per note. A hint, never a fix. Fix the code and the note goes away on its own. Nothing worth saying, it says nothing.
+**1. Play-by-play.** Live commentary on your code as you write it. Save, pause for a few seconds, and a fast model reads what changed. Worth saying? A short note lands right above your prompt: a bug, a risky pattern, a better idiom for that language. One idea per note. A hint, never a fix. Fix the code and the note goes away on its own. Nothing worth saying, it says nothing.
 
 - **Your call.** When your code hits a real design choice (how errors are handled, which data structure, what the user sees), the note says so, lays out what each way costs, and leaves the choice to you.
 - **★ Insight.** Now and then, something about how *this* codebase does things. Never a lecture you could read anywhere.
 
-**2. Deep review.** Commit, and a stronger model reviews the commit in the context of the whole project: design, correctness, what to do next. In the pane, not in your chat. Commits made while Claude is down or you're at your plan limit get reviewed when it's back.
+**2. Deep review.** Commit, and a stronger model reviews the commit in the context of the whole project: design, correctness, what to do next. In its own tab, not in your chat. Commits made while Claude is down or you're at your plan limit get reviewed when it's back.
 
 **3. Explain.** Move your cursor (with an editor plugin, below), point at a line (`/bsd explain src/app.py:42`), or just save, and it tells you what that code does, how, why it's there, what to watch out for and what it relies on. Step through a file symbol by symbol with `n` and `p`. Change the code and the old explanation disappears before it can lie to you.
 
 **4. Progress.** An honest level per language, from beginner to senior: where you are, why, and what the next level takes. Judged only on commits you wrote yourself, not imports, not generated code, not anything co-written with an AI. It follows you across projects. It can go down.
 
-**5. Settings.** Change the voice, the models, how hard they think and how often it looks, right in the pane. Same rows as `/config`.
+**5. Settings.** Change the voice, the models, how hard they think and how often it looks, right in the tab. Same rows as `/config`.
 
 **And the conversation.** Claude is still there in chat, as a tutor. Ask it anything. Ask it to write your code and you get a nudge, then the concept, then a small example somewhere else, one step at a time. Questions about the language get straight answers. Push back and it weighs your argument; a point you contest goes to the deep reviewer for a second opinion. Tell it to drop a topic and it stays dropped, in every project in that language. You have the last word.
 
@@ -83,18 +83,19 @@ Type `/bsd` in Claude Code. The first time you work in a language, it asks a few
 | `/bsd explain src/app.py:42` | Explain a spot in the code |
 | `/bsd working on the parser` | Tell it what you're working on |
 | `/bsd settings` | Open the Settings tab |
+| `/bsd layout` | Above the prompt, a horizontal frame, or a vertical pane. It remembers |
 | `/bsd forget` | Erase what it remembers: one project, one language, or everything |
 | `/bsd license` | Switch between personal and commercial use, or add a key |
-| `/bsd update`, `/bsd uninstall` | Fetch a newer release when the pane announces one, or remove the plugin |
+| `/bsd update`, `/bsd uninstall` | Fetch a newer release when it announces one, or remove the plugin |
 | `/bsd help` | Every command and key |
 
-`Ctrl+X Tab` focuses the pane, and `Esc` leaves it. `1` to `5` switch tabs. On a note, `e` explains it, `d` dismisses it, `m` mutes that topic for good. `l` looks at your changes now, `r` reviews now. The pane draws in the terminal and in the desktop app's Code tab.
+`Ctrl+X Tab` hands it the keyboard, and `Esc` takes it back. `1` to `5` open the tabs. On a note, `e` explains it, `d` dismisses it, `m` mutes that topic for good. `l` looks at your changes now, `r` reviews now. It draws in the terminal and in the desktop app's Code tab.
 
 Models, thinking levels, pacing and personas live in tab `5`, Settings, or `/bsd settings`. They're in `/config` too.
 
 ### Editors
 
-Plugins for Emacs, Neovim and VS Code live in [`editors/`](editors). They tell the tutor where your cursor is, what you've selected and what's open, so Explain follows your cursor and the tutor knows where you've been. The pane says which editor is connected. Nothing to configure.
+Plugins for Emacs, Neovim and VS Code live in [`editors/`](editors). They tell the tutor where your cursor is, what you've selected and what's open, so Explain follows your cursor and the tutor knows where you've been. The tutor says which editor is connected. Nothing to configure.
 
 - **Neovim** (0.9+): `vim.opt.rtp:append('/path/to/backseat-driver/editors/neovim')` in `init.lua`.
 - **Emacs** (27+): `(add-to-list 'load-path "/path/to/backseat-driver/editors/emacs")`, `(require 'backseat-driver)`, `(backseat-driver-mode 1)`.
@@ -105,6 +106,6 @@ Plugins for Emacs, Neovim and VS Code live in [`editors/`](editors). They tell t
 Source-available, not open source. Read it, change it, share it.
 
 - **Personal use is free.** Learning, hobby projects, unpaid open source. Schools and charities too.
-- **Commercial use is paid.** Using it for a business needs a [commercial license](COMMERCIAL-LICENSE.md). You pick personal or commercial the first time you switch it on, and `/bsd license` changes it. No lockouts. A missing key gets a note in the pane, nothing more.
+- **Commercial use is paid.** Using it for a business needs a [commercial license](COMMERCIAL-LICENSE.md). You pick personal or commercial the first time you switch it on, and `/bsd license` changes it. No lockouts. A missing key gets a note in the tutor, nothing more.
 
 The terms are the [PolyForm Noncommercial License 1.0.0](LICENSE). Commits that carry the MIT license stay MIT. The decision points and insights are adapted, with thanks, from Anthropic's [learning-output-style](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/learning-output-style) plugin, under its Apache 2.0 license. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

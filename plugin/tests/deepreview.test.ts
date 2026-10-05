@@ -107,7 +107,7 @@ sessionTest('a commit is reviewed by the registered reviewer, and the review lan
 
   await $.turn.complete(session.finish(1, 'Good change. `mean` fails on an empty list.'))
   expect(await ui.find({ type: 'Markdown', text: '`mean` fails on an empty list.' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: 'commit 0000000: Add mean' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Commit 0000000: Add mean' })).toBeDefined()
   await ui.unmount()
 
   // Nothing went into the conversation.

@@ -28,6 +28,9 @@ const VIEW: PaneView = {
   columns: 76,
   character: null,
   isCompact: false,
+  layout: 'vertical',
+  isUnfolded: false,
+  rows: 48,
   settings: [],
 }
 
