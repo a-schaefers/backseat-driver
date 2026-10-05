@@ -127,6 +127,8 @@ sessionTest('unified, the open notes show above the prompt one line each', async
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await band.find({ type: 'Text', text: 'stats.py:2  An empty list divides by zero.' })).toBeDefined()
   expect((await band.find({ key: 'tab-play' }))?.props.label).toBe('Play (1)')
+  // Folded, the notes are opened with j, but only while the band has the keyboard: otherwise j is a letter for the prompt.
+  expect(await band.find({ key: 'open-notes' })).toBeUndefined()
   await band.unmount()
 })
 

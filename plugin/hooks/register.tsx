@@ -4187,6 +4187,8 @@ export const register: Register = (on, options) => {
     mode = await read($, modeAtom)
     if (mode !== 'off') {
       trace($, 'hook', 'session.start', () => ({ mode, cwd: e.cwd, isReload: true }))
+      // A reload (a layout change, say) takes the keyboard back to the prompt.
+      await update($, bandKeysAtom, () => false)
       const open = await read($, notesAtom)
       nextNoteId = open.reduce((highest, note) => Math.max(highest, note.id), 0) + 1
       await loadTutor($, settings.persona)
@@ -4246,6 +4248,8 @@ export const register: Register = (on, options) => {
   on('command.run', { command: ['backseat-driver', 'bsd'] }, async ($, e) => {
     const { request, rest, unknown } = parseRequest(e.args)
     trace($, 'cmd', request, () => ({ args: e.args, mode }))
+    // Typing a command means the prompt had the keyboard, whatever the band last heard (Esc raises no event).
+    if (request !== 'debug') await update($, bandKeysAtom, () => false)
     if (request === 'help') return { text: helpText(unknown) }
     if (request === 'debug') {
       const asked = parseDebugRequest(rest)
