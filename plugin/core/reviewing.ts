@@ -12,7 +12,7 @@
 import type { Review } from '../types'
 import { failedText, heldText, isSpent, mayAsk, nextToAssess, nextToReview, retryMs, reviewed, settledIn, WATCHDOG_LIMIT_MS, WATCHDOG_MS, withAttempt, withoutCommit } from './core'
 import type { Health, Pressure } from './health'
-import type { Trace } from './host'
+import type { Host } from './host'
 import { commitSubject, EMPTY_QUEUE } from './reviewqueue'
 import type { ReviewQueue, Waiting } from './reviewqueue'
 import { scopeSubject, shortHash, showCommitArgs } from './review'
@@ -68,12 +68,8 @@ export function freshReviewState(): ReviewState {
 }
 
 /** What the waiting commits and their reviews need from their host. Each is read or done when it is needed. */
-export type ReviewPorts = {
+export type ReviewPorts = Pick<Host, 'now' | 'trace' | 'deadline' | 'engagement' | 'fail'> & {
   settings: Settings
-  now: () => Promise<number>
-  trace: Trace
-  /** Sets a deadline, or takes it away. */
-  deadline: { set: (name: string, at: number, run: () => Promise<unknown> | unknown) => void; cancel: (name: string) => void }
   /** Runs git in the repository. -1 is git not answering. */
   git: (args: readonly string[]) => Promise<{ exitCode: number; stdout: string }>
   changeQueue: (change: (queue: ReviewQueue) => ReviewQueue) => Promise<void>
@@ -93,15 +89,12 @@ export type ReviewPorts = {
   agents: () => Promise<readonly { id: string; description: string; status: string }[]>
   /** Hands a scope to the deep reviewer. Resolves false when it did not start. The caller holds the review slot. */
   startReview: (scope: ReviewScope) => Promise<boolean>
-  /** Counts the switch-ons, so that work from before a switch-off lets go. */
-  engagement: () => number
   /** The text of the deep review of a commit, by its short hash, or undefined. */
   reviewText: (commit: string) => string | undefined
   /** The look at the person's progress for a commit. Resolves false for "worth another try". */
   assess: (hash: string, review: string) => Promise<boolean>
   /** Runs this after the looks at progress already under way. */
   queueProgress: (work: () => Promise<void>) => void
-  fail: (what: string, error: unknown) => void
 }
 
 /** Whether a review may start: none is running, being started, or being wound up. */
