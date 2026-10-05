@@ -28,8 +28,6 @@ import type { Backdrop } from '../core/sprite'
 import { personaPrompt, reframeInstructions, SESSION_NOTES, stripComments, stripFrontmatter, tutorSections } from './contract'
 import {
   dataHome,
-  debugRoot,
-  debugSwitchPath,
   fileEntryPath,
   isOwnFolder,
   isRemovable,
@@ -44,7 +42,9 @@ import {
   projectId,
   sharedFolders,
 } from '../core/datahome'
-import { createDebugLog, createTracer, DEBUG_USAGE, FLUSH_MS, parseDebugRequest, parseSwitch, sessionFolder } from '../core/debuglog'
+import { debugCommand as runDebugCommand, flushDebug as flushDebugLog, freshDebuggingState, startDebug as startDebugLog, stopDebug as stopDebugLog, trace as noteTrace } from '../core/debugging'
+import type { DebuggingPorts, DebuggingState } from '../core/debugging'
+import { DEBUG_USAGE, parseDebugRequest } from '../core/debuglog'
 import type { DebugRequest } from '../core/debuglog'
 import { createExplainer, NO_VIEW } from '../core/explainer'
 import { EDITORS_FOLDER, focusWatchArgv, ignoredFolders, isEstablished, lineSplitter, nudgesOf, treeWatchArgv, watcherComplaint } from '../core/filewatch'
@@ -491,13 +491,12 @@ const journalState: JournalState = freshJournalState()
 /** What the pane was last told they are working on, as JSON, so that it is told again only when that changes. */
 
 /**
- * The debug log. The tracer always keeps the latest records in memory, and
- * writes every one of them to a file while the log is switched on.
+ * The debug log: `core/debugging.ts` runs it, and this is what it remembers.
+ * The tracer always keeps the latest records in memory, and writes every one
+ * of them to a file while the log is switched on.
  */
-const tracer = createTracer(() => Date.now())
-let flushTimer: Timer | null = null
-/** The tutor's state as last written beside the log, so that it is written again only when it changes. */
-let stateWritten = ''
+const debugState: DebuggingState = freshDebuggingState(() => Date.now())
+const tracer = debugState.tracer
 /** Polls that find nothing new are counted and summed up now and then, not logged one by one. */
 let quiet = { polls: 0, stats: 0, renders: 0, composes: 0 }
 let quietSince = 0
@@ -509,12 +508,7 @@ let composedLast = ''
 
 /** Records one thing the tutor did. Its details are worked out only while the debug log is on. */
 function trace($: EngineInterface, kind: string, name: string, detail?: () => unknown, ms?: number): void {
-  tracer.note(kind, name, detail, ms)
-  if (!tracer.isOn() || flushTimer !== null) return
-  flushTimer = $.clock.after(FLUSH_MS, () => {
-    flushTimer = null
-    void flushDebug($)
-  })
+  noteTrace(debugPortsOf($), debugState, kind, name, detail, ms)
 }
 
 /** Something went wrong and the tutor carried on. It is said in Claude Code's debug log and in the tutor's own. */
@@ -617,132 +611,51 @@ async function fullState($: EngineInterface): Promise<Record<string, unknown>> {
   }
 }
 
+/** What running the debug log needs from this session. `settings` is for the two that write them down. */
+function debugPortsOf($: EngineInterface, settings: Settings | null = null): DebuggingPorts {
+  return {
+    settings,
+    now: () => $.clock.now(),
+    after: (ms, run) => $.clock.after(ms, run),
+    read: path => $.fs.read(path),
+    write: (path, text) => $.fs.write(path, text),
+    list: path => $.fs.list(path),
+    remove: path => diskOf($).remove(path),
+    markHome: () => markHome($),
+    resolveHome: () => resolveHome($),
+    dataRoot: () => dataRoot,
+    repoRoot: () => repoRoot,
+    mode: () => mode,
+    sessionId: () => $.session.id(),
+    versions: async () => {
+      const [claudeCode, own] = await Promise.all([$.session.version(), ownVersion($)])
+
+      return { claudeCode, plugin: own.version === null ? null : versionText(own.version) }
+    },
+    pluginRoot: () => $.plugin.root,
+    fullState: () => fullState($),
+    log: text => $.ui.log(text, { to: 'debug' }),
+  }
+}
+
 /** Writes the debug log and, beside it, the tutor's whole state as it stands. */
 async function flushDebug($: EngineInterface): Promise<void> {
-  const log = tracer.log()
-  if (log === null) return
-  await log.flush()
-  try {
-    const text = JSON.stringify(await fullState($), null, 1)
-    if (text === stateWritten) return
-    stateWritten = text
-    await $.fs.write(`${log.dir()}/state.json`, `${text}\n`)
-  } catch {
-    // The state file is a convenience. The log itself has been written.
-  }
-}
-
-/** Whether the debug log's switch in the data folder says on. */
-async function isDebugSwitchedOn($: EngineInterface): Promise<boolean> {
-  try {
-    return parseSwitch(JSON.parse(await $.fs.read(debugSwitchPath(dataRoot))))
-  } catch {
-    // No switch, or not JSON: off.
-    return false
-  }
-}
-
-/** The names in a folder of the debug log, or none when it is not there. */
-async function debugNames($: EngineInterface, path: string): Promise<string[]> {
-  try {
-    return (await $.fs.list(path)).map(entry => entry.name)
-  } catch {
-    return []
-  }
+  await flushDebugLog(debugPortsOf($), debugState)
 }
 
 /** Starts this session's debug log, when the switch in the data folder says it is on. */
 async function startDebug($: EngineInterface, settings: Settings): Promise<void> {
-  if (tracer.isOn() || dataRoot === '') return
-  try {
-    if (!(await isDebugSwitchedOn($))) return
-    const sessionId = await $.session.id()
-    const root = debugRoot(dataRoot)
-    const dir = `${root}/${sessionFolder(await debugNames($, root), Date.now(), sessionId)}`
-    const log = createDebugLog({ write: (path, text) => $.fs.write(path, text), list: path => debugNames($, path) }, dir)
-    await markHome($)
-    await log.open()
-    tracer.attach(log, sessionId)
-    stateWritten = ''
-    const [claudeCode, own] = await Promise.all([$.session.version(), ownVersion($)])
-    trace($, 'meta', 'log started', () => ({
-      sessionId,
-      claudeCode,
-      plugin: own.version === null ? null : versionText(own.version),
-      pluginRoot: $.plugin.root,
-      dataRoot,
-      repoRoot,
-      mode,
-      settings,
-    }))
-  } catch (error) {
-    $.ui.log(`could not start the debug log: ${String(error)}`, { to: 'debug' })
-  }
+  await startDebugLog(debugPortsOf($, settings), debugState)
 }
 
 /** Stops the debug log, writing what it still holds. */
 async function stopDebug($: EngineInterface, why: string): Promise<void> {
-  if (!tracer.isOn()) return
-  trace($, 'meta', 'log stopped', () => ({ why }))
-  flushTimer?.cancel()
-  flushTimer = null
-  await flushDebug($)
-  tracer.detach()
+  await stopDebugLog(debugPortsOf($), debugState, why)
 }
 
 /** `/bsd debug`: switches the debug log, says where it is, writes down what just happened, or deletes the logs. */
 async function debugCommand($: EngineInterface, settings: Settings, request: DebugRequest): Promise<string> {
-  await resolveHome($)
-  if (dataRoot === '') return 'There is no home directory, so there is nowhere to keep a debug log.'
-  const root = debugRoot(dataRoot)
-
-  if (request === 'on' || request === 'off') {
-    await markHome($)
-    await $.fs.write(debugSwitchPath(dataRoot), `${JSON.stringify({ on: request === 'on', since: await $.clock.now() })}\n`)
-    if (request === 'off') {
-      await stopDebug($, 'switched off')
-
-      return `The debug log is off. What was logged is kept in ${root}, and /bsd debug clear deletes it.`
-    }
-    if (mode !== 'off') await startDebug($, settings)
-    const where = tracer.log()?.dir()
-
-    return [
-      `The debug log is on. It records everything the tutor does, your code and prompts included, in ${root}.`,
-      where === undefined ? 'It starts when the tutor is switched on.' : `This session writes ${where}.`,
-    ].join(' ')
-  }
-
-  if (request === 'status') {
-    const isOn = await isDebugSwitchedOn($)
-    const where = tracer.log()?.current()
-
-    return [
-      `The debug log is ${isOn ? 'on' : 'off'}.`,
-      where !== undefined ? `This session is writing ${where}.` : isOn ? 'It starts when the tutor is switched on.' : '',
-      `Logs are kept in ${root}.`,
-    ]
-      .filter(part => part !== '')
-      .join(' ')
-  }
-
-  if (request === 'dump') {
-    const latest = tracer.ring()
-    const path = `${root}/dump-${sessionFolder([], Date.now(), await $.session.id())}.json`
-    await markHome($)
-    await $.fs.write(path, `${JSON.stringify({ at: await $.clock.now(), state: await fullState($), latest }, null, 1)}\n`)
-
-    return `Wrote the tutor's state and its latest ${latest.length} records to ${path}.`
-  }
-
-  if ((await debugNames($, root)).length === 0) return `There are no debug logs in ${root}.`
-  const wasOn = tracer.isOn()
-  await stopDebug($, 'the logs were deleted')
-  const isGone = await diskOf($).remove(root)
-  if (wasOn) await startDebug($, settings)
-  if (!isGone) return `Could not delete ${root}. Delete it by hand.`
-
-  return wasOn ? `Deleted every debug log in ${root}. This session carries on in a new one.` : `Deleted every debug log in ${root}.`
+  return runDebugCommand(debugPortsOf($, settings), debugState, request)
 }
 
 /**
