@@ -163,13 +163,13 @@ mayAsk (Recovering _) = true
 mayAsk _ = false
 
 accountErrors :: Array String
-accountErrors = [ "authentication_failed", "oauth_org_not_allowed", "account_on_hold", "verification_required", "billing_error" ]
+accountErrors = [ "authentication_failed", "oauth_org_not_allowed", "account_on_hold", "verification_required", "billing_error", "cloud_credential_error" ]
 
 jobErrors :: Array String
 jobErrors = [ "model_not_found", "invalid_request", "max_output_tokens" ]
 
 -- | The trouble behind one of Claude Code's words for an API error. One it
--- | does not know is taken to pass.
+-- | does not know is taken for a server error: waited out, and tried again.
 troubleOf :: String -> Trouble
 troubleOf error
   | error == "rate_limit" = RateLimit
