@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { HEALTHY, mayAsk, NO_PRESSURE, outcomeOf, outcomeOfError, pressureOf, retryDelayMs, stepHealth, troubleOf } from '../hooks/health'
-import type { Health, Pressure } from '../hooks/health'
+import type { Health, HealthEvent, Pressure, Trouble } from '../hooks/health'
 import { isLookDue, playOf, wakeAt } from '../hooks/play'
 import type { PlayFacts } from '../hooks/play'
 import { createScheduler } from '../hooks/scheduler'
@@ -230,6 +230,87 @@ test('the request that finds out whether Claude is back cannot leave the others 
   // Only the one that was asking can be abandoned.
   expect(stepHealth(waiting, { type: 'abandoned' })).toEqual(waiting)
   expect(stepHealth(HEALTHY, { type: 'abandoned' })).toEqual(HEALTHY)
+})
+
+/** A small seeded generator, so that a history that breaks a rule can be found again by its seed. */
+function seeded(seed: number): () => number {
+  let state = seed >>> 0
+
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0
+    let t = state
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+const EVERY_TROUBLE: Trouble[] = ['rate-limit', 'overloaded', 'server', 'offline', 'timeout', 'account', 'job', 'reply']
+
+test('whatever happens and in whatever order, the health machine keeps its rules', { timeoutMs: 60_000 }, async () => {
+  for (let seed = 1; seed <= 400; seed += 1) {
+    const random = seeded(seed)
+    const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T
+    let health: Health = HEALTHY
+    let at = 1_790_000_000_000
+    for (let turn = 0; turn < 50; turn += 1) {
+      at += Math.floor(random() * 300_000)
+      const kind = pick(['failed', 'failed', 'failed', 'answered', 'due', 'probing', 'abandoned'] as const)
+      const event: HealthEvent =
+        kind === 'failed'
+          ? { type: 'failed', trouble: pick(EVERY_TROUBLE), detail: 'x', at, random: random(), resetsAt: pick([null, at + 60_000, at - 1]) }
+          : { type: kind }
+      const before = health
+      health = stepHealth(health, event)
+      const where = `seed ${seed}, turn ${turn}: ${JSON.stringify(before)} then ${JSON.stringify(event)} gave ${JSON.stringify(health)}`
+
+      // An answer, from anyone, always ends the trouble.
+      if (event.type === 'answered' && health.state !== 'ok') throw new Error(`an answer did not end it. ${where}`)
+      // A refused account is left only by an answer.
+      if (before.state === 'blocked' && event.type !== 'answered' && health.state !== 'blocked') throw new Error(`blocked was left without an answer. ${where}`)
+      // The request that finds out cannot leave the others waiting for good: whatever follows it, it is over.
+      if (before.state === 'probing' && (event.type === 'failed' || event.type === 'abandoned') && health.state === 'probing') {
+        throw new Error(`a probe that ended is still probing. ${where}`)
+      }
+      // A failure never brings the retry forward, and never shortens the count.
+      if (before.state === 'waiting' && health.state === 'waiting') {
+        if (health.until < before.until) throw new Error(`the retry came forward. ${where}`)
+        if (health.failures < before.failures) throw new Error(`the count went down. ${where}`)
+      }
+      // A wait is always in the future of the failure that set it.
+      if (event.type === 'failed' && health.state === 'waiting' && before.state !== 'waiting' && health.until <= event.at) {
+        throw new Error(`a wait that is already over. ${where}`)
+      }
+      // Only the service's own trouble makes everyone wait.
+      if (event.type === 'failed' && (event.trouble === 'job' || event.trouble === 'reply') && before.state === 'ok' && health.state !== 'ok') {
+        throw new Error(`a job's own problem made the others wait. ${where}`)
+      }
+      // Jobs ask by themselves exactly when nothing is known to be wrong, or the wait is over and nobody is finding out.
+      if (mayAsk(health) !== (health.state === 'ok' || health.state === 'recovering')) throw new Error(`mayAsk disagrees with the state. ${where}`)
+      // An event that changes nothing hands back the very object it was given: the shell tells a change by that.
+      if (JSON.stringify(health) === JSON.stringify(before) && health !== before) throw new Error(`nothing changed, and the object did. ${where}`)
+      if (health.state === 'ok' && health !== HEALTHY) throw new Error(`ok is not the one HEALTHY. ${where}`)
+    }
+  }
+})
+
+test('the wait after a failure is in the upper half of its step, for every trouble and every count', async () => {
+  const random = seeded(99)
+  for (let turn = 0; turn < 5000; turn += 1) {
+    const trouble = EVERY_TROUBLE[Math.floor(random() * EVERY_TROUBLE.length)] as Trouble
+    const failures = Math.floor(random() * 40) - 3
+    const first = trouble === 'offline' || trouble === 'timeout' ? 15_000 : 30_000
+    const whole = Math.min(600_000, first * 2 ** Math.max(0, failures - 1))
+    const wait = retryDelayMs(trouble, failures, random())
+    expect(wait >= whole / 2 && wait <= whole).toBe(true)
+    expect(Number.isInteger(wait)).toBe(true)
+  }
+})
+
+test('a model result with an error and no word for it names the status', async () => {
+  expect(outcomeOf({ isAnswered: false, reason: 'api-error', status: 503, error: '' })).toEqual({ ok: false, trouble: 'server', detail: 'error 503' })
+  expect(outcomeOf({ isAnswered: false, reason: 'api-error', status: 503 })).toEqual({ ok: false, trouble: 'server', detail: 'error 503' })
 })
 
 test('a refused account stops every job until something is answered', async () => {

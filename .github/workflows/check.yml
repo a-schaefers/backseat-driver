@@ -1,4 +1,4 @@
-# Runs `npm run check` (validate, test, typecheck) on every push to main and
+# Runs `npm run check` (kernel, validate, test, typecheck) on every push to main and
 # every pull request, against the Claude Code version the mod was last
 # verified with. nightly.yml runs the same check on the newest Claude Code.
 
@@ -33,6 +33,15 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # The kernel is PureScript. `npm run check` builds it and fails when the committed bundle,
+      # plugin/hooks/kernel.js, is not what kernel/src builds. The compiler (fetched by pinned hash)
+      # and spago's packages are kept between runs.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            local/bin
+            kernel/.spago
+          key: kernel-${{ runner.os }}-${{ hashFiles('kernel/toolchain.json', 'kernel/spago.lock') }}
       - run: npm install -g @anthropic-ai/claude-code@$CLAUDE_CODE_VERSION
       - run: claude --version
       # The type check reads the mod API types, which Claude Code writes beside

@@ -1,5 +1,9 @@
 import { throttle, usagePressure } from './gate'
 
+// The decisions are the kernel's (kernel/src/Kernel/Health.purs), through core.ts. The types the rest of the
+// mod uses for them, and the plan's pressure, are here.
+export { HEALTHY, mayAsk, outcomeOf, outcomeOfError, retryDelayMs, stepHealth, troubleOf } from './core'
+
 /**
  * Whether Claude is answering, and when to ask again if it is not.
  *
@@ -26,36 +30,6 @@ export type Outcome = { ok: true } | { ok: false; trouble: Trouble; detail: stri
 /** What `$.model.complete` resolves to, as far as this module reads it. */
 export type ModelResult = { isAnswered: true } | { isAnswered: false; reason: string; status?: number | null; error?: string }
 
-const ACCOUNT_ERRORS = ['authentication_failed', 'oauth_org_not_allowed', 'account_on_hold', 'verification_required', 'billing_error']
-const JOB_ERRORS = ['model_not_found', 'invalid_request', 'max_output_tokens']
-
-/** The trouble behind one of Claude Code's words for an API error. One it does not know is taken to pass. */
-export function troubleOf(error: string): Trouble {
-  if (error === 'rate_limit') return 'rate-limit'
-  if (error === 'overloaded') return 'overloaded'
-  if (ACCOUNT_ERRORS.includes(error)) return 'account'
-  if (JOB_ERRORS.includes(error)) return 'job'
-
-  return 'server'
-}
-
-/** How a model call went. */
-export function outcomeOf(result: ModelResult): Outcome {
-  if (result.isAnswered) return { ok: true }
-  if (result.reason === 'aborted') return { ok: false, trouble: 'timeout', detail: 'timed out' }
-  if (result.reason !== 'api-error') return { ok: false, trouble: 'reply', detail: 'empty reply' }
-  // No status at all: the request never reached the service, or its answer never came back.
-  if (result.status === null || result.status === undefined) return { ok: false, trouble: 'offline', detail: 'no connection' }
-  const error = result.error ?? 'unknown'
-
-  return { ok: false, trouble: troubleOf(error), detail: error === 'unknown' ? `error ${result.status}` : error.replaceAll('_', ' ') }
-}
-
-/** How an API error that ended a turn, the conversation's or a subagent's, counts. */
-export function outcomeOfError(error: string): Outcome {
-  return { ok: false, trouble: troubleOf(error), detail: error.replaceAll('_', ' ') }
-}
-
 export type Health =
   /** Requests are being answered, as far as anyone knows. */
   | { state: 'ok' }
@@ -68,8 +42,6 @@ export type Health =
   /** The account is refused. No job asks by itself until something is answered again. */
   | { state: 'blocked'; detail: string }
 
-export const HEALTHY: Health = { state: 'ok' }
-
 export type HealthEvent =
   /** A request failed. `random` is a number from 0 up to 1. `resetsAt` is when the plan's window reopens, if that is why. */
   | { type: 'failed'; trouble: Trouble; detail: string; at: number; random: number; resetsAt?: number | null }
@@ -81,60 +53,6 @@ export type HealthEvent =
   | { type: 'probing' }
   /** The job that was asking ended without saying anything about Claude: it was cut short, or what came back was its own problem. */
   | { type: 'abandoned' }
-
-const FIRST_WAIT_MS = 30_000
-/** With no connection, or no answer in time, the first retry comes sooner: a dropped connection is often back at once. */
-const FIRST_WAIT_OFFLINE_MS = 15_000
-const LONGEST_WAIT_MS = 600_000
-/** After a plan window reopens, a retry waits up to this much longer, so that every session does not ask in the same second. */
-const RESET_SLACK_MS = 30_000
-
-/**
- * How long to wait after the nth failure in a row: 30 seconds, doubling, ten
- * minutes at most, and somewhere in the upper half of that, so that several
- * sessions do not all come back at the same moment.
- */
-export function retryDelayMs(trouble: Trouble, failures: number, random: number): number {
-  const first = trouble === 'offline' || trouble === 'timeout' ? FIRST_WAIT_OFFLINE_MS : FIRST_WAIT_MS
-  const whole = Math.min(LONGEST_WAIT_MS, first * 2 ** Math.max(0, failures - 1))
-
-  return Math.round(whole / 2 + (random * whole) / 2)
-}
-
-export function stepHealth(health: Health, event: HealthEvent): Health {
-  switch (event.type) {
-    case 'answered':
-      return HEALTHY
-    case 'due':
-      return health.state === 'waiting' ? { state: 'recovering', trouble: health.trouble, detail: health.detail, failures: health.failures } : health
-    case 'probing':
-      return health.state === 'recovering' ? { ...health, state: 'probing' } : health
-    case 'abandoned':
-      // Nothing was found out, so the next job that wants to ask does. Otherwise every job would wait for an answer that is not coming.
-      return health.state === 'probing' ? { ...health, state: 'recovering' } : health
-    case 'failed': {
-      if (event.trouble === 'account') return { state: 'blocked', detail: event.detail }
-      // Not the service's doing: the job that asked deals with it.
-      if (event.trouble === 'job' || event.trouble === 'reply') return stepHealth(health, { type: 'abandoned' })
-      if (health.state === 'blocked') return health
-      const failures = health.state === 'ok' ? 1 : health.failures + 1
-      const reopens = event.trouble === 'rate-limit' && typeof event.resetsAt === 'number' && event.resetsAt > event.at ? event.resetsAt : null
-      const until =
-        reopens !== null
-          ? reopens + Math.round(event.random * RESET_SLACK_MS)
-          : event.at + retryDelayMs(event.trouble, failures, event.random)
-      // A failure reported while already waiting never brings the retry forward.
-      const kept = health.state === 'waiting' ? Math.max(health.until, until) : until
-
-      return { state: 'waiting', trouble: event.trouble, detail: event.detail, until: kept, failures }
-    }
-  }
-}
-
-/** Whether a job may ask by itself now. What the person asks for is always tried. */
-export function mayAsk(health: Health): boolean {
-  return health.state === 'ok' || health.state === 'recovering'
-}
 
 /** How close the plan's usage limit is, from the tightest window still open. */
 export type Pressure = {

@@ -6,3 +6,10 @@ plugin/.claude-plugin/types/
 
 # Worktrees that other Claude Code sessions make in this repository.
 .claude/worktrees/
+
+# The kernel's build: the PureScript compiler (fetched by pinned hash), spago's
+# packages and the compiled modules. The bundle they make,
+# plugin/hooks/kernel.js, is committed.
+local/
+kernel/.spago/
+kernel/output/

@@ -1,0 +1,22 @@
+# The kernel of Backseat Driver: the decisions the mod makes, as PureScript.
+# Compiled by `purs` (local/bin/purs, fetched by pinned sha256 with
+# scripts/toolchain.py) into kernel/output/ (ES modules), which esbuild bundles
+# into the one file the mod loads, plugin/hooks/kernel.js. That file is
+# committed: nothing is built on a user's machine. `npm run build:kernel` makes
+# it, and `npm run check` fails when it is not what the source builds.
+# Determinism: this pinned package set, the pinned compiler, the pinned esbuild,
+# and a clean output folder before each build.
+package:
+  name: backseat-driver-kernel
+  dependencies:
+    - prelude
+    - arrays
+    - foldable-traversable
+    - integers
+    - maybe
+    - numbers
+    - strings
+workspace:
+  packageSet:
+    registry: 80.2.0
+  extraPackages: {}

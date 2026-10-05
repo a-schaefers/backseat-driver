@@ -77,7 +77,7 @@ Every roadmap milestone is built and was seen working in short scripted real ses
   - which ref new installs get (see Updates)
   - whether to submit to Anthropic's directory
   - whether the mod may name watch paths at session start, while still off (open since M0, 2026-10-04). It would give pushed commits (`.git/logs/HEAD`), a pushed editor caret and pushed changes from other sessions, about 0.6 s after the write, with no file read. It bends "dormant until switched on": Claude Code would watch a handful of paths in every session that has the plugin. Saves in the working tree stay on the sensor either way, because a watched folder reports its direct children only.
-  - whether the event-driven machines are written in TypeScript first and ported (the approved order) or born in PureScript, now that the load probe passed
+  - (settled by doing: the machines were written in TypeScript first, as approved, and are being ported. New decision logic is born in PureScript from here on, see "Kernel".)
 - Directory facts (checked 2026-10-04):
   - It lists mods, for Claude Code only.
   - Submit at claude.ai/directory/manage. It tracks a branch or tag, and the plugin path can be `plugin`.
@@ -85,7 +85,7 @@ Every roadmap milestone is built and was seen working in short scripted real ses
   - Limits: files under 256 KiB, at most 512 files.
   - Directory installs load as `<name>@synced`.
 - Approved plan for part two: `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine (nine decisions, risks per milestone).
-- In progress: the event-driven plan, `~/.claude/plans/wild-jumping-clover.md` on the owner's machine (approved 2026-10-04). Milestones M0 probes, M1 debug log, M2 locked store, M3 kernel (events, deadlines, health, play-by-play machine, sensor), M4 deep review queue, M5 Explain and journal on deadlines, M6 one driver per project, M7 pane pass, M8 optional push sources, M9 PureScript kernel. Done so far: M0 (see "Probed live" under Mod API), M1 (see "Debug log"; it also added the `session.end` flush of the journal) and M2 (the store and the locks, under "Data folder"). M3 (the kernel: deadlines, the scan, health, the play-by-play's state and status line; under "Play-by-play and watcher") and M4 (the queue of commits waiting for their review, its retries and watchdog; under "Deep review") are done too, and so is M5 (Explain and the journal on deadlines, the caret's fast lane, attention from timestamps; under "Explain" and "Journal"). Nothing in the mod runs on a repeating timer now except the animated persona's mouth and blink. M6 (one session drives a project, and what is on record about the person is read again when another session changes it; under "Several sessions") and M7 (the pane pass, under "Pane") are done as well. M8 is a set of optional push sources that each need the owner's decision (see the open decisions above), so nothing of it is built. Next: M9, the PureScript kernel.
+- In progress: the event-driven plan, `~/.claude/plans/wild-jumping-clover.md` on the owner's machine (approved 2026-10-04). Milestones M0 probes, M1 debug log, M2 locked store, M3 kernel (events, deadlines, health, play-by-play machine, sensor), M4 deep review queue, M5 Explain and journal on deadlines, M6 one driver per project, M7 pane pass, M8 optional push sources, M9 PureScript kernel. Done so far: M0 (see "Probed live" under Mod API), M1 (see "Debug log"; it also added the `session.end` flush of the journal) and M2 (the store and the locks, under "Data folder"). M3 (the kernel: deadlines, the scan, health, the play-by-play's state and status line; under "Play-by-play and watcher") and M4 (the queue of commits waiting for their review, its retries and watchdog; under "Deep review") are done too, and so is M5 (Explain and the journal on deadlines, the caret's fast lane, attention from timestamps; under "Explain" and "Journal"). Nothing in the mod runs on a repeating timer now except the animated persona's mouth and blink. M6 (one session drives a project, and what is on record about the person is read again when another session changes it; under "Several sessions") and M7 (the pane pass, under "Pane") are done as well. M8 is a set of optional push sources that each need the owner's decision (see the open decisions above), so nothing of it is built. M9, the PureScript kernel, has begun (see "Kernel"): the toolchain, the membrane, the check that the committed bundle is what the source builds, and the health machine. The other decision modules are ported one at a time, each after a parity run against the TypeScript it replaces: `PORTED` and `TO PORT` in "Kernel" say where that stands.
 
 ## Repository
 
@@ -102,10 +102,17 @@ THIRD_PARTY_NOTICES.md (also plugin/) the Apache-2.0 parts: learning-output-styl
 plugin/hooks/hooks.json             {"modules": ["./register.tsx"]}
 plugin/hooks/register.tsx           all effects
 plugin/hooks/*.ts, pane.tsx         pure logic
+plugin/hooks/kernel.js              the kernel, compiled from PureScript; committed, never edited by hand
+plugin/hooks/kernel.d.ts, core.ts   what the kernel exports, and the one file that calls it
+kernel/src/Kernel/*.purs            the kernel's source (dev tooling: not shipped)
+kernel/spago.yaml, spago.lock       its package set, pinned
+kernel/toolchain.json               the PureScript compiler, pinned by sha256
 plugin/types/index.d.ts             state keys, tool inputs
 plugin/tests/                       claude plugin test; kit.ts is the fake world
 scripts/dev-session.sh              live session in tmux
 scripts/outage-proxy.py             a proxy to cut one live session off from Claude
+scripts/toolchain.py                fetches the pinned compiler into local/bin (git-ignored)
+scripts/build-kernel.sh             kernel/src -> plugin/hooks/kernel.js
 scripts/release.sh                  cut a release
 .github/workflows/check.yml         npm run check on push/PR, pinned Claude Code
 .github/workflows/nightly.yml       same check daily on newest Claude Code
@@ -116,8 +123,10 @@ The ground rules in README ("Claude does not edit your files" etc.) describe end
 ## Commands
 
 ```bash
-npm install                      # once: TypeScript, the only dev dependency
-npm run check                    # validate + licenses + test + typecheck
+npm install                      # once: TypeScript, and spago and esbuild for the kernel
+npm run check                    # kernel + validate + licenses + test + typecheck
+npm run build:kernel             # kernel/src -> plugin/hooks/kernel.js (fetches the pinned compiler the first time)
+npm run kernel                   # fails when plugin/hooks/kernel.js is not what kernel/src builds
 npm run licenses                 # LICENSE and THIRD_PARTY_NOTICES.md: root and plugin/ copies identical
 npm run validate                 # claude plugin validate . --strict && ./plugin --strict
 npm test                         # claude plugin test ./plugin
@@ -187,7 +196,9 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 | `gate.ts` | the pacing arithmetic: backoff after failed looks, the gap near the plan limit |
 | `scheduler.ts` | deadlines: named things to do at a known time, one timer for the earliest |
 | `sensor.ts` | how often the working tree is scanned, and how often the spot in focus is checked while someone watches it |
-| `health.ts` | whether Claude is answering: what went wrong with a request, the shared wait after failures, the plan's pressure |
+| `health.ts` | whether Claude is answering: the types, and the plan's pressure. The decisions are the kernel's (`Kernel.Health`) |
+| `core.ts` | the membrane: the one file that imports `kernel.js`, turning the kernel's flat records into the mod's tagged unions and back |
+| `kernel.js`, `kernel.d.ts` | the kernel, compiled from PureScript, and what it exports |
 | `play.ts` | what the play-by-play is doing and when it looks next, worked out from the facts |
 | `status.ts` | the pane's status line as a sentence, with a clock time for every wait |
 | `notes.ts`, `prompts.ts` | reviewer reply → notes; reviewer and conversation prompt text |
@@ -219,6 +230,31 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 | `questions.ts` | first-run questions |
 | `debuglog.ts` | the debug log: records, chunks, the ring of latest records, the tracer, `/bsd debug` parsing |
 | `pane.tsx` | pane tree from plain data, handlers passed in |
+
+### Kernel (PureScript)
+
+The owner wants the logic functional where it can be, "to detect, prevent and reduce bugs" (Product). The decisions the mod makes live in `kernel/src/Kernel/*.purs`. Their types carry the rules: a state that cannot happen cannot be built, and a transition that is not handled does not compile. Modeled on `../merecatholicity.com` (`purescript/src/Domain/*`, `app/core.ts`).
+
+- Rule: new decision logic is written in PureScript. TypeScript is the shell (`register.tsx`: effects), the pane, the engines with ports, text parsing, and the membrane. Claude Code reads `on(...)` and `$` calls from TypeScript source, so those cannot move.
+- `PORTED`: `Kernel.Health` (the shared wait after failures, what an API error means). `TO PORT`, in this order: `play.ts`, `sensor.ts`, `lease.ts`, `reviewqueue.ts`, the store's retry policy.
+- How it reaches the mod:
+  - `scripts/build-kernel.sh` (`npm run build:kernel`): `scripts/toolchain.py` puts `purs` 0.15.16 in `local/bin` (downloaded from the GitHub release, tarball and binary each checked against the sha256 in `kernel/toolchain.json`), `spago build` compiles `kernel/src` with the package set pinned in `kernel/spago.yaml` and `spago.lock`, and esbuild (pinned exactly in `package.json`) bundles the entry module `Kernel.Main` into one ES module, `plugin/hooks/kernel.js`.
+  - `kernel.js` is committed: installs copy the repository, and nothing is built on a user's machine. It is 21 KB for one module (the limit for a file in a plugin directory listing is 256 KiB). Never edit it.
+  - `npm run kernel` builds beside it and compares. `npm run check` starts with it, and so does CI, which keeps `local/bin` and `kernel/.spago` between runs.
+  - `Kernel.Main` re-exports what crosses. What it does not export is not in the bundle.
+- The membrane, `core.ts`, is the only importer of `kernel.js`:
+  - PureScript functions are curried: `K.stepWire(health)(event)`.
+  - What crosses is plain data, as flat records in which every field is always present (`HealthWire`: `{ state, trouble, detail, until, failures }`), because one PureScript record type cannot be a union of shapes. The kernel turns them into its own types and back (`healthFromWire`, `healthToWire`), and `core.ts` turns them into the tagged unions the rest of the mod uses. A tag the kernel does not know becomes the safe value (`Ok`, a server error), never an exception.
+  - The membrane keeps identity: when an event changes nothing, `stepHealth` hands back the object it was given, and `ok` is always the one `HEALTHY`. `noteOutcome` tells a change by `health === before`.
+  - Keep it thin. A decision made in `core.ts` is one the kernel's types did not check.
+- Porting a module: write `Kernel.X` with the same rules, export its `…Wire` functions from `Kernel.Main`, declare them in `kernel.d.ts`, write the membrane functions in `core.ts` under the names the TypeScript module exported, and re-export them from that module so that no caller changes. Then copy the old TypeScript into a temporary reference under `plugin/tests/` and run both over seeded random histories. When they agree, delete the reference and the old logic, and keep property tests (the rules, over random histories) beside the table tests.
+- Health's parity run (2026-10-04): 60,000 random steps of `stepHealth` and `mayAsk`, 20,000 retry delays, every error word and 500 model results agreed, with one difference that is meant: an API error with an empty word used to leave the detail empty ("The last look failed ()") and now names the status ("error 503").
+- PureScript things that bite here:
+  - `Int` is 32 bits. Clock times are `Number`.
+  - `type` is a reserved word, so an event's tag is `kind` on the wire.
+  - `Data.Number.round` is JavaScript's `Math.round`, so the arithmetic matches the TypeScript it replaced to the millisecond.
+- `npm audit` reports three "high" findings, all one advisory: `braces` through `micromatch` through spago, a stack exhaustion on a hostile glob pattern. spago is a dev tool that globs this repository's own files, nothing of it ships, and the fix npm offers is a downgrade of spago. The reference repository lives with the same one.
+- Live (2026-10-04): a real session on the bundle went through an outage and back: no connection, `waiting offline failures=1`, the wait over 12 s later, a lookup answered, `ok`. The mod loads `kernel.js` through `register.tsx` → `health.ts` → `core.ts`.
 
 ### Mode
 
@@ -692,6 +728,7 @@ The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above mem
 - Engines with ports are tested without the kit: `explain.test.ts` has `world()`, whose model is answered by hand with `w.answer(request, reply)`, which is how a test changes a file mid-call. `w.state.wakeAt` is what the engine last asked for, and `w.explainer.wake()` is the deadline firing.
 - Another session in the kit is what it leaves in the data folder: seed `data: { 'projects/<id>/lease.json': { v: 1, session: 'someone-else', at: 0 } }` for a driver that is there (kit time starts at 0, so that lease runs out at 60 s), or `session.disk.set(...)` a profile mid-test for a hush made elsewhere. `session.sessionId` is this session's id: set it and fire `$.classic.SessionStart({ source: 'clear' })` for a `/clear`. `session.scans` counts one `git status` at switch-on even in a session that does not drive.
 - `/clear` in the kit: `$.session.end({ reason: 'clear', … })`, then `$.classic.SessionStart({ source: 'clear' })`. The kit cannot empty `$.state` in between, so a test changes the pane by hand there (dismisses a note) and checks that it is put back.
+- Property tests (`kernel.test.ts`): a rule is checked over seeded random histories (`seeded(seed)`), and a failure names its seed and turn, so it can be found again. They run against the committed bundle, which is what users get.
 - A slow model in the kit: `session.stall('explain' | 'look' | 'progress')` holds that job's requests open until `session.release()`. Requests are recorded when asked, not when answered.
 - `sessionTest` (30 s limit) for anything that starts a session; plain `test` (5 s) for pure functions. All files run in parallel processes, and each test loads the whole mod, so a busy machine takes seconds before the first action.
 - A `$.clock.every` period is one dispatch with 10 s of real time ("exceeded 10000ms budget" under load). The timed deep review is no longer one: it is a deadline. `await session.clock.settle()` before asserting on timer-started work.
