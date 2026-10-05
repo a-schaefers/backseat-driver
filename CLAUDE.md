@@ -117,6 +117,7 @@ scripts/build-kernel.sh             kernel/src -> plugin/hooks/kernel.js
 scripts/release.sh                  cut a release
 .github/workflows/check.yml         npm run check on push/PR, pinned Claude Code
 .github/workflows/nightly.yml       same check daily on newest Claude Code
+research/                           research notes for the owner (not shipped): multi-backend.md
 ```
 
 The ground rules in README ("Claude does not edit your files" etc.) describe end-user product behavior, not rules for working in this repo.
