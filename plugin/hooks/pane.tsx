@@ -334,7 +334,7 @@ export function detailMarkdown(detail: NonNullable<ExplainView['detail']>): stri
 }
 
 /** What the Explain tab says about a file it knows nothing about yet. */
-export const NOTHING_EXPLAINED = 'Nothing explained here yet. f looks this file up, or run /bsd explain with a file and a line.'
+export const NOTHING_EXPLAINED = 'Nothing explained here yet: either this file has not been looked up, or it has no functions or classes to explain. f looks it up again, or run /bsd explain with a file and a line.'
 
 function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, actions: PaneActions) {
   const { explain } = view

@@ -184,7 +184,7 @@ sessionTest('/bsd layout changes the layout in /config, shows it at once, and st
   await session.clock.settle()
 
   const vertical = await $.command.run(typed('bsd', 'layout vertical'))
-  expect(vertical.text).toBe('Layout: vertical. It is kept for next time.')
+  expect(vertical.text).toBe('Layout: vertical. It is kept for next time. The pane sits beside the conversation in fullscreen, and above the prompt, short, elsewhere.')
   expect(session.configured).toEqual([{ key: 'backseat-driver.layout', value: 'vertical' }])
   expect(session.opened).toEqual(['backseat-driver'])
 
@@ -206,7 +206,7 @@ sessionTest('/bsd layout works while the tutor is off, and opens nothing', async
   await $.session.start(SESSION)
 
   const set = await $.command.run(typed('bsd', 'layout vertical'))
-  expect(set.text).toBe('Layout: vertical. It is kept for next time. It shows when you run /bsd.')
+  expect(set.text).toBe('Layout: vertical. It is kept for next time. The pane sits beside the conversation in fullscreen, and above the prompt, short, elsewhere. It shows when you run /bsd.')
   expect(session.opened).toEqual([])
 
   await $.command.run(typed('bsd'))
