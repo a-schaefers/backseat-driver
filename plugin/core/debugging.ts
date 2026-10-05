@@ -41,8 +41,8 @@ export type DebuggingPorts = Pick<Host, 'now' | 'after' | 'markHome' | 'dataRoot
   remove: (path: string) => Promise<boolean>
   /** Works out where the data folder is, when that is not known yet. */
   resolveHome: () => Promise<void>
-  /** The versions of Claude Code and of the plugin (null when it cannot be read), the plugin's folder. */
-  versions: () => Promise<{ claudeCode: unknown; plugin: string | null }>
+  /** The host's own versions, named as the host names them (written into the log's first record as they are), and the plugin's (null when it cannot be read). */
+  versions: () => Promise<{ host: Record<string, unknown>; plugin: string | null }>
   pluginRoot: () => string
   /** The tutor's whole state: what is held in memory, and what the pane is drawn from. */
   fullState: () => Promise<Record<string, unknown>>
@@ -122,10 +122,10 @@ export async function startDebug(ports: DebuggingPorts, state: DebuggingState): 
     const earlier = state.tracer.ring()
     state.tracer.attach(log, sessionId)
     state.stateWritten = ''
-    const { claudeCode, plugin } = await ports.versions()
+    const { host, plugin } = await ports.versions()
     trace(ports, state, 'meta', 'log started', () => ({
       sessionId,
-      claudeCode,
+      ...host,
       plugin,
       pluginRoot: ports.pluginRoot(),
       dataRoot: ports.dataRoot(),
