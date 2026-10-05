@@ -46,6 +46,7 @@ import {
 } from '../core/datahome'
 import { debugCommand as runDebugCommand, flushDebug as flushDebugLog, followSwitch as followDebugSwitch, freshDebuggingState, startDebug as startDebugLog, stopDebug as stopDebugLog, trace as noteTrace } from '../core/debugging'
 import type { DebuggingPorts, DebuggingState } from '../core/debugging'
+import type { Host } from '../core/host'
 import { DEBUG_USAGE, parseDebugRequest } from '../core/debuglog'
 import type { DebugRequest } from '../core/debuglog'
 import { createExplainer, NO_VIEW } from '../core/explainer'
@@ -667,22 +668,50 @@ async function fullState($: EngineInterface): Promise<Record<string, unknown>> {
   }
 }
 
+/**
+ * Claude Code as the engines' host: every shared port, each made from `$`
+ * and read at the moment an engine needs it. An engine's ports are this and
+ * what is its own. `settings` is for the model calls, which only engines that
+ * have settings take: without them, a request is refused before it is sent.
+ */
+function hostOf($: EngineInterface, settings: Settings | null): Host {
+  return {
+    now: async () => await $.clock.now(),
+    after: (ms, run) => $.clock.after(ms, run),
+    deadline: { set: (name, at, run) => schedulerOf($).set(name, at, run), cancel: name => void deadlines?.cancel(name) },
+    trace: (kind, name, detail) => trace($, kind, name, detail),
+    fail: (what, error) => fail($, what, error),
+    toast: text => $.ui.toast(text),
+    sessionId: async () => await $.session.id(),
+    mode: () => mode,
+    isOn: () => mode !== 'off',
+    isDriver: () => leaseState.isDriver,
+    engagement: () => engagement,
+    repoRoot: () => repoRoot,
+    dataRoot: () => dataRoot,
+    store: () => storeOf($),
+    markHome: () => markHome($),
+    list: async path => await $.fs.list(path),
+    readFile: async path => await $.fs.read(path),
+    writeFile: async (path, text) => void (await $.fs.write(path, text)),
+    git: (root, args) => git($, root, args),
+    ask: (job, request) =>
+      settings === null ? Promise.reject(new Error(`no settings to ask the ${job} model with`)) : callModel($, settings, job, request),
+    readPressure: () => readPressure($),
+  }
+}
+
 /** What running the debug log needs from this session. `settings` is for the two that write them down. */
 function debugPortsOf($: EngineInterface, settings: Settings | null = null): DebuggingPorts {
+  const host = hostOf($, settings)
+
   return {
+    ...host,
     settings,
-    now: () => $.clock.now(),
-    after: (ms, run) => $.clock.after(ms, run),
-    read: path => $.fs.read(path),
-    write: (path, text) => $.fs.write(path, text),
-    list: path => $.fs.list(path),
+    read: host.readFile,
+    write: host.writeFile,
     remove: path => diskOf($).remove(path),
-    markHome: () => markHome($),
     resolveHome: () => resolveHome($),
-    dataRoot: () => dataRoot,
-    repoRoot: () => repoRoot,
-    mode: () => mode,
-    sessionId: () => $.session.id(),
     versions: async () => {
       const [claudeCode, own] = await Promise.all([$.session.version(), ownVersion($)])
 
@@ -1734,24 +1763,16 @@ async function runUninstall($: EngineInterface, settings: Settings): Promise<voi
 /** What keeping the journal needs from Claude Code. */
 function journalPortsOf($: EngineInterface): JournalPorts {
   return {
-    now: async () => await $.clock.now(),
-    trace: (kind, name, detail) => trace($, kind, name, detail),
+    ...hostOf($, null),
     showWorking: async working => void (await update($, workingAtom, (): Working => working)),
-    isOn: () => mode !== 'off',
-    store: () => storeOf($),
     file: root => (dataRoot === '' ? '' : journalPath(dataRoot, root)),
-    repoRoot: () => repoRoot,
     read: (root, path) => readSource($, root, path),
-    git: (root, args) => git($, root, args),
     readEditor: async () => {
       await readFocus($)
 
       return followState.focusText
     },
     watcher: () => watcher,
-    engagement: () => engagement,
-    deadline: { set: (name, at, run) => schedulerOf($).set(name, at, run), cancel: name => void deadlines?.cancel(name) },
-    fail: (what, error) => fail($, what, error),
   }
 }
 
@@ -2045,13 +2066,10 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
 /** What a look asks of Claude Code, each made from `$` and read at the moment the look needs it. */
 function lookPortsOf($: EngineInterface, settings: Settings): LookPorts {
   return {
+    ...hostOf($, settings),
     settings,
     watcher: () => watcher,
-    now: async () => await $.clock.now(),
     lastChangeAt: () => lastChangeAt,
-    ask: (job, request) => callModel($, settings, job, request),
-    trace: (kind, name, detail) => trace($, kind, name, detail),
-    toast: text => $.ui.toast(text),
     showPlay: () => showPlay($, settings),
     holdDeadline: () => schedulerOf($).cancel('look'),
     planNext: () => planLook($, settings),
@@ -2073,7 +2091,6 @@ function lookPortsOf($: EngineInterface, settings: Settings): LookPorts {
     recorder: () => journalState.recorder,
     showWorking: now => showWorking($, now),
     say: text => say($, text),
-    fail: (what, error) => fail($, what, error),
   }
 }
 
@@ -2246,17 +2263,10 @@ const CARRIED_ON = 'Backseat Driver is still on. It came along with the conversa
 /** What carrying the tutor from one process of a conversation to the next needs from Claude Code. */
 function carryPortsOf($: EngineInterface, settings: Settings): CarryPorts {
   return {
-    now: async () => await $.clock.now(),
-    trace: (kind, name, detail) => trace($, kind, name, detail),
-    fail: (what, error) => fail($, what, error),
-    dataRoot: () => dataRoot,
-    mode: () => mode,
-    sessionId: async () => await $.session.id(),
+    ...hostOf($, settings),
     born: async () => (await $.session.usage()).startedAt,
     cwd: async () => await $.session.cwd(),
     surfaces: async () => (await $.session.surfaces()).length,
-    store: () => storeOf($),
-    deadline: { set: (name, at, run) => schedulerOf($).set(name, at, run) },
     comeUp: (to, from) => comeUp($, settings, to, from),
     standDown: () => standDown($, settings),
   }
@@ -2337,16 +2347,7 @@ async function giveLease($: EngineInterface, path: string, holder: string): Prom
 /** What holding the lease needs from Claude Code. */
 function leasePortsOf($: EngineInterface, settings: Settings): LeasePorts {
   return {
-    now: async () => await $.clock.now(),
-    trace: (kind, name, detail) => trace($, kind, name, detail),
-    fail: (what, error) => fail($, what, error),
-    isOn: () => mode !== 'off',
-    engagement: () => engagement,
-    repoRoot: () => repoRoot,
-    dataRoot: () => dataRoot,
-    sessionId: async () => await $.session.id(),
-    store: () => storeOf($),
-    deadline: { set: (name, at, run) => schedulerOf($).set(name, at, run) },
+    ...hostOf($, settings),
     startDriving: run => startDriving($, settings, run),
     stopDriving: () => stopDriving($, settings),
   }
@@ -2575,10 +2576,8 @@ async function reviewCommitNow($: EngineInterface, settings: Settings, commit: {
 /** What the waiting commits and their reviews ask of Claude Code, each made from `$` and read when it is needed. */
 function reviewPortsOf($: EngineInterface, settings: Settings): ReviewPorts {
   return {
+    ...hostOf($, settings),
     settings,
-    now: async () => await $.clock.now(),
-    trace: (kind, name, detail) => trace($, kind, name, detail),
-    deadline: { set: (name, at, run) => schedulerOf($).set(name, at, run), cancel: name => schedulerOf($).cancel(name) },
     git: args => git($, repoRoot, args),
     changeQueue: change => changeQueue($, change),
     setReview: change => setReview($, change),
@@ -2591,11 +2590,9 @@ function reviewPortsOf($: EngineInterface, settings: Settings): ReviewPorts {
     isActive: () => mode === 'on' && repoRoot !== '' && leaseState.isDriver,
     agents: async () => await $.agent.list(),
     startReview: scope => startReview($, settings, scope),
-    engagement: () => engagement,
     reviewText: commit => reviews.find(known => known.commit === commit)?.text,
     assess: (hash, review) => assessCommit($, settings, hash, review),
     queueProgress: work => queueProgress($, work),
-    fail: (what, error) => fail($, what, error),
   }
 }
 
@@ -3094,18 +3091,8 @@ async function startWatching($: EngineInterface, settings: Settings, run: number
 /** What following the spot in focus needs from Claude Code. */
 function followPortsOf($: EngineInterface): FollowPorts {
   return {
-    now: async () => await $.clock.now(),
-    trace: (kind, name, detail) => trace($, kind, name, detail),
-    fail: (what, error) => fail($, what, error),
-    repoRoot: () => repoRoot,
-    dataRoot: () => dataRoot,
-    isOn: () => mode !== 'off',
-    isDriver: () => leaseState.isDriver,
-    engagement: () => engagement,
+    ...hostOf($, null),
     stamp: path => fileStamp($, path),
-    list: async path => await $.fs.list(path),
-    readFile: async path => await $.fs.read(path),
-    writeFile: async (path, text) => void (await $.fs.write(path, text)),
     countStat: () => void (quiet.stats += 1),
     readView: () => read($, explainAtom),
     setView: async change => void (await update($, explainAtom, change)),
@@ -3114,9 +3101,6 @@ function followPortsOf($: EngineInterface): FollowPorts {
     markActive: now => void (activeAt = now),
     feedJournal: (text, now) => journalState.recorder?.editor(text, now, false),
     isPushed: role => isPushed(role),
-    deadline: { set: (name, at, run) => schedulerOf($).set(name, at, run), cancel: name => void deadlines?.cancel(name) },
-    after: (ms, run) => $.clock.after(ms, run),
-    markHome: () => markHome($),
   }
 }
 
@@ -3268,25 +3252,15 @@ async function setProgress($: EngineInterface, change: Partial<ProgressView>): P
 /** What the look at the person's progress needs from Claude Code. */
 function progressPortsOf($: EngineInterface, settings: Settings): ProgressPorts {
   return {
+    ...hostOf($, settings),
     settings,
-    now: async () => await $.clock.now(),
-    ask: (job, request) => callModel($, settings, job, request),
     git: args => git($, repoRoot === '' ? undefined : repoRoot, args),
-    store: () => storeOf($),
-    repoRoot: () => repoRoot,
-    dataRoot: () => dataRoot,
     projectName: () => projectId(repoRoot).replace(/-[0-9a-f]{8}$/, ''),
-    isOn: () => mode !== 'off',
-    isDriver: () => leaseState.isDriver,
-    engagement: () => engagement,
     profiles: () => profiles,
     instructions: () => progressInstructions,
-    readPressure: () => readPressure($),
     mayAsk: () => mayAsk(health),
     setProgress: change => setProgress($, change),
     registerReviewer: () => registerReviewer($, settings),
-    toast: text => $.ui.toast(text),
-    fail: (what, error) => fail($, what, error),
   }
 }
 

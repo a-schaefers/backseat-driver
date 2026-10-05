@@ -12,8 +12,7 @@
 import type { Working } from '../types'
 import { createRecorder } from './recorder'
 import type { Recorder } from './recorder'
-import type { Trace } from './host'
-import type { Store } from './store'
+import type { Host } from './host'
 import type { Watcher } from './watcher'
 
 /** What the pane says when no journal is kept. */
@@ -31,17 +30,11 @@ export function freshJournalState(): JournalState {
 }
 
 /** What keeping the journal needs from its host. Each is read or done when it is needed. */
-export type JournalPorts = {
-  now: () => Promise<number>
-  trace: Trace
+export type JournalPorts = Pick<Host, 'now' | 'trace' | 'isOn' | 'store' | 'repoRoot' | 'engagement' | 'deadline' | 'fail'> & {
   /** Changes what the pane says they are working on. */
   showWorking: (working: Working) => Promise<void>
-  /** False while the tutor is off. */
-  isOn: () => boolean
-  store: () => Pick<Store, 'read' | 'update'>
   /** The journal's file, or '' when there is no data folder. */
   file: (root: string) => string
-  repoRoot: () => string
   /** A file's text by its path from the repository root, or null when it cannot be read. */
   read: (root: string, path: string) => Promise<string | null>
   /** Runs git in the repository. */
@@ -50,10 +43,6 @@ export type JournalPorts = {
   readEditor: () => Promise<string | null>
   /** The files the watcher has found changed or still dirty. */
   watcher: () => Pick<Watcher, 'dirty'> | null
-  engagement: () => number
-  /** Sets or takes away the deadline of the journal. */
-  deadline: { set: (name: string, at: number, run: () => Promise<unknown> | unknown) => void; cancel: (name: string) => void }
-  fail: (what: string, error: unknown) => void
 }
 
 /** Tells the pane what they are working on, when that has changed since it was last told. */

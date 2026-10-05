@@ -19,13 +19,11 @@
  * remembers is `CarryState`.
  */
 
-import type { Mode } from '../types'
 import { sessionsPath } from './datahome'
-import type { Trace } from './host'
+import type { Deadlines, Host } from './host'
 import { boundOf, carriedFrom, isSayDue, parseSessions, RECHECK_MS, saidLeft, saidOn, SELF_CHECK_MS, withdrawn } from './sessions'
 import type { SessionEntry } from './sessions'
 import { updateJson } from './store'
-import type { Store } from './store'
 
 /** What carrying the tutor remembers. */
 export type CarryState = {
@@ -44,23 +42,14 @@ export function freshCarryState(): CarryState {
 }
 
 /** What carrying the tutor needs from its host. Each is read or done when it is needed. */
-export type CarryPorts = {
-  now: () => Promise<number>
-  trace: Trace
-  fail: (what: string, error: unknown) => void
-  dataRoot: () => string
-  /** The mode as the session has it now. */
-  mode: () => Mode
-  /** The session's id now. */
-  sessionId: () => Promise<string>
+export type CarryPorts = Pick<Host, 'now' | 'trace' | 'fail' | 'dataRoot' | 'mode' | 'sessionId' | 'store'> & {
   /** When the session's conversation first began: the same for a conversation and every fork and resume of it. */
   born: () => Promise<number>
   /** The directory the session runs in. */
   cwd: () => Promise<string>
   /** How many surfaces the session draws on now. */
   surfaces: () => Promise<number>
-  store: () => Pick<Store, 'read' | 'update'>
-  deadline: { set: (name: string, at: number, run: () => Promise<unknown> | unknown) => void }
+  deadline: Pick<Deadlines, 'set'>
   /** Switches the tutor on as it was in `from`, the session this one carries on. */
   comeUp: (mode: 'on' | 'paused', from: string) => Promise<void>
   /** This session has nowhere left to draw: everything it runs is laid down. */

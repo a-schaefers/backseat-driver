@@ -13,6 +13,7 @@
 import { debugRoot, debugSwitchPath } from './datahome'
 import { createDebugLog, createTracer, FLUSH_MS, parseSwitch, sessionFolder } from './debuglog'
 import type { DebugRequest, Tracer } from './debuglog'
+import type { Host } from './host'
 import type { Settings } from './settings'
 
 /** What running the debug log remembers. */
@@ -30,25 +31,16 @@ export function freshDebuggingState(now: () => number): DebuggingState {
 }
 
 /** What running the debug log needs from its host. Each is read or done when it is needed. */
-export type DebuggingPorts = {
+export type DebuggingPorts = Pick<Host, 'now' | 'after' | 'markHome' | 'dataRoot' | 'repoRoot' | 'mode' | 'sessionId'> & {
   /** The settings the log starts by writing down. Null where a caller does not start or command it. */
   settings: Settings | null
-  now: () => Promise<number>
-  /** Runs `run` after `ms`, once. */
-  after: (ms: number, run: () => void) => { cancel: () => void }
   read: (path: string) => Promise<string>
   write: (path: string, text: string) => Promise<void>
   list: (path: string) => Promise<{ name: string }[]>
   /** Deletes a folder of the data folder. False when it could not. */
   remove: (path: string) => Promise<boolean>
-  /** Makes the data folder's marker, so that anything may be written to it. */
-  markHome: () => Promise<void>
   /** Works out where the data folder is, when that is not known yet. */
   resolveHome: () => Promise<void>
-  dataRoot: () => string
-  repoRoot: () => string
-  mode: () => string
-  sessionId: () => Promise<string>
   /** The host's own versions, named as the host names them (written into the log's first record as they are), and the plugin's (null when it cannot be read). */
   versions: () => Promise<{ host: Record<string, unknown>; plugin: string | null }>
   pluginRoot: () => string
