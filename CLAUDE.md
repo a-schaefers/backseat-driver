@@ -135,6 +135,7 @@ license-server/                     reference license server: issue, check, revo
 .github/workflows/check.yml         npm run check on push/PR, pinned Claude Code
 .github/workflows/nightly.yml       same check daily on newest Claude Code
 research/                           research notes for the owner (not shipped): opencode.md, the plan for an OpenCode client
+research/personas/                  one file per persona: how the person speaks and judges code, with sources; what the persona prompts are checked against
 ```
 
 The ground rules in README ("Claude does not edit your files" etc.) describe end-user product behavior, not rules for working in this repo.
@@ -191,6 +192,7 @@ scripts/outage-proxy.py 18080    # a proxy for staging an outage in a live sessi
 - Contract: `SKILL.md`, the single source of tutor behavior. The mod injects it and never carries a copy.
   - `SKILL.md` describes behavior only. Anything naming this plugin's commands, tools or agents goes in `SESSION_NOTES` in `contract.ts`, so the skill works alone (as `/backseat-driver:tutor`) with mods off. That fallback is a conversational tutor without background reviews.
 - Personas: the chosen engineering file, then the voice file, are injected after the contract and into both review prompts. Each persona file states which half it is and that it leaves the other alone; a new persona file needs that paragraph too.
+  - `research/personas/` holds the research behind each persona (voice and engineering judgment, with sources, folklore marked) and where the prompts diverge from it (2026-10-05). Read it before changing a persona prompt; a new persona gets a research file first.
 - Mod: `plugin/hooks/`. Commands via `$.command.register` (`/backseat-driver`, `/bsd`, `/backseat-driver-update`); tools via `$.tool.register` (`hush`, `unhush`, `record`, `lookup`, `progress`, `profile`, `working`, `activity`); pane via `$.ui.open` plus a `ui.render` hook, contents in `$.state`. Why a mod, not a skill plus a monitor: a monitor would turn every save into a conversation turn on the main model. The mod reviews out of band.
 
 ### Module shape (enforced by Claude Code)
