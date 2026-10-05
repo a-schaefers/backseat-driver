@@ -73,6 +73,7 @@ Every roadmap milestone is built and was seen working in short scripted real ses
 - The editor side has been tried only with a script writing `focus.json`.
 - Decision points and insights (from `learning-output-style`): seen live in the play-by-play, the deep review and the conversation on Sonnet at low thinking. A play-by-play `insight` has not been seen live.
 - Marketplace install, `/bsd update` and `/bsd uninstall` were run against a local git server at one project's scope, not GitHub. No release has been published, so installed copies stay at 0.1.0.
+- The event-driven plan's last check (2026-10-04): one real session with the debug log on, through a save, ten seconds on the Explain tab, a commit with its review and progress look, and a hundred idle seconds. No errors. What runs in the background, read from the log: a scan of the working tree every second for a minute after something happened and every two seconds after that (five after ten idle minutes, by test); two stats ten times a second only while the Explain tab was open; a lease renewal every 20 s (two git calls, two small reads, one write); a journal write when something is new; and, with the animated persona on, its blink. Nothing else polled, retried or redrew.
 - Open owner decisions:
   - which ref new installs get (see Updates)
   - whether to submit to Anthropic's directory

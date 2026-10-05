@@ -2023,9 +2023,13 @@ async function keepLease($: EngineInterface, settings: Settings, run: number): P
   const now = await $.clock.now()
   let lease: Lease
   try {
-    // Read first. A session that is waiting changes nothing while the lease is held, and so takes no lock.
-    const seen = parseLease(await storeOf($).read(path))
-    lease = claimed(seen, me, now, leaseHolder) === seen ? seen : await updateJson(storeOf($), path, parseLease, stored => claimed(stored, me, now, leaseHolder))
+    // A session that is waiting reads first: it changes nothing while the lease is held, and so takes no lock.
+    // The one that drives is here to renew, and goes straight to the change.
+    const seen = isDriver && leaseHolder === me ? null : parseLease(await storeOf($).read(path))
+    lease =
+      seen !== null && claimed(seen, me, now, leaseHolder) === seen
+        ? seen
+        : await updateJson(storeOf($), path, parseLease, stored => claimed(stored, me, now, leaseHolder))
   } catch (error) {
     // With no lease to go by, this session carries on as it was.
     fail($, 'could not read the lease', error)
