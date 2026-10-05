@@ -499,3 +499,30 @@ export function watchState(play: Play): Watch['state'] {
 
   return state === 'starting' || state === 'no-git' || state === 'looking' || state === 'settling' || state === 'waiting' ? state : 'idle'
 }
+
+// --- Deadlines (Kernel.Schedule)
+
+export type Arm = { next: 'keep' } | { next: 'disarm' } | { next: 'arm'; at: number }
+
+/** What to do with a timer armed for `armedFor` (null: none), given the deadlines as they are now. */
+export function arming(armedFor: number | null, deadlines: { name: string; at: number }[]): Arm {
+  const wire = K.armingWire(armedFor !== null)(armedFor ?? 0)(deadlines)
+  switch (wire.next) {
+    case 'keep':
+      return { next: 'keep' }
+    case 'arm':
+      return { next: 'arm', at: wire.at }
+    default:
+      return { next: 'disarm' }
+  }
+}
+
+/** How long from `now` until `at`. A time already past is now. */
+export function delayMs(at: number, now: number): number {
+  return K.delayMsWire(at)(now)
+}
+
+/** The names of the deadlines due at `now`, the earliest first, in the order given among those due together. */
+export function dueNow(deadlines: { name: string; at: number }[], now: number): string[] {
+  return K.dueNowWire(deadlines)(now)
+}

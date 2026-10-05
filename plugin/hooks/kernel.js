@@ -29,6 +29,48 @@ var findIndexImpl = function(just, nothing, f, xs) {
 var filterImpl = function(f, xs) {
   return xs.filter(f);
 };
+var sortByImpl = /* @__PURE__ */ (function() {
+  function mergeFromTo(compare2, fromOrdering, xs1, xs2, from, to) {
+    var mid;
+    var i;
+    var j;
+    var k;
+    var x;
+    var y;
+    var c;
+    mid = from + (to - from >> 1);
+    if (mid - from > 1) mergeFromTo(compare2, fromOrdering, xs2, xs1, from, mid);
+    if (to - mid > 1) mergeFromTo(compare2, fromOrdering, xs2, xs1, mid, to);
+    i = from;
+    j = mid;
+    k = from;
+    while (i < mid && j < to) {
+      x = xs2[i];
+      y = xs2[j];
+      c = fromOrdering(compare2(x)(y));
+      if (c > 0) {
+        xs1[k++] = y;
+        ++j;
+      } else {
+        xs1[k++] = x;
+        ++i;
+      }
+    }
+    while (i < mid) {
+      xs1[k++] = xs2[i++];
+    }
+    while (j < to) {
+      xs1[k++] = xs2[j++];
+    }
+  }
+  return function(compare2, fromOrdering, xs) {
+    var out;
+    if (xs.length < 2) return xs;
+    out = xs.slice(0);
+    mergeFromTo(compare2, fromOrdering, out, xs.slice(0), 0, xs.length);
+    return out;
+  };
+})();
 var sliceImpl = function(s, e, l) {
   return l.slice(s, e);
 };
@@ -269,6 +311,16 @@ var ordInt = /* @__PURE__ */ (function() {
 var compare = function(dict) {
   return dict.compare;
 };
+var comparing = function(dictOrd) {
+  var compare3 = compare(dictOrd);
+  return function(f) {
+    return function(x) {
+      return function(y) {
+        return compare3(f(x))(f(y));
+      };
+    };
+  };
+};
 var max = function(dictOrd) {
   var compare3 = compare(dictOrd);
   return function(x) {
@@ -384,6 +436,29 @@ var functorMaybe = {
 };
 var fromMaybe = function(a) {
   return maybe(a)(identity2);
+};
+var eqMaybe = function(dictEq) {
+  var eq2 = eq(dictEq);
+  return {
+    eq: function(x) {
+      return function(y) {
+        if (x instanceof Nothing && y instanceof Nothing) {
+          return true;
+        }
+        ;
+        if (x instanceof Just && y instanceof Just) {
+          return eq2(x.value0)(y.value0);
+        }
+        ;
+        return false;
+      };
+    }
+  };
+};
+
+// output/Data.Monoid/index.js
+var mempty = function(dict) {
+  return dict.mempty;
 };
 
 // output/Control.Monad.ST.Internal/foreign.js
@@ -509,6 +584,61 @@ var withArray = function(f) {
 };
 var push = /* @__PURE__ */ runSTFn2(pushImpl);
 
+// output/Data.Foldable/foreign.js
+var foldrArray = function(f) {
+  return function(init) {
+    return function(xs) {
+      var acc = init;
+      var len = xs.length;
+      for (var i = len - 1; i >= 0; i--) {
+        acc = f(xs[i])(acc);
+      }
+      return acc;
+    };
+  };
+};
+var foldlArray = function(f) {
+  return function(init) {
+    return function(xs) {
+      var acc = init;
+      var len = xs.length;
+      for (var i = 0; i < len; i++) {
+        acc = f(acc)(xs[i]);
+      }
+      return acc;
+    };
+  };
+};
+
+// output/Data.Foldable/index.js
+var foldr = function(dict) {
+  return dict.foldr;
+};
+var foldl = function(dict) {
+  return dict.foldl;
+};
+var foldMapDefaultR = function(dictFoldable) {
+  var foldr2 = foldr(dictFoldable);
+  return function(dictMonoid) {
+    var append2 = append(dictMonoid.Semigroup0());
+    var mempty2 = mempty(dictMonoid);
+    return function(f) {
+      return foldr2(function(x) {
+        return function(acc) {
+          return append2(f(x))(acc);
+        };
+      })(mempty2);
+    };
+  };
+};
+var foldableArray = {
+  foldr: foldrArray,
+  foldl: foldlArray,
+  foldMap: function(dictMonoid) {
+    return foldMapDefaultR(foldableArray)(dictMonoid);
+  }
+};
+
 // output/Data.Function.Uncurried/foreign.js
 var runFn2 = function(fn) {
   return function(a) {
@@ -547,6 +677,29 @@ var unsafeIndex = function() {
   return runFn2(unsafeIndexImpl);
 };
 var unsafeIndex1 = /* @__PURE__ */ unsafeIndex();
+var sortBy = function(comp) {
+  return runFn3(sortByImpl)(comp)(function(v) {
+    if (v instanceof GT) {
+      return 1;
+    }
+    ;
+    if (v instanceof EQ) {
+      return 0;
+    }
+    ;
+    if (v instanceof LT) {
+      return -1 | 0;
+    }
+    ;
+    throw new Error("Failed pattern match at Data.Array (line 897, column 38 - line 900, column 11): " + [v.constructor.name]);
+  });
+};
+var sortWith = function(dictOrd) {
+  var comparing2 = comparing(dictOrd);
+  return function(f) {
+    return sortBy(comparing2(f));
+  };
+};
 var snoc = function(xs) {
   return function(x) {
     return withArray(push(x))(xs)();
@@ -556,6 +709,7 @@ var slice = /* @__PURE__ */ runFn3(sliceImpl);
 var $$null = function(xs) {
   return length(xs) === 0;
 };
+var foldl2 = /* @__PURE__ */ foldl(foldableArray);
 var findIndex = /* @__PURE__ */ (function() {
   return runFn4(findIndexImpl)(Just.create)(Nothing.value);
 })();
@@ -2447,9 +2601,134 @@ var withAttemptWire = function(commits) {
   };
 };
 
-// output/Kernel.Sensor/index.js
+// output/Kernel.Schedule/index.js
 var min6 = /* @__PURE__ */ min(ordNumber);
+var map4 = /* @__PURE__ */ map(functorArray);
+var sortWith2 = /* @__PURE__ */ sortWith(ordNumber);
 var max8 = /* @__PURE__ */ max(ordNumber);
+var eq13 = /* @__PURE__ */ eq(/* @__PURE__ */ eqMaybe(eqNumber));
+var Keep = /* @__PURE__ */ (function() {
+  function Keep2() {
+  }
+  ;
+  Keep2.value = new Keep2();
+  return Keep2;
+})();
+var Disarm = /* @__PURE__ */ (function() {
+  function Disarm2() {
+  }
+  ;
+  Disarm2.value = new Disarm2();
+  return Disarm2;
+})();
+var ArmFor = /* @__PURE__ */ (function() {
+  function ArmFor2(value0) {
+    this.value0 = value0;
+  }
+  ;
+  ArmFor2.create = function(value0) {
+    return new ArmFor2(value0);
+  };
+  return ArmFor2;
+})();
+var earliest = /* @__PURE__ */ (function() {
+  var first = function(v) {
+    return function(v1) {
+      if (v instanceof Nothing) {
+        return new Just(v1.at);
+      }
+      ;
+      if (v instanceof Just) {
+        return new Just(min6(v.value0)(v1.at));
+      }
+      ;
+      throw new Error("Failed pattern match at Kernel.Schedule (line 54, column 3 - line 54, column 44): " + [v.constructor.name, v1.constructor.name]);
+    };
+  };
+  return foldl2(first)(Nothing.value);
+})();
+var dueNow = function(now) {
+  var $32 = map4(function(v) {
+    return v.name;
+  });
+  var $33 = sortWith2(function(v) {
+    return v.at;
+  });
+  var $34 = filter(function(deadline) {
+    return deadline.at <= now;
+  });
+  return function($35) {
+    return $32($33($34($35)));
+  };
+};
+var dueNowWire = function(deadlines) {
+  return function(now) {
+    return dueNow(now)(deadlines);
+  };
+};
+var delayMs = function(at) {
+  return function(now) {
+    return max8(0)(at - now);
+  };
+};
+var delayMsWire = delayMs;
+var arming = function(armedFor) {
+  return function(deadlines) {
+    var v = earliest(deadlines);
+    if (eq13(v)(armedFor)) {
+      return Keep.value;
+    }
+    ;
+    if (v instanceof Nothing) {
+      return Disarm.value;
+    }
+    ;
+    if (v instanceof Just) {
+      return new ArmFor(v.value0);
+    }
+    ;
+    throw new Error("Failed pattern match at Kernel.Schedule (line 60, column 29 - line 63, column 23): " + [v.constructor.name]);
+  };
+};
+var armingWire = function(isArmed) {
+  return function(armedFor) {
+    return function(deadlines) {
+      var v = arming((function() {
+        if (isArmed) {
+          return new Just(armedFor);
+        }
+        ;
+        return Nothing.value;
+      })())(deadlines);
+      if (v instanceof Keep) {
+        return {
+          next: "keep",
+          at: 0
+        };
+      }
+      ;
+      if (v instanceof Disarm) {
+        return {
+          next: "disarm",
+          at: 0
+        };
+      }
+      ;
+      if (v instanceof ArmFor) {
+        return {
+          next: "arm",
+          at: v.value0
+        };
+      }
+      ;
+      throw new Error("Failed pattern match at Kernel.Schedule (line 79, column 41 - line 82, column 35): " + [v.constructor.name]);
+    };
+  };
+};
+
+// output/Kernel.Sensor/index.js
+var min7 = /* @__PURE__ */ min(ordNumber);
+var max9 = /* @__PURE__ */ max(ordNumber);
 var slowScanWaitMs = 2e3;
 var slowScanStepMs = 250;
 var scanMs = 2e3;
@@ -2483,7 +2762,7 @@ var scanGapMs = function(facts) {
     ;
     throw new Error("Failed pattern match at Kernel.Sensor (line 85, column 10 - line 90, column 28): " + [facts.activeAt.constructor.name]);
   })();
-  return min6(longestScanGapMs)(base + slowness);
+  return min7(longestScanGapMs)(base + slowness);
 };
 var scanGapMsWire = function(w) {
   return scanGapMs({
@@ -2500,7 +2779,7 @@ var scanGapMsWire = function(w) {
 };
 var focusScanMs = 100;
 var focusGapMs = function(tookMs) {
-  return min6(longestFocusGapMs)(max8(focusScanMs)(tookMs * 4));
+  return min7(longestFocusGapMs)(max9(focusScanMs)(tookMs * 4));
 };
 
 // output/Data.Number.Format/foreign.js
@@ -3071,8 +3350,11 @@ var leaseBeatMs = beatMs;
 export {
   afterReadWire,
   afterWriteWire,
+  armingWire,
   backoffMs,
   currentQueueWire,
+  delayMsWire,
+  dueNowWire,
   failedTextWire,
   focusGapMs,
   focusScanMs,

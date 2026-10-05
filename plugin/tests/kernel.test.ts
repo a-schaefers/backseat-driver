@@ -9,7 +9,7 @@ import type { Play, PlayFacts, Why } from '../hooks/play'
 import { current, isSpent, MAX_ATTEMPTS, MAX_WAIT_MS, MAX_WAITING, nextToAssess, nextToReview, reviewed, settledIn, withAttempt, withCommit, withoutCommit } from '../hooks/reviewqueue'
 import type { ReviewQueue } from '../hooks/reviewqueue'
 import { createScheduler } from '../hooks/scheduler'
-import { afterRead, afterWrite, changeStep, keepsBackup } from '../hooks/core'
+import { afterRead, afterWrite, arming, changeStep, delayMs, dueNow, keepsBackup } from '../hooks/core'
 import { READ_RETRY_MS, READ_TRIES, WRITE_TRIES } from '../hooks/store'
 import { FOCUS_SCAN_MS, focusGapMs, HOT_FOR_MS, HOT_SCAN_MS, IDLE_AFTER_MS, IDLE_SCAN_MS, LONGEST_FOCUS_GAP_MS, LONGEST_SCAN_GAP_MS, SCAN_MS, scanGapMs } from '../hooks/sensor'
 import { clockTime, healthLine, playLine, watchOf } from '../hooks/status'
@@ -766,5 +766,33 @@ test('whatever the play-by-play is doing, a wait names when it ends, and the row
     // Nothing is said about the background while it is not this session's, or not running.
     if ((play.at === 'paused' || play.at === 'following' || play.at === 'starting' || play.at === 'no-git') && row !== '') throw new Error(`turn ${turn}: "${row}"`)
     if (watchOf(play, null, row).line !== line) throw new Error(`turn ${turn}: watchOf says another line`)
+  }
+})
+
+test('whatever deadlines there are, the timer is armed for the first of them, and due ones run earliest first', async () => {
+  const random = seeded(51)
+  const names = ['scan', 'look', 'health', 'review', 'lease', 'journal']
+  for (let turn = 0; turn < 20_000; turn += 1) {
+    const now = 1_790_000_000_000
+    const deadlines = names.filter(() => random() < 0.5).map(name => ({ name, at: now + Math.floor(random() * 5) * 1000 - 2000 }))
+    const first = deadlines.length === 0 ? null : Math.min(...deadlines.map(deadline => deadline.at))
+    const armedFor = [null, first, now][Math.floor(random() * 3)] ?? null
+    const arm = arming(armedFor, deadlines)
+    const where = `turn ${turn}: armed for ${armedFor}, ${JSON.stringify(deadlines)} gave ${JSON.stringify(arm)}`
+    // Left alone when it is right already, never armed with nothing to do, and otherwise armed for the first.
+    if (armedFor === first && arm.next !== 'keep') throw new Error(`a timer that was right was touched. ${where}`)
+    if (armedFor !== first && first === null && arm.next !== 'disarm') throw new Error(`a timer is kept with nothing to do. ${where}`)
+    if (armedFor !== first && first !== null && (arm.next !== 'arm' || arm.at !== first)) throw new Error(`not armed for the first. ${where}`)
+    if (first !== null && delayMs(first, now) !== Math.max(0, first - now)) throw new Error(`the delay is wrong. ${where}`)
+    // Every due deadline runs, none that is not, the earliest first, and in the order given among equals.
+    const due = dueNow(deadlines, now)
+    const expected = deadlines.filter(deadline => deadline.at <= now)
+    if (due.length !== expected.length || !expected.every(deadline => due.includes(deadline.name))) throw new Error(`not what is due. ${where} ${JSON.stringify(due)}`)
+    const at = (name: string) => deadlines.findIndex(deadline => deadline.name === name)
+    for (let index = 1; index < due.length; index += 1) {
+      const a = deadlines[at(due[index - 1] as string)]
+      const b = deadlines[at(due[index] as string)]
+      if (a === undefined || b === undefined || a.at > b.at || (a.at === b.at && at(a.name) > at(b.name))) throw new Error(`out of order. ${where} ${JSON.stringify(due)}`)
+    }
   }
 })

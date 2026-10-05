@@ -145,3 +145,10 @@ export const healthLineWire: (
 /** `starting`, `no-git`, `looking`, `settling`, `waiting` or `idle`. */
 export const watchStateWire: (play: PlayWire) => string
 export const slowScanMs: number
+
+// Deadlines
+export type DeadlineWire = { name: string; at: number }
+/** `next` is `keep`, `disarm` or `arm`, and `at` is the time to arm the timer for. */
+export const armingWire: (isArmed: boolean) => (armedFor: number) => (deadlines: DeadlineWire[]) => { next: string; at: number }
+export const delayMsWire: (at: number) => (now: number) => number
+export const dueNowWire: (deadlines: DeadlineWire[]) => (now: number) => string[]

@@ -11,6 +11,7 @@ module Kernel.Main
   , module Kernel.Queue
   , module Kernel.Store
   , module Kernel.Status
+  , module Kernel.Schedule
   , module Kernel.Sensor
   , leaseIsHeld
   , leaseClaimed
@@ -29,6 +30,7 @@ import Kernel.Play (isLookDueWire, playOfWire, wakeAtWire)
 import Kernel.Queue (currentQueueWire, failedTextWire, heldTextWire, isSpentWire, maxAttempts, maxWaitMs, maxWaiting, nextToAssessWire, nextToReviewWire, planHeld, retryBaseMs, retryMs, reviewedWire, settledInWire, verdictMs, watchdogLimitMs, watchdogMs, withAttemptWire, withCommitWire, withoutCommitWire)
 import Kernel.Store (afterReadWire, afterWriteWire, keepsBackupWire, readRetryMs, readTries, stepOfWire, writeTries)
 import Kernel.Status (healthLineWire, playLineWire, slowScanMs, watchStateWire)
+import Kernel.Schedule (armingWire, delayMsWire, dueNowWire)
 import Kernel.Sensor (focusGapMs, focusScanMs, hotForMs, hotScanMs, idleAfterMs, idleScanMs, longestFocusGapMs, longestScanGapMs, scanGapMsWire, scanMs)
 
 leaseIsHeld :: Lease -> Number -> Boolean
