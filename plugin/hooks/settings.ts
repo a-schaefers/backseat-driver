@@ -1,6 +1,7 @@
-import type { PluginOptions } from 'claude-code'
-
 import type { SettingRow } from '../types'
+
+/** The plugin's options as a host hands them over: Claude Code's `PluginOptions`, spelled here so this file needs no host's types. */
+export type Options = Readonly<Record<string, string | number | boolean | readonly string[]>>
 
 export type Thinking = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
@@ -93,7 +94,7 @@ function personaName(value: unknown): string {
 }
 
 /** Keys are the `userConfig` fields in plugin.json. */
-export function readSettings(options: PluginOptions): Settings {
+export function readSettings(options: Options): Settings {
   return {
     persona: {
       voice: personaName(options.voice),
