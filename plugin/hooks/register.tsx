@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Register, Timer, UiFocusResult } from 'claude-code'
 
-import type { ExplainView, Hush, LevelChange, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, SettingRow, Spot, Tab, Watch, Working } from '../types'
+import type { ExplainView, Hush, LevelChange, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, SettingRow, Speech, Spot, Tab, Watch, Working } from '../types'
 import {
   avatarFor,
   BLINK_MS,
@@ -3944,7 +3944,9 @@ async function changeLayout($: EngineInterface, wanted: Layout): Promise<string>
   layout = wanted
   await showLayout($)
 
-  return `Layout: ${wanted}. It is kept for next time.${mode === 'off' ? ' It shows when you run /bsd.' : ''}`
+  const where = wanted === 'vertical' ? ' The pane sits beside the conversation in fullscreen, and above the prompt, short, elsewhere.' : ''
+
+  return `Layout: ${wanted}. It is kept for next time.${where}${mode === 'off' ? ' It shows when you run /bsd.' : ''}`
 }
 
 /** Asks one question about forgetting, and answers null when the dialog is dismissed. */
@@ -4115,6 +4117,8 @@ async function drawTutor($: EngineInterface, settings: Settings, kit: Kit, where
     },
     onExplain: (note: Note) => {
       touched($, settings, 'explain', () => note)
+      // The answer lands in the conversation: an open tab above the prompt would cover it.
+      if (layout === 'unified') void update($, unfoldedAtom, () => false)
       // Not awaited: it resolves when the turn starts, which may be after the one now running.
       void $.prompt.submit({ text: explainRequest(note), asUser: true })
       // A decision point or an insight is about this one spot in their code, not an idea now explained to them.
@@ -4145,6 +4149,7 @@ async function drawTutor($: EngineInterface, settings: Settings, kit: Kit, where
     },
     onExplainAsk: () => {
       touched($, settings, 'explain ask')
+      if (layout === 'unified') void update($, unfoldedAtom, () => false)
       void read($, explainAtom).then(view => {
         const text = explainAsk(view)
         // A prompt the mod submits skips the mod's own `prompt.submit` hook. The text
@@ -4154,6 +4159,8 @@ async function drawTutor($: EngineInterface, settings: Settings, kit: Kit, where
     },
     onDismiss: (note: Note) => {
       touched($, settings, 'dismiss', () => note)
+      // What the character was saying may have been about this note.
+      void update($, speechAtom, (said): Speech => (said.text === '' ? said : { ...said, text: '', tick: 0 }))
       // The keys carry on with the next note in the order drawn, not the first.
       const after = steppedNote(view, 1)
       void update($, selectedAtom, () => (after === undefined || after.id === note.id ? null : after.id))
