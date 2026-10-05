@@ -39,6 +39,8 @@ function sameMap(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>)
 export function createWatcher(ports: WatcherPorts) {
   let seen = new Map<string, string>()
   let changed: string[] = []
+  /** The changed files git listed at the last poll that are never worth a look (lock files, generated folders). */
+  let skipped: string[] = []
   const looked = new Map<string, string>()
   /** What each changed file contained at the last look. A file not listed was clean then, so its baseline is HEAD. */
   const baseline = new Map<string, string>()
@@ -64,11 +66,16 @@ export function createWatcher(ports: WatcherPorts) {
     if (status.exitCode !== 0) return null
 
     const prints = new Map<string, string>()
+    const noise: string[] = []
     for (const path of dirtyPaths(parseStatus(status.stdout))) {
-      if (isNoiseFile(path)) continue
+      if (isNoiseFile(path)) {
+        noise.push(path)
+        continue
+      }
       const stat = await ports.stat(path)
       if (stat !== null) prints.set(path, `${stat.size}:${stat.mtimeMs}`)
     }
+    skipped = noise
 
     return prints
   }
@@ -143,6 +150,11 @@ export function createWatcher(ports: WatcherPorts) {
     /** Every file that differs from HEAD as of the last poll. */
     dirty(): string[] {
       return [...seen.keys()]
+    },
+
+    /** The files that differ from HEAD as of the last poll and are never looked at. With `dirty()`, everything git listed. */
+    noise(): string[] {
+      return skipped
     },
 
     /**

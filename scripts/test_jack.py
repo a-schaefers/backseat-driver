@@ -13,6 +13,7 @@ import os
 import pathlib
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -296,7 +297,11 @@ class Disagreements(unittest.TestCase):
         s = session(home=self.home, state=told)
         found = bad(jack.check_session(world([s], [self.home], self.now), s, DOCKED))
         self.assertEqual(len(found), 1, found)
-        self.assertIn("2 open note(s) in its pane, and notes.json keeps 0", found[0])
+        self.assertIn("2 open note(s) in its pane, and notes.json", found[0])
+        self.assertIn("lacks 2 of them", found[0])
+        # More kept than shown is a note about text changed since: kept, and never shown again.
+        told["pane"]["notes"] = []
+        self.assertEqual(bad(jack.check_session(world([s], [self.home], self.now), s, DOCKED)), [])
 
     def test_an_editor_light_that_does_not_match_the_editors_files(self):
         root = "/tmp/ride"
@@ -358,6 +363,210 @@ class Disagreements(unittest.TestCase):
         self.assertIs(jack.pick(w, "off"), off)
         self.assertIs(jack.pick(w, "bsd"), on)
         self.assertIsNone(jack.pick(w, "nobody"))
+
+
+class ToldAndBelieved(unittest.TestCase):
+    """What the tutor told the person outside its pane, and what it believes about the world, against both."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = pathlib.Path(self.tmp.name)
+        self.now = jack.now_ms()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def told(self, *said, **over) -> dict:
+        return session(state=state(self.now, said=list(said), **over))
+
+    def test_an_answer_to_bsd_on_the_screen_and_one_that_is_not(self):
+        answer = {"at": self.now - 3000, "how": "command", "text": "Backseat Driver is on."}
+        s = self.told(answer)
+        found = jack.check_said(world([s], now=self.now), s, DOCKED)
+        self.assertEqual(bad(found), [])
+        self.assertTrue(any("command “Backseat Driver is on.” is on its screen" in text for _, text in found))
+        missing = {"at": self.now - 3000, "how": "transcript", "text": "Nothing was forgotten."}
+        s = self.told(missing)
+        found = bad(jack.check_said(world([s], now=self.now), s, DOCKED))
+        self.assertEqual(len(found), 1)
+        self.assertIn("“Nothing was forgotten.”", found[0])
+
+    def test_what_was_said_too_long_ago_or_a_moment_ago_is_not_looked_for(self):
+        s = self.told(
+            {"at": self.now - jack.SAID_RECENT_MS - 1000, "how": "transcript", "text": "Scrolled away long since."},
+            {"at": self.now - 200, "how": "command", "text": "Not drawn yet."},
+            {"at": self.now - jack.TOAST_MS - 500, "how": "toast", "text": "A toast that is gone."},
+        )
+        self.assertEqual(jack.check_said(world([s], now=self.now), s, DOCKED), [])
+
+    def test_a_question_a_dialog_is_said_to_ask(self):
+        s = self.told(asking={"at": self.now - 5000, "question": "How are you using Backseat Driver?"})
+        found = bad(jack.check_said(world([s], now=self.now), s, DOCKED))
+        self.assertEqual(len(found), 1)
+        self.assertIn("no such question is on its screen", found[0])
+        shown = DOCKED + ["│ How are you using Backseat Driver?"]
+        self.assertEqual(bad(jack.check_said(world([s], now=self.now), s, shown)), [])
+
+    def test_the_hint_line_in_the_unified_layout(self):
+        told = state(self.now, said=[])
+        told["session"]["layout"] = "unified"
+        told["shown"]["hint"] = "backseat watching · ctrl+x tab for keys"
+        s = session(state=told)
+        self.assertEqual(len(bad(jack.check_said(world([s], now=self.now), s, DOCKED))), 1)
+        hinted = DOCKED + ["  ? for shortcuts · backseat watching · ctrl+x tab for keys"]
+        self.assertEqual(bad(jack.check_said(world([s], now=self.now), s, hinted)), [])
+
+    def test_a_pane_the_person_closed_is_their_choice_and_not_a_fault(self):
+        told = state(self.now)
+        told["session"]["panes"] = []
+        s = session(state=told)
+        self.assertTrue(any("lists no pane of its own" in text for text in bad(jack.check_session(world([s], now=self.now), s, None))))
+        told["shown"]["closed"] = {"at": self.now - 4000, "origin": "person"}
+        found = jack.check_session(world([s], now=self.now), s, None)
+        self.assertEqual(bad(found), [])
+        self.assertTrue(any(level == jack.NOTE and "closed by the person" in text for level, text in found))
+
+    def test_a_session_that_runs_code_older_than_the_working_copy(self):
+        plugin = self.dir / "plugin"
+        (plugin / "hooks").mkdir(parents=True)
+        (plugin / "tests").mkdir()
+        saved = self.now - jack.RELOAD_GRACE_MS - 10_000
+        (plugin / "hooks" / "register.tsx").write_text("x")
+        os.utime(plugin / "hooks" / "register.tsx", (saved / 1000, saved / 1000))
+        # A test saved later is not code the session runs.
+        (plugin / "tests" / "a.test.ts").write_text("x")
+        s = session(plugin=str(plugin), state=state(self.now, loaded={"at": saved - 60_000, "options": {}}))
+        found = bad(jack.check_world(world([s], now=self.now), s))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("runs code older than the working copy", found[0])
+        self.assertIn("hooks/register.tsx", found[0])
+        s["state"]["loaded"]["at"] = saved + 100
+        self.assertEqual(bad(jack.check_world(world([s], now=self.now), s)), [])
+
+    def test_settings_that_were_saved_and_never_loaded(self):
+        config = self.dir / "config"
+        config.mkdir()
+        (config / "settings.json").write_text(json.dumps({"pluginConfigs": {
+            "backseat-driver@inline": {"options": {"quiet_time": "5 seconds", "animated_persona": False}},
+            "backseat-driver@backseat-driver": {"options": {"quiet_time": "60 seconds"}},
+        }}))
+        working = str(REPO / "plugin")
+        options = {"quiet_time": "10 seconds", "animated_persona": False, "layout": "vertical"}
+        s = session(plugin=working, config=str(config), argv=[], state=state(self.now, loaded={"at": self.now, "options": options}))
+        found = bad(jack.check_world(world([s], now=self.now), s))
+        self.assertTrue(any("quiet_time: 5 seconds in the settings, 10 seconds in force" in text for text in found), found)
+        # A --settings flag comes last and wins.
+        s["argv"] = ["claude", "--settings", json.dumps({"pluginConfigs": {"backseat-driver@inline": {"options": {"quiet_time": "10 seconds"}}}})]
+        self.assertFalse(any("settings that are not the ones saved" in text for text in bad(jack.check_world(world([s], now=self.now), s))))
+        # An installed copy reads its own entry, not the working copy's.
+        s = session(plugin="installed", config=str(config), argv=[], state=state(self.now, loaded={"at": self.now, "options": {"quiet_time": "60 seconds"}}))
+        self.assertEqual(bad(jack.check_world(world([s], now=self.now), s)), [])
+
+    def git(self, *args: str) -> str:
+        return subprocess.run(["git", "-C", str(self.dir / "ride"), *args], capture_output=True, text=True, check=True).stdout.strip()
+
+    def ride(self) -> str:
+        root = self.dir / "ride"
+        root.mkdir()
+        self.git("init", "-q")
+        self.git("config", "user.email", "me@example.com")
+        self.git("config", "user.name", "Me")
+        (root / "stats.py").write_text("x = 1\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "one")
+        return str(root)
+
+    def back(self, path: pathlib.Path, ms: int) -> None:
+        at = (self.now - ms) / 1000
+        os.utime(path, (at, at))
+
+    @unittest.skipUnless(shutil.which("git"), "git is not installed")
+    def test_a_commit_and_a_save_the_tutor_did_not_see(self):
+        root = self.ride()
+        first = self.git("rev-parse", "HEAD")
+        (pathlib.Path(root) / "stats.py").write_text("x = 2\n")
+        self.git("commit", "-qam", "two")
+        self.back(pathlib.Path(root) / ".git" / "logs" / "HEAD", 20_000)
+        (pathlib.Path(root) / "median.py").write_text("y\n")
+        (pathlib.Path(root) / "package-lock.json").write_text("{}\n")
+        for name in ("median.py", "package-lock.json"):
+            self.back(pathlib.Path(root) / name, 20_000)
+        believed = {"repoRoot": root, "scan": {"lastScanAt": self.now - 2000}, "review": {"lastHead": first, "waiting": {"commits": []}},
+                    "watcher": {"dirty": [], "noise": ["package-lock.json"]}, "loaded": {"at": self.now, "options": {}}}
+        s = session(state=state(self.now, **believed))
+        found = bad(jack.check_world(world([s], now=self.now), s))
+        self.assertTrue(any(f"believes HEAD is {first[:7]}" in text and "missed a commit" in text for text in found), found)
+        self.assertTrue(any("has not seen 1 changed file(s)" in text and "median.py" in text for text in found), found)
+        # What it has seen, it has seen; and a save after its last scan is not yet its to have seen.
+        s["state"]["review"]["lastHead"] = self.git("rev-parse", "HEAD")
+        s["state"]["watcher"]["dirty"] = ["median.py"]
+        (pathlib.Path(root) / "later.py").write_text("z\n")
+        self.assertEqual(bad(jack.check_world(world([s], now=self.now), s)), [])
+
+    @unittest.skipUnless(shutil.which("git"), "git is not installed")
+    def test_a_file_it_believes_changed_that_git_calls_clean(self):
+        root = self.ride()
+        self.back(pathlib.Path(root) / "stats.py", 20_000)
+        self.back(pathlib.Path(root) / ".git" / "logs" / "HEAD", 20_000)
+        believed = {"repoRoot": root, "scan": {"lastScanAt": self.now - 2000}, "review": {"lastHead": self.git("rev-parse", "HEAD")},
+                    "watcher": {"dirty": ["stats.py"], "noise": []}, "loaded": {"at": self.now, "options": {}}}
+        s = session(state=state(self.now, **believed))
+        found = bad(jack.check_world(world([s], now=self.now), s))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("git calls clean: stats.py", found[0])
+
+    def test_commits_waiting_in_memory_and_on_disk(self):
+        home = self.dir / "home"
+        root = "/tmp/ride-queue"
+        folder = home / "projects" / jack.project_id(root)
+        folder.mkdir(parents=True)
+        (folder / "project.json").write_text(json.dumps({"v": 1, "root": root}))
+        (folder / "queue.json").write_text(json.dumps({"v": 1, "commits": [{"hash": "a" * 40}]}))
+        self.back(folder / "queue.json", 30_000)
+        believed = {"repoRoot": root, "scan": {"lastScanAt": self.now - 1000}, "review": {"waiting": {"commits": []}}, "loaded": {"at": self.now, "options": {}}}
+        s = session(home=home, state=state(self.now, **believed))
+        found = bad(jack.check_world(world([s], [home], self.now), s))
+        self.assertTrue(any("0 commit(s) waiting for a review in memory, and queue.json keeps 1" in text for text in found), found)
+
+    def test_an_editor_caret_the_tutor_did_not_follow(self):
+        home = self.dir / "home"
+        (home / "editors").mkdir(parents=True)
+        root = "/tmp/ride-editor"
+        caret = {"v": 1, "editor": "neovim", "pid": 1, "at": self.now - 1000, "changed": self.now - 8000, "root": root, "file": f"{root}/stats.py", "line": 9}
+        (home / "editors" / "neovim-1.json").write_text(json.dumps(caret))
+        believed = {"repoRoot": root, "scan": {"lastScanAt": self.now - 1000}, "loaded": {"at": self.now, "options": {}},
+                    "explain": {"isOn": True, "editorFocusAt": self.now - 60_000, "focus": {"path": "stats.py", "line": 2}}}
+        s = session(home=home, state=state(self.now, **believed))
+        found = bad(jack.check_world(world([s], [home], self.now), s))
+        self.assertTrue(any("neovim moved to" in text and "stats.py:9" in text for text in found), found)
+        s["state"]["explain"]["editorFocusAt"] = self.now - 7900
+        self.assertEqual(bad(jack.check_world(world([s], [home], self.now), s)), [])
+
+
+class Finding(unittest.TestCase):
+    def test_sessions_are_looked_for_under_every_config_folder_in_use(self):
+        procs = {1: {"pid": 1, "ppid": 0, "argv": ["claude", "--plugin-dir", "x"], "state": "S"}, 2: {"pid": 2, "ppid": 0, "argv": ["bash"], "state": "S"}}
+        envs = {1: {"CLAUDE_CONFIG_DIR": "/tmp/dev-config", "HOME": "/home/me"}, 2: {"CLAUDE_CONFIG_DIR": "/elsewhere"}}
+        real = jack.environ
+        try:
+            jack.environ = lambda pid: envs.get(pid, {})
+            found = jack.config_dirs(procs)
+        finally:
+            jack.environ = real
+        self.assertEqual(found[0], jack.default_config())
+        self.assertIn("/tmp/dev-config", found)
+        self.assertNotIn("/elsewhere", found)
+
+    def test_a_data_folder_given_with_no_command_reads_as_the_status(self):
+        seen = []
+        real = jack.cmd_status
+        try:
+            jack.cmd_status = lambda args: seen.append(args.home) or 0
+            self.assertEqual(jack.main(["--home", "/tmp/scratch-home"]), 0)
+            self.assertEqual(jack.main([]), 0)
+        finally:
+            jack.cmd_status = real
+        self.assertEqual(seen, ["/tmp/scratch-home", None])
 
 
 if __name__ == "__main__":
