@@ -2,10 +2,46 @@
 -- | plugin/hooks/core.ts imports. This module is the bundle's entry: what is
 -- | not exported here does not reach plugin/hooks/kernel.js.
 -- |
--- | Only the `…Wire` functions cross: plain records, numbers, strings and
--- | booleans in, the same out. The types that carry the rules stay inside.
+-- | Only plain data crosses: records, numbers, strings and booleans in, the
+-- | same out. The types that carry the rules stay inside.
 module Kernel.Main
   ( module Kernel.Health
+  , module Kernel.Pace
+  , module Kernel.Play
+  , module Kernel.Sensor
+  , leaseIsHeld
+  , leaseClaimed
+  , leaseReleased
+  , leaseNextCheck
+  , leaseBeatMs
+  , leaseTtlMs
+  , leaseSlackMs
   ) where
 
 import Kernel.Health (mayAskWire, outcomeOfErrorWire, outcomeOfWire, retryDelayMsWire, stepWire, troubleOfWire)
+import Kernel.Lease (Lease)
+import Kernel.Lease as Lease
+import Kernel.Pace (backoffMs, gapFactor, isHeldAt, slowedGapMs)
+import Kernel.Play (isLookDueWire, playOfWire, wakeAtWire)
+import Kernel.Sensor (focusGapMs, focusScanMs, hotForMs, hotScanMs, idleAfterMs, idleScanMs, longestFocusGapMs, longestScanGapMs, scanGapMsWire, scanMs)
+
+leaseIsHeld :: Lease -> Number -> Boolean
+leaseIsHeld = Lease.isHeld
+
+leaseClaimed :: Lease -> String -> Number -> String -> Lease
+leaseClaimed = Lease.claimed
+
+leaseReleased :: Lease -> String -> Lease
+leaseReleased = Lease.released
+
+leaseNextCheck :: Lease -> String -> Number -> Number -> Number
+leaseNextCheck = Lease.nextCheck
+
+leaseBeatMs :: Number
+leaseBeatMs = Lease.beatMs
+
+leaseTtlMs :: Number
+leaseTtlMs = Lease.ttlMs
+
+leaseSlackMs :: Number
+leaseSlackMs = Lease.slackMs

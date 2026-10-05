@@ -1,3 +1,6 @@
+// The arithmetic is the kernel's (kernel/src/Kernel/Pace.purs), through core.ts.
+export { backoffMs, slowedGapMs, throttle } from './core'
+
 /** What decides whether the play-by-play looks now. Times are clock milliseconds. */
 export type GateInput = {
   now: number
@@ -38,24 +41,4 @@ export type Throttle = {
   gapFactor: number
   /** True when nothing runs unless the user asks for it. */
   isHeld: boolean
-}
-
-/** From 80% of a usage window, looks are spaced four times further apart. From 95%, they wait to be asked for. */
-export function throttle(pressure: number): Throttle {
-  if (pressure >= 95) return { gapFactor: 1, isHeld: true }
-  if (pressure >= 80) return { gapFactor: 4, isHeld: false }
-
-  return { gapFactor: 1, isHeld: false }
-}
-
-/** The minimum gap while slowed down: the setting stretched, and never under four minutes. */
-export function slowedGapMs(minGapMs: number, gapFactor: number): number {
-  return gapFactor === 1 ? minGapMs : Math.max(minGapMs, 60_000) * gapFactor
-}
-
-/** How long failed looks hold the next one back: 30 seconds, doubling, up to 10 minutes. */
-export function backoffMs(failures: number): number {
-  if (failures <= 0) return 0
-
-  return Math.min(600_000, 30_000 * 2 ** (failures - 1))
 }

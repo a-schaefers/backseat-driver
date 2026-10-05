@@ -1,6 +1,10 @@
-import type { Health, HealthEvent, ModelResult, Outcome, Trouble } from './health'
+import type { Throttle } from './gate'
+import type { Health, HealthEvent, ModelResult, Outcome, Pressure, Trouble } from './health'
 import * as K from './kernel.js'
-import type { HealthWire } from './kernel.js'
+import type { HealthWire, PlayFactsWire } from './kernel.js'
+import type { Lease } from './lease'
+import type { Play, PlayFacts, Why } from './play'
+import type { ScanFacts } from './sensor'
 
 /**
  * The one bridge between the kernel and the rest of the mod.
@@ -108,4 +112,171 @@ export function outcomeOf(result: ModelResult): Outcome {
 /** How an API error that ended a turn, the conversation's or a subagent's, counts. */
 export function outcomeOfError(error: string): Outcome {
   return outcomeFromWire(K.outcomeOfErrorWire(error))
+}
+
+// --- Pacing (Kernel.Pace)
+
+/** How long failed looks hold the next one back: 30 seconds, doubling, up to 10 minutes. */
+export function backoffMs(failures: number): number {
+  return K.backoffMs(Math.trunc(failures))
+}
+
+/** The minimum gap while slowed down: the setting stretched, and never under four minutes. */
+export function slowedGapMs(minGapMs: number, gapFactor: number): number {
+  return K.slowedGapMs(minGapMs)(gapFactor)
+}
+
+/** From 80% of a usage window, looks are spaced four times further apart. From 95%, they wait to be asked for. */
+export function throttle(pressure: number): Throttle {
+  return { gapFactor: K.gapFactor(pressure), isHeld: K.isHeldAt(pressure) }
+}
+
+// --- The scan (Kernel.Sensor)
+
+/** Between scans while something has just happened. */
+export const HOT_SCAN_MS: number = K.hotScanMs
+/** Between scans otherwise. */
+export const SCAN_MS: number = K.scanMs
+/** Between scans once nothing has happened for a while. */
+export const IDLE_SCAN_MS: number = K.idleScanMs
+/** How long after something happened the scans stay close together. */
+export const HOT_FOR_MS: number = K.hotForMs
+/** How long nothing has to happen before they grow far apart. */
+export const IDLE_AFTER_MS: number = K.idleAfterMs
+/** However slow git is, the working tree is looked at this often. */
+export const LONGEST_SCAN_GAP_MS: number = K.longestScanGapMs
+/** Between checks of the spot in focus while someone is watching it. */
+export const FOCUS_SCAN_MS: number = K.focusScanMs
+/** However slow the disk is, the spot in focus is checked this often. */
+export const LONGEST_FOCUS_GAP_MS: number = K.longestFocusGapMs
+
+/** How long to wait before the next scan. */
+export function scanGapMs(facts: ScanFacts): number {
+  return K.scanGapMsWire({ now: facts.now, hasActiveAt: facts.activeAt !== null, activeAt: facts.activeAt ?? 0, lastScanMs: facts.lastScanMs })
+}
+
+/** How long to wait before the next check of the spot in focus. A check that was slow is not run back to back. */
+export function focusGapMs(tookMs: number): number {
+  return K.focusGapMs(tookMs)
+}
+
+// --- The lease (Kernel.Lease)
+
+/** How often the driving session renews the lease. */
+export const LEASE_BEAT_MS: number = K.leaseBeatMs
+/** A lease not renewed for this long is free: its session is gone. */
+export const LEASE_TTL_MS: number = K.leaseTtlMs
+/** A waiting session looks again up to this long after the lease runs out. */
+export const LEASE_SLACK_MS: number = K.leaseSlackMs
+
+export const NO_LEASE: Lease = { v: 1, session: '', at: 0 }
+
+/** Whether some session holds the lease at `now`. */
+export function isHeld(lease: Lease, now: number): boolean {
+  return K.leaseIsHeld({ session: lease.session, at: lease.at })(now)
+}
+
+/**
+ * The lease after `me` has tried for it at `now`. Held by another, it comes
+ * back as it was, the same object, so that the caller can tell nothing has
+ * to be written.
+ */
+export function claimed(lease: Lease, me: string, now: number, also = ''): Lease {
+  const next = K.leaseClaimed({ session: lease.session, at: lease.at })(me)(now)(also)
+
+  return next.session === lease.session && next.at === lease.at ? lease : { v: 1, session: next.session, at: next.at }
+}
+
+/** The lease after `me` has given it back. Another session's is left alone, and comes back the same object. */
+export function released(lease: Lease, me: string): Lease {
+  const next = K.leaseReleased({ session: lease.session, at: lease.at })(me)
+
+  return next.session === lease.session && next.at === lease.at ? lease : NO_LEASE
+}
+
+/** When to look at the lease again. `random` is a number from 0 up to 1. */
+export function nextLeaseCheck(lease: Lease, me: string, now: number, random: number): number {
+  return K.leaseNextCheck({ session: lease.session, at: lease.at })(me)(now)(random)
+}
+
+// --- The play-by-play (Kernel.Play)
+
+function pressureToWire(pressure: Pressure): PlayFactsWire['pressure'] {
+  return {
+    level: pressure.level,
+    percent: pressure.percent,
+    window: pressure.window,
+    hasResetsAt: pressure.resetsAt !== null,
+    resetsAt: pressure.resetsAt ?? 0,
+  }
+}
+
+function factsToWire(facts: PlayFacts): PlayFactsWire {
+  return {
+    isPaused: facts.mode === 'paused',
+    isReady: facts.isReady,
+    hasRepo: facts.hasRepo,
+    isFollowing: facts.isFollowing,
+    isAutomatic: facts.isAutomatic,
+    hasPending: facts.hasPending,
+    hasLastChangeAt: facts.lastChangeAt !== null,
+    lastChangeAt: facts.lastChangeAt ?? 0,
+    hasLastLookAt: facts.lastLookAt !== null,
+    lastLookAt: facts.lastLookAt ?? 0,
+    isLooking: facts.isLooking,
+    failures: Math.trunc(facts.failures),
+    failure: facts.failure,
+    quietMs: facts.quietMs,
+    minGapMs: facts.minGapMs,
+    health: healthToWire(facts.health),
+    pressure: pressureToWire(facts.pressure),
+    jobBlock: facts.jobBlock,
+  }
+}
+
+function whyFromWire(wire: K.PlayWire): Why {
+  switch (wire.why) {
+    case 'trouble':
+      return { kind: 'trouble', trouble: wire.trouble as Trouble, detail: wire.detail }
+    case 'plan':
+      return { kind: 'plan', percent: wire.percent, window: wire.window }
+    case 'account':
+      return { kind: 'account', detail: wire.detail }
+    case 'job':
+      return { kind: 'job', detail: wire.detail }
+    default:
+      return { kind: 'failed', detail: wire.detail }
+  }
+}
+
+/** What the play-by-play is doing, worked out from the facts. */
+export function playOf(facts: PlayFacts): Play {
+  const wire = K.playOfWire(factsToWire(facts))
+  switch (wire.at) {
+    case 'settling':
+      return { at: 'settling', dueAt: wire.dueAt, isSpacing: wire.isSpacing }
+    case 'waiting':
+      return { at: 'waiting', until: wire.hasUntil ? wire.until : null, why: whyFromWire(wire) }
+    case 'no-git':
+    case 'following':
+    case 'paused':
+    case 'watching':
+    case 'on-request':
+    case 'looking':
+      return { at: wire.at }
+    default:
+      return { at: 'starting' }
+  }
+}
+
+/** When to come back and see whether a look can start. Null when there is nothing to wait for, or no time to give. */
+export function wakeAt(facts: PlayFacts): number | null {
+  const wake = K.wakeAtWire(factsToWire(facts))
+
+  return wake.has ? wake.at : null
+}
+
+/** Whether a look may start by itself at `now`. */
+export function isLookDue(facts: PlayFacts, now: number): boolean {
+  return K.isLookDueWire(factsToWire(facts))(now)
 }

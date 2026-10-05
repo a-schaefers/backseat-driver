@@ -85,7 +85,7 @@ Every roadmap milestone is built and was seen working in short scripted real ses
   - Limits: files under 256 KiB, at most 512 files.
   - Directory installs load as `<name>@synced`.
 - Approved plan for part two: `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine (nine decisions, risks per milestone).
-- In progress: the event-driven plan, `~/.claude/plans/wild-jumping-clover.md` on the owner's machine (approved 2026-10-04). Milestones M0 probes, M1 debug log, M2 locked store, M3 kernel (events, deadlines, health, play-by-play machine, sensor), M4 deep review queue, M5 Explain and journal on deadlines, M6 one driver per project, M7 pane pass, M8 optional push sources, M9 PureScript kernel. Done so far: M0 (see "Probed live" under Mod API), M1 (see "Debug log"; it also added the `session.end` flush of the journal) and M2 (the store and the locks, under "Data folder"). M3 (the kernel: deadlines, the scan, health, the play-by-play's state and status line; under "Play-by-play and watcher") and M4 (the queue of commits waiting for their review, its retries and watchdog; under "Deep review") are done too, and so is M5 (Explain and the journal on deadlines, the caret's fast lane, attention from timestamps; under "Explain" and "Journal"). Nothing in the mod runs on a repeating timer now except the animated persona's mouth and blink. M6 (one session drives a project, and what is on record about the person is read again when another session changes it; under "Several sessions") and M7 (the pane pass, under "Pane") are done as well. M8 is a set of optional push sources that each need the owner's decision (see the open decisions above), so nothing of it is built. M9, the PureScript kernel, has begun (see "Kernel"): the toolchain, the membrane, the check that the committed bundle is what the source builds, and the health machine. The other decision modules are ported one at a time, each after a parity run against the TypeScript it replaces: `PORTED` and `TO PORT` in "Kernel" say where that stands.
+- In progress: the event-driven plan, `~/.claude/plans/wild-jumping-clover.md` on the owner's machine (approved 2026-10-04). Milestones M0 probes, M1 debug log, M2 locked store, M3 kernel (events, deadlines, health, play-by-play machine, sensor), M4 deep review queue, M5 Explain and journal on deadlines, M6 one driver per project, M7 pane pass, M8 optional push sources, M9 PureScript kernel. Done so far: M0 (see "Probed live" under Mod API), M1 (see "Debug log"; it also added the `session.end` flush of the journal) and M2 (the store and the locks, under "Data folder"). M3 (the kernel: deadlines, the scan, health, the play-by-play's state and status line; under "Play-by-play and watcher") and M4 (the queue of commits waiting for their review, its retries and watchdog; under "Deep review") are done too, and so is M5 (Explain and the journal on deadlines, the caret's fast lane, attention from timestamps; under "Explain" and "Journal"). Nothing in the mod runs on a repeating timer now except the animated persona's mouth and blink. M6 (one session drives a project, and what is on record about the person is read again when another session changes it; under "Several sessions") and M7 (the pane pass, under "Pane") are done as well. M8 is a set of optional push sources that each need the owner's decision (see the open decisions above), so nothing of it is built. M9, the PureScript kernel, is under way (see "Kernel"): the toolchain, the membrane, the check that the committed bundle is what the source builds, and five modules: health, the play-by-play's decision, the pacing arithmetic, the scan cadence and the lease. The other decision modules are ported one at a time, each after a parity run against the TypeScript it replaces: `PORTED` and `TO PORT` in "Kernel" say where that stands.
 
 ## Repository
 
@@ -193,13 +193,13 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 | `guard.ts` | which paths are the user's |
 | `git.ts`, `noise.ts`, `diff.ts` | `git status` parsing, files and edits never worth a look, line diff |
 | `watcher.ts` | change since the last look (ports; tests use an in-memory tree) |
-| `gate.ts` | the pacing arithmetic: backoff after failed looks, the gap near the plan limit |
+| `gate.ts` | the pacing arithmetic's types, and `usagePressure`. The arithmetic is the kernel's (`Kernel.Pace`) |
 | `scheduler.ts` | deadlines: named things to do at a known time, one timer for the earliest |
-| `sensor.ts` | how often the working tree is scanned, and how often the spot in focus is checked while someone watches it |
+| `sensor.ts` | how often the working tree is scanned, and how often the spot in focus is checked while someone watches it. The kernel's (`Kernel.Sensor`) |
 | `health.ts` | whether Claude is answering: the types, and the plan's pressure. The decisions are the kernel's (`Kernel.Health`) |
 | `core.ts` | the membrane: the one file that imports `kernel.js`, turning the kernel's flat records into the mod's tagged unions and back |
 | `kernel.js`, `kernel.d.ts` | the kernel, compiled from PureScript, and what it exports |
-| `play.ts` | what the play-by-play is doing and when it looks next, worked out from the facts |
+| `play.ts` | what the play-by-play is doing and when it looks next, worked out from the facts: the types. The decision is the kernel's (`Kernel.Play`) |
 | `status.ts` | the pane's status line as a sentence, with a clock time for every wait |
 | `notes.ts`, `prompts.ts` | reviewer reply → notes; reviewer and conversation prompt text |
 | `review.ts` | deep review scope: reflog, what counts as a commit, the request |
@@ -210,7 +210,7 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 | `datahome.ts`, `storage.ts` | data folder paths, what is removable, `Disk` port, `memoryDisk()` |
 | `store.ts` | every read and change of the tutor's JSON files: half-written files, backups, one change at a time, read-back |
 | `locks.ts` | locks that hold across sessions, as refs in a bare git repository of the tutor's own |
-| `lease.ts` | which session drives a project's background jobs: the lease, who may take it, when to look at it again |
+| `lease.ts` | which session drives a project's background jobs: the lease as stored. Who may take it and when to look again are the kernel's (`Kernel.Lease`) |
 | `forget.ts` | forget scopes, dialog wording, paths per scope |
 | `knowledge.ts` | per-file knowledge and the freshness rule |
 | `explain-prompts.ts` | map-a-file and explain-a-symbol requests and replies |
@@ -236,10 +236,11 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 The owner wants the logic functional where it can be, "to detect, prevent and reduce bugs" (Product). The decisions the mod makes live in `kernel/src/Kernel/*.purs`. Their types carry the rules: a state that cannot happen cannot be built, and a transition that is not handled does not compile. Modeled on `../merecatholicity.com` (`purescript/src/Domain/*`, `app/core.ts`).
 
 - Rule: new decision logic is written in PureScript. TypeScript is the shell (`register.tsx`: effects), the pane, the engines with ports, text parsing, and the membrane. Claude Code reads `on(...)` and `$` calls from TypeScript source, so those cannot move.
-- `PORTED`: `Kernel.Health` (the shared wait after failures, what an API error means). `TO PORT`, in this order: `play.ts`, `sensor.ts`, `lease.ts`, `reviewqueue.ts`, the store's retry policy.
+- `PORTED`: `Kernel.Health` (the shared wait after failures, what an API error means), `Kernel.Play` (what the play-by-play is doing, when to come back, whether a look is due), `Kernel.Pace` (backoff after failed looks, the gap near the plan limit), `Kernel.Sensor` (how often to scan, and to check the spot in focus), `Kernel.Lease` (who may take a project's lease, and when to look at it again). Their TypeScript files (`health.ts`, `play.ts`, `gate.ts`, `sensor.ts`, `lease.ts`) keep the types and the parsing and re-export the kernel's functions from `core.ts`.
+- `TO PORT`, in this order: `reviewqueue.ts` (the queue of waiting commits, tries and their spacing), the store's retry policy, `status.ts` (the status line and the health row), `scheduler.ts`. Not for the kernel: anything that parses text or JSON from outside (`parseLease`, `pressureOf`'s dates), which stays at the edge.
 - How it reaches the mod:
   - `scripts/build-kernel.sh` (`npm run build:kernel`): `scripts/toolchain.py` puts `purs` 0.15.16 in `local/bin` (downloaded from the GitHub release, tarball and binary each checked against the sha256 in `kernel/toolchain.json`), `spago build` compiles `kernel/src` with the package set pinned in `kernel/spago.yaml` and `spago.lock`, and esbuild (pinned exactly in `package.json`) bundles the entry module `Kernel.Main` into one ES module, `plugin/hooks/kernel.js`.
-  - `kernel.js` is committed: installs copy the repository, and nothing is built on a user's machine. It is 21 KB for one module (the limit for a file in a plugin directory listing is 256 KiB). Never edit it.
+  - `kernel.js` is committed: installs copy the repository, and nothing is built on a user's machine. It is 40 KB for five modules (the limit for a file in a plugin directory listing is 256 KiB). Never edit it.
   - `npm run kernel` builds beside it and compares. `npm run check` starts with it, and so does CI, which keeps `local/bin` and `kernel/.spago` between runs.
   - `Kernel.Main` re-exports what crosses. What it does not export is not in the bundle.
 - The membrane, `core.ts`, is the only importer of `kernel.js`:
@@ -248,12 +249,16 @@ The owner wants the logic functional where it can be, "to detect, prevent and re
   - The membrane keeps identity: when an event changes nothing, `stepHealth` hands back the object it was given, and `ok` is always the one `HEALTHY`. `noteOutcome` tells a change by `health === before`.
   - Keep it thin. A decision made in `core.ts` is one the kernel's types did not check.
 - Porting a module: write `Kernel.X` with the same rules, export its `…Wire` functions from `Kernel.Main`, declare them in `kernel.d.ts`, write the membrane functions in `core.ts` under the names the TypeScript module exported, and re-export them from that module so that no caller changes. Then copy the old TypeScript into a temporary reference under `plugin/tests/` and run both over seeded random histories. When they agree, delete the reference and the old logic, and keep property tests (the rules, over random histories) beside the table tests.
+- The second parity run (2026-10-04) agreed everywhere on the first try: the pacing arithmetic at every half percent and every failure count, the scan cadence over 20,000 random facts and its exact edges, 40,000 random steps of the lease with its same-object rule, and 60,000 random sets of facts through `playOf`, `wakeAt` and `isLookDue` at four moments each, every state and every reason reached. The one thing the compiler caught on the way that TypeScript would not have: `Waiting` meant two things (Claude not answering, and a look held back), and the play module would not compile until each use said which.
 - Health's parity run (2026-10-04): 60,000 random steps of `stepHealth` and `mayAsk`, 20,000 retry delays, every error word and 500 model results agreed, with one difference that is meant: an API error with an empty word used to leave the detail empty ("The last look failed ()") and now names the status ("error 503").
 - PureScript things that bite here:
   - `Int` is 32 bits. Clock times are `Number`.
   - `type` is a reserved word, so an event's tag is `kind` on the wire.
   - `Data.Number.round` is JavaScript's `Math.round`, so the arithmetic matches the TypeScript it replaced to the millisecond.
+  - Two modules may name a constructor alike (`Health.Waiting`, `Play.Waiting`). Import one of them qualified.
+  - `Kernel.Main` can only re-export a name as it is. Where a module's names are too plain to stand alone in the bundle (`claimed`, `isHeld`), `Main` gives them a prefixed alias with its own signature (`leaseClaimed`).
 - `npm audit` reports three "high" findings, all one advisory: `braces` through `micromatch` through spago, a stack exhaustion on a hostile glob pattern. spago is a dev tool that globs this repository's own files, nothing of it ships, and the fix npm offers is a downgrade of spago. The reference repository lives with the same one.
+- Live with the five modules (2026-10-04): a save was seen at the next scan, the pane said "Saw your save. Looking when you pause.", the look started 10.0 s after it, two notes came back, and the session held its project's lease.
 - Live (2026-10-04): a real session on the bundle went through an outage and back: no connection, `waiting offline failures=1`, the wait over 12 s later, a lookup answered, `ok`. The mod loads `kernel.js` through `register.tsx` → `health.ts` → `core.ts`.
 
 ### Mode

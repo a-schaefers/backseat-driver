@@ -17,23 +17,23 @@
  * the file the Explain view is about, and the file an editor writes its
  * caret to. Two stats, ten times a second (`focusGapMs`), because an
  * explanation of code that was just edited must not stay on screen.
+ *
+ * The numbers and the arithmetic are the kernel's (kernel/src/Kernel/Sensor.purs),
+ * through core.ts.
  */
 
-/** Between scans while something has just happened. */
-export const HOT_SCAN_MS = 1000
-/** Between scans otherwise. */
-export const SCAN_MS = 2000
-/** Between scans once nothing has happened for a while. */
-export const IDLE_SCAN_MS = 5000
-/** How long after something happened the scans stay close together. */
-export const HOT_FOR_MS = 60_000
-/** How long nothing has to happen before they grow far apart. */
-export const IDLE_AFTER_MS = 600_000
-/** Each quarter second a scan takes adds this much to the wait for the next, so that a slow `git status` is not run back to back. */
-const SLOW_SCAN_STEP_MS = 250
-const SLOW_SCAN_WAIT_MS = 2000
-/** However slow git is, the working tree is looked at this often. */
-export const LONGEST_SCAN_GAP_MS = 32_000
+export {
+  FOCUS_SCAN_MS,
+  focusGapMs,
+  HOT_FOR_MS,
+  HOT_SCAN_MS,
+  IDLE_AFTER_MS,
+  IDLE_SCAN_MS,
+  LONGEST_FOCUS_GAP_MS,
+  LONGEST_SCAN_GAP_MS,
+  SCAN_MS,
+  scanGapMs,
+} from './core'
 
 export type ScanFacts = {
   now: number
@@ -41,28 +41,4 @@ export type ScanFacts = {
   activeAt: number | null
   /** How long the scan that just finished took. */
   lastScanMs: number
-}
-
-/** How long to wait before the next scan. */
-export function scanGapMs(facts: ScanFacts): number {
-  const quietFor = facts.activeAt === null ? Number.POSITIVE_INFINITY : facts.now - facts.activeAt
-  const base = quietFor < HOT_FOR_MS ? HOT_SCAN_MS : quietFor >= IDLE_AFTER_MS ? IDLE_SCAN_MS : SCAN_MS
-  const slowness = Math.floor(facts.lastScanMs / SLOW_SCAN_STEP_MS) * SLOW_SCAN_WAIT_MS
-
-  return Math.min(LONGEST_SCAN_GAP_MS, base + slowness)
-}
-
-/**
- * Between checks of the spot in focus while someone is watching it. A stat
- * takes about a millisecond. This is the longest the pane can show an
- * explanation of code that was just edited, and the longest an editor waits
- * for its caret to be noticed.
- */
-export const FOCUS_SCAN_MS = 100
-/** However slow the disk is, the spot in focus is checked this often. */
-export const LONGEST_FOCUS_GAP_MS = 2000
-
-/** How long to wait before the next check of the spot in focus. A check that was slow is not run back to back. */
-export function focusGapMs(tookMs: number): number {
-  return Math.min(LONGEST_FOCUS_GAP_MS, Math.max(FOCUS_SCAN_MS, tookMs * 4))
 }

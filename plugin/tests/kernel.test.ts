@@ -1,6 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
 import { HEALTHY, mayAsk, NO_PRESSURE, outcomeOf, outcomeOfError, pressureOf, retryDelayMs, stepHealth, troubleOf } from '../hooks/health'
+import { claimed, isHeld, LEASE_BEAT_MS, LEASE_TTL_MS, nextLeaseCheck, NO_LEASE, released } from '../hooks/lease'
+import type { Lease } from '../hooks/lease'
 import type { Health, HealthEvent, Pressure, Trouble } from '../hooks/health'
 import { isLookDue, playOf, wakeAt } from '../hooks/play'
 import type { PlayFacts } from '../hooks/play'
@@ -521,4 +523,94 @@ test('the spot in focus is checked ten times a second while it is watched, and l
   // A check that took a while is not run back to back: the wait is four times what it took.
   expect(focusGapMs(100)).toBe(400)
   expect(focusGapMs(60_000)).toBe(LONGEST_FOCUS_GAP_MS)
+})
+
+test('whatever the facts, no look starts by itself when it must not, and one that is held back says until when it can', { timeoutMs: 60_000 }, async () => {
+  const random = seeded(21)
+  const chance = (p: number): boolean => random() < p
+  const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T
+  for (let turn = 0; turn < 20_000; turn += 1) {
+    const now = 1_790_000_000_000 + Math.floor(random() * 1e8)
+    const health: Health = pick<Health>([
+      HEALTHY,
+      HEALTHY,
+      { state: 'waiting', trouble: 'overloaded', detail: 'overloaded', until: now + Math.floor((random() - 0.3) * 400_000), failures: 2 },
+      { state: 'recovering', trouble: 'offline', detail: 'no connection', failures: 1 },
+      { state: 'probing', trouble: 'offline', detail: 'no connection', failures: 1 },
+      { state: 'blocked', detail: 'billing error' },
+    ])
+    const percent = pick([0, 0, 50, 80, 94, 95, 100])
+    const facts: PlayFacts = {
+      mode: chance(0.1) ? 'paused' : 'on',
+      isReady: !chance(0.05),
+      hasRepo: !chance(0.05),
+      isFollowing: chance(0.1),
+      isAutomatic: !chance(0.1),
+      hasPending: !chance(0.2),
+      lastChangeAt: chance(0.1) ? null : now - Math.floor(random() ** 2 * 200_000),
+      lastLookAt: chance(0.3) ? null : now - Math.floor(random() ** 2 * 900_000),
+      isLooking: chance(0.1),
+      failures: chance(0.6) ? 0 : Math.floor(random() * 6),
+      failure: 'overloaded',
+      quietMs: pick([5000, 10_000, 60_000]),
+      minGapMs: pick([0, 60_000, 300_000]),
+      health,
+      pressure: { level: percent >= 95 ? 'held' : percent >= 80 ? 'slowed' : 'none', percent, window: 'five_hour', resetsAt: chance(0.5) ? null : now + 600_000 },
+      jobBlock: chance(0.05) ? 'model not found' : '',
+    }
+    const play = playOf(facts)
+    const wake = wakeAt(facts)
+    const where = `turn ${turn}: ${JSON.stringify(facts)} is ${JSON.stringify(play)}`
+    for (const at of [now - 500_000, now, now + 500_000]) {
+      if (!isLookDue(facts, at)) continue
+      // A look that is due is due because its time has come: there was a time, and it has passed.
+      if (wake === null || wake > at) throw new Error(`due at ${at} with a wake time of ${wake}. ${where}`)
+      if (facts.isLooking) throw new Error(`due while one runs. ${where}`)
+      if (facts.mode === 'paused' || facts.isFollowing || !facts.hasRepo || !facts.isReady) throw new Error(`due while nothing should look. ${where}`)
+      if (!facts.isAutomatic) throw new Error(`due though it looks only when asked. ${where}`)
+      if (!facts.hasPending || facts.lastChangeAt === null) throw new Error(`due with nothing to look at. ${where}`)
+      if (facts.jobBlock !== '' || health.state === 'blocked' || facts.pressure.level === 'held') throw new Error(`due though it is held back. ${where}`)
+      // While another job is finding out whether Claude is back, this one waits for what it finds.
+      if (health.state === 'probing') throw new Error(`due while another job is finding out. ${where}`)
+      if (at < facts.lastChangeAt + facts.quietMs) throw new Error(`due before the quiet time is over. ${where}`)
+    }
+    // A save that is settling is due no sooner than the quiet time after it.
+    if (play.at === 'settling' && facts.lastChangeAt !== null && play.dueAt < facts.lastChangeAt + facts.quietMs) throw new Error(`settling too early. ${where}`)
+    // The time to come back is the state's own time, and there is none for a state that waits for nothing.
+    if (play.at === 'settling' && wake !== play.dueAt) throw new Error(`wake is not the due time. ${where}`)
+    if (play.at === 'waiting' && wake !== play.until) throw new Error(`wake is not the wait's end. ${where}`)
+    if (play.at !== 'settling' && play.at !== 'waiting' && wake !== null) throw new Error(`a wake time with nothing to wait for. ${where}`)
+  }
+})
+
+test('whoever asks and whenever, a lease that is held is never taken from its holder before it runs out', async () => {
+  const random = seeded(31)
+  const ids = ['a', 'b', 'c']
+  let lease: Lease = NO_LEASE
+  let now = 1_790_000_000_000
+  for (let turn = 0; turn < 20_000; turn += 1) {
+    now += Math.floor(random() ** 2 * 50_000)
+    const me = ids[Math.floor(random() * ids.length)] as string
+    const before = lease
+    const wasHeld = isHeld(before, now)
+    if (random() < 0.15) {
+      lease = released(lease, me)
+      // Only its holder gives a lease back.
+      if (before.session !== me && lease !== before) throw new Error(`turn ${turn}: ${me} gave back ${JSON.stringify(before)}`)
+      if (before.session === me && isHeld(lease, now)) throw new Error(`turn ${turn}: given back and still held`)
+    } else {
+      lease = claimed(lease, me, now)
+      if (wasHeld && before.session !== me) {
+        // Held by another: untouched, and the same object, so that nothing is written.
+        if (lease !== before) throw new Error(`turn ${turn}: ${me} took ${JSON.stringify(before)} at ${now}`)
+      } else if (lease.session !== me || lease.at !== now) {
+        throw new Error(`turn ${turn}: ${me} did not get a lease that was free: ${JSON.stringify(lease)}`)
+      }
+    }
+    // A lease run out is nobody's, whoever it names.
+    if (lease.session !== '' && now - lease.at >= LEASE_TTL_MS && isHeld(lease, now)) throw new Error(`turn ${turn}: held past its time`)
+    // The next look at it is in the future, and never further off than one beat.
+    const next = nextLeaseCheck(lease, me, now, random())
+    if (next <= now || next > now + LEASE_BEAT_MS) throw new Error(`turn ${turn}: the next check is at ${next - now} ms`)
+  }
 })

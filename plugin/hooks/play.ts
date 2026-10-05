@@ -1,6 +1,7 @@
-import { backoffMs, slowedGapMs } from './gate'
-import { gapFactorOf, mayAsk } from './health'
 import type { Health, Pressure, Trouble } from './health'
+
+// The decision is the kernel's (kernel/src/Kernel/Play.purs), through core.ts. Its types, as the rest of the mod uses them, are here.
+export { isLookDue, playOf, wakeAt } from './core'
 
 /**
  * What the play-by-play is doing, and when it looks next.
@@ -63,62 +64,4 @@ export type PlayFacts = {
   pressure: Pressure
   /** Why the play-by-play's own request is refused, such as a model that does not exist. '' when it is not. */
   jobBlock: string
-}
-
-/** When the pacing alone allows the next look: the quiet time, the minimum gap, and the wait after a failed look. */
-function paced(facts: PlayFacts): number | null {
-  if (!facts.hasPending || facts.lastChangeAt === null) return null
-  const quiet = facts.lastChangeAt + facts.quietMs
-  if (facts.lastLookAt === null) return quiet
-
-  return Math.max(quiet, facts.lastLookAt + slowedGapMs(facts.minGapMs, gapFactorOf(facts.pressure)) + backoffMs(facts.failures))
-}
-
-export function playOf(facts: PlayFacts): Play {
-  if (!facts.isReady) return { at: 'starting' }
-  if (!facts.hasRepo) return { at: 'no-git' }
-  if (facts.mode === 'paused') return { at: 'paused' }
-  if (facts.isFollowing) return { at: 'following' }
-  if (facts.isLooking) return { at: 'looking' }
-  if (!facts.isAutomatic) return { at: 'on-request' }
-  const dueAt = paced(facts)
-  if (dueAt === null) return { at: 'watching' }
-
-  if (facts.jobBlock !== '') return { at: 'waiting', until: null, why: { kind: 'job', detail: facts.jobBlock } }
-  const { health, pressure } = facts
-  if (health.state === 'blocked') return { at: 'waiting', until: null, why: { kind: 'account', detail: health.detail } }
-  if (pressure.level === 'held') {
-    return { at: 'waiting', until: pressure.resetsAt, why: { kind: 'plan', percent: pressure.percent, window: pressure.window } }
-  }
-  const failed: Why | null = facts.failures > 0 ? { kind: 'failed', detail: facts.failure } : null
-  if (health.state === 'waiting' || health.state === 'probing') {
-    // While another job finds out whether Claude is back, there is no time to give.
-    const until = health.state === 'waiting' ? Math.max(health.until, dueAt) : null
-
-    return { at: 'waiting', until, why: failed ?? { kind: 'trouble', trouble: health.trouble, detail: health.detail } }
-  }
-  if (failed !== null) return { at: 'waiting', until: dueAt, why: failed }
-
-  return { at: 'settling', dueAt, isSpacing: facts.lastChangeAt !== null && dueAt > facts.lastChangeAt + facts.quietMs }
-}
-
-/** When to come back and see whether a look can start. Null when there is nothing to wait for, or no time to give. */
-export function wakeAt(facts: PlayFacts): number | null {
-  const play = playOf(facts)
-  if (play.at === 'settling') return play.dueAt
-  if (play.at === 'waiting') return play.until
-
-  return null
-}
-
-/** Whether a look may start by itself at `now`. */
-export function isLookDue(facts: PlayFacts, now: number): boolean {
-  const play = playOf(facts)
-  if (play.at === 'settling') return play.dueAt <= now && mayAsk(facts.health)
-  // The wait after a failure is over: this look is the one that finds out whether Claude is back.
-  if (play.at === 'waiting' && (play.why.kind === 'failed' || play.why.kind === 'trouble')) {
-    return play.until !== null && play.until <= now && (mayAsk(facts.health) || facts.health.state === 'waiting')
-  }
-
-  return false
 }
