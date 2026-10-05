@@ -20,21 +20,13 @@ Inspired by the ideas discussed in the [Enchant Games Journal](https://enchant.g
 
 > We built machines to obey us.
 >
-> Now we ask them to think instead of us.
+> Now we ask them to think for us.
 
-First they took the environment. Then the tools. Then the stack. Now, in 2026, we're told not to write code at all. Use Claude. Use Codex. Use Copilot. Leave your brain at home, kids.
+This project is trying to reverse course.
 
-Good grief.
+It's not about speed. If it takes me longer but I grok it, I win. **It's about owning your understanding.**
 
-The skills you don't use, you lose. Devs who handed their jobs to the AI keep saying the same thing: give it a few months and you forget how to code. Juniors aren't getting the reps at all. And the whole time, the people steering the agent think they're in the driver's seat.
-
-It's not about speed. If it takes me longer, but I grok it, that matters. **It's about ownership of understanding.**
-
-And I love this stuff: the puzzle, the craft, the moment it clicks. I'm in it for the love of the game, and I'm not handing that to a guessing machine.
-
-So yes, this is a Claude plugin, and yes, I see the irony. Backseat Driver puts the machine where it belongs: in the back seat. You drive. It watches the road and speaks up when it matters. Iron sharpens iron.
-
-Let's make coding human again.
+So yes, this is a Claude plugin, and yes, I see the irony. Backseat Driver puts the machine where it belongs: in the back seat. You drive. It watches the road and speaks up when it matters.
 
 ## What it is
 
