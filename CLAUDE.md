@@ -74,6 +74,8 @@ Every roadmap milestone is built and was seen working in short scripted real ses
 - Open owner decisions:
   - which ref new installs get (see Updates)
   - whether to submit to Anthropic's directory
+  - whether the mod may name watch paths at session start, while still off (open since M0, 2026-10-04). It would give pushed commits (`.git/logs/HEAD`), a pushed editor caret and pushed changes from other sessions, about 0.6 s after the write, with no file read. It bends "dormant until switched on": Claude Code would watch a handful of paths in every session that has the plugin. Saves in the working tree stay on the sensor either way, because a watched folder reports its direct children only.
+  - whether the event-driven machines are written in TypeScript first and ported (the approved order) or born in PureScript, now that the load probe passed
 - Directory facts (checked 2026-10-04):
   - It lists mods, for Claude Code only.
   - Submit at claude.ai/directory/manage. It tracks a branch or tag, and the plugin path can be `plugin`.
@@ -81,7 +83,7 @@ Every roadmap milestone is built and was seen working in short scripted real ses
   - Limits: files under 256 KiB, at most 512 files.
   - Directory installs load as `<name>@synced`.
 - Approved plan for part two: `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine (nine decisions, risks per milestone).
-- In progress: the event-driven plan, `~/.claude/plans/wild-jumping-clover.md` on the owner's machine (approved 2026-10-04). Milestones M0 probes, M1 debug log, M2 locked store, M3 kernel (events, deadlines, health, play-by-play machine, sensor), M4 deep review queue, M5 Explain and journal on deadlines, M6 one driver per project, M7 pane pass, M8 optional push sources, M9 PureScript kernel. Done so far: none. Until M3 lands, the sections below describe the polling design.
+- In progress: the event-driven plan, `~/.claude/plans/wild-jumping-clover.md` on the owner's machine (approved 2026-10-04). Milestones M0 probes, M1 debug log, M2 locked store, M3 kernel (events, deadlines, health, play-by-play machine, sensor), M4 deep review queue, M5 Explain and journal on deadlines, M6 one driver per project, M7 pane pass, M8 optional push sources, M9 PureScript kernel. Done so far: M0 (see "Probed live" under Mod API). Until M3 lands, the sections below describe the polling design.
 
 ## Repository
 
@@ -501,6 +503,30 @@ The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above mem
 - State-driven redraws and `$.ui.invalidate` are capped at 30/s in the terminal. The persona ticks about 7/s while talking, zero at rest.
 - `e.props.isFocused` in the pane's `ui.render` says whether it has the keyboard; hotkeys are dead until then, and the pane says how to focus.
 - `Text` takes no `key`. Keys go on `Button`, `Input`, `Select`, `Markdown`. Find text via `ui.find({ type: 'Text', text })`; an undefined result after a clean mount usually means this.
+
+### Probed live (2.1.289, 2026-10-04, a scratch mod; the event-driven plan's M0)
+
+- `$.fs.write` truncates in place (same inode; a hard link sees the new text): not atomic. 1 KB 2 ms, 128 KB 3 ms, 2 MB 15 ms. `stat` 2 ms. `list` 3 ms, and it returns `{ name, kind, size, mtimeMs }` per entry, so one call stamps a whole folder.
+- Module environment:
+  - Present: `Date` in the local time zone, `Intl`, `toLocaleTimeString`, `Math.random`, `setTimeout`, `setInterval`, `AbortController`, `crypto`, `structuredClone`.
+  - Absent: `queueMicrotask`, `process`, `fetch`, `WeakRef`.
+  - `Date.now()` agrees with `$.clock.now()`. Keep `$.clock.now()`: tests move that clock.
+- `$.clock.after(ms)` fires 15 to 80 ms late. `cancel()` holds.
+- `$.model.complete`: about 0.5 s on haiku. `timeoutMs` elapsed resolves `{ reason: 'aborted' }`. An unknown model resolves `{ reason: 'api-error', status: 404, error: 'model_not_found' }`; it does not reject.
+- `session.measure` fires around main-thread turns, the first time naming every unit, with `rateLimits` (`kind`, `percentUsed`, `resetsAt`). It did not fire after a `$.model.complete` alone. `$.session.usage()` is free and holds the same figures.
+- `$.agent.spawn` resolves in about 130 ms with `{ model, agentId }`. `$.agent.list()` rows are `{ id, description, type, status, spawnedBy }`, status `running | completed | failed`; a finished row drops out later.
+- A subagent that dies on an API error raises `turn.complete` with `reason: 'error'` and an empty answer, about 16 s after the spawn (the engine retries first). At the same moment `classic.StopFailure` fires with the error kind (`model_not_found`) and `agent_id`: that is where a failed review's reason comes from.
+- `session.end`: `next.budget` was `{ ms: 1491 }`. Twelve writes and a git run took 109 ms, so a flush at exit fits.
+- `classic.FileChanged` reaches a function hook with no settings hook configured, for paths returned as `watchPaths` from `classic.SessionStart`.
+  - `classic.SessionStart` is the only event that takes the list: one returned from `classic.FileChanged` is ignored. So nothing can start a watch when `/bsd` is typed mid-session.
+  - It takes files, files that do not exist yet (`add`), and folders. A folder gives its direct children only.
+  - Events are `add | change | unlink`, about 570 ms after the write (it waits for the write to settle). `.git/logs/HEAD` fired on a commit.
+- `$.session.send({ to: { sessionId }, text })` between two sessions on one machine arrives in under a second. The receiver's `session.receive` sees `origin: { kind: 'peer', plugin }` and the text inside a `<cross-session-message …>` envelope, so match with `includes`, not `startsWith`. `{ consumed }` keeps it out of the conversation. Passed on, it becomes a row and a model turn there. Both sessions were in bypass mode; different modes are untested.
+- git as a lock, in a bare repository:
+  - `update-ref <ref> <new> <40 zeros>` creates only when absent (exit 128 when held). `update-ref -d <ref> <holder>` deletes only on a match (exit 1 otherwise). `update-ref <ref> <new> <old>` steals.
+  - 40 racing processes: one winner. Two writers making 100 locked increments each lost none.
+  - Through `$.process.run`: 10 ms per `update-ref`, 14 ms for `hash-object -w --stdin`, 34 ms for `init --bare`. The ref file's mtime is when the lock was taken.
+- Compiled PureScript loads. `purs` output bundled by esbuild into one ES module and imported by the hooks module (`import * as K from './kernel.js'`) passes `claude plugin validate`, runs in a live session, and runs under `claude plugin test`. A 100-line module using prelude, arrays, maybe and integers bundled to 12 KB.
 
 ## Tests
 
