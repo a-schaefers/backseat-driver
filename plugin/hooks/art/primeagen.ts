@@ -26,43 +26,48 @@ const art: SpriteArt = {
     D: 0x2e2e36, // hoodie
     d: 0x1f1f25, // hoodie, shaded
     C: 0xd8d8d8, // hoodie string
+    N: 0xf4f0e8, // teeth
   },
   // prettier-ignore
   rest: [
     '....AAaaaaaaaaAA....', // 0
     '...AKKTTTTTTTTKKA...', // 1
-    '..AKSTTTTTTTTTTSKA..', // 2
-    '..AKSSSTTTTTTSSSKA..', // 3
-    '.AKSSSSSSSSSSSSSSKA.', // 4
-    '.AKSSSSSSSSSSSSSSKA.', // 5
-    'QQKShhhhSSSShhhhSKQQ', // 6
-    'QqKSSSSSSSSSSSSSSKqQ', // 7
-    'QqKSWEESSSSSSEEWSKqQ', // 8
+    '..AKTTTTTTTTTTTTKA..', // 2
+    '..AKSSTTTTTTTTSSKA..', // 3
+    '.AKShhSSSSSSSShhSKA.', // 4
+    '.AKSSShhhSShhhSSSKA.', // 5
+    'QQKSSSSSSSSSSSSSSKQQ', // 6
+    'QqKSSWWWSSSSWWWSSKqQ', // 7
+    'QqKSSWEWSSSSWEWSSKqQ', // 8
     'QqKSSSSSSssSSSSSSKqQ', // 9
     'QqKSSSSSssssSSSSSKqQ', // 10
     'QQKsSSSsTssTsSSSsKQQ', // 11
     '..KSSUUUUUUUUUUSSK..', // 12
-    '..KSSUUSMMMMSUUSSK..', // 13
-    '..KSSUUSSSSSSUUSSK..', // 14
-    '...KSUUSSSSSSUUSK...', // 15
-    '....KUUSSSSSSUUK....', // 16
-    '..aDDKKssssssKKDDA..', // 17
-    '.aDDDDKssssssKDDDDd.', // 18
-    'dDDDDDDCDssDCDDDDDDd', // 19
+    '..KSSUUNNNNNNUUSSK..', // 13
+    '..KSSUUMMMMMMUUSSK..', // 14
+    '..KSSUUSSSSSSUUSSK..', // 15
+    '..KSSUUSSTTSSUUSSK..', // 16
+    '..KsSUUSTTTTSUUSsK..', // 17
+    '...KssSSSSSSSSssK...', // 18
+    '....KKKssssssKKK....', // 19
+    '.aDDDDKssssssKDDDDa.', // 20
+    'dDDDDDDCDssDCDDDDDDd', // 21
   ],
   talk: {
-    13: '..KSSUUMMMMMMUUSSK..',
-    14: '..KSSUUSMMMMSUUSSK..',
+    13: '..KSSUUNNNNNNUUSSK..',
+    14: '..KSSUUMMMMMMUUSSK..',
+    15: '..KSSUUMMMMMMUUSSK..',
+    16: '..KSSUUSMMMMSUUSSK..',
   },
   blink: {
-    8: 'QqKShhhSSSSSShhhSKqQ',
+    7: 'QqKSSSSSSSSSSSSSSKqQ',
+    8: 'QqKSSEEESSSSEEESSKqQ',
   },
   think: {
-    6: 'QQKSSSSSSSSSSSSSSKQQ',
-    7: 'QqKShhhhSSSShhhhSKqQ',
-    8: 'QqKSEEWSSSSSSWEESKqQ',
+    7: 'QqKSSWEWSSSSWEWSSKqQ',
+    8: 'QqKSSWWWSSSSWWWSSKqQ',
   },
-  mouth: 7,
+  mouth: 6,
 }
 
 export default art

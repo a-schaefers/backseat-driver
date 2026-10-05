@@ -1,8 +1,9 @@
 import type { SpriteArt } from '../sprite'
 
 /**
- * Donald Knuth, in the spirit of: a bald dome, white tufts at the sides,
- * round gold wire glasses, a wide warm grin, a red sweater over a white collar.
+ * Donald Knuth, in the spirit of: a long head under a high bald dome, white
+ * hair at the sides, small round gold wire glasses, a gentle smile, a dark
+ * sweater over a white shirt collar.
  *
  * Each letter is a color from the palette and `.` is see-through; two rows of
  * pixels make one row of terminal cells. Preview with `npm run persona`.
@@ -13,54 +14,55 @@ const art: SpriteArt = {
     S: 0xf2c8a8, // skin
     s: 0xd59c7c, // skin, shaded
     T: 0xfde2cc, // skin, lit
-    R: 0xeaa28c, // cheek
     W: 0xe8e8e4, // white hair
     w: 0xb8b8b2, // white hair, shaded
     h: 0x9a948c, // brows
-    Y: 0xb08a3a, // glasses, gold wire
+    Y: 0xc8a050, // glasses, thin gold wire
     L: 0xdfeef4, // lens
     E: 0x2a3440, // eye
     M: 0x6e2c25, // mouth
     N: 0xf8f4ee, // teeth
-    Q: 0xa63a32, // sweater
-    q: 0x7a2822, // sweater, shaded
-    C: 0xf0f0ec, // collar
+    C: 0xf0f0ec, // shirt collar
+    D: 0x3a4458, // sweater, dark
   },
   // prettier-ignore
   rest: [
-    '......KKKKKKKK......', // 0
-    '....KKSTTTTTTSKK....', // 1
-    '...KSSTTTTTTTTSSK...', // 2
-    '..KSSSSTTSSTTSSSSK..', // 3
-    '..KSSSSSSSSSSSSSSK..', // 4
-    '..KKSSSSSSSSSSSSKK..', // 5
-    'KwWWSSSSSSSSSSSSWWwK', // 6
-    'KWWShhhSSSSSShhhSWWK', // 7
-    'KWsSSYYYSSSSYYYSSsWK', // 8
-    'KWsSYLLLYYYYLLLYSsWK', // 9
-    'KwKSYLELYSSYLELYSKwK', // 10
-    '.KwSSYYYSSSSYYYSSwK.', // 11
-    '..KSSSSSssssSSSSSK..', // 12
-    '..KsRRSSsTTsSSRRsK..', // 13
-    '..KsSMSSSSSSSSMSsK..', // 14
-    '..KsSSMNNNNNNMSSsK..', // 15
-    '...KsSSMMMMMMSSsK...', // 16
-    '....KsSSSSSSSSsK....', // 17
-    '..qCCKKssssssKKCCq..', // 18
-    'qQQQQQCCssssCCQQQQQq', // 19
+    '.......KKKKKK.......', // 0
+    '.....KKTTTTTTKK.....', // 1
+    '....KSTTTTTTTTSK....', // 2
+    '....KSSTTTTTTSSK....', // 3
+    '...KSSSSTTTTSSSSK...', // 4
+    '...KSSSSSSSSSSSSK...', // 5
+    '...KSSSSSSSSSSSSK...', // 6
+    '...KSSSSSSSSSSSSK...', // 7
+    '..KWShhhSSSShhhSWK..', // 8
+    '.KWWSYYYSSSSYYYSWWK.', // 9
+    '.KWWYLELYSSYLELYWWK.', // 10
+    'KsWWYLLLYYYYLLLYWWsK', // 11
+    '.KWWSYYYSSSSYYYSWWK.', // 12
+    '..KWSSSSSssSSSSSWK..', // 13
+    '...KSSSSsTTsSSSSK...', // 14
+    '...KSSSssssssSSSK...', // 15
+    '...KsSSSSSSSSSSsK...', // 16
+    '...KsSSMSSSSMSSsK...', // 17
+    '...KsSSSMMMMSSSsK...', // 18
+    '...KssSSSSSSSSssK...', // 19
+    '....KKssSSSSssKK....', // 20
+    'DDDDDCCKssssKCCDDDDD', // 21
   ],
   talk: {
-    16: '...KsSMMMMMMMMSsK...',
-    17: '....KsSSMMMMSSsK....',
+    18: '...KsSSMMMMMMSSsK...',
+    19: '...KssSSMMMMSSssK...',
   },
   blink: {
-    10: 'KwKSYEEEYSSYEEEYSKwK',
+    10: '.KWWYEEEYSSYEEEYWWK.',
   },
   think: {
-    9: 'KWsSYLELYYYYLELYSsWK',
-    10: 'KwKSYLLLYSSYLLLYSKwK',
+    7: '...KShhhSSSShhhSK...',
+    8: '..KWSSSSSSSSSSSSWK..',
+    10: '.KWWYLLEYSSYLLEYWWK.',
   },
-  mouth: 7,
+  mouth: 8,
 }
 
 export default art
