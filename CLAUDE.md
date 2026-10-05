@@ -16,6 +16,7 @@ AI-only reference for this repository. Terse by design. `README.md` is the only 
   - Never apologize for the project or hedge it ("trying to", "I see the irony"). State what it does with confidence.
   - Never suggest autosave to make it closer to live: editor plugins are the answer.
   - Never link to this file or to design detail. A new feature gets a line at most.
+  - No drawings or screenshots of the UI: it changes. Describe features in bullets.
   - It carries facts that must stay true: install commands, minimum Claude Code version (text and badge), the `/bsd` command table, the footprint paragraph at the end of "What it is".
 - Pronouns: the owner's are not stated. Use "the owner" or they/them.
 
@@ -435,7 +436,6 @@ The tutor writes `view.json` in answer and whenever its knowledge of the spot ch
   - Only printable ASCII plus the block elements Claude Code's mascot uses (nothing double-width).
   - Each character names its `mouth` row, and `bubbleColumn` pads above so the bubble's tail meets the mouth.
   - ASCII characters use the ASCII bubble (`bubbleStyle`); Claude's mascot uses box lines.
-  - The README pane drawing avoids block elements (GitHub's font may lack them).
 - Live: all characters seen saying hello with mouth movement, blinking, sleeping when paused, and with the tail at the mouth. One-line mode at 100 columns.
 
 ### Updates and uninstall

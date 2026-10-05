@@ -30,24 +30,6 @@ Backseat Driver puts the machine where it belongs: in the back seat. You drive. 
 
 ## What it is
 
-```text
-┌─ conversation ─────────────────────────┬─ Backseat ────────────────────────────────────┐
-│                                        │ 1: Play  2: Review  3: Explain  4: Progress   │
-│ > /bsd                                 │ On. Watching for your next save.              │
-│   Backseat Driver is on. You drive.    │ w: Working on adding an async cache           │
-│                                        │                                               │
-│ > why does note 1 matter? the tests    │ src/cache.rs                                  │
-│   pass                                 │ > 1  risk · line 42                           │
-│                                        │     This guard is still held when you reach   │
-│ ● They pass because nothing in them    │     the .await on line 47. Who else is        │
-│   competes for the lock. Look at what  │     waiting on it?                            │
-│   is still alive when you reach the    │   2  idiom · line 18                          │
-│   .await on line 47...                 │     This match only changes the Some case.    │
-│                                        │     Option has a method for exactly that.     │
-│ >                                      │ e: explain  d: dismiss  m: mute  l: look now  │
-└────────────────────────────────────────┴───────────────────────────────────────────────┘
-```
-
 - **Play-by-play.** Save, pause, and a fast model reads what changed. If it's worth saying, a short note lands in the pane: a bug, a risky pattern, a better idiom. A hint, never a fix. Fix the code and the note goes away.
 - **Decision points and insights.** When your code reaches a real choice, like how to handle errors or which data structure to use, the pane marks it as **your call** and lays out what each way costs. Then it gets out of the way. It also points out ★ insights about how your codebase does things.
 - **Deep review.** Commit, and a stronger model reviews it in context, decision points first.
