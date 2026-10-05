@@ -812,6 +812,7 @@ The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above mem
   - `update-ref <ref> <new> <40 zeros>` creates only when absent (exit 128 when held). `update-ref -d <ref> <holder>` deletes only on a match (exit 1 otherwise). `update-ref <ref> <new> <old>` steals.
   - 40 racing processes: one winner. Two writers making 100 locked increments each lost none.
   - Through `$.process.run`: 10 ms per `update-ref`, 14 ms for `hash-object -w --stdin`, 34 ms for `init --bare`. The ref file's mtime is when the lock was taken.
+- A hooks module may import from a sibling folder of `hooks/` inside the plugin (2026-10-05, for the move to `plugin/core/`): with `hash.ts` moved to `plugin/core/` and imported as `../core/hash`, `claude plugin validate --strict` passed, `claude -p '/bsd help' --plugin-dir` loaded the module (`hooks module backseat-driver@inline loaded`) and answered, and `claude plugin test` ran the tests (those that need the plugin inside this repository aside).
 - Compiled PureScript loads. `purs` output bundled by esbuild into one ES module and imported by the hooks module (`import * as K from './kernel.js'`) passes `claude plugin validate`, runs in a live session, and runs under `claude plugin test`. A 100-line module using prelude, arrays, maybe and integers bundled to 12 KB.
 
 ## Tests
