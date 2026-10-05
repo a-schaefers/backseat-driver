@@ -612,6 +612,7 @@ export function renderPane(kit: Kit, view: PaneView, actions: PaneActions) {
       </Box>
       <Text dimColor>{statusLine(view)}</Text>
       {view.mode !== 'paused' && (view.watch.health ?? '') !== '' && <Text dimColor>{view.watch.health}</Text>}
+      {view.mode !== 'paused' && (view.watch.editors ?? '') !== '' && <Text dimColor>{view.watch.editors}</Text>}
       {view.update !== '' && <Text color="yellow">{view.update}</Text>}
       {/* Outside a repository there is no journal, so nothing to go on and nowhere to keep an answer. */}
       {view.watch.state !== 'no-git' && workingOn(kit, view, actions)}

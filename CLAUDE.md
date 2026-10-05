@@ -42,7 +42,9 @@ Stance: the project is against Claude writing the user's code, not neutral. Whil
 - Learning and Explanatory modes, read-only (owner, 2026-10-04): take the good parts of Anthropic's `learning-output-style` plugin and leave all the driving to the user. Its decision-point criteria and its `★ Insight` format are adapted into the play-by-play, the deep review and the contract. A decision point is pointed out as the user's call, with what each way costs, never handed over to be written. Insights are about this codebase and this code, never general concepts, and never a defect in disguise.
 - License: MIT (owner's preference). The adapted parts stay under Apache-2.0: `THIRD_PARTY_NOTICES.md` (root and `plugin/`, identical; `npm run licenses` compares them) holds the attribution, what changed and the license text. Each adapted prompt credits it in an HTML comment at its top, which `stripComments` removes before a model sees the file. Credit the same way when adapting anything else.
 - Explain is never stale: freshness beats speed. Nothing is shown unless it matches the file on disk at that moment.
-- No editor plugins yet (vim and emacs come later). Build only the side they talk to (`focus.json`/`view.json`, below).
+- Editor plugins (owner, 2026-10-05): Emacs, Neovim in Lua, and VS Code, in this repository under `editors/`. Simple and plug and play: they send what is useful (open files, the focused one, the caret's line and column, the selection, unsaved changes, whether the editor has the keyboard), and the pane says when an editor is connected. More editors can come; the protocol is the contract (see "Editor protocol").
+  - Transport (decided by the editor-plugins thread, 2026-10-05): files, one per running editor, in the data folder. The mod cannot listen on a socket (no Node, and no network of its own is a footprint invariant), and the data folder is already where every session looks. An editor that finds no data folder writes nothing.
+  - Two tutors at once: every driver reads every editor's file and keeps what is about its own repository. One editor serves every project it has files in; two editors in one project, the last caret to move speaks for it; a caret in a repository nested in another goes to the inner one's tutor. Within one project only the lease holder reads (see "Several sessions").
 - Progress is honest: one report per language across projects. A level (beginner, junior, mid, senior), why, what the next level needs, recent notes, and encouragement kept apart from the level. Only the user's own work counts. A level can come back down. It stays in step with deep reviews. The owner says it is worth the token burn.
 - State is never cleared by accident: clearing is deliberate and confirmed (one project, one language, or everything). Uninstalling can clear everything.
 - Users stay up to date: a newer release is announced in the pane, one command fetches it, and the tutor comes back on by itself.
@@ -70,7 +72,7 @@ Every roadmap milestone is built and was seen working in short scripted real ses
   - the deep review's watchdog, a review given up on after three tries, and the retries of the look at progress
 - Never run: the `primeagen` engineering persona.
 - Persona pairs run live: `eli5-tldr-kiss-terse`+`knuth`, `primeagen`+`torvalds`. Every voice's character has been seen live.
-- The editor side has been tried only with a script writing `focus.json`.
+- Editor plugins: each was run for real (Neovim 0.9.5 and Emacs 29.3 headless, the VS Code extension under Node against a stand-in `vscode` module and packaged with vsce) and wrote, beat and removed its file as the protocol says. Not yet seen: one of them driving a live tutor session (the cloud session that built them could not log in interactively), real VS Code, Windows.
 - Decision points and insights (from `learning-output-style`): seen live in the play-by-play, the deep review and the conversation on Sonnet at low thinking. A play-by-play `insight` has not been seen live.
 - Marketplace install, `/bsd update` and `/bsd uninstall` were run against a local git server at one project's scope, not GitHub. No release has been published, so installed copies stay at 0.1.0.
 - The event-driven plan's last check (2026-10-04): one real session with the debug log on, through a save, ten seconds on the Explain tab, a commit with its review and progress look, and a hundred idle seconds. No errors. What runs in the background, read from the log: a scan of the working tree every second for a minute after something happened and every two seconds after that (five after ten idle minutes, by test); two stats ten times a second only while the Explain tab was open; a lease renewal every 20 s (two git calls, two small reads, one write); a journal write when something is new; and, with the animated persona on, its blink. Nothing else polled, retried or redrew.
@@ -115,6 +117,7 @@ scripts/outage-proxy.py             a proxy to cut one live session off from Cla
 scripts/toolchain.py                fetches the pinned compiler into local/bin (git-ignored)
 scripts/build-kernel.sh             kernel/src -> plugin/hooks/kernel.js
 scripts/release.sh                  cut a release
+editors/                            editor plugins: neovim/, emacs/, vscode/ (dev side: not shipped with the mod)
 .github/workflows/check.yml         npm run check on push/PR, pinned Claude Code
 .github/workflows/nightly.yml       same check daily on newest Claude Code
 ```
@@ -222,7 +225,8 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 | `progress.ts` | ledger, level rules, assessment request, report text |
 | `project.ts` | project knowledge from deep reviews; what reviewers are told |
 | `journal.ts` | journal storage: entries, save runs, sitting roll-up, cross-session merge |
-| `attention.ts` | `focus.json` beyond the spot; caret and on-screen time |
+| `editors.ts` | the editors' files: which editors are connected, and which one speaks for this project |
+| `attention.ts` | an editor's report beyond the spot; caret and on-screen time |
 | `enclosing.ts` | enclosing definition name by indentation, no parser |
 | `glance.ts` | journal as text for pane, reviewers, conversation |
 | `recorder.ts` | journal engine (ports) |
@@ -289,7 +293,7 @@ The owner wants the logic functional where it can be, "to detect, prevent and re
 - The one thing the mod polls is the working tree, because nothing tells it about the person's own saves, their commits in their own terminal, or their editor's caret (see "Probed live": no watch in `$.fs`, `FileChanged` only for paths named at session start, no watcher installed). `scan` in `register.tsx` is that poll, one at a time, the next planned when it finishes:
   - `sensor.ts`: 1 s apart for a minute after something happened (`activeAt`: a save, a caret move, a prompt, a key in the pane, switch-on), 2 s otherwise, 5 s once nothing has happened for ten minutes. Each quarter second a scan took adds 2 s, up to 32 s.
   - `kick` scans at once: on `prompt.submit`, when a turn of the conversation ends, on a key in the pane, on resume.
-  - The fast lane (`fastPoll`, deadline `focus`): while someone can see the Explain view, two stats ten times a second, the file in focus and the editor's `focus.json`. Each check plans the next, `focusGapMs` after it (100 ms, four times what the check took when that is more, 2 s at most), and none is planned once nobody is watching. While it runs, the scan leaves `focus.json` to it.
+  - The fast lane (`fastPoll`, deadline `focus`): while someone can see the Explain view, a stat of the file in focus and a listing of the editors' folder, ten times a second. Each check plans the next, `focusGapMs` after it (100 ms, four times what the check took when that is more, 2 s at most), and none is planned once nobody is watching. While it runs, the scan leaves the editors' folder to it.
   - Paused, nothing scans and no look is due.
   - A scan never calls a model. It feeds the journal and Explain, checks HEAD, and calls `planLook`.
 - Failures (owner: told apart, retried with delayed backoff, nothing pending lost). `health.ts`:
@@ -365,7 +369,8 @@ The owner wants the logic functional where it can be, "to detect, prevent and re
 - Tabs say what is behind them (`tabBadge`): `Play-by-play (3)` for open notes, `Deep review (new)` until it is opened, `(…)` while a review runs, Explain is looking something up or Progress is assessing, `(!)` for a review that did not finish. `tabRow` keeps the badges for as long as the row fits: full names, then short names with a gap of 2, then 1, then only the review's badge, which is the one that asks for a look.
 - The Deep review tab always has something to read. A review that finished stays, as `Review.last`, while a newer one runs, waits or has failed (`withReviewChange`, which every write of the review state goes through; `readableReview` is what the tab and the conversation's context use). Above it: "Reviewing commit a1b2c3d: Title since 12:01." or why it did not finish, and how many more commits wait (`Review.waiting`, set by `changeQueue`).
 - The row under the status line (`Watch.health`, from `healthLine` in `status.ts`) says what keeps going wrong in the background and is otherwise absent: Claude not answering and until when, a refused account, the plan limit, a scan of the working tree that took over 1.5 s, and anything `fail()` reported twice within five minutes ("Keeps failing: … /bsd debug dump saves the details."). It leaves out what the status line already says, which is the case whenever a look is the thing held back. Until M7 those errors went to `claude --debug` only.
-- New fields in `$.state` are optional (`Watch.health`, `Review.since`, `Review.waiting`, `Review.last`): after an update the state still holds what the older version wrote.
+- Under the health row, `Watch.editors` names the connected editors with something of this project open (`editorsLine`), from `readFocus`. `showPlay` keeps it when it rewrites the watch atom. Hidden while paused.
+- New fields in `$.state` are optional (`Watch.health`, `Watch.editors`, `Review.since`, `Review.waiting`, `Review.last`): after an update the state still holds what the older version wrote.
 - Live (2026-10-04): "1: Play (2)  2: Review (new)  3: Explain  4: Progress" after a save with two notes, "Review (…)" while a commit was reviewed. During the second commit's review the tab read "Reviewing commit 5554aa7: Sort a copy since 20:17." then "The review before it:" and the first review. After `/clear` the two notes and the review were still in the pane, on the tab that had been open. With `play_by_play` on request and no connection: "On. Looking only when you ask." and under it "There is no connection to Claude. Background work waits until 20:25.", gone once a lookup was answered. A fix saved and committed within one scan took its note out of the pane at the next look, and left the note that was still true.
 - Not seen live: the git-is-slow and keeps-failing parts of the row, the `(!)` badge. Tests cover them (`kernel.test.ts`, `pane.test.ts`).
 
@@ -385,7 +390,7 @@ The owner wants the logic functional where it can be, "to detect, prevent and re
 ### Explain
 
 - Spot = whichever moved last:
-  - the editor's `focus.json`
+  - the caret of the editor that speaks for this project (`editors.ts`)
   - `/bsd explain path:line[-end]`
   - `n`/`p` in the tab
   - the `lookup` tool
@@ -411,22 +416,29 @@ The owner wants the logic functional where it can be, "to detect, prevent and re
 - While Claude is not answering, or the plan is at its limit (`pressure()` is `held`), only what was asked for by name starts: a request made into an outage fails and lengthens everyone's wait. A lookup that failed while held is not marked failed. It goes back in the queue as something looked at, and runs when `wake` says Claude is back, without the minute's wait.
 - `changed()` resolves when the next lookup ends. The `lookup` tool and `/bsd explain` wait on it (`lookUp`, `soonest`), up to `LOOKUP_WAIT_MS` (6 s) in all, and answer the moment what they asked about lands. Before M5 they slept half a second at a time.
 - Setting `explain`: `automatic | on request | off`. Near limits, `automatic` degrades to on-request (saves first, then everything).
-- `register.tsx`: `startExplaining` (in `engage`) builds the ports. `refreshView` builds the focused view into state and writes `view.json`. While the tab is open or an editor is live, `fastPoll` stats the focused file and `focus.json` every 100 ms and refreshes on change, which is why stale text leaves the screen within about 0.1 s. It stops when nobody watches (see the fast lane under "Play-by-play and watcher"). `readFocus` is the only reader of `focus.json`; `pollFocus` feeds the journal, then Explain (`followEditor`).
+- `register.tsx`: `startExplaining` (in `engage`) builds the ports. `refreshView` builds the focused view into state and writes `view.json`. While the tab is open or an editor is live, `fastPoll` stats the focused file and lists the editors' folder every 100 ms and refreshes on change, which is why stale text leaves the screen within about 0.1 s. It stops when nobody watches (see the fast lane under "Play-by-play and watcher"). `readFocus` is the only reader of the editors' files: one `$.fs.list`, a read of each file whose size or time changed, then `focusText` is what the speaking editor says without its times (so a beat is not a move). It also writes the pane's editors row. A source that pushes editor events calls it. `pollFocus` feeds the journal, then Explain (`followEditor`).
 - Live: first explanation in an unseen file in 6.6 s; cached `n`/`p` in 40–80 ms; edit removed the explanation in about 60 ms, new one after 9 s; a script's `focus.json` → `view.json` in 40–80 ms; the tutor called `lookup` with no permission prompt when it hadn't already read the file.
 - Live on deadlines (2026-10-04): the mapping request left 2.52 s after the scan that saw the save; an edit to the function in focus rewrote `view.json` 50 ms after the save, without the old explanation; a caret written to `focus.json` was followed in 68 and 108 ms. The `lookup` tool's wait on `changed()` has been seen in tests only.
 
-### Editor protocol (for future vim and emacs plugins)
+### Editor protocol
 
-Both files are in the data folder. The editor writes `focus.json` atomically (temp file plus rename) on cursor, selection or field change; a few writes a second is plenty.
+The plugins are in `editors/` (dev side of the repository, not shipped with the mod): `neovim/` (`plugin/backseat-driver.lua` starts `lua/backseat-driver/init.lua`), `emacs/backseat-driver.el` (`backseat-driver-mode`), `vscode/` (`package.json`, `extension.js`, plain JavaScript, no build; `npx @vscode/vsce package --skip-license` makes the `.vsix`). Install lines are in README. `editors.ts` is the mod's side.
+
+Each running editor keeps one file, `editors/<editor>-<pid>.json` in the data folder, written whole (temp file `.<name>.tmp`, then rename) when what it says changes (debounced 150 ms), and every `EDITOR_BEAT_MS` (20 s) while nothing does:
 
 ```json
-{ "file": "/abs/path/src/stats.py", "line": 12, "endLine": 15, "modified": true,
-  "buffers": ["/abs/..."], "visible": ["/abs/..."], "active": true }
+{ "v": 1, "editor": "neovim", "pid": 4242, "at": 1759653120000, "changed": 1759653118000,
+  "root": "/abs/repo", "file": "/abs/repo/src/stats.py", "line": 12, "column": 5, "endLine": 15,
+  "modified": true, "buffers": ["/abs/..."], "visible": ["/abs/..."], "active": true }
 ```
 
-- `file` is absolute; files outside the session's repo are ignored, so sessions can share one focus file. `line` is 1-based. `endLine` only while selecting.
-- Explain needs only `file` and `line`. The rest feed the journal: `modified` = unsaved changes in the caret's buffer, `buffers` = open files, `visible` = other files on screen, `active: false` = the editor window lacks the keyboard.
-- The editor never reports durations; the tutor credits time per poll.
+- `at` is when written, `changed` when what it says last changed (ms since 1970). `root` is the nearest folder above the caret's file with a `.git`. Paths are real paths (symlinks resolved), because the tutor's root comes from git.
+- `line` and `column` are 1-based, the column in characters. `endLine` only while more than one line is selected (then `line` is the selection's first). `modified` = unsaved changes in the caret's buffer, `buffers` = open files, `visible` = other files on screen, `active: false` = the editor window lacks the keyboard. Explain reads `file` and `line`; the journal reads the rest. `column` is sent for later use.
+- When the current buffer is not a file (a terminal, help), the last file's report stands and keeps beating.
+- An editor writes nothing until the data folder has its marker (`.backseat-driver`), makes `editors/` when missing, removes its own file on exit, and at start removes files in `editors/` untouched for a day (editors that crashed).
+- The tutor: an editor whose `at` is more than `EDITOR_TTL_MS` (60 s) old is closed. The speaker for a project is the connected editor whose caret is in it (`root` equal to the repository, or, without `root`, the file inside it) with the latest `changed`. The pane's row under the status line names the connected editors with anything of this project open ("Neovim is connected.").
+- The editor never reports durations; the tutor credits time per report (`attention.ts`), and a beat that changes nothing is not a report.
+- Before 2026-10-05 the protocol was one shared `focus.json`, which two editors would have overwritten. It is no longer read; `focus.json` stays in `REMOVABLE` so an old one can be forgotten.
 
 The tutor writes `view.json` in answer and whenever its knowledge of the spot changes: `{ v: 1, at, root, source, spot: {path, line}, status, fileSummary, outline: [{name, kind, startLine, endLine, summary}], isOutlineCurrent, isMappable, target, detail: {what, how, why, watch, uses} }`.
 
@@ -456,7 +468,7 @@ The tutor writes `view.json` in answer and whenever its knowledge of the spot ch
   - A stretch of more than `MAX_GAP_MS` (60 s) in which nothing here looked at the clock is not credited: the laptop slept, or the tutor was paused. A scan is never further apart than that.
   - Every `SLICE_MS` (2 min) → `focus` entries: up to 3 regions per file plus the remainder. A region is lines within 20 of each other inside one definition, named for the line held longest. Visible files get `screen` entries.
   - The definition name is resolved at the next scan, so one read per caret position.
-  - `focus.json` from before switch-on is a baseline and earns no time until rewritten.
+  - What an editor said before switch-on is a baseline and earns no time until it changes.
 - Sittings: an hour idle ends one. On every read or write, finished sittings roll up (`digest`: files, commit titles, statements); only the open sitting keeps entries. Keep the last 20. A sitting with no save, no commit and under 1 min of editor time leaves nothing.
 - Writes: at most every 30 s when something is new; at once on a working-on statement; at switch-off; and when the session ends (`session.end`).
   - The recorder says when it next has something to do (`wakeAt`: a write that is due, or a slice of attention long enough to keep), and `journalDue` runs then, on the deadline `journal`. A scan no longer asks "is a write due?": it only records what was saved and names where the caret is.
@@ -570,7 +582,7 @@ The tutor writes `view.json` in answer and whenever its knowledge of the spot ch
   - The lease is given back at switch-off and at `session.end`, except for `clear` and `resume`, after which the process carries on.
   - `/clear` gives the session another id (`session.end` says so, and no `session.start` fires). `leaseHolder` is the id the lease is held under, and `claimed(lease, me, now, also)` treats that id as this session, so the session goes on driving under its new id instead of waiting a minute for itself.
 - What is on record about the person (profiles, progress) is shared by every session in every project. `refreshShared` lists the two folders (`sharedFolders`: one `$.fs.list` each, about 3 ms), and when names, sizes or times differ from the last look it reads the profiles and records in play again, takes open notes about a topic hushed elsewhere out of the pane, and registers the reviewer again. It runs before every prompt (`prompt.submit`) and, in the driver, from the scan at most every `SHARED_CHECK_MS` (5 s). This session's own writes change the listing too: the read that follows finds nothing new.
-- `view.json` has one writer: the session that drives the project the editor's caret is in. `refreshView` writes it only when `isDriver` and `focus.json` names a file in this repository, or no editor has written `focus.json` at all. Before M6 two sessions in two projects overwrote each other's.
+- `view.json` has one writer: the session that drives the project the editor's caret is in. `refreshView` writes it only when `isDriver` and an editor's caret is in this repository, or no editor is connected at all. Before M6 two sessions in two projects overwrote each other's.
 - Not yet: a session that does not drive does not show the driver's notes or reviews (the owner approved "chat only" with the plan). Two sessions in one project both ask the first-run questions if both are switched on before either is answered.
 - Live (2026-10-04, three real sessions sharing one data folder, Sonnet at low): with two sessions in one project the second said "Another session is driving this project", made no `git status` call at all, and a commit got one reviewer, from the first. The first was killed with `kill -9`: the second held the lease 61 s after the first's last renewal (47 s after the kill), its status line went back to normal, and the next commit was reviewed by it. A third session in another project was told in chat never to bring up missing type hints in Python: the tutor called `hush`, and the session in the first project read the profile again within its next look at the shared files and registered its reviewer with "Do not bring up: missing type hints in Python".
 - Not seen live: a driver giving way after a sleep, `/clear` while driving, an open note leaving the pane for a hush made elsewhere. Tests cover them (`lease.test.ts`).
@@ -584,7 +596,7 @@ The tutor writes `view.json` in answer and whenever its knowledge of the spot ch
 profiles/<language>.json      answers, hushes, lesson memory
 progress/<language>.json      evidence, level, report
 projects/<name>-<hash>/       journal.json, project.json, reviews.json, queue.json, lease.json, files/
-focus.json                    written by an editor
+editors/<editor>-<pid>.json   one per running editor (see "Editor protocol")
 view.json                     written by the tutor
 update.json                   last release check
 debug.json                    the debug log's switch: {"on": true}
@@ -724,7 +736,7 @@ The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above mem
   - subagents finished by `$.turn.complete(session.finish(n, answer))`
 - Options: `email` (default `me@example.com`, `''` = none), `data` (seed the data disk), `isNewProject`, `install: 'clone'|'installed'`, `tags`, `isCloneDirty`, `isCloneCurrent`, `head`. Registers every stub needed to start and switch modes: extend it, don't register a second stub (one stub per event).
 - Data disk: `session.disk` (absolute path → text), `session.data(rel)`, `session.removed` (rm targets). Deletion needs the marker: `session.disk.set(MARKER_PATH, …)` or a prior write.
-- Explain in the kit: `session.lookups`, answered with `session.explain(reply, 'text the prompt contains')`. Order isn't guaranteed. With no answer, a file maps to no symbols. `session.editor(file, line, …, extra)` writes `focus.json`. Journal tests set `explain: 'off'` (a live editor triggers the 100 ms poll and slows minute-scale tests).
+- Explain in the kit: `session.lookups`, answered with `session.explain(reply, 'text the prompt contains')`. Order isn't guaranteed. With no answer, a file maps to no symbols. `session.editor(file, line, …, extra)` writes `editors/<extra.editor ?? 'test'>-1.json`, beating for the whole test unless `extra.at` is given (kit time starts at 0, and an `at` of 0 does not parse: advance the clock first). Journal tests set `explain: 'off'` (a live editor triggers the 100 ms poll and slows minute-scale tests).
 - Progress: `session.assess(reply)`, `session.assessments`. Updates: `session.ran` (claude and network git commands in order). A clone's top is the plugin folder's parent; an installed copy's `installPath` is `/`.
 - `session.logs` = `$.ui.log` output (swallowed errors appear there).
 - Failures in the kit: `session.failing.push('overloaded')` makes the next model request fail that way, whichever job makes it; `'look:overloaded'`, `'explain:…'`, `'progress:…'` name the job. Words: Claude Code's API errors, or `offline`, `timeout`, `empty`. Explain asks 2.5 s after a save, before the look, so name the job or set `explain: 'off'`. `$.classic.StopFailure({ error })` is a turn that died, `$.turn.complete(session.turnEnded())` a conversation turn that answered, `$.session.measure({ context, rateLimits, changed: ['rateLimits'] })` the plan's limits arriving (set `session.limits` too: the tutor reads them again before a look). `session.scans` counts `git status` calls.
