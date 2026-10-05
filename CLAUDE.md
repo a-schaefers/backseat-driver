@@ -113,6 +113,7 @@ THIRD_PARTY_NOTICES.md (also plugin/) the Apache-2.0 parts: learning-output-styl
 plugin/hooks/hooks.json             {"modules": ["./register.tsx"]}
 plugin/hooks/register.tsx           all effects
 plugin/hooks/*.ts, pane.tsx         pure logic
+plugin/hooks/art/<voice>.ts         each character's pixel art (palette + rows of letters)
 plugin/hooks/kernel.js              the kernel, compiled from PureScript; committed, never edited by hand
 plugin/hooks/kernel.d.ts, core.ts   what the kernel exports, and the one file that calls it
 kernel/src/Kernel/*.purs            the kernel's source (dev tooling: not shipped)
@@ -125,6 +126,7 @@ scripts/outage-proxy.py             a proxy to cut one live session off from Cla
 scripts/toolchain.py                fetches the pinned compiler into local/bin (git-ignored)
 scripts/build-kernel.sh             kernel/src -> plugin/hooks/kernel.js
 scripts/release.sh                  cut a release
+scripts/persona-preview.ts          the persona art as a terminal shows it, and as PNGs
 editors/                            editor plugins: neovim/, emacs/, vscode/ (dev side: not shipped with the mod)
 license-server/                     reference license server: issue, check, revoke keys (dev tooling: not shipped, not deployed)
 .github/workflows/check.yml         npm run check on push/PR, pinned Claude Code
@@ -148,6 +150,7 @@ npm run typecheck                # tsc -p plugin/tsconfig.json
 npm run server                   # the license server's typecheck and node:test tests (they check its keys with the plugin's checker)
 scripts/dev-session.sh           # live session in tmux (default session name bsd)
 scripts/release.sh minor --push  # patch|minor|major|X.Y.Z: bump plugin.json, check, commit, tag, push
+npm run persona -- [dir] [voice] # print the persona art in truecolor, and write PNGs of every pose to dir (default local/persona-preview)
 scripts/debug-tail.sh            # follow the tutor's debug log (see "Debug log")
 scripts/outage-proxy.py 18080    # a proxy for staging an outage in a live session (see "Live checks")
 ```
@@ -233,6 +236,8 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 | `explainer.ts` | Explain engine (ports): queue, fetch policy, never storing answers for changed text |
 | `focus.ts` | spot in focus, editor files, conversation's view of the spot |
 | `avatar.ts` | characters, poses, word-by-word speech, bubble |
+| `sprite.ts` | pixel art → Raster cells: poses, half blocks, dim per backdrop, base64 |
+| `character.tsx` | `characterArt`: the character in pixels where a Raster can be drawn, in ASCII where not. What a layout calls |
 | `authorship.ts` | whose work a commit is; added lines by language |
 | `progress.ts` | ledger, level rules, assessment request, report text |
 | `project.ts` | project knowledge from deep reviews; what reviewers are told |
@@ -545,7 +550,16 @@ The tutor writes `view.json` in answer and whenever its knowledge of the spot ch
 
 ### Animated persona
 
-- `avatar.ts` holds the art and rules; `register.tsx` moves it. It stands at the top of the Play-by-play and Deep review tabs.
+- `avatar.ts` holds the characters and rules; `register.tsx` moves them. It stands at the top of the Play-by-play and Deep review tabs.
+- Drawn in tiers (owner, 2026-10-05: the ASCII "didn't look like the real people; 80s video games were more believable"):
+  - Pixels: on the terminal, a `Raster` of truecolor half blocks (`▀`, top pixel as color, bottom as background; `▄` or a space where a pixel is see-through, over the terminal's own background). Humans are 20×22 pixels (20 columns × 11 rows), Tux 20×20, the mascot 16×10. Each human has its own head shape and a signature expression (Linus broad with a deadpan, heavy-lidded look and a raised brow; Knuth long and narrow with a gentle smile; Prime square with wide eyes and a grin under the horseshoe), because cold reads by a second agent showed that props alone (glasses, a mustache) did not make them recognizable. The art is a file per voice in `hooks/art/`, made to be replaced: a palette of letters and rows of pixels, with the other poses giving only the rows that differ. `rasterCells` works out each pose's cells once.
+  - ASCII (`frames`): where the kit has no `Raster`. Today every non-terminal surface is compact, so this is the floor for a future layout, not something drawn now.
+  - One line (`mini`): above the prompt and off the terminal, as before.
+  - Images (`Image`, kitty and Ghostty) were left out: pixel art at cell size looks the same as half blocks there, elsewhere (tmux included) an `Image` draws its `alt` as dim words, and nothing tells the mod beforehand which it will be.
+  - The renderer is trusted to bring 24-bit colors down on a 256-color terminal (inferred, not seen).
+- Dim at rest: a Raster has no `dimColor`, so `dimmed` greys each color and takes it toward the background. That needs the background: `themeBackdrop` reads the `theme` row of `$.config.list()` on each render while the character is shown (a theme with `light` in its name is light; anything else, `auto` included, dark).
+- `characterArt(kit, avatar, pose, isResting, backdrop)` is the one call a layout makes; `artShape` says how big it is and which row the bubble's tail meets.
+- The art was drawn and then reviewed by an art-director agent working from PNG renders (`npm run persona`): likeness first (one or two exaggerated features per person, silhouettes that differ), then readability on dark and light terminals. Conventions it set: rest eyes look forward, a blink is a dark line, talk opens the same mouth with its corners kept, think raises the brows and turns the eyes up, dark characters get a slate rim on the edges facing the light.
 - Lines:
   - The play-by-play reply's `say` field. `prompts/speech-bubble.md` goes into the reviewer's system prompt only while the setting is on. The request's last line says `insight`, or `remark` after `QUIET_LOOKS_BEFORE_REMARK` (4) silent looks.
   - Each look's `say` replaces the line, so a quiet look means silence, and it never speaks about outdated code.
@@ -560,9 +574,11 @@ The tutor writes `view.json` in answer and whenever its knowledge of the spot ch
 - Art rules (`avatar.test.ts` checks them):
   - Every pose of a character has the same height, and every line the same width.
   - Only printable ASCII plus the block elements Claude Code's mascot uses (nothing double-width).
-  - Each character names its `mouth` row, and `bubbleColumn` pads above so the bubble's tail meets the mouth.
+  - Pixel art: an even number of rows, every row as wide, every letter in its palette (an unknown letter would draw as a hole), every pose different from rest, the `mouth` row inside the picture.
+  - Each character names its `mouth` row, and `bubbleColumn` pads above so the bubble's tail meets the mouth. The pixel art's row is `art.mouth`, passed to `bubbleColumn`.
   - ASCII characters use the ASCII bubble (`bubbleStyle`); Claude's mascot uses box lines.
-- Live: all characters seen saying hello with mouth movement, blinking, sleeping when paused, and with the tail at the mouth. One-line mode at 100 columns.
+- Tests find the drawing as `{ type: 'Raster', key: 'persona' }` and compare its `cells` with `rasterCells` for the pose they expect. The kit has no theme, so a test session is dark.
+- Live: all ASCII characters seen saying hello with mouth movement, blinking, sleeping when paused, and with the tail at the mouth. One-line mode at 100 columns. The pixel art has not been seen in a real session yet (cloud sessions have no login): tests and PNG renders only.
 
 ### License
 

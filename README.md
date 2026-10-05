@@ -53,7 +53,7 @@ Type `/bsd`. A pane opens beside the conversation with five tabs.
 
 It knows what you're working on without being asked: which files, which functions, what you said you're up to. It learns your level from your code and explains new ideas in terms of a language you already know.
 
-Pick who's riding along. A voice sets how it talks: `default`, `torvalds`, `knuth`, `primeagen`, or `eli5-tldr-kiss-terse`. An engineering persona sets what it cares about in code, chosen separately. A little ASCII character speaks for the voice. Square glasses, round glasses, headphones, a penguin in a top hat. Hard on the code, never on you.
+Pick who's riding along. A voice sets how it talks: `default`, `torvalds`, `knuth`, `primeagen`, or `eli5-tldr-kiss-terse`. An engineering persona sets what it cares about in code, chosen separately. A little pixel-art character speaks for the voice. Linus, Knuth, Prime, a penguin in a top hat. Hard on the code, never on you.
 
 While it's on, a hook blocks Claude's editing tools, so your code stays yours no matter what the model decides. It installs no git hooks and never writes to your working tree. What it remembers stays in `~/.local/share/backseat-driver/`. Its only network requests of its own: a check for a newer release, at most every six hours, and, with a commercial key, a check of that key about once a week. Nothing stops working if either can't get through.
 

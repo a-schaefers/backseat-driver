@@ -1,13 +1,23 @@
 import { expect } from 'claude-code/testing'
+import type { Mounted } from 'claude-code/testing'
 
+import type { Pose } from '../hooks/avatar'
 import { AVATARS, TALK_MS } from '../hooks/avatar'
 import { ASLEEP } from '../hooks/pane'
+import { rasterCells } from '../hooks/sprite'
 import { PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const MEAN = 'def mean(xs):\n    return sum(xs) / len(xs)\n'
 const FAST = { quiet_time: '5 seconds', minimum_gap: 'none' }
 /** Long enough to say any line the tests give the character. */
 const SAY_ALL = TALK_MS * 12
+
+/** The character's pixels as the pane draws them: which voice's, in which pose, and whether dim. */
+async function drawnAs(ui: Mounted<'terminal', 'Pane'>, voice: keyof typeof AVATARS, pose: Pose, isDim: boolean): Promise<boolean> {
+  const raster = await ui.find({ type: 'Raster', key: 'persona' })
+
+  return raster?.props.cells === rasterCells(AVATARS[voice].art, pose, isDim ? 'dark' : null)
+}
 
 sessionTest('switched on, the character says hello one word at a time', async ($, on) => {
   const session = stubSession(on)
@@ -18,14 +28,14 @@ sessionTest('switched on, the character says hello one word at a time', async ($
   const talking = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await talking.find({ type: 'Text', text: /─┤ Riding +│/ })).toBeDefined()
   // Mouth open on the first word, and lit up while it talks.
-  expect((await talking.find({ type: 'Text', text: AVATARS.default.frames.talk[0] }))?.props.dimColor).toBe(false)
+  expect(await drawnAs(talking, 'default', 'talk', false)).toBe(true)
   await talking.unmount()
 
   await session.clock.advance(SAY_ALL)
   const done = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await done.find({ type: 'Text', text: 'Riding along. You drive.' })).toBeDefined()
   // At rest it is dim.
-  expect((await done.find({ type: 'Text', text: AVATARS.default.frames.rest[0] }))?.props.dimColor).toBe(true)
+  expect(await drawnAs(done, 'default', 'rest', true)).toBe(true)
   await done.unmount()
 })
 
@@ -36,7 +46,7 @@ sessionTest("the character is the voice persona's", { options: { voice: 'torvald
   await session.clock.advance(SAY_ALL)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: AVATARS.torvalds.frames.rest[2] })).toBeDefined()
+  expect(await drawnAs(ui, 'torvalds', 'rest', true)).toBe(true)
   expect(await ui.find({ type: 'Text', text: `-| ${AVATARS.torvalds.hello} |` })).toBeDefined()
   await ui.unmount()
 })
@@ -48,10 +58,10 @@ sessionTest('the keep-it-simple voice gets the KISS penguin in its top hat', { o
   await session.clock.advance(SAY_ALL)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: ' ._|____|_.' })).toBeDefined()
-  // A pane 60 columns wide fits the quote in two lines, with the tail on the second, level with the beak.
-  expect(await ui.find({ type: 'Text', text: ' | "whatsoever a man soweth, that shall he |' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: '-| also reap."' })).toBeDefined()
+  expect(await drawnAs(ui, 'eli5-tldr-kiss-terse', 'rest', true)).toBe(true)
+  // Beside the penguin a pane 60 columns wide fits the quote in two lines, with the tail on the second, level with the beak.
+  expect(await ui.find({ type: 'Text', text: ' | "whatsoever a man soweth, that |' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '-| shall he also reap."' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -113,7 +123,7 @@ sessionTest("a finished deep review gives the character the review's closing lin
   await session.clock.advance(SAY_ALL)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: "Review's in. Next: test mean when empty." })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Review's in\. Next: test mean when/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -126,7 +136,7 @@ sessionTest('paused, the character sleeps', async ($, on) => {
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: ASLEEP })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: AVATARS.default.frames.blink[0] })).toBeDefined()
+  expect(await drawnAs(ui, 'default', 'blink', true)).toBe(true)
   await ui.unmount()
 })
 
@@ -139,7 +149,7 @@ sessionTest('above the prompt, where rows are scarce, the character takes one li
   const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, placement: 'inline' }, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: AVATARS.default.mini.rest })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'Riding along. You drive.' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: AVATARS.default.frames.rest[1] })).toBeUndefined()
+  expect(await ui.find({ type: 'Raster' })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -153,7 +163,7 @@ sessionTest('now and then a resting character blinks', async ($, on) => {
   let blinks = 0
   for (let step = 0; step < 100; step += 1) {
     await session.clock.advance(100)
-    if ((await ui.find({ type: 'Text', text: AVATARS.default.frames.blink[0] })) !== undefined) blinks += 1
+    if (await drawnAs(ui, 'default', 'blink', true)) blinks += 1
   }
   expect(blinks).toBeGreaterThan(0)
   expect(blinks).toBeLessThan(5)
@@ -172,7 +182,7 @@ sessionTest('with the animation off, there is no character and the reviewer is n
   expect(session.requests[0]?.prompt).not.toMatch('Speech bubble')
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: AVATARS.default.frames.rest[0] })).toBeUndefined()
+  expect(await ui.find({ type: 'Raster' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: 'Riding along.' })).toBeUndefined()
   await ui.unmount()
 })
@@ -222,7 +232,7 @@ sessionTest("the character never reads out the notes a deep review leaves for th
   await session.clock.advance(SAY_ALL)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: "Review's in. Next: test mean when empty." })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Review's in\. Next: test mean when/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /backseat-notes|overview/ })).toBeUndefined()
   await ui.unmount()
 })

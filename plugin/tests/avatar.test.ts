@@ -18,6 +18,7 @@ import {
   wrap,
 } from '../hooks/avatar'
 import type { Pose } from '../hooks/avatar'
+import { backdropOf, base64, cellWords, dimmed, pixels, poseGrid, rasterCells, spriteSize } from '../hooks/sprite'
 
 const POSES: readonly Pose[] = ['rest', 'talk', 'blink', 'think']
 
@@ -161,3 +162,55 @@ test("the bubble's tail is level with the character's mouth, and a tall bubble h
   expect(bubbleColumn(claude, 'Hi!', 1, 60)).toEqual([' ╭─────╮', '─┤ Hi! │', ' ╰─────╯'])
 })
 
+
+test('every pixel portrait is a whole grid in every pose, in colors from its own palette', async () => {
+  for (const [voice, avatar] of Object.entries(AVATARS)) {
+    const { art } = avatar
+    const width = art.rest[0]?.length ?? 0
+    expect({ voice, isEven: art.rest.length % 2 === 0, isWide: width > 0 }).toEqual({ voice, isEven: true, isWide: true })
+    for (const pose of POSES) {
+      for (const [row, line] of poseGrid(art, pose).entries()) {
+        expect({ voice, pose, row, width: line.length }).toEqual({ voice, pose, row, width })
+        for (const letter of line) expect({ voice, pose, row, letter, isKnown: letter === '.' || art.palette[letter] !== undefined }).toEqual({ voice, pose, row, letter, isKnown: true })
+      }
+      // A pose changes only rows that are there.
+      for (const row of Object.keys(pose === 'rest' ? {} : (art[pose] ?? {}))) expect(Number(row) < art.rest.length).toBe(true)
+    }
+    // Every pose but rest looks different from rest.
+    for (const pose of POSES.filter(pose => pose !== 'rest')) expect({ voice, pose, isSame: poseGrid(art, pose).join() === art.rest.join() }).toEqual({ voice, pose, isSame: false })
+    expect({ voice, isMouthInside: art.mouth >= 1 && art.mouth < spriteSize(art).rows }).toEqual({ voice, isMouthInside: true })
+  }
+})
+
+test('two pixels go in each cell: the top as the color of an upper half block, the bottom as its background', async () => {
+  const art = { palette: { R: 0xff0000, B: 0x0000ff }, rest: ['RB.', 'B.R', 'R..', '...'], mouth: 1 }
+  const DEFAULT = 0x01000000
+
+  expect(spriteSize(art)).toEqual({ columns: 3, rows: 2 })
+  expect([...cellWords(pixels(art, 'rest'))]).toEqual([
+    0x2580, 0xff0000, 0x0000ff,
+    0x2580, 0x0000ff, DEFAULT,
+    0x2584, 0xff0000, DEFAULT,
+    0x2580, 0xff0000, DEFAULT,
+    0x20, DEFAULT, DEFAULT,
+    0x20, DEFAULT, DEFAULT,
+  ])
+  // Dim is greyer and nearer the background: darker on a dark terminal, lighter on a light one.
+  expect(dimmed(0xff0000, 'dark')).toBe(0x732626)
+  expect(dimmed(0x000000, 'dark')).toBe(0)
+  expect(dimmed(0xff0000, 'light')).toBe(0xbf7474)
+  expect(dimmed(0x000000, 'light')).toBe(0x565656)
+  expect([backdropOf('dark'), backdropOf('light-daltonized'), backdropOf('auto'), backdropOf(undefined)]).toEqual(['dark', 'light', 'dark', 'dark'])
+})
+
+test('Raster cells are padded base64 of little-endian words', async () => {
+  expect(base64(new Uint8Array([]))).toBe('')
+  expect(base64(new TextEncoder().encode('f'))).toBe('Zg==')
+  expect(base64(new TextEncoder().encode('fo'))).toBe('Zm8=')
+  expect(base64(new TextEncoder().encode('foobar'))).toBe('Zm9vYmFy')
+
+  const art = { palette: { O: 0xff8800 }, rest: ['O', 'O'], mouth: 0 }
+  // One orange upper half block on orange: 0x2580, 0xff8800, 0xff8800 as little-endian bytes.
+  expect(rasterCells(art, 'rest', null)).toBe(base64(new Uint8Array([0x80, 0x25, 0, 0, 0x00, 0x88, 0xff, 0, 0x00, 0x88, 0xff, 0])))
+  expect(rasterCells(art, 'rest', null)).toBe(rasterCells(art, 'talk', null))
+})
