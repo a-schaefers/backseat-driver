@@ -19,7 +19,6 @@ import {
   finished,
   isTalking,
   nextTick,
-  QUIET_LOOKS_BEFORE_REMARK,
   SILENT,
   speech,
   TALK_MS,
@@ -96,6 +95,8 @@ import { NO_ACTIVITY } from '../core/glance'
 import { DENIAL, isUsersFile } from '../core/guard'
 import { languageName, languageOf, mainLanguages } from '../core/languages'
 import { sourcePrint } from '../core/knowledge'
+import { freshLookState, runLook } from '../core/look'
+import type { LookPorts, LookState } from '../core/look'
 import {
   isCheckDue,
   installedEntry,
@@ -123,7 +124,7 @@ import { helpText, isModeRequest, LAYOUT_USAGE, parseRequest, SETTINGS_OFF, tran
 import { isNoiseFile } from '../core/noise'
 import { isLookDue, playOf, wakeAt } from '../core/play'
 import type { Play, PlayFacts } from '../core/play'
-import { applyReply, isProblem, keepNotes, parseKeptNotes, parseReply, stillOpen, withDismissed } from '../core/notes'
+import { isProblem, keepNotes, parseKeptNotes, stillOpen, withDismissed } from '../core/notes'
 import { renderPane, reviewSchedule, statusEntry, steppedNote } from './pane'
 import type { Kit, PaneView } from './pane'
 import {
@@ -138,7 +139,6 @@ import {
   withAnswer,
   withAnswers,
   withExplained,
-  withFlagged,
   withHush,
   withoutHush,
 } from '../core/profiles'
@@ -157,8 +157,7 @@ import {
   withReviewNotes,
 } from '../core/project'
 import type { Insight, KeptInsight, ProjectKnowledge, ReviewNotes, ReviewRecord } from '../core/project'
-import { explainAsk, explainContext, explainRequest, paneContext, playByPlayPrompt, reviewerSystem } from '../core/prompts'
-import type { Bubble } from '../core/prompts'
+import { explainAsk, explainContext, explainRequest, paneContext, reviewerSystem } from '../core/prompts'
 import { firstRunQuestions, groupAnswers } from '../core/questions'
 import type { Question } from '../core/questions'
 import { createRecorder } from '../core/recorder'
@@ -312,12 +311,9 @@ let isHomeMarked = false
 let watcher: Watcher | null = null
 /** False from the moment the tutor is switched on until the working tree has been read, or found not to be a repository. */
 let isWatchReady = false
-let nextNoteId = 1
 let lastChangeAt: number | null = null
-let lastLookAt: number | null = null
-let isLooking = false
-/** Looks in a row that got no answer, and why the last of them did not. */
-let failures = 0
+/** What looks remember from one to the next (`core/look.ts`): the failures in a row and why, when the last one was, the ids of notes. */
+const lookState: LookState = freshLookState()
 /**
  * What went wrong lately and how often, by the words it was reported with.
  * Something that fails twice within a few minutes is said in the pane.
@@ -338,7 +334,6 @@ let carried: {
   update: string
   working: Working
 } | null = null
-let lookFailure = ''
 
 /**
  * The scan of the working tree: the one thing the mod has to go and look at,
@@ -436,8 +431,6 @@ const LOOKUP_WAIT_MS = 6000
 /** The animated persona's timers: one moves its mouth while it talks, the other makes it blink now and then. */
 let talkTimer: Timer | null = null
 let blinkTimer: Timer | null = null
-/** Looks in a row that gave it nothing to say. After enough of them, a look may give it a light remark. */
-let quietLooks = 0
 
 /** How close the plan's usage limit is: pushed by Claude Code when it measures the session, and read before anything is spent. */
 let pressure: Pressure = NO_PRESSURE
@@ -570,7 +563,15 @@ function snapshot(): Record<string, unknown> {
     repoRoot,
     dataRoot,
     watcher: watcher === null ? null : { dirty: watcher.dirty(), changed: watcher.changed(), hasPending: watcher.hasPending() },
-    look: { isWatchReady, isLooking, lastChangeAt, lastLookAt, failures, lookFailure, quietLooks },
+    look: {
+      isWatchReady,
+      isLooking: lookState.isLooking,
+      lastChangeAt,
+      lastLookAt: lookState.lastLookAt,
+      failures: lookState.failures,
+      lookFailure: lookState.lookFailure,
+      quietLooks: lookState.quietLooks,
+    },
     scan: { isScanning, isScanWanted, lastScanMs, activeAt },
     pushers: pushers.map(pusher => ({ role: pusher.role, isLive: pusher.isLive })),
     deadlines: deadlines?.all() ?? {},
@@ -888,10 +889,10 @@ function playFacts(settings: Settings): PlayFacts {
     isAutomatic: settings.playByPlay.isAutomatic,
     hasPending: watcher?.hasPending() ?? false,
     lastChangeAt,
-    lastLookAt,
-    isLooking,
-    failures,
-    failure: lookFailure,
+    lastLookAt: lookState.lastLookAt,
+    isLooking: lookState.isLooking,
+    failures: lookState.failures,
+    failure: lookState.lookFailure,
     quietMs: settings.playByPlay.quietMs,
     minGapMs: settings.playByPlay.minGapMs,
     health,
@@ -903,7 +904,7 @@ function playFacts(settings: Settings): PlayFacts {
 /** Tells the pane what the play-by-play is doing, when that is not what it already says. */
 async function showPlay($: EngineInterface, settings: Settings): Promise<Play> {
   const play = playOf(playFacts(settings))
-  const next = watchOf(play, lastLookAt, healthLine({ play, health, pressure, lastScanMs, failing: failingNow() }))
+  const next = watchOf(play, lookState.lastLookAt, healthLine({ play, health, pressure, lastScanMs, failing: failingNow() }))
   const shown = await read($, watchAtom)
   if (shown.state !== next.state || shown.line !== next.line || shown.lastLookAt !== next.lastLookAt || (shown.health ?? '') !== (next.health ?? '')) {
     trace($, 'state', 'watch', () => ({ ...next, play }))
@@ -2040,125 +2041,50 @@ async function registerTools($: EngineInterface): Promise<void> {
 
 /**
  * One look: the pending changes go to the play-by-play model, and its reply
- * becomes notes. `isAsked` is true when the user pressed "look now".
+ * becomes notes (`core/look.ts`). `isAsked` is true when the user pressed
+ * "look now".
  */
 async function look($: EngineInterface, settings: Settings, isAsked: boolean): Promise<void> {
-  const active = watcher
   if (!isDriver) {
     if (isAsked) $.ui.toast(FOLLOWING)
 
     return
   }
-  if (isLooking || active === null) return
-  isLooking = true
-  schedulerOf($).cancel('look')
-  try {
-    // Said before anything is read, so that a press of "look now" is answered at once.
-    await showPlay($, settings)
-    const changes = await active.collect()
-    if (changes.length === 0) {
-      active.settle([])
-      trace($, 'look', 'nothing to look at', () => ({ isAsked }))
-      if (isAsked) $.ui.toast('Nothing has changed since the last look.')
+  await runLook(lookPortsOf($, settings), lookState, isAsked)
+}
 
-      return
-    }
-
-    trace($, 'look', 'start', () => ({ isAsked, files: changes.map(change => change.path), failures, lastChangeAt, lastLookAt }))
-    await bringIntoPlay(
-      $,
-      changes.map(change => languageOf(change.path)).filter(language => language !== null),
-    )
-    const bubble: Bubble | null = !settings.isAnimated
-      ? null
-      : quietLooks >= QUIET_LOOKS_BEFORE_REMARK
-        ? 'remark'
-        : 'insight'
-    const changedFiles = changes.map(change => change.path)
-    const current = await currentInsights($, changedFiles)
-    const brief = project === null ? '' : projectBrief(project, changedFiles, insight => current.has(insight))
-    // What the journal says they have been doing, so that the changes are read in the light of it.
-    const doing = recorder?.glance(await $.clock.now()) ?? ''
-    const { prompt, shown } = playByPlayPrompt(changes, await read($, notesAtom), await read($, dismissedAtom), bubble, brief, doing)
-    const result = await callModel($, settings, 'play-by-play', {
-      model: settings.playByPlay.model,
-      effort: settings.playByPlay.thinking,
-      system: reviewerSystem(
-        lookInstructions,
-        [bubble === null ? '' : bubbleInstructions, aboutPerson()],
-        persona,
-      ),
-      prompt,
-      maxTokens: 2000,
-      timeoutMs: 120_000,
-    })
-    const now = await $.clock.now()
-    lastLookAt = now
-
-    const outcome = outcomeOf(result)
-    if (!outcome.ok || !result.isAnswered) {
-      // Nothing is settled, so the same changes are tried again after the back-off.
-      failures += 1
-      lookFailure = outcome.ok ? 'no answer' : outcome.detail
-
-      return
-    }
-
-    failures = 0
-    lookFailure = ''
-    // What was shown has been looked at, whether or not the reply can be used.
-    active.settle(shown)
-    const parsed = parseReply(result.text)
-    if (parsed === null) trace($, 'look', 'reply not understood', () => ({ text: result.text }))
-    if (parsed !== null) {
-      // The reviewer is told what was hushed. This makes sure of it.
-      const reply = {
-        ...parsed,
-        notes: parsed.notes.filter(note => !isHushed(profiles, languageOf(note.file), note.topic)),
-      }
-      const firstId = nextNoteId
-      nextNoteId += reply.notes.length
-      const paths = shown.map(change => change.path)
-      // Read again: a note dismissed while this look ran must not come back with it.
-      const dismissed = await read($, dismissedAtom)
-      const dealtWith = (await read($, notesAtom)).filter(note => reply.resolved.includes(note.id))
-      await update($, notesAtom, open => applyReply(open, reply, paths, firstId, dismissed).notes)
-      // The notes about these files are about the text this look saw.
-      for (const change of shown) notePrints.set(change.path, sourcePrint(change.after))
-      void saveNotes($)
-
-      // Lesson memory: which ideas reached the pane, by language. A repeat
-      // of a note that is already open is not a second time it came up.
-      const added = (await read($, notesAtom)).filter(note => note.id >= firstId)
-      for (const note of dealtWith) recorder?.add({ at: now, kind: 'fixed', path: note.file, line: note.line, text: note.topic })
-      for (const note of added) recorder?.add({ at: now, kind: 'note', path: note.file, line: note.line, text: note.topic })
-      recorder?.infer(reply.workingOn, paths, now)
-      trace($, 'look', 'done', () => ({ shown: paths, added, dealtWith, hushedOut: parsed.notes.length - reply.notes.length, say: reply.say, workingOn: reply.workingOn }))
-      await showWorking($, now)
-      const raised = new Map<string, string[]>()
-      // A decision point or an insight is not a mistake, so it is no lesson that keeps coming back.
-      for (const note of added.filter(item => isProblem(item.kind))) {
-        const subject = languageOf(note.file) ?? GENERAL
-        raised.set(subject, [...(raised.get(subject) ?? []), note.topic])
-      }
-      for (const [subject, topics] of raised) {
-        await saveSubject($, settings, subject, profile => withFlagged(profile, topics))
-      }
-
-      // The persona's line is about this look, so a quiet look leaves it quiet.
-      if (bubble !== null) {
-        quietLooks = reply.say === '' ? quietLooks + 1 : 0
-        await say($, reply.say)
-      }
-    }
-  } catch (error) {
-    failures += 1
-    lookFailure = 'an error'
-    fail($, 'look failed', error)
-  } finally {
-    isLooking = false
-    // The pane's line and the next look both follow from how this one went.
-    await planLook($, settings)
+/** What a look asks of Claude Code, each made from `$` and read at the moment the look needs it. */
+function lookPortsOf($: EngineInterface, settings: Settings): LookPorts {
+  return {
+    settings,
+    watcher: () => watcher,
+    now: async () => await $.clock.now(),
+    lastChangeAt: () => lastChangeAt,
+    ask: (job, request) => callModel($, settings, job, request),
+    trace: (kind, name, detail) => trace($, kind, name, detail),
+    toast: text => $.ui.toast(text),
+    showPlay: () => showPlay($, settings),
+    holdDeadline: () => schedulerOf($).cancel('look'),
+    planNext: () => planLook($, settings),
+    bringIntoPlay: languages => bringIntoPlay($, languages),
+    currentInsights: files => currentInsights($, files),
+    brief: (files, isCurrent) => (project === null ? '' : projectBrief(project, files, isCurrent)),
+    glance: async () => recorder?.glance(await $.clock.now()) ?? '',
+    system: bubble =>
+      reviewerSystem(lookInstructions, [bubble === null ? '' : bubbleInstructions, aboutPerson()], persona),
+    profiles: () => profiles,
+    notes: {
+      open: () => read($, notesAtom),
+      dismissed: () => read($, dismissedAtom),
+      change: apply => update($, notesAtom, apply),
+    },
+    notePrints,
+    saveNotes: () => saveNotes($),
+    saveSubject: (subject, change) => saveSubject($, settings, subject, change),
+    recorder: () => recorder,
+    showWorking: now => showWorking($, now),
+    say: text => say($, text),
+    fail: (what, error) => fail($, what, error),
   }
 }
 
@@ -2528,7 +2454,7 @@ async function restorePaneFromDisk($: EngineInterface, isFresh: boolean): Promis
   const open = stillOpen(kept, now)
   if (open.length > 0 && (await read($, notesAtom)).length === 0) {
     await update($, notesAtom, () => open)
-    nextNoteId = Math.max(nextNoteId, ...open.map(note => note.id + 1))
+    lookState.nextNoteId = Math.max(lookState.nextNoteId, ...open.map(note => note.id + 1))
   }
   if (kept.dismissed.length > 0 && (await read($, dismissedAtom)).length === 0) await update($, dismissedAtom, () => kept.dismissed)
   const last = reviews.at(-1)
@@ -3242,9 +3168,9 @@ function stopWatching(): void {
 async function startWatching($: EngineInterface, settings: Settings, run: number): Promise<void> {
   stopWatching()
   lastChangeAt = null
-  lastLookAt = null
-  failures = 0
-  lookFailure = ''
+  lookState.lastLookAt = null
+  lookState.failures = 0
+  lookState.lookFailure = ''
   lastScanMs = 0
   pressure = NO_PRESSURE
 
@@ -4195,7 +4121,7 @@ export const register: Register = (on, options) => {
       // A reload (a layout change, say) takes the keyboard back to the prompt.
       await update($, bandKeysAtom, () => false)
       const open = await read($, notesAtom)
-      nextNoteId = open.reduce((highest, note) => Math.max(highest, note.id), 0) + 1
+      lookState.nextNoteId = open.reduce((highest, note) => Math.max(highest, note.id), 0) + 1
       await loadTutor($, settings.persona)
       // A change of layout in /config reloads the module: the pane opens or closes to suit it.
       await showLayout($)
