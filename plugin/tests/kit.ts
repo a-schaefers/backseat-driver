@@ -254,6 +254,10 @@ export function stubSession(on: On, options: StubOptions = {}) {
      * job asks next. `look:overloaded`, `explain:...` or `progress:...` is for that job's next request.
      */
     failing: [] as string[],
+    /** The jobs (`look`, `explain`, `progress`) whose model requests stay open, as a slow model's do, until `release()`. */
+    stalled: [] as string[],
+    /** The answers held back for those requests. */
+    held: [] as (() => void)[],
     /** Every key the plugin read from its store, in order. */
     storeReads: [] as string[],
     /** Every file the plugin read outside the repository and its own folder, in order. */
@@ -325,6 +329,15 @@ export function stubSession(on: On, options: StubOptions = {}) {
       const text = typeof reply === 'string' ? reply : JSON.stringify(reply)
       if (when === undefined) session.lookupReplies.push(text)
       else session.lookupAnswers.push({ when, reply: text })
+    },
+    /** From now on this job's model requests stay open until `release()`. */
+    stall(job: 'look' | 'explain' | 'progress') {
+      session.stalled.push(job)
+    },
+    /** Answers every request that was held open, and holds none from now on. */
+    release() {
+      session.stalled.length = 0
+      for (const answer of session.held.splice(0)) answer()
     },
   }
 
@@ -607,29 +620,37 @@ export function stubSession(on: On, options: StubOptions = {}) {
       return { value: { isAnswered: false as const, reason: 'api-error' as const, status, error: (failure === 'offline' ? 'unknown' : failure) as never, usage: none } }
     }
     const job = e.system?.startsWith('PROGRESS INSTRUCTIONS') === true ? 'progress' : e.system?.startsWith('EXPLAIN INSTRUCTIONS') === true ? 'explain' : 'look'
-    const queued = session.failing.findIndex(entry => !entry.includes(':') || entry.startsWith(`${job}:`))
-    const failure = queued === -1 ? undefined : session.failing.splice(queued, 1)[0]?.replace(/^[a-z]+:/, '')
-    if (e.system?.startsWith('PROGRESS INSTRUCTIONS') === true) {
-      session.assessments.push(e)
+    const answer = () => {
+      const queued = session.failing.findIndex(entry => !entry.includes(':') || entry.startsWith(`${job}:`))
+      const failure = queued === -1 ? undefined : session.failing.splice(queued, 1)[0]?.replace(/^[a-z]+:/, '')
+      if (job === 'progress') {
+        if (failure !== undefined) return refused(failure)
+        const text = session.assessmentReplies.shift() ?? '{"observations": [], "level": null}'
+
+        return { value: { isAnswered: true as const, text, usage: USAGE } }
+      }
+      if (job === 'explain') {
+        if (failure !== undefined) return refused(failure)
+        const text =
+          session.lookupAnswers.find(known => e.prompt.includes(known.when))?.reply ??
+          session.lookupReplies.shift() ??
+          '{"summary": "", "symbols": []}'
+
+        return { value: { isAnswered: true as const, text, usage: USAGE } }
+      }
       if (failure !== undefined) return refused(failure)
-      const text = session.assessmentReplies.shift() ?? '{"observations": [], "level": null}'
 
-      return { value: { isAnswered: true, text, usage: USAGE } }
+      return { value: { isAnswered: true as const, text: session.replies.shift() ?? '{"resolved": [], "notes": []}', usage: USAGE } }
     }
-    if (e.system?.startsWith('EXPLAIN INSTRUCTIONS') === true) {
-      session.lookups.push(e)
-      if (failure !== undefined) return refused(failure)
-      const text =
-        session.lookupAnswers.find(answer => e.prompt.includes(answer.when))?.reply ??
-        session.lookupReplies.shift() ??
-        '{"summary": "", "symbols": []}'
+    // Recorded when it is asked, whenever it is answered.
+    if (job === 'progress') session.assessments.push(e)
+    else if (job === 'explain') session.lookups.push(e)
+    else session.requests.push(e)
+    if (!session.stalled.includes(job)) return answer()
 
-      return { value: { isAnswered: true, text, usage: USAGE } }
-    }
-    session.requests.push(e)
-    if (failure !== undefined) return refused(failure)
-
-    return { value: { isAnswered: true, text: session.replies.shift() ?? '{"resolved": [], "notes": []}', usage: USAGE } }
+    return new Promise<ReturnType<typeof answer>>(resolve => {
+      session.held.push(() => resolve(answer()))
+    })
   })
   on('prompt.submit', ($, e) => {
     session.submitted.push(e.text)

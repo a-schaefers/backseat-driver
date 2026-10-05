@@ -6,9 +6,10 @@ import type { Entry, Span } from './journal'
  *
  * An editor writes `focus.json` in the tutor's data folder whenever the caret
  * moves. The file says where the caret is at that moment and nothing about
- * time. The tutor samples it on every poll and adds the time up itself: which
- * file was in front for how long, where in it the caret stayed, and which
- * files were on screen beside it. So an editor plugin stays a few lines long,
+ * time. The tutor notes when each report arrives and adds the time up itself,
+ * from one report to the next: which file was in front for how long, where
+ * in it the caret stayed, and which files were on screen beside it. How
+ * often the tutor happens to look does not change the sum. So an editor plugin stays a few lines long,
  * and two editors are counted alike.
  *
  *   {"file": "/abs/path/stats.py", "line": 12, "modified": true,
@@ -41,8 +42,8 @@ export type Caret = { path: string; line: number; where: string; isModified: boo
 export const LINGER_MS = 120_000
 /** A slice of attention becomes journal entries after this long. */
 export const SLICE_MS = 120_000
-/** One poll credits at most this much, so that a timer that stalled or a laptop that slept adds nothing. */
-const MAX_STEP_MS = 10_000
+/** Longer than this between two looks at the clock and the laptop slept, or the tutor was paused: none of that is attention. */
+export const MAX_GAP_MS = 60_000
 /** Carets further apart than this many lines are in different parts of a file. */
 const REGION_GAP = 20
 /** Less than this in one slice is passing through, not attention. */
@@ -117,7 +118,7 @@ function regions(lines: ReadonlyMap<number, Dwell>): { span: Span; ms: number; w
 
 /**
  * Adds up where the caret has been. `observe` is told each time the editor
- * writes its file, `tick` is called on every poll, and `drain` hands over
+ * writes its file, `tick` brings the sum up to now, and `drain` hands over
  * what has built up as journal entries.
  */
 export function createAttention() {
@@ -127,7 +128,10 @@ export function createAttention() {
   let isNamed = false
   /** When the editor last wrote its file while the tutor was watching. Null until it does. */
   let movedAt: number | null = null
-  let tickedAt: number | null = null
+  /** Up to when the time has been added up. Null until the editor writes while the tutor is watching. */
+  let creditedAt: number | null = null
+  /** When the clock was last looked at, by anything here. */
+  let seenAt: number | null = null
   let sliceFrom: number | null = null
   const files = new Map<string, Map<number, Dwell>>()
   /** Time each file spent on screen beside the one with the caret. */
@@ -135,6 +139,29 @@ export function createAttention() {
 
   function isLive(now: number): boolean {
     return report !== null && report.isActive && movedAt !== null && now - movedAt <= LINGER_MS
+  }
+
+  /**
+   * Credits the time since the last credit to the line the caret is on, and
+   * to the files on screen beside it. It runs up to now, or to the moment
+   * the editor's last word stopped counting, and not across a stretch in
+   * which nothing here looked at the clock at all.
+   */
+  function credit(now: number): void {
+    const from = creditedAt
+    const awake = seenAt !== null && now - seenAt > MAX_GAP_MS ? seenAt : now
+    seenAt = now
+    if (from === null || movedAt === null) return
+    creditedAt = now
+    const step = Math.min(awake, movedAt + LINGER_MS) - from
+    if (step <= 0 || report === null || report.path === null || !report.isActive) return
+
+    sliceFrom ??= from
+    const lines = files.get(report.path) ?? new Map<number, Dwell>()
+    const dwell = lines.get(report.line) ?? { ms: 0, where }
+    lines.set(report.line, { ms: dwell.ms + step, where: where === '' ? dwell.where : where })
+    files.set(report.path, lines)
+    for (const path of report.visible) screen.set(path, (screen.get(path) ?? 0) + step)
   }
 
   function rows(): Entry[] {
@@ -164,6 +191,8 @@ export function createAttention() {
      * no time is credited until the editor writes again.
      */
     observe(next: EditorReport | null, now: number, isBaseline: boolean): void {
+      // The time up to this moment belongs to where the caret was until now.
+      credit(now)
       const isSameLine = next !== null && report !== null && next.path === report.path && next.line === report.line
       report = next
       if (!isSameLine) {
@@ -171,6 +200,7 @@ export function createAttention() {
         isNamed = false
       }
       movedAt = isBaseline ? null : now
+      creditedAt = movedAt
     },
 
     /** Where the caret is, when the definition it is in has not been named yet and the editor is still reporting. */
@@ -186,23 +216,19 @@ export function createAttention() {
       isNamed = true
     },
 
-    /** Credits the time since the previous poll to the line the caret is on, and to the files on screen beside it. */
+    /** Brings the sum up to now. */
     tick(now: number): void {
-      const step = tickedAt === null ? 0 : Math.min(now - tickedAt, MAX_STEP_MS)
-      tickedAt = now
-      if (step <= 0 || report === null || report.path === null || !isLive(now)) return
-
-      sliceFrom ??= now - step
-      const lines = files.get(report.path) ?? new Map<number, Dwell>()
-      const dwell = lines.get(report.line) ?? { ms: 0, where }
-      lines.set(report.line, { ms: dwell.ms + step, where: where === '' ? dwell.where : where })
-      files.set(report.path, lines)
-      for (const path of report.visible) screen.set(path, (screen.get(path) ?? 0) + step)
+      credit(now)
     },
 
     /** Whether the slice being built is long enough to hand over. */
     isDue(now: number): boolean {
       return sliceFrom !== null && now - sliceFrom >= SLICE_MS
+    },
+
+    /** When the slice being built will be long enough to hand over, or null when none is being built. */
+    dueAt(): number | null {
+      return sliceFrom === null ? null : sliceFrom + SLICE_MS
     },
 
     /** The slice being built, as the journal entries it would become. */

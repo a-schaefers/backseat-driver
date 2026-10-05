@@ -76,6 +76,12 @@ export type ExplainPorts = {
   model: string
   /** Called after anything known has changed. */
   onChange: () => void
+  /**
+   * Says when `wake` should next be called: the moment the first waiting
+   * lookup becomes ready by the passing of time alone. Null when none is
+   * waiting for a time.
+   */
+  wakeAt: (at: number | null) => void
   log: (line: string) => void
 }
 
@@ -129,6 +135,8 @@ export function createExplainer(ports: ExplainPorts) {
   const changedAt = new Map<string, number>()
   /** Where that change began, for the focus to follow a save to. */
   const changedLine = new Map<string, number>()
+  /** Whoever is waiting for the next lookup to end. */
+  let waiters: (() => void)[] = []
   let isStopped = false
 
   /** The file as it is on disk now. The text is read again only when its stamp has changed. */
@@ -214,16 +222,30 @@ export function createExplainer(ports: ExplainPorts) {
   }
 
   /**
-   * Whether a job may start now. Mapping a file waits until the file has
-   * stayed unchanged for a moment, unless the person asked for it by name.
-   * An explanation never waits: it is of text that is in the file right now.
+   * When a job may start, as far as time decides, and 0 when no time has to
+   * pass. A lookup that failed waits before it is tried again. Mapping a
+   * file waits until the file has stayed unchanged for a moment, unless the
+   * person asked for it by name. An explanation does not wait for that: it
+   * is of text that is in the file right now.
    */
-  function isReady(job: Job, now: number): boolean {
-    if (isRecentFailure(job.key, now)) return false
-    if (job.kind !== 'outline' || job.priority === ASKED) return true
+  function readyAt(job: Job): number {
+    const failed = failedAt.get(job.key)
+    const afterFailure = failed === undefined ? 0 : failed + RETRY_MS
+    if (job.kind !== 'outline' || job.priority === ASKED) return afterFailure
     const changed = changedAt.get(job.path)
 
-    return changed === undefined || now - changed >= SETTLE_MS
+    return Math.max(afterFailure, changed === undefined ? 0 : changed + SETTLE_MS)
+  }
+
+  /** The moment the first waiting lookup becomes ready by time alone, or null when none waits for a time. */
+  function nextWakeAt(now: number): number | null {
+    let earliest: number | null = null
+    for (const job of queue.values()) {
+      const at = readyAt(job)
+      if (at > now && (earliest === null || at < earliest)) earliest = at
+    }
+
+    return earliest
   }
 
   /** The fingerprints the symbols named in `uses` have right now. */
@@ -349,14 +371,20 @@ export function createExplainer(ports: ExplainPorts) {
     return at !== undefined && now - at < RETRY_MS
   }
 
-  /** Starts whatever may start now: the most urgent first, a few at a time. */
+  /**
+   * Starts whatever may start now: the most urgent first, a few at a time.
+   * Whatever is left waiting for a time is woken when that time comes.
+   */
   function pump(now: number): void {
     if (isStopped) return
-    const waiting = [...queue.values()].filter(job => isReady(job, now)).sort((a, b) => a.priority - b.priority)
+    const level = ports.pressure()
+    const waiting = [...queue.values()].filter(job => readyAt(job) <= now).sort((a, b) => a.priority - b.priority)
     for (const job of waiting) {
       const isUrgent = job.priority <= LOOKING
       if (running.size >= (isUrgent ? PARALLEL + 1 : PARALLEL)) continue
-      if (!isUrgent && ports.pressure() !== 'none') continue
+      // Slowed, nothing is fetched that nobody is looking at. Held, only what the person asked for by name:
+      // a request made while Claude is not answering fails, and makes everything else wait longer.
+      if (level === 'held' ? job.priority !== ASKED : level !== 'none' && !isUrgent) continue
       queue.delete(job.key)
       const control = new AbortController()
       running.set(job.key, control)
@@ -369,15 +397,24 @@ export function createExplainer(ports: ExplainPorts) {
         .then(async outcome => {
           running.delete(job.key)
           const finished = await ports.now()
-          if (outcome === 'failed') failedAt.set(job.key, finished)
+          if (outcome === 'failed' && ports.pressure() === 'held') {
+            // Claude is not answering, or the plan is spent: that is not this lookup's failure. It waits with
+            // the rest and goes again when they do, as something looked at and not asked for a second time.
+            failedAt.delete(job.key)
+            enqueue({ ...job, priority: Math.max(job.priority, LOOKING) })
+          } else if (outcome === 'failed') failedAt.set(job.key, finished)
           else failedAt.delete(job.key)
           // Saved again while it was being mapped: once more, after it has settled.
           if (outcome === 'again') enqueue(outlineJob(job.path, Math.max(job.priority, LOOKING)))
+          const told = waiters
+          waiters = []
+          for (const tell of told) tell()
           if (isStopped) return
           ports.onChange()
           pump(finished)
         })
     }
+    ports.wakeAt(nextWakeAt(now))
   }
 
   /**
@@ -516,8 +553,10 @@ export function createExplainer(ports: ExplainPorts) {
       // A mapping in flight is of text that no longer exists. An explanation in
       // flight may still be good: its symbol is looked for again when it lands.
       running.get(`outline ${path}`)?.abort()
-      changedAt.set(path, await ports.now())
+      const now = await ports.now()
+      changedAt.set(path, now)
       enqueue(outlineJob(path, SAVED))
+      ports.wakeAt(nextWakeAt(now))
     },
     /**
      * Where the person is most likely working in a file they just saved: the
@@ -550,9 +589,19 @@ export function createExplainer(ports: ExplainPorts) {
 
       return symbol === undefined ? { print: read.print, of: 'file' } : { print: symbol.print, of: 'symbol' }
     },
-    /** Lets waiting lookups start if their time has come. Called on a timer. */
-    async tick(): Promise<void> {
+    /**
+     * Lets waiting lookups start if they may. Called when the time `wakeAt`
+     * named has come, and when something that held lookups back has changed.
+     */
+    async wake(): Promise<void> {
       if (queue.size > 0) pump(await ports.now())
+    },
+    /** Resolves when the next lookup has ended, whatever came of it, or when the engine is stopped. */
+    changed(): Promise<void> {
+      return new Promise(resolve => {
+        if (isStopped) resolve()
+        else waiters.push(resolve)
+      })
     },
     /** How many lookups are waiting or in flight. */
     pending(): number {
@@ -572,6 +621,9 @@ export function createExplainer(ports: ExplainPorts) {
       isStopped = true
       queue.clear()
       for (const control of running.values()) control.abort()
+      const told = waiters
+      waiters = []
+      for (const tell of told) tell()
     },
   }
 }

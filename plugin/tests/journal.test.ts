@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Working } from '../types'
-import { createAttention, parseEditorReport } from '../hooks/attention'
+import { createAttention, parseEditorReport, SLICE_MS } from '../hooks/attention'
 import { definitionName, enclosingName } from '../hooks/enclosing'
 import { ago, briefText, glanceText, pictureOf, placeWords, shareWords, took, workingOf } from '../hooks/glance'
 import type { Seen } from '../hooks/glance'
@@ -240,17 +240,43 @@ test('attention adds up where the caret stays, and stops when the editor goes qu
   expect(attention.drain()[0]).toEqual({ at: 2000, kind: 'focus', path: 'a.py', ms: 120_000, lines: [[200, 200]], where: 'total' })
   expect(attention.rows()).toEqual([])
 
-  // A poll that comes an hour late, as after the laptop slept, credits ten seconds and no more.
-  attention.observe(caret(5), 4_000_000, false)
-  attention.tick(4_000_000)
-  expect(attention.rows()).toEqual([{ at: 3_990_000, kind: 'focus', path: 'a.py', ms: 10_000, lines: [[5, 5]], where: '' }])
+  // The laptop sleeps for an hour with the caret where it was. None of that hour is attention.
+  attention.observe(caret(5), 500_000, false)
+  attention.tick(504_000)
+  expect(attention.dueAt()).toBe(500_000 + SLICE_MS)
+  attention.tick(4_104_000)
+  expect(attention.rows()).toEqual([{ at: 500_000, kind: 'focus', path: 'a.py', ms: 4000, lines: [[5, 5]], where: '' }])
 
   // An editor that says its window lost the keyboard earns nothing.
   attention.drain()
-  attention.observe({ ...caret(5), isActive: false }, 4_002_000, false)
-  attention.tick(4_002_000)
-  attention.tick(4_004_000)
+  expect(attention.dueAt()).toBe(null)
+  attention.observe({ ...caret(5), isActive: false }, 4_200_000, false)
+  attention.tick(4_202_000)
+  attention.tick(4_204_000)
   expect(attention.rows()).toEqual([])
+})
+
+test('attention is the time between reports, however often the tutor looks', async () => {
+  const caret = (line: number) => ({ path: 'a.py', line, open: [], visible: ['b.py'], isModified: false, isActive: true })
+  // The caret is on line 3 for 7.5 s, then on line 40 for 12.5 s.
+  const moves = (attention: ReturnType<typeof createAttention>) => {
+    attention.observe(caret(3), 1000, false)
+    attention.observe(caret(40), 8500, false)
+  }
+  const often = createAttention()
+  moves(often)
+  for (let now = 8600; now <= 21_000; now += 100) often.tick(now)
+  const seldom = createAttention()
+  moves(seldom)
+  seldom.tick(21_000)
+
+  const expected = [
+    { at: 1000, kind: 'focus', path: 'a.py', ms: 12_500, lines: [[40, 40]], where: '' },
+    { at: 1000, kind: 'focus', path: 'a.py', ms: 7500, lines: [[3, 3]], where: '' },
+    { at: 1000, kind: 'screen', path: 'b.py', ms: 20_000 },
+  ]
+  expect(often.rows()).toEqual(expected)
+  expect(seldom.rows()).toEqual(expected)
 })
 
 test('a stay in one function and a stay in the next are two places, however close their lines', async () => {
@@ -576,4 +602,52 @@ test('forgetting leaves nothing held that could be written back', async () => {
   await recorder.flush(2000, true)
   expect(disk.files.size).toBe(0)
   expect(recorder.working(2000)).toEqual(NOTHING)
+})
+
+test('the journal says when it next has something to do', async () => {
+  const files = { 'stats.py': MEAN }
+  const disk = memoryDisk()
+  let wakeAt: number | null = null
+  const recorder = createRecorder({
+    store: plainStore(disk),
+    file: FILE,
+    root: '/work',
+    read: async path => files[path as 'stats.py'] ?? null,
+    head: async () => MEAN,
+    wakeAt: at => {
+      wakeAt = at
+    },
+  })
+  // Being switched on is not worth a write, so there is nothing to wait for.
+  await recorder.start(1000, 'main', [])
+  expect(wakeAt).toBe(null)
+
+  // A save is. The write is due half a minute after the last one, and no sooner.
+  files['stats.py'] = `${MEAN}\ndef total(xs):\n    return sum(xs)\n`
+  await recorder.saved(['stats.py'], 5000)
+  expect(wakeAt).toBe(1000 + FLUSH_MS)
+  await recorder.flush(5000)
+  expect(disk.files.has(FILE)).toBe(false)
+  expect(wakeAt).toBe(1000 + FLUSH_MS)
+
+  // Woken then, it writes, and has nothing more to wait for.
+  await recorder.tick(1000 + FLUSH_MS)
+  await recorder.flush(1000 + FLUSH_MS)
+  expect(disk.files.has(FILE)).toBe(true)
+  expect(wakeAt).toBe(null)
+
+  // A caret that stays put becomes an entry once it has been there long enough: that moment is named too.
+  recorder.editor('{"file": "/work/stats.py", "line": 2}', 40_000, false)
+  expect(wakeAt).toBe(null)
+  await recorder.tick(42_000)
+  expect(wakeAt).toBe(40_000 + SLICE_MS)
+  // Every scan brings the time up to date, which moves nothing.
+  for (let now = 45_000; now < 40_000 + SLICE_MS; now += 5000) await recorder.tick(now)
+  expect(wakeAt).toBe(40_000 + SLICE_MS)
+  await recorder.tick(40_000 + SLICE_MS)
+  // The slice is an entry now, which makes a write due: at once, since the last one was long ago.
+  expect(wakeAt).toBe(1000 + FLUSH_MS + FLUSH_MS)
+  await recorder.flush(40_000 + SLICE_MS)
+  expect(wakeAt).toBe(null)
+  expect(recorder.journal().entries.some(entry => entry.kind === 'focus' && entry.ms === SLICE_MS)).toBe(true)
 })

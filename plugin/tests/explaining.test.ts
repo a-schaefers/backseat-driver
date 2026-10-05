@@ -249,8 +249,8 @@ sessionTest('the lookup tool answers from the same cache, and turns the tab to t
   await session.clock.settle()
   expect(session.tools.map(tool => tool.name)).toContain('lookup')
 
+  // It answers the moment the lookups land: the clock does not have to move for it.
   const call = $.tool.call({ tool: 'mcp__backseat-driver__lookup', file: `${ROOT}/stats.py`, line: 6 })
-  await session.clock.advance(3000)
   const answer = String(((await call) as { result: unknown }).result)
   expect(answer).toMatch('variance (function, lines 5 to 7): How spread out a list is.')
   expect(answer).toMatch('What: How spread out the values are.')
@@ -399,4 +399,43 @@ sessionTest('after a reload the Explain tab is still on the spot it was showing'
   // Read back from disk: nothing was asked again.
   expect(session.lookups.length).toBe(before)
   await ui.unmount()
+})
+
+sessionTest('a saved file is mapped the moment it has stayed unchanged long enough, whenever the next scan is', { options: { play_by_play: 'on request', animated_persona: false, progress_report: false } }, async ($, on) => {
+  const session = stubSession(on, { head: { 'stats.py': STATS } })
+  answers(session)
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+  await session.clock.settle()
+  const mapped = (): number => asked(session).filter(what => what === 'Map this file.').length
+  const before = mapped()
+
+  // The scan a second in sees the save. Scans are then a second apart, and the file has settled between two of them.
+  session.write('stats.py', `${STATS}\n# more\n`)
+  await session.clock.advance(1000)
+  await session.clock.advance(SETTLE_MS - 1)
+  expect(mapped()).toBe(before)
+  await session.clock.advance(1)
+  expect(mapped()).toBe(before + 1)
+})
+
+sessionTest('the lookup tool gives up waiting after six seconds and says more is coming', { options: { play_by_play: 'on request', animated_persona: false, progress_report: false } }, async ($, on) => {
+  const session = stubSession(on, { head: { 'stats.py': STATS } })
+  // No answer is ready for the model: its lookups stay open.
+  session.stall('explain')
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+  await session.clock.settle()
+
+  let answer = ''
+  const call = $.tool.call({ tool: 'mcp__backseat-driver__lookup', file: 'stats.py', line: 6 }).then(reply => {
+    answer = String((reply as { result: unknown }).result)
+  })
+  await session.clock.advance(5999)
+  expect(answer).toBe('')
+  await session.clock.advance(1)
+  await call
+  expect(answer).toMatch('More is being looked up and will be in the Explain tab shortly.')
+  session.release()
+  await session.clock.settle()
 })

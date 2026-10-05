@@ -85,7 +85,7 @@ Every roadmap milestone is built and was seen working in short scripted real ses
   - Limits: files under 256 KiB, at most 512 files.
   - Directory installs load as `<name>@synced`.
 - Approved plan for part two: `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine (nine decisions, risks per milestone).
-- In progress: the event-driven plan, `~/.claude/plans/wild-jumping-clover.md` on the owner's machine (approved 2026-10-04). Milestones M0 probes, M1 debug log, M2 locked store, M3 kernel (events, deadlines, health, play-by-play machine, sensor), M4 deep review queue, M5 Explain and journal on deadlines, M6 one driver per project, M7 pane pass, M8 optional push sources, M9 PureScript kernel. Done so far: M0 (see "Probed live" under Mod API), M1 (see "Debug log"; it also added the `session.end` flush of the journal) and M2 (the store and the locks, under "Data folder"). M3 (the kernel: deadlines, the scan, health, the play-by-play's state and status line; under "Play-by-play and watcher") and M4 (the queue of commits waiting for their review, its retries and watchdog; under "Deep review") are done too. Explain and the journal (M5) still run on their own timers, described below as they are.
+- In progress: the event-driven plan, `~/.claude/plans/wild-jumping-clover.md` on the owner's machine (approved 2026-10-04). Milestones M0 probes, M1 debug log, M2 locked store, M3 kernel (events, deadlines, health, play-by-play machine, sensor), M4 deep review queue, M5 Explain and journal on deadlines, M6 one driver per project, M7 pane pass, M8 optional push sources, M9 PureScript kernel. Done so far: M0 (see "Probed live" under Mod API), M1 (see "Debug log"; it also added the `session.end` flush of the journal) and M2 (the store and the locks, under "Data folder"). M3 (the kernel: deadlines, the scan, health, the play-by-play's state and status line; under "Play-by-play and watcher") and M4 (the queue of commits waiting for their review, its retries and watchdog; under "Deep review") are done too, and so is M5 (Explain and the journal on deadlines, the caret's fast lane, attention from timestamps; under "Explain" and "Journal"). Nothing in the mod runs on a repeating timer now except the animated persona's mouth and blink. Next: M6, one driver per project.
 
 ## Repository
 
@@ -186,7 +186,7 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 | `watcher.ts` | change since the last look (ports; tests use an in-memory tree) |
 | `gate.ts` | the pacing arithmetic: backoff after failed looks, the gap near the plan limit |
 | `scheduler.ts` | deadlines: named things to do at a known time, one timer for the earliest |
-| `sensor.ts` | how often the working tree is scanned |
+| `sensor.ts` | how often the working tree is scanned, and how often the spot in focus is checked while someone watches it |
 | `health.ts` | whether Claude is answering: what went wrong with a request, the shared wait after failures, the plan's pressure |
 | `play.ts` | what the play-by-play is doing and when it looks next, worked out from the facts |
 | `status.ts` | the pane's status line as a sentence, with a clock time for every wait |
@@ -237,13 +237,15 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 ### Play-by-play and watcher
 
 - Events and deadlines drive the mod, not a tick (owner, 2026-10-04). Nothing compares the clock against a condition over and over:
-  - `scheduler.ts` holds named deadlines (`scan`, `look`, `health`) and keeps one `$.clock.after` armed for the earliest. Setting a name again moves it. Work that is due is started, not awaited.
+  - `scheduler.ts` holds named deadlines and keeps one `$.clock.after` armed for the earliest. Setting a name again moves it. Work that is due is started, not awaited. The names: `scan`, `focus` (the fast lane), `look`, `health`, `review`, `assess`, `review-timer`, `review-watchdog`, `review-verdict`, `explain`, `journal`.
+  - An engine with ports does not keep time itself. It tells the shell when it next has something to do through a `wakeAt(at | null)` port (`explainer.ts`, `recorder.ts`), and the shell sets or cancels the deadline of that name.
   - A look is the deadline `look`, set by `planLook` whenever a fact it rests on changes (a save, the end of a look, a failure, the plan's limit). It fires at the moment the quiet time ends: live, 10.0 s after the save was seen.
   - `play.ts` works the state out from the facts each time (`playOf`): `starting`, `no-git`, `paused`, `watching`, `on-request`, `settling(dueAt)`, `looking`, `waiting(until, why)`. Nothing is remembered that could disagree with the facts. `wakeAt` is when to come back, `isLookDue` whether a look may start then.
   - `showPlay` writes the `watch` atom (`{ state, lastLookAt, line }`) only when it changed. `status.ts` makes `line`. A wait says why and until when as a clock time (`Next try 12:07`), so nothing redraws every second.
 - The one thing the mod polls is the working tree, because nothing tells it about the person's own saves, their commits in their own terminal, or their editor's caret (see "Probed live": no watch in `$.fs`, `FileChanged` only for paths named at session start, no watcher installed). `scan` in `register.tsx` is that poll, one at a time, the next planned when it finishes:
   - `sensor.ts`: 1 s apart for a minute after something happened (`activeAt`: a save, a caret move, a prompt, a key in the pane, switch-on), 2 s otherwise, 5 s once nothing has happened for ten minutes. Each quarter second a scan took adds 2 s, up to 32 s.
   - `kick` scans at once: on `prompt.submit`, when a turn of the conversation ends, on a key in the pane, on resume.
+  - The fast lane (`fastPoll`, deadline `focus`): while someone can see the Explain view, two stats ten times a second, the file in focus and the editor's `focus.json`. Each check plans the next, `focusGapMs` after it (100 ms, four times what the check took when that is more, 2 s at most), and none is planned once nobody is watching. While it runs, the scan leaves `focus.json` to it.
   - Paused, nothing scans and no look is due.
   - A scan never calls a model. It feeds the journal and Explain, checks HEAD, and calls `planLook`.
 - Failures (owner: told apart, retried with delayed backoff, nothing pending lost). `health.ts`:
@@ -350,9 +352,13 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
   | ahead | 2 unexplained symbols after a mapping | last | — | 80% |
 
 - `SETTLE_MS` 2.5 s after a file's last change before mapping. Explaining a symbol never waits. Concurrency is 2, plus 1 for a watched spot. `commit()` applies results to the latest state synchronously and writes one at a time (two landing together once lost one). Re-check the cache just before calling the model. Failed lookups aren't retried for `RETRY_MS` (1 min).
+- Nothing pumps the queue on a timer. `readyAt(job)` is when time lets a job start, `pump` starts what may start and then calls `wakeAt` with the first moment a waiting job becomes ready by time alone (the deadline `explain`), and `wake()` is what the deadline and `wake` in `register.tsx` call. So a saved file is mapped 2.5 s after the scan that saw the save, not at the first scan after that.
+- While Claude is not answering, or the plan is at its limit (`pressure()` is `held`), only what was asked for by name starts: a request made into an outage fails and lengthens everyone's wait. A lookup that failed while held is not marked failed. It goes back in the queue as something looked at, and runs when `wake` says Claude is back, without the minute's wait.
+- `changed()` resolves when the next lookup ends. The `lookup` tool and `/bsd explain` wait on it (`lookUp`, `soonest`), up to `LOOKUP_WAIT_MS` (6 s) in all, and answer the moment what they asked about lands. Before M5 they slept half a second at a time.
 - Setting `explain`: `automatic | on request | off`. Near limits, `automatic` degrades to on-request (saves first, then everything).
-- `register.tsx`: `startExplaining` (in `engage`) builds the ports. `refreshView` builds the focused view into state and writes `view.json`. While the tab is open or an editor is live, `fastPoll` stats the focused file and `focus.json` every 100 ms and refreshes on change, which is why stale text leaves the screen within about 0.1 s. It stops when nobody watches. `readFocus` is the only reader of `focus.json`; `pollFocus` feeds the journal, then Explain (`followEditor`).
+- `register.tsx`: `startExplaining` (in `engage`) builds the ports. `refreshView` builds the focused view into state and writes `view.json`. While the tab is open or an editor is live, `fastPoll` stats the focused file and `focus.json` every 100 ms and refreshes on change, which is why stale text leaves the screen within about 0.1 s. It stops when nobody watches (see the fast lane under "Play-by-play and watcher"). `readFocus` is the only reader of `focus.json`; `pollFocus` feeds the journal, then Explain (`followEditor`).
 - Live: first explanation in an unseen file in 6.6 s; cached `n`/`p` in 40–80 ms; edit removed the explanation in about 60 ms, new one after 9 s; a script's `focus.json` → `view.json` in 40–80 ms; the tutor called `lookup` with no permission prompt when it hadn't already read the file.
+- Live on deadlines (2026-10-04): the mapping request left 2.52 s after the scan that saw the save; an edit to the function in focus rewrote `view.json` 50 ms after the save, without the old explanation; a caret written to `focus.json` was followed in 68 and 108 ms. The `lookup` tool's wait on `changed()` has been seen in tests only.
 
 ### Editor protocol (for future vim and emacs plugins)
 
@@ -391,12 +397,14 @@ The tutor writes `view.json` in answer and whenever its knowledge of the spot ch
   - Saves of one file under 2 min apart form one run, until a commit or HEAD move.
   - Other entries: commits, HEAD moves, notes raised, notes fixed, dismissals, deep reviews, switch-on, working-on statements.
   - The last 3 files' diffs stay in memory for the `activity` tool.
-- Attention: `attention.ts` credits each poll's time (max 10 s, so sleep adds nothing) to the caret line and to `visible` files, while the editor wrote within `LINGER_MS` (2 min) and isn't `active: false`.
+- Attention: `attention.ts` adds time up from timestamps, not from how often it is looked at. Each report from the editor closes the stretch before it: the time since the last credit goes to the line the caret was on and to the `visible` files, for as long as the editor wrote within `LINGER_MS` (2 min) and isn't `active: false`. `tick(now)` brings the sum up to now. A hundred looks and one give the same sum.
+  - A stretch of more than `MAX_GAP_MS` (60 s) in which nothing here looked at the clock is not credited: the laptop slept, or the tutor was paused. A scan is never further apart than that.
   - Every `SLICE_MS` (2 min) → `focus` entries: up to 3 regions per file plus the remainder. A region is lines within 20 of each other inside one definition, named for the line held longest. Visible files get `screen` entries.
   - The definition name is resolved at the next scan, so one read per caret position.
   - `focus.json` from before switch-on is a baseline and earns no time until rewritten.
 - Sittings: an hour idle ends one. On every read or write, finished sittings roll up (`digest`: files, commit titles, statements); only the open sitting keeps entries. Keep the last 20. A sitting with no save, no commit and under 1 min of editor time leaves nothing.
 - Writes: at most every 30 s when something is new; at once on a working-on statement; at switch-off; and when the session ends (`session.end`).
+  - The recorder says when it next has something to do (`wakeAt`: a write that is due, or a slice of attention long enough to keep), and `journalDue` runs then, on the deadline `journal`. A scan no longer asks "is a write due?": it only records what was saved and names where the caret is.
   - Every write re-reads and merges (`sync`). An unseen entry is another session's and is kept. A seen-but-gone entry was rolled up or merged, and is dropped.
   - For said and inferred working-on, later wins; ties go to this session.
   - Every entry passes `parseEntry` so JSON is canonical for comparison.
@@ -410,6 +418,7 @@ The tutor writes `view.json` in answer and whenever its knowledge of the spot ch
   - `w` or bare `/bsd working` asks with two answers plus free text. Enter gives the first, which never loses anything (`workingChoices`).
   - The user's words come via `/bsd working <words>`, the `working` tool, or a typed answer. Take-back: "Let the tutor work it out", `/bsd working clear`, or the tool with an empty string. A tool call without `on` records nothing (a live call without it once cleared the line).
 - `/bsd forget project` deletes the folder, and `recorder.reset()` stops the next write from restoring it.
+- Live on deadlines (2026-10-04): the first write came 30.0 s after switch-on with a save waiting, between two scans. A session closed with `/exit` five seconds after a save had its journal on disk afterwards with the save and the two open stretches of caret time (6.3 s and 4.7 s).
 - Live (script as editor): "Working on stats.py, in mean" 4 s after the caret moved; after a save, `working_on` became "writing a median function in stats.py"; "this" in chat resolved to `median`; `working`, `activity` and a commit were written within 30 s; a reload kept everything. Regions now also end where the definition changes (one once merged `mean` and `median`).
 
 ### Progress
@@ -651,7 +660,8 @@ The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above mem
 - Time in the kit starts at 0 and the first scan is 1 s after switch-on. A look is due exactly `quietMs` after the scan that saw the save: `advance(9999)` no request, `advance(1)` one. The health wait is jittered with `Math.random`, so assert on the look's own pacing (deterministic) or on bounds.
 - Several sessions in the kit: the fake git keeps the lock repository in `session.disk` (`locks.git/HEAD`, one file per held ref). `session.locking` lists `take`, `steal`, `give` and `refused` with the ref (`lockRef(path)` names it). `session.lockedElsewhere(ref, agoMs)` is another session's lock. `session.halfWritten.set(path, n)` makes the next n reads of a file find it empty. A wait in the store or for a lock is a `$.clock.sleep`, so the test has to move the clock for the call to finish: start the call, `await session.clock.advance(...)`, then await it.
 - The tutor's own debug log in the kit: seed `data: { 'debug.json': { on: true } }` (and the marker), or run `/bsd debug on`. `session.debugLog()` returns every record across chunks. Records are written `FLUSH_MS` after they are noted, so `await session.clock.advance(FLUSH_MS)` before reading. The kit stubs `session.id` (`SESSION_ID`), `session.version` and `session.end`.
-- Engines with ports are tested without the kit: `explain.test.ts` has `world()`, whose model is answered by hand with `w.answer(request, reply)`, which is how a test changes a file mid-call.
+- Engines with ports are tested without the kit: `explain.test.ts` has `world()`, whose model is answered by hand with `w.answer(request, reply)`, which is how a test changes a file mid-call. `w.state.wakeAt` is what the engine last asked for, and `w.explainer.wake()` is the deadline firing.
+- A slow model in the kit: `session.stall('explain' | 'look' | 'progress')` holds that job's requests open until `session.release()`. Requests are recorded when asked, not when answered.
 - `sessionTest` (30 s limit) for anything that starts a session; plain `test` (5 s) for pure functions. All files run in parallel processes, and each test loads the whole mod, so a busy machine takes seconds before the first action.
 - A `$.clock.every` period is one dispatch with 10 s of real time ("exceeded 10000ms budget" under load). The timed deep review is no longer one: it is a deadline. `await session.clock.settle()` before asserting on timer-started work.
 - Deep reviews in the kit: `session.spawned`, `$.turn.complete(session.finish(n, answer, reason))`, `$.classic.StopFailure({ error, agent_id: session.agentId(n) })` for why a reviewer died, `session.lostAgents.push(id)` for one Claude Code no longer lists (the watchdog), `data: { 'projects/<id>/queue.json': … }` for commits left waiting. A reload cannot be staged (module variables outlive nothing but the test), so `adoptReview` is checked live only.

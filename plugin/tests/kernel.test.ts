@@ -5,7 +5,7 @@ import type { Health, Pressure } from '../hooks/health'
 import { isLookDue, playOf, wakeAt } from '../hooks/play'
 import type { PlayFacts } from '../hooks/play'
 import { createScheduler } from '../hooks/scheduler'
-import { HOT_FOR_MS, HOT_SCAN_MS, IDLE_AFTER_MS, IDLE_SCAN_MS, LONGEST_SCAN_GAP_MS, SCAN_MS, scanGapMs } from '../hooks/sensor'
+import { FOCUS_SCAN_MS, focusGapMs, HOT_FOR_MS, HOT_SCAN_MS, IDLE_AFTER_MS, IDLE_SCAN_MS, LONGEST_FOCUS_GAP_MS, LONGEST_SCAN_GAP_MS, SCAN_MS, scanGapMs } from '../hooks/sensor'
 import { clockTime, playLine, watchOf } from '../hooks/status'
 
 /** The pure parts of the kernel: deadlines, whether Claude is answering, what the play-by-play is doing, how often to scan. */
@@ -398,4 +398,12 @@ test('the working tree is scanned often after something happened, and seldom whe
   expect(at(0, 250)).toBe(HOT_SCAN_MS + 2000)
   expect(at(HOT_FOR_MS, 1000)).toBe(SCAN_MS + 8000)
   expect(at(0, 60_000)).toBe(LONGEST_SCAN_GAP_MS)
+})
+
+test('the spot in focus is checked ten times a second while it is watched, and less often when a check is slow', async () => {
+  expect(focusGapMs(0)).toBe(FOCUS_SCAN_MS)
+  expect(focusGapMs(25)).toBe(FOCUS_SCAN_MS)
+  // A check that took a while is not run back to back: the wait is four times what it took.
+  expect(focusGapMs(100)).toBe(400)
+  expect(focusGapMs(60_000)).toBe(LONGEST_FOCUS_GAP_MS)
 })

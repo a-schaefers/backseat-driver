@@ -153,7 +153,7 @@ import type { Question } from './questions'
 import { createRecorder } from './recorder'
 import { createScheduler } from './scheduler'
 import type { Scheduler } from './scheduler'
-import { scanGapMs } from './sensor'
+import { FOCUS_SCAN_MS, focusGapMs, scanGapMs } from './sensor'
 import { playLine, watchOf } from './status'
 import type { Recorder } from './recorder'
 import {
@@ -302,15 +302,16 @@ let profiles: Profiles = NO_PROFILES
 /** The model's tools are registered the first time the tutor is switched on, and only then. */
 let areToolsRegistered = false
 
-/**
- * Explain: the lookup engine, where the person is looking, and the timer
- * that watches the file an editor writes its cursor to.
- */
+/** Explain: the lookup engine, and where the person is looking. */
 let explainer: Explainer | null = null
 let focus: Focus | null = null
 /** When an editor last moved the focus, in clock milliseconds. A save does not move the focus away from a live editor. */
 let editorFocusAt = 0
-let focusTimer: Timer | null = null
+/**
+ * True while the spot in focus is being checked ten times a second, which it
+ * is for as long as someone can see the Explain view (`fastPoll`).
+ */
+let isWatchingClosely = false
 /** The editor's focus file as last read: its size and modification time, and its text, null when it is not there. */
 let focusStamp = ''
 let focusText: string | null = null
@@ -318,16 +319,10 @@ let focusText: string | null = null
 let viewRun = 0
 /** The focused file's stamp when the view was last made. A different stamp now means the view may describe code that is gone. */
 let viewedStamp = ''
-let isFastPolling = false
 let writtenView = ''
-/**
- * How often the focused file and the editor's focus file are checked while
- * someone is watching the Explain view. A stat takes about a millisecond.
- * This is the longest the pane can show an explanation of code that was
- * just edited, and the longest an editor waits for its cursor to be noticed.
- */
-const FOCUS_POLL_MS = 100
 const EDITOR_LIVE_MS = 600_000
+/** The lookup tool waits this long for what it was asked about. A hook has ten seconds of its own. */
+const LOOKUP_WAIT_MS = 6000
 
 /** The animated persona's timers: one moves its mouth while it talks, the other makes it blink now and then. */
 let talkTimer: Timer | null = null
@@ -471,8 +466,8 @@ function snapshot(): Record<string, unknown> {
       lastHead,
       headLog,
     },
-    explain: { isOn: explainer !== null, waiting: explainer?.pending() ?? 0, focus, editorFocusAt, isFastPolling },
-    timers: { focus: focusTimer !== null, talk: talkTimer !== null, blink: blinkTimer !== null },
+    explain: { isOn: explainer !== null, waiting: explainer?.pending() ?? 0, focus, editorFocusAt, isWatchingClosely },
+    timers: { talk: talkTimer !== null, blink: blinkTimer !== null },
     profiles: { languages: profiles.languages, subjects: Object.keys(profiles.subjects) },
     progress: { identity, records: [...records.keys()], watchedPaths: [...watchedPaths] },
     journal: recorder === null ? null : { working: workingShown },
@@ -737,7 +732,7 @@ async function wake($: EngineInterface, settings: Settings): Promise<void> {
   if (mode === 'off') return
   await planLook($, settings)
   await planReview($, settings)
-  await explainer?.tick()
+  await explainer?.wake()
   void refreshView($)
 }
 
@@ -1377,9 +1372,9 @@ async function flushJournal($: EngineInterface, journal: Recorder, now: number, 
 }
 
 /**
- * The journal's part of a poll: what was just saved and what it changed, the
- * time the caret has spent where it is, and a write when one is due. No
- * model is involved.
+ * The journal's part of a scan: what was just saved and what it changed, and
+ * the time the caret has spent where it is. No model is involved. Writing
+ * the journal is not part of it: that has a deadline of its own.
  */
 async function keepJournal($: EngineInterface, active: Watcher, now: number): Promise<void> {
   const journal = recorder
@@ -1387,6 +1382,18 @@ async function keepJournal($: EngineInterface, active: Watcher, now: number): Pr
   const saved = active.changed()
   if (saved.length > 0) await journal.saved(saved, now)
   journal.settle(active.dirty())
+  await journal.tick(now)
+  await showWorking($, now)
+}
+
+/**
+ * The journal's deadline came: a write is due, or the time the caret has
+ * spent somewhere is worth an entry. The journal says when the next one is.
+ */
+async function journalDue($: EngineInterface): Promise<void> {
+  const journal = recorder
+  if (journal === null || mode === 'off') return
+  const now = await $.clock.now()
   await journal.tick(now)
   await showWorking($, now)
   await flushJournal($, journal, now, false)
@@ -1408,6 +1415,12 @@ async function startJournal($: EngineInterface, run: number, isFresh: boolean): 
       const shown = await git($, root, ['show', `HEAD:${path}`])
 
       return shown.exitCode === 0 ? shown.stdout : null
+    },
+    wakeAt: at => {
+      // Only the journal in use keeps the deadline: one that was replaced, or never taken up, has no say.
+      if (recorder !== null && recorder !== started) return
+      if (at === null) deadlines?.cancel('journal')
+      else schedulerOf($).set('journal', at, () => journalDue($))
     },
   })
   const branch = (await git($, root, ['rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim()
@@ -2350,9 +2363,8 @@ async function scan($: EngineInterface, settings: Settings): Promise<void> {
       for (const path of active.changed()) watchedPaths.add(path)
       await followSaves($, active.changed(), now)
     }
-    await explainer?.tick()
     // Until an editor has written its focus file, looking for it this often is enough.
-    if (focusTimer === null) await pollFocus($)
+    if (!isWatchingClosely) await pollFocus($)
     await keepJournal($, active, now)
     await checkHead($, settings)
     traceQuiet($)
@@ -2378,8 +2390,7 @@ function stopWatching(): void {
   jobBlocks.clear()
   reviewFailure = ''
   reviewFailureNoted = null
-  focusTimer?.cancel()
-  focusTimer = null
+  isWatchingClosely = false
   explainer?.stop()
   explainer = null
   watchedPaths.clear()
@@ -2554,37 +2565,44 @@ async function isWatched($: EngineInterface): Promise<boolean> {
 
 /**
  * While the Explain view is being watched, the file in focus is checked for
- * changes far more often than the two-second poll does, so that an edit takes
- * the old explanation off the screen in a tenth of a second, and a file that
- * has settled is mapped without waiting for the next slow poll.
+ * changes far more often than the working tree is scanned, so that an edit
+ * takes the old explanation off the screen in a tenth of a second and an
+ * editor's caret is followed as it moves. Each check plans the next, until
+ * nobody is watching.
  */
 async function fastPoll($: EngineInterface): Promise<void> {
-  if (isFastPolling || explainer === null) return
-  isFastPolling = true
+  if (!isWatchingClosely) return
+  let isStillWatched = false
+  const started = await $.clock.now()
   try {
-    await pollFocus($)
-    const spot = focus
-    if (spot !== null && (await fileStamp($, `${repoRoot}/${spot.path}`)) !== viewedStamp) await refreshView($)
-    await explainer?.tick()
-    if (!(await isWatched($))) {
-      trace($, 'timer', 'nobody is watching the focus')
-      focusTimer?.cancel()
-      focusTimer = null
+    if (explainer !== null) {
+      await pollFocus($)
+      const spot = focus
+      if (spot !== null && (await fileStamp($, `${repoRoot}/${spot.path}`)) !== viewedStamp) await refreshView($)
+      isStillWatched = explainer !== null && (await isWatched($))
     }
   } catch (error) {
     fail($, 'focus poll failed', error)
-  } finally {
-    isFastPolling = false
+    isStillWatched = explainer !== null
   }
+  // Switched off, or on again, while this check ran: whoever did that decides what runs now.
+  if (!isWatchingClosely) return
+  if (!isStillWatched) {
+    trace($, 'timer', 'nobody is watching the focus')
+    isWatchingClosely = false
+
+    return
+  }
+  const now = await $.clock.now()
+  schedulerOf($).set('focus', now + focusGapMs(now - started), () => fastPoll($))
 }
 
 function watchClosely($: EngineInterface): void {
-  if (explainer === null) return
-  if (focusTimer !== null) return
-  trace($, 'timer', 'watching the focus closely', () => ({ everyMs: FOCUS_POLL_MS, focus }))
-  focusTimer = $.clock.every(FOCUS_POLL_MS, () => {
-    void fastPoll($)
-  })
+  if (explainer === null || isWatchingClosely) return
+  isWatchingClosely = true
+  trace($, 'timer', 'watching the focus closely', () => ({ everyMs: FOCUS_SCAN_MS, focus }))
+  // The first check is due at once: the scheduler runs a deadline whose time has passed straight away.
+  schedulerOf($).set('focus', 0, () => fastPoll($))
 }
 
 /** Saved files are mapped again, and the focus follows the save unless an editor is reporting its cursor. */
@@ -2649,6 +2667,10 @@ async function startExplaining($: EngineInterface, settings: Settings, run: numb
     onChange: () => {
       void refreshView($)
     },
+    wakeAt: at => {
+      if (at === null) deadlines?.cancel('explain')
+      else schedulerOf($).set('explain', at, () => explainer?.wake())
+    },
     log: line => {
       $.ui.log(line, { to: 'debug' })
       trace($, 'explain', 'log', () => line)
@@ -2684,15 +2706,30 @@ async function moveFocus($: EngineInterface, step: 1 | -1): Promise<void> {
   if (row !== undefined) await setFocus($, { path: view.spot.path, line: row.startLine, source: 'pane' }, true)
 }
 
+/** Resolves when `wanted` does, or after `ms`, whichever comes first. */
+function soonest($: EngineInterface, wanted: Promise<void>, ms: number): Promise<void> {
+  return new Promise(resolve => {
+    const timer = $.clock.after(ms, () => resolve())
+    void wanted.then(() => {
+      timer.cancel()
+      resolve()
+    })
+  })
+}
+
 /** What the lookup tool and `/bsd explain` share: move the focus to a spot and say what is known about it. */
 async function lookUp($: EngineInterface, spot: Spot): Promise<string> {
   const engine = explainer
   if (engine === null) return ''
   await setFocus($, { ...spot, source: 'command' }, true)
   let view = await engine.view(spot, 'asked')
-  // A lookup takes the model a few seconds, and a hook has ten of its own. This waits for some of them.
-  for (let turn = 0; turn < 12 && view.status === 'updating'; turn += 1) {
-    await $.clock.sleep(500)
+  // A lookup takes the model a few seconds, and a hook has ten of its own. This waits for the lookup to
+  // land and answers the moment it does, or with what there is when the wait is over.
+  const until = (await $.clock.now()) + LOOKUP_WAIT_MS
+  while (view.status === 'updating' && engine.pending() > 0) {
+    const left = until - (await $.clock.now())
+    if (left <= 0) break
+    await soonest($, engine.changed(), left)
     view = await engine.view(spot, 'asked')
   }
   const known = viewText(view)

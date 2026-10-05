@@ -151,6 +151,8 @@ function world(initial: Record<string, string>) {
     pressure: 'none' as 'none' | 'slowed' | 'held',
     changes: 0,
     insights: [] as string[],
+    /** When the engine last said it wants to be woken, or null for no time at all. */
+    wakeAt: null as number | null,
   }
   const start = () =>
     createExplainer({
@@ -170,6 +172,9 @@ function world(initial: Record<string, string>) {
       model: 'test',
       onChange: () => {
         state.changes += 1
+      },
+      wakeAt: at => {
+        state.wakeAt = at
       },
       log: () => {},
     })
@@ -302,7 +307,7 @@ test('an edit elsewhere in the file costs an unchanged function nothing', async 
   // The file is mapped again once it has settled, because it changed. Nothing is asked about variance.
   expect(w.open('Map this file.').length).toBe(0)
   w.state.now += SETTLE_MS
-  await w.explainer.tick()
+  await w.explainer.wake()
   await w.settle()
   expect(w.open('Map this file.').length).toBe(1)
   expect(w.open('Explain').length).toBe(before)
@@ -340,11 +345,11 @@ test('a mapping that lands after another save is dropped, and the file is mapped
   expect(w.disk.files.size).toBe(0)
 
   // Not at once: the file may still be being typed.
-  await w.explainer.tick()
+  await w.explainer.wake()
   await w.settle()
   expect(w.open('Map this file.').length).toBe(0)
   w.state.now += SETTLE_MS
-  await w.explainer.tick()
+  await w.explainer.wake()
   await w.settle()
   expect(w.open('Map this file.').length).toBe(1)
   expect(w.open('Map this file.')[0]?.prompt).toMatch('def total(xs):')
@@ -370,7 +375,7 @@ test('on request, nothing is fetched until the person asks', async () => {
   expect(idle.status).toBe('waiting')
   await w.explainer.touch('stats.py')
   w.state.now += SETTLE_MS
-  await w.explainer.tick()
+  await w.explainer.wake()
   await w.settle()
   expect(w.asked.length).toBe(0)
 
@@ -408,16 +413,16 @@ test('a saved file is mapped once it has settled, and explained ahead only when 
   const w = world({ 'stats.py': STATS })
   w.state.pressure = 'slowed'
   await w.explainer.touch('stats.py')
-  await w.explainer.tick()
+  await w.explainer.wake()
   await w.settle()
   // Near the plan limit, nothing that was not asked for is fetched.
   w.state.now += SETTLE_MS
-  await w.explainer.tick()
+  await w.explainer.wake()
   await w.settle()
   expect(w.asked.length).toBe(0)
 
   w.state.pressure = 'none'
-  await w.explainer.tick()
+  await w.explainer.wake()
   await w.settle()
   expect(w.open('Map this file.').length).toBe(1)
   w.answer(w.open('Map this file.')[0], OUTLINE)
@@ -465,7 +470,7 @@ test('how eagerly a spot is looked up depends on why it is being looked at', asy
   await saved.settle()
   expect(saved.asked.length).toBe(0)
   saved.state.now += SETTLE_MS
-  await saved.explainer.tick()
+  await saved.explainer.wake()
   await saved.settle()
   expect(saved.asked.length).toBe(1)
 
@@ -475,7 +480,7 @@ test('how eagerly a spot is looked up depends on why it is being looked at', asy
   await slowed.explainer.touch('stats.py')
   expect((await slowed.explainer.view({ path: 'stats.py', line: 6 }, 'following')).status).toBe('held')
   slowed.state.now += SETTLE_MS
-  await slowed.explainer.tick()
+  await slowed.explainer.wake()
   await slowed.settle()
   expect(slowed.asked.length).toBe(0)
   expect((await slowed.explainer.view({ path: 'stats.py', line: 6 }, 'browsing')).status).toBe('updating')
@@ -496,7 +501,7 @@ test('how eagerly a spot is looked up depends on why it is being looked at', asy
 test('asking for a file that is waiting to settle maps it at once', async () => {
   const w = world({ 'stats.py': STATS })
   await w.explainer.touch('stats.py')
-  await w.explainer.tick()
+  await w.explainer.wake()
   await w.settle()
   expect(w.asked.length).toBe(0)
 
@@ -555,13 +560,13 @@ test('a file edited under the cursor is not mapped again until it has settled', 
     expect(view.detail).toBe(null)
     expect(view.status).toBe('updating')
     w.state.now += 1000
-    await w.explainer.tick()
+    await w.explainer.wake()
     await w.settle()
   }
   expect(w.asked.length).toBe(before)
 
   w.state.now += SETTLE_MS
-  await w.explainer.tick()
+  await w.explainer.wake()
   await w.settle()
   // One mapping, of the text as it ended up.
   expect(w.asked.length).toBe(before + 1)
@@ -586,4 +591,93 @@ test('a save takes the focus to where the change began, once the file has been r
   expect(await w.explainer.where('stats.py')).toBe(10)
   w.save('stats.py', STATS.replace('m = mean(xs)', 'mu = mean(xs)'))
   expect(await w.explainer.where('stats.py')).toBe(6)
+})
+
+test('the engine says when it wants to be woken, and for nothing else', async () => {
+  const w = world({ 'stats.py': STATS })
+  expect(w.state.wakeAt).toBe(null)
+
+  // A saved file is mapped once it has stayed unchanged for a moment: that moment is named.
+  await w.explainer.touch('stats.py')
+  expect(w.state.wakeAt).toBe(1000 + SETTLE_MS)
+  // Saved again a second later: the moment moves.
+  w.state.now += 1000
+  await w.explainer.touch('stats.py')
+  expect(w.state.wakeAt).toBe(2000 + SETTLE_MS)
+
+  // Woken too early, nothing starts and the time stands.
+  await w.explainer.wake()
+  await w.settle()
+  expect(w.asked.length).toBe(0)
+  expect(w.state.wakeAt).toBe(2000 + SETTLE_MS)
+
+  // Woken on time, the mapping starts and there is nothing left to wait for.
+  w.state.now = 2000 + SETTLE_MS
+  await w.explainer.wake()
+  await w.settle()
+  expect(w.open('Map this file.').length).toBe(1)
+  expect(w.state.wakeAt).toBe(null)
+
+  // A lookup that failed is tried again a minute later, when someone still wants it.
+  w.answer(w.open('Map this file.')[0], 'not json')
+  await w.settle()
+  expect(w.state.wakeAt).toBe(null)
+  expect((await w.explainer.view({ path: 'stats.py', line: 6 }, 'browsing')).status).toBe('failed')
+  expect(w.state.wakeAt).toBe(2000 + SETTLE_MS + RETRY_MS)
+  w.state.now = 2000 + SETTLE_MS + RETRY_MS
+  await w.explainer.wake()
+  await w.settle()
+  expect(w.open('Map this file.').length).toBe(1)
+})
+
+test('while Claude is not answering, only what is asked for by name is tried, and nothing is marked failed for it', async () => {
+  const w = world({ 'stats.py': STATS })
+  await w.explainer.view({ path: 'stats.py', line: 6 }, 'browsing')
+  await w.settle()
+  expect(w.open('Map this file.').length).toBe(1)
+
+  // The request dies because Claude is not answering, which every job is then told.
+  w.state.pressure = 'held'
+  w.answer(w.open('Map this file.')[0], null)
+  await w.settle()
+  // It is not this lookup's failure: it waits, and is not shown as failed.
+  expect(w.explainer.pending()).toBe(1)
+  expect(w.asked.length).toBe(1)
+  expect((await w.explainer.view({ path: 'stats.py', line: 6 }, 'browsing')).status).toBe('held')
+  // Waking it changes nothing while Claude is still not answering.
+  w.state.now += RETRY_MS
+  await w.explainer.wake()
+  await w.settle()
+  expect(w.asked.length).toBe(1)
+
+  // Claude answers again: it goes at once, with no minute's wait.
+  w.state.pressure = 'none'
+  await w.explainer.wake()
+  await w.settle()
+  expect(w.asked.length).toBe(2)
+})
+
+test('whoever waits for a lookup is told the moment one ends', async () => {
+  const w = world({ 'stats.py': STATS })
+  await w.explainer.view({ path: 'stats.py', line: 6 }, 'asked')
+  await w.settle()
+  let isTold = false
+  void w.explainer.changed().then(() => {
+    isTold = true
+  })
+  await w.settle()
+  expect(isTold).toBe(false)
+
+  w.answer(w.open('Map this file.')[0], OUTLINE)
+  await w.settle()
+  expect(isTold).toBe(true)
+
+  // Stopping the engine lets go of whoever is still waiting.
+  let isReleased = false
+  void w.explainer.changed().then(() => {
+    isReleased = true
+  })
+  w.explainer.stop()
+  await w.settle()
+  expect(isReleased).toBe(true)
 })

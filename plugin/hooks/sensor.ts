@@ -12,6 +12,11 @@
  * minute after something happened (a save, a prompt, a key in the pane),
  * every two seconds otherwise, every five once nothing has happened for ten
  * minutes. Anything Claude Code does tell the mod about makes it scan at once.
+ *
+ * One thing is looked at more often, and only while someone is watching it:
+ * the file the Explain view is about, and the file an editor writes its
+ * caret to. Two stats, ten times a second (`focusGapMs`), because an
+ * explanation of code that was just edited must not stay on screen.
  */
 
 /** Between scans while something has just happened. */
@@ -45,4 +50,19 @@ export function scanGapMs(facts: ScanFacts): number {
   const slowness = Math.floor(facts.lastScanMs / SLOW_SCAN_STEP_MS) * SLOW_SCAN_WAIT_MS
 
   return Math.min(LONGEST_SCAN_GAP_MS, base + slowness)
+}
+
+/**
+ * Between checks of the spot in focus while someone is watching it. A stat
+ * takes about a millisecond. This is the longest the pane can show an
+ * explanation of code that was just edited, and the longest an editor waits
+ * for its caret to be noticed.
+ */
+export const FOCUS_SCAN_MS = 100
+/** However slow the disk is, the spot in focus is checked this often. */
+export const LONGEST_FOCUS_GAP_MS = 2000
+
+/** How long to wait before the next check of the spot in focus. A check that was slow is not run back to back. */
+export function focusGapMs(tookMs: number): number {
+  return Math.min(LONGEST_FOCUS_GAP_MS, Math.max(FOCUS_SCAN_MS, tookMs * 4))
 }

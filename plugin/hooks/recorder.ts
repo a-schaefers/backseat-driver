@@ -22,6 +22,12 @@ export type RecorderPorts = {
   read: (path: string) => Promise<string | null>
   /** The file as committed at HEAD, or null when git does not have it. */
   head: (path: string) => Promise<string | null>
+  /**
+   * Says when the journal next has something to do by itself, which is when
+   * `tick` and `flush` should be called: a write that is due, or a slice of
+   * attention long enough to keep. Null when there is nothing to wait for.
+   */
+  wakeAt?: (at: number | null) => void
 }
 
 /** The journal is written at most this often while entries keep coming. */
@@ -69,11 +75,19 @@ export function createRecorder(ports: RecorderPorts) {
     if (texts.size > MAX_TEXTS && oldest.done !== true) texts.delete(oldest.value)
   }
 
+  /** Tells whoever keeps the time when the journal next has something to do. */
+  function plan(): void {
+    const flushAt = isDirty ? flushedAt + FLUSH_MS : null
+    const sliceAt = attention.dueAt()
+    ports.wakeAt?.(flushAt === null ? sliceAt : sliceAt === null ? flushAt : Math.min(flushAt, sliceAt))
+  }
+
   function add(entry: Entry): void {
     const fitted = parseEntry(entry)
     if (fitted === null) return
     held = { ...held, entries: withEntry(held.entries, fitted) }
     isDirty = true
+    plan()
   }
 
   function seen(now: number): Seen {
@@ -101,6 +115,7 @@ export function createRecorder(ports: RecorderPorts) {
         add({ at: now, kind: 'on', text: branch })
         isDirty = false
       }
+      plan()
     },
 
     /** These files were saved since the previous poll: records what each save changed, and where. */
@@ -165,6 +180,7 @@ export function createRecorder(ports: RecorderPorts) {
       if (inferred === '') return
       held = { ...held, inferred: { text: inferred, at: now, paths: [...paths] } }
       isDirty = true
+      plan()
     },
 
     /** HEAD moved to other work, so what was made of the activity before no longer applies. */
@@ -179,12 +195,13 @@ export function createRecorder(ports: RecorderPorts) {
      */
     editor(text: string | null, now: number, isBaseline: boolean): void {
       attention.observe(text === null ? null : parseEditorReport(text, ports.root), now, isBaseline)
+      plan()
     },
 
     /**
-     * One poll: names the definition the caret moved into, which takes a read
-     * of that file, and credits the time since the last poll to where the
-     * caret is.
+     * Names the definition the caret moved into, which takes a read of that
+     * file, brings the time the caret has spent up to now, and turns a slice
+     * of it that is long enough into entries.
      */
     async tick(now: number): Promise<void> {
       const caret = attention.unnamed(now)
@@ -194,8 +211,10 @@ export function createRecorder(ports: RecorderPorts) {
         attention.name(isReadable ? enclosingName(splitLines(source), caret.line, caret.path) : '')
       }
       attention.tick(now)
-      if (!attention.isDue(now)) return
-      for (const entry of attention.drain()) add(entry)
+      if (attention.isDue(now)) {
+        for (const entry of attention.drain()) add(entry)
+      }
+      plan()
     },
 
     /**
@@ -233,6 +252,7 @@ export function createRecorder(ports: RecorderPorts) {
         throw error
       } finally {
         isFlushing = false
+        plan()
       }
     },
 
