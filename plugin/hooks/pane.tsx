@@ -3,6 +3,8 @@ import type { Elements } from 'claude-code'
 import type { ExplainView, Mode, Note, OutlineRow, Profile, Profiles, ProgressRecord, ProgressView, Review, Speech, Tab, Watch, Working } from '../types'
 import { bubbleColumn, bubbleWidth, isTalking, poseOf, saidSoFar, wordsSaid } from './avatar'
 import type { Avatar } from './avatar'
+import { artShape, characterArt } from './character'
+import type { Backdrop } from './sprite'
 import { languageName } from './languages'
 import { isProblem, sortNotes } from './notes'
 import { ANSWER_LABELS, explained, GENERAL, recurring } from './profiles'
@@ -13,7 +15,7 @@ import { clockTime, playLine } from './status'
 import type { Persona } from './settings'
 
 /** The elements the pane is built from. Every surface that draws panes has them. */
-export type Kit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdown'>
+export type Kit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdown'> & { Raster?: Elements['terminal']['Raster'] }
 
 /** Everything the pane shows, as plain data. */
 export type PaneView = {
@@ -41,7 +43,7 @@ export type PaneView = {
   /** How wide the pane's body is, in columns. */
   columns: number
   /** The voice's animated character and what it is saying, or null while the animation is off. */
-  character: { avatar: Avatar; speech: Speech } | null
+  character: { avatar: Avatar; speech: Speech; backdrop?: Backdrop } | null
   /** True where rows are scarce, as in a pane above the prompt: the character is then drawn in one line. */
   isCompact: boolean
 }
@@ -211,11 +213,13 @@ export const ASLEEP = 'z z z'
  * The animated persona: the drawing in its current pose, with its speech
  * bubble beside it. It is dim while it rests and lights up while it talks.
  */
-function characterRow({ Box, Text }: Kit, view: PaneView, { avatar, speech }: { avatar: Avatar; speech: Speech }) {
+function characterRow(kit: Kit, view: PaneView, { avatar, speech, backdrop }: { avatar: Avatar; speech: Speech; backdrop?: Backdrop }) {
+  const { Box, Text } = kit
   const pose = poseOf(view.mode, view.watch.state, speech)
   const isResting = !isTalking(speech)
   const isAsleep = view.mode === 'paused'
-  const width = bubbleWidth(view.columns, avatar.frames.rest[0]?.length ?? 0)
+  const shape = artShape(kit, avatar)
+  const width = bubbleWidth(view.columns, shape.columns)
 
   if (view.isCompact || width === 0) {
     return (
@@ -232,19 +236,13 @@ function characterRow({ Box, Text }: Kit, view: PaneView, { avatar, speech }: { 
 
   return (
     <Box flexDirection="row" columnGap={1}>
-      <Box flexDirection="column">
-        {avatar.frames[pose].map(line => (
-          <Text color={avatar.color} dimColor={isResting} wrap="truncate-end">
-            {line}
-          </Text>
-        ))}
-      </Box>
+      {characterArt(kit, avatar, pose, isResting, backdrop)}
       <Box flexDirection="column">
         {isAsleep &&
-          [...Array.from({ length: avatar.mouth - 1 }, () => ' '), ASLEEP].map(line => <Text dimColor>{line}</Text>)}
+          [...Array.from({ length: shape.mouth - 1 }, () => ' '), ASLEEP].map(line => <Text dimColor>{line}</Text>)}
         {!isAsleep &&
           speech.text !== '' &&
-          bubbleColumn(avatar, speech.text, wordsSaid(speech), width).map(line => (
+          bubbleColumn(avatar, speech.text, wordsSaid(speech), width, shape.mouth).map(line => (
             <Text wrap="truncate-end">{line}</Text>
           ))}
       </Box>
