@@ -13,3 +13,7 @@ plugin/.claude-plugin/types/
 local/
 kernel/.spago/
 kernel/output/
+# The license server's secrets and records, if ever made inside the repository.
+license-server/*.pem
+license-server/*.key
+license-server/licenses.json

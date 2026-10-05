@@ -4,9 +4,9 @@ import type { Mode } from '../types'
 export type ModeRequest = 'on' | 'off' | 'pause' | 'resume' | 'status'
 
 /** Everything `/bsd <word>` can ask for. */
-export type Request = ModeRequest | 'explain' | 'settings' | 'questions' | 'working' | 'forget' | 'update' | 'uninstall' | 'debug' | 'help'
+export type Request = ModeRequest | 'explain' | 'settings' | 'questions' | 'working' | 'forget' | 'license' | 'update' | 'uninstall' | 'debug' | 'help'
 
-const WORDS: readonly Request[] = ['on', 'off', 'pause', 'resume', 'status', 'explain', 'settings', 'questions', 'working', 'forget', 'update', 'uninstall', 'debug', 'help']
+const WORDS: readonly Request[] = ['on', 'off', 'pause', 'resume', 'status', 'explain', 'settings', 'questions', 'working', 'forget', 'license', 'update', 'uninstall', 'debug', 'help']
 
 export type Parsed = {
   request: Request
@@ -34,6 +34,7 @@ export function isModeRequest(request: Request): request is ModeRequest {
     request !== 'questions' &&
     request !== 'working' &&
     request !== 'forget' &&
+    request !== 'license' &&
     request !== 'update' &&
     request !== 'uninstall' &&
     request !== 'debug' &&
@@ -56,6 +57,7 @@ export const HELP = [
   '  /bsd working     say what you are working on: /bsd working on the parser',
   '                   /bsd working clear lets it work that out again',
   '  /bsd forget      erase what it remembers: this project, one language, or everything',
+  '  /bsd license     personal or commercial use: /bsd license personal, commercial, <key>, clear',
   '  /bsd update      fetch the newest release (also /backseat-driver-update)',
   '  /bsd uninstall   remove the plugin, and erase what it remembers if you say so',
   '  /bsd debug       log everything the tutor does to a file: /bsd debug on, off, status, dump, clear',

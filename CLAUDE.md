@@ -41,7 +41,9 @@ Stance: the project is against Claude writing the user's code, not neutral. Whil
 - First-run questions are few and single choice: the language they know best (once ever), then three per new language (level, goals, focus). Never more than ten at once. Esc skips the rest. Re-ask with `/bsd questions` or `q` in Progress.
 - Three background jobs, each with its own model and thinking level: play-by-play (while hacking), deep review (commits), Explain (reading). The conversation uses the session's model. Explain's cache is per project (profiles are per language); all three jobs feed it and read it.
 - Learning and Explanatory modes, read-only (owner, 2026-10-04): take the good parts of Anthropic's `learning-output-style` plugin and leave all the driving to the user. Its decision-point criteria and its `★ Insight` format are adapted into the play-by-play, the deep review and the contract. A decision point is pointed out as the user's call, with what each way costs, never handed over to be written. Insights are about this codebase and this code, never general concepts, and never a defect in disguise.
-- License: MIT (owner's preference). The adapted parts stay under Apache-2.0: `THIRD_PARTY_NOTICES.md` (root and `plugin/`, identical; `npm run licenses` compares them) holds the attribution, what changed and the license text. Each adapted prompt credits it in an HTML comment at its top, which `stripComments` removes before a model sees the file. Credit the same way when adapting anything else.
+- License (owner, 2026-10-05): source-available, free for personal use, paid for commercial use. The terms are the PolyForm Noncommercial License 1.0.0 (`LICENSE`, root and `plugin/`, with a `Required Notice:` copyright line on top), plus `COMMERCIAL-LICENSE.md` (root and `plugin/`): who needs it, what it grants, no lockouts, "not on sale yet". Never call it open source. Each commit is under its own `LICENSE`: commits that carry MIT (everything before this change) stay MIT for whoever has them. SPDX `PolyForm-Noncommercial-1.0.0` in `plugin.json`, `package.json`, `editors/vscode/package.json` and the Emacs header. Until 2026-10-05 the license was MIT.
+- Licensing is light (owner: "this is not Microsoft, don't be paranoid, a way for ethical companies to pay us"). Asked once at the first switch-on, personal or commercial; commercial asks for a key. Nothing ever stops working: a missing, bad, expired or withdrawn key only puts one dim line in the pane. Payment and deploying the server are for a later discussion with the owner.
+- The adapted parts (an audit on 2026-10-05 found the decision-point lists and the `★ Insight` box are close paraphrases or copies of `learning-output-style`; everything else, and all 50 commits, are the owner's own) stay under Apache-2.0: `THIRD_PARTY_NOTICES.md` (root and `plugin/`, identical; `npm run licenses` compares them) holds the attribution, what changed and the license text. Each adapted prompt credits it in an HTML comment at its top, which `stripComments` removes before a model sees the file. Credit the same way when adapting anything else.
 - Explain is never stale: freshness beats speed. Nothing is shown unless it matches the file on disk at that moment.
 - Editor plugins (owner, 2026-10-05): Emacs, Neovim in Lua, and VS Code, in this repository under `editors/`. Simple and plug and play: they send what is useful (open files, the focused one, the caret's line and column, the selection, unsaved changes, whether the editor has the keyboard), and the pane says when an editor is connected. More editors can come; the protocol is the contract (see "Editor protocol").
   - Transport (decided by the editor-plugins thread, 2026-10-05): files, one per running editor, in the data folder. The mod cannot listen on a socket (no Node, and no network of its own is a footprint invariant), and the data folder is already where every session looks. An editor that finds no data folder writes nothing.
@@ -74,6 +76,7 @@ Every roadmap milestone is built and was seen working in short scripted real ses
   - the deep review's watchdog, a review given up on after three tries, and the retries of the look at progress
 - Never run: the `primeagen` engineering persona.
 - The Settings tab and `/bsd settings`: tests only (the kit stubs `config.list` and `config.set`). Not yet seen live: how a pick looks in a real terminal, and the reload that follows it.
+- The license question, `/bsd license` and the key check: tests only. No server is deployed and `PUBLIC_KEYS` is empty, so a well-formed key is taken on trust.
 - Persona pairs run live: `eli5-tldr-kiss-terse`+`knuth`, `primeagen`+`torvalds`. Every voice's character has been seen live.
 - Editor plugins: each was run for real (Neovim 0.9.5 and Emacs 29.3 headless, the VS Code extension under Node against a stand-in `vscode` module and packaged with vsce) and wrote, beat and removed its file as the protocol says. Not yet seen: one of them driving a live tutor session (the cloud session that built them could not log in interactively), real VS Code, Windows.
 - Decision points and insights (from `learning-output-style`): seen live in the play-by-play, the deep review and the conversation on Sonnet at low thinking. A play-by-play `insight` has not been seen live.
@@ -86,7 +89,7 @@ Every roadmap milestone is built and was seen working in short scripted real ses
 - Directory facts (checked 2026-10-04):
   - It lists mods, for Claude Code only.
   - Submit at claude.ai/directory/manage. It tracks a branch or tag, and the plugin path can be `plugin`.
-  - Blocking: no README of 40+ words inside `plugin/`. (A LICENSE was the other blocker; `plugin/LICENSE` and `"license": "MIT"` now settle it.)
+  - Blocking: no README of 40+ words inside `plugin/`. (A LICENSE was the other blocker; `plugin/LICENSE` settles it. Whether the directory takes a noncommercial license is not known.)
   - Limits: files under 256 KiB, at most 512 files.
   - Directory installs load as `<name>@synced`.
 - Approved plan for part two: `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine (nine decisions, risks per milestone).
@@ -102,7 +105,8 @@ plugin/.claude-plugin/plugin.json   manifest + userConfig (source of truth for s
 plugin/skills/tutor/SKILL.md        the contract
 plugin/personas/{voice,engineering}/*.md
 plugin/prompts/                     play-by-play.md, deep-review.md, explain.md, progress.md, speech-bubble.md
-LICENSE, plugin/LICENSE             MIT, identical
+LICENSE, plugin/LICENSE             PolyForm Noncommercial 1.0.0, identical
+COMMERCIAL-LICENSE.md (also plugin/) the commercial terms, identical
 THIRD_PARTY_NOTICES.md (also plugin/) the Apache-2.0 parts: learning-output-style, adapted
 plugin/hooks/hooks.json             {"modules": ["./register.tsx"]}
 plugin/hooks/register.tsx           all effects
@@ -120,8 +124,10 @@ scripts/toolchain.py                fetches the pinned compiler into local/bin (
 scripts/build-kernel.sh             kernel/src -> plugin/hooks/kernel.js
 scripts/release.sh                  cut a release
 editors/                            editor plugins: neovim/, emacs/, vscode/ (dev side: not shipped with the mod)
+license-server/                     reference license server: issue, check, revoke keys (dev tooling: not shipped, not deployed)
 .github/workflows/check.yml         npm run check on push/PR, pinned Claude Code
 .github/workflows/nightly.yml       same check daily on newest Claude Code
+research/                           research notes for the owner (not shipped): opencode.md, the plan for an OpenCode client
 ```
 
 The ground rules in README ("Claude does not edit your files" etc.) describe end-user product behavior, not rules for working in this repo.
@@ -130,13 +136,14 @@ The ground rules in README ("Claude does not edit your files" etc.) describe end
 
 ```bash
 npm install                      # once: TypeScript, and spago and esbuild for the kernel
-npm run check                    # kernel + validate + licenses + test + typecheck
+npm run check                    # kernel + validate + licenses + test + typecheck + server
 npm run build:kernel             # kernel/src -> plugin/hooks/kernel.js (fetches the pinned compiler the first time)
 npm run kernel                   # fails when plugin/hooks/kernel.js is not what kernel/src builds
-npm run licenses                 # LICENSE and THIRD_PARTY_NOTICES.md: root and plugin/ copies identical
+npm run licenses                 # LICENSE, COMMERCIAL-LICENSE.md, THIRD_PARTY_NOTICES.md: root and plugin/ copies identical
 npm run validate                 # claude plugin validate . --strict && ./plugin --strict
 npm test                         # claude plugin test ./plugin
 npm run typecheck                # tsc -p plugin/tsconfig.json
+npm run server                   # the license server's typecheck and node:test tests (they check its keys with the plugin's checker)
 scripts/dev-session.sh           # live session in tmux (default session name bsd)
 scripts/release.sh minor --push  # patch|minor|major|X.Y.Z: bump plugin.json, check, commit, tag, push
 scripts/debug-tail.sh            # follow the tutor's debug log (see "Debug log")
@@ -236,6 +243,8 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 | `recorder.ts` | journal engine (ports) |
 | `working.ts` | "What are you working on right now?" and `/bsd working` |
 | `update.ts` | install kind, versions, release tags, update and uninstall commands |
+| `license.ts` | `license.json`, the first-switch-on question, `/bsd license` words, the pane's line, the server's answer. The standing is the kernel's (`Kernel.License`) |
+| `licensekey.ts` | key format, `PUBLIC_KEYS`, ECDSA P-256 verification in BigInt. Imports nothing, so the server's tests import it |
 | `questions.ts` | first-run questions |
 | `debuglog.ts` | the debug log: records, chunks, the ring of latest records, the tracer, `/bsd debug` parsing |
 | `pane.tsx` | pane tree from plain data, handlers passed in |
@@ -245,11 +254,11 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 The owner wants the logic functional where it can be, "to detect, prevent and reduce bugs" (Product). The decisions the mod makes live in `kernel/src/Kernel/*.purs`. Their types carry the rules: a state that cannot happen cannot be built, and a transition that is not handled does not compile. Modeled on `../merecatholicity.com` (`purescript/src/Domain/*`, `app/core.ts`).
 
 - Rule: new decision logic is written in PureScript. TypeScript is the shell (`register.tsx`: effects), the pane, the engines with ports, text parsing, and the membrane. Claude Code reads `on(...)` and `$` calls from TypeScript source, so those cannot move.
-- `PORTED`: `Kernel.Health` (the shared wait after failures, what an API error means), `Kernel.Play` (what the play-by-play is doing, when to come back, whether a look is due), `Kernel.Pace` (backoff after failed looks, the gap near the plan limit), `Kernel.Sensor` (how often to scan, and to check the spot in focus), `Kernel.Lease` (who may take a project's lease, and when to look at it again), `Kernel.Queue` (the commits waiting for their review: at most three, each once, one stage at a time, the tries and their spacing, what the tab says while one waits), `Kernel.Store` (the store's retry policy: when a file is read again, counts as broken, is checked before a write without the lock, is written again, or given up on, and when the old copy is kept), `Kernel.Status` (the status line, the row under it, and the state the character's pose comes from), `Kernel.Schedule` (when the one timer is armed and for how long, which deadlines are due and in what order). Their TypeScript files (`health.ts`, `play.ts`, `gate.ts`, `sensor.ts`, `lease.ts`, `reviewqueue.ts`, `store.ts`, `status.ts`, `scheduler.ts`) keep the types and the parsing and re-export the kernel's functions from `core.ts`.
+- `PORTED`: `Kernel.Health` (the shared wait after failures, what an API error means), `Kernel.Play` (what the play-by-play is doing, when to come back, whether a look is due), `Kernel.Pace` (backoff after failed looks, the gap near the plan limit), `Kernel.Sensor` (how often to scan, and to check the spot in focus), `Kernel.Lease` (who may take a project's lease, and when to look at it again), `Kernel.Queue` (the commits waiting for their review: at most three, each once, one stage at a time, the tries and their spacing, what the tab says while one waits), `Kernel.Store` (the store's retry policy: when a file is read again, counts as broken, is checked before a write without the lock, is written again, or given up on, and when the old copy is kept), `Kernel.Status` (the status line, the row under it, and the state the character's pose comes from), `Kernel.Schedule` (when the one timer is armed and for how long, which deadlines are due and in what order). Born there: `Kernel.License` (where the person stands with the license, when to ask the server). Their TypeScript files (`health.ts`, `play.ts`, `gate.ts`, `sensor.ts`, `lease.ts`, `reviewqueue.ts`, `store.ts`, `status.ts`, `scheduler.ts`) keep the types and the parsing and re-export the kernel's functions from `core.ts`.
 - `TO PORT`: nothing. The engines with ports (`explainer.ts`, `recorder.ts`, `watcher.ts`) hold effects and text and stay TypeScript; a decision found in one of them is a candidate. Not for the kernel: anything that parses text or JSON from outside (`parseLease`, `parseQueue`, `pressureOf`'s dates), which stays at the edge.
 - How it reaches the mod:
   - `scripts/build-kernel.sh` (`npm run build:kernel`): `scripts/toolchain.py` puts `purs` 0.15.16 in `local/bin` (downloaded from the GitHub release, tarball and binary each checked against the sha256 in `kernel/toolchain.json`), `spago build` compiles `kernel/src` with the package set pinned in `kernel/spago.yaml` and `spago.lock`, and esbuild (pinned exactly in `package.json`) bundles the entry module `Kernel.Main` into one ES module, `plugin/hooks/kernel.js`.
-  - `kernel.js` is committed: installs copy the repository, and nothing is built on a user's machine. It is 81 KB for nine modules (the limit for a file in a plugin directory listing is 256 KiB). Never edit it.
+  - `kernel.js` is committed: installs copy the repository, and nothing is built on a user's machine. It is 89 KB for ten modules (the limit for a file in a plugin directory listing is 256 KiB). Never edit it.
   - `npm run kernel` builds beside it and compares. `npm run check` starts with it, and so does CI, which keeps `local/bin` and `kernel/.spago` between runs.
   - `Kernel.Main` re-exports what crosses. What it does not export is not in the bundle.
 - The membrane, `core.ts`, is the only importer of `kernel.js`:
@@ -563,6 +572,16 @@ The tutor writes `view.json` in answer and whenever its knowledge of the spot ch
   - ASCII characters use the ASCII bubble (`bubbleStyle`); Claude's mascot uses box lines.
 - Live: all characters seen saying hello with mouth movement, blinking, sleeping when paused, and with the tail at the mouth. One-line mode at 100 columns.
 
+### License
+
+- `license.json` (data folder, about the person): `use` (`personal | commercial | null`), `isAsked`, `key`, `keySince`, `answer` (`active | revoked | unknown | null`), `answeredAt`, `triedAt`. Forgetting everything removes it, and the question comes back.
+- Asked once ever, at a fresh switch-on, after the language questions (`startLicense` in `engage`, `askLicense`): personal or commercial; commercial then asks for the key, with "add it later" as the one option and the key typed as free text. A key typed into the first question counts as commercial. Dismissing either is an answer: `isAsked` is set and nothing is asked again unprompted. Kit tests that count questions seed `LICENSE_ANSWERED`.
+- Kept in the data folder, not `userConfig`: it outlives a reinstall and another install method, and changing it does not reload the mod. `/bsd license [personal | commercial | <key> | clear]` changes it, works while off, and answers with where they stand.
+- A key is `BSD1.<payload>.<signature>`: payload JSON in base64url (`v, kid, id, to, seats, iat, exp`), ECDSA P-256 SHA-256 over the payload's base64url text, r‖s. `checkKey` says `malformed`, `forged` (signature fails, or an unknown `kid`), `unverified` (no public key or no SHA-256) or `valid`. `PUBLIC_KEYS` is empty until the owner runs `keygen`.
+- The standing (`Kernel.License`): `unchosen`, `personal`, `licensed`, `needs-key`, `bad-key`, `expired`, `withdrawn`, and `unchecked` (a fine key, a server, and no answer for 30 days since the last answer or the paste). A server's `unknown` counts as no news. `licenseLine` gives the pane one dim line under the update notice for the commercial problems only (`license` state key; recomputed after `/clear`).
+- The server is asked (`checkLicense`) at a fresh switch-on and when a key is pasted, when `nextLicenseCheck` says it is due: at once for a new key, 7 days after an answer, 1 day after a try with none. `GET <server>/v1/keys/<id>`; a 404 is `unknown`, anything unreadable is no answer.
+- `license-server/` (dev tooling, Node 22.18+ running TypeScript directly, `"type": "module"`): `keys.ts` makes signing keys and signs, `store.ts` keeps issued licenses (memory, or one JSON file written by rename), `server.ts` answers `GET /v1/keys/<id>`, `GET /v1/public-keys`, and for the owner's bearer token `POST /v1/licenses`, `POST /v1/licenses/<id>/revoke|restore`, `GET /v1/licenses` (closed without a token). `cli.ts`: `keygen`, `issue`, `revoke`, `serve`. No payment, no deployment, no secrets in the repository (`.gitignore` covers `license-server/*.pem` and `licenses.json`). Its tests check every key it signs with the plugin's own `checkKey`.
+
 ### Updates and uninstall
 
 - `update.ts` is pure. Effects live in `detectInstall`, `checkForUpdate`, `runUpdate`, `removeHome` and `runUninstall` in `register.tsx`.
@@ -624,6 +643,7 @@ projects/<name>-<hash>/       journal.json, project.json, reviews.json, notes.js
 editors/<editor>-<pid>.json   one per running editor (see "Editor protocol")
 view.json                     written by the tutor
 update.json                   last release check
+license.json                  personal or commercial, the key, what the server last said
 debug.json                    the debug log's switch: {"on": true}
 debug/<session>/              one session's debug log (see "Debug log")
 locks.git/                    bare git repository; its refs are the locks on the files above
@@ -688,7 +708,7 @@ For developing Backseat Driver, not for its users: everything the tutor does, in
 
 ## Invariants
 
-- Dormant until switched on. While off, every hook passes through with `next(e)`: no pane, model call, prompt change or denial. No reads or writes at session start. Only `/bsd forget`, `/bsd help`, `/bsd debug` (and update or uninstall when asked) act while off. The debug log itself is written only while the tutor is on.
+- Dormant until switched on. While off, every hook passes through with `next(e)`: no pane, model call, prompt change or denial. No reads or writes at session start. Only `/bsd forget`, `/bsd help`, `/bsd debug`, `/bsd license` (and update or uninstall when asked) act while off. The debug log itself is written only while the tutor is on.
 - Background reviews never become conversation turns. Only what the user does in chat or the pane does. Verified live for `$.model.complete` and `$.agent.spawn`.
 - Model and effort per job come from `userConfig`; no model id is pinned (aliases only). Defaults: play-by-play `sonnet`/`medium`, deep review `opus`/`high`, Explain `sonnet`/`low`. "Thinking level" = Claude Code effort (`low|medium|high|xhigh|max`).
 - Hard rules are hooks; teaching style is the contract. The edit guard covers only `Edit`, `Write` and `NotebookEdit`; a shell command could still write, which rests on the contract and Claude Code's permission prompts.
@@ -697,7 +717,7 @@ For developing Backseat Driver, not for its users: everything the tutor does, in
   - Changes Claude Code's own settings only when the person picks a value in the Settings tab, through `$.config.set`, as `/config` would.
   - Other processes only on request: `rm` inside the data folder (forget, `/bsd debug clear`), `claude plugin` (update, uninstall). The one exception, approved by the owner: `inotifywait`, while on, when it is on PATH (`$.process.spawn`; "Pushed changes").
   - The debug log, when the user switches it on, holds their code and prompts. It stays in the data folder.
-  - Network of its own: the release check (`git ls-remote`, at most every 6 h, opt-out) and `/bsd update`'s fetch.
+  - Network of its own: the release check (`git ls-remote`, at most every 6 h, opt-out), `/bsd update`'s fetch, and the license check (`$.http.fetch`, only with a commercial key and a `LICENSE_SERVER`, about weekly, only the key's id, off with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`). `LICENSE_SERVER` is '' until the owner deploys one, so it sends nothing yet.
   - No git hooks, never writes the working tree.
   - Any new kind of call in the validator's `calls:` (`http.fetch`, a write outside the data folder, another process) breaks this and needs the owner's decision plus a README update.
   - `env reads:` must stay `BACKSEAT_DRIVER_HOME, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, CLAUDE_CONFIG_DIR, HOME, USERPROFILE, XDG_DATA_HOME`.
@@ -734,7 +754,8 @@ The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above mem
 
 - `$.fs.write` truncates in place (same inode; a hard link sees the new text): not atomic. 1 KB 2 ms, 128 KB 3 ms, 2 MB 15 ms. `stat` 2 ms. `list` 3 ms, and it returns `{ name, kind, size, mtimeMs }` per entry, so one call stamps a whole folder.
 - Module environment:
-  - Present: `Date` in the local time zone, `Intl`, `toLocaleTimeString`, `Math.random`, `setTimeout`, `setInterval`, `AbortController`, `crypto`, `structuredClone`.
+  - Present: `Date` in the local time zone, `Intl`, `toLocaleTimeString`, `Math.random`, `setTimeout`, `setInterval`, `AbortController`, `crypto`, `structuredClone`, `BigInt`.
+  - `crypto.subtle` is `digest` only (the types say so, and in `claude plugin test` there is no `generateKey`, `importKey` or `verify`). Hence the license key's signature is checked in BigInt (`licensekey.ts`); tests use keys signed once by Node.
   - Absent: `queueMicrotask`, `process`, `fetch`, `WeakRef`.
   - `Date.now()` agrees with `$.clock.now()`. Keep `$.clock.now()`: tests move that clock.
 - `$.clock.after(ms)` fires 15 to 80 ms late. `cancel()` holds.

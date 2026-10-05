@@ -4,6 +4,7 @@ import type { Health, HealthEvent, ModelResult, Outcome, Pressure, Trouble } fro
 import * as K from './kernel.js'
 import type { HealthWire, PlayFactsWire, WaitingWire } from './kernel.js'
 import type { Lease } from './lease'
+import type { LicenseFacts, Standing } from './license'
 import type { Play, PlayFacts, Why } from './play'
 import type { ReviewQueue, Waiting, Wanted } from './reviewqueue'
 import { clockTime } from './clock'
@@ -529,4 +530,22 @@ export function delayMs(at: number, now: number): number {
 /** The names of the deadlines due at `now`, the earliest first, in the order given among those due together. */
 export function dueNow(deadlines: { name: string; at: number }[], now: number): string[] {
   return K.dueNowWire(deadlines)(now)
+}
+
+// --- The license (Kernel.License)
+
+const STANDINGS: readonly Standing[] = ['unchosen', 'personal', 'licensed', 'needs-key', 'bad-key', 'expired', 'withdrawn', 'unchecked']
+
+/** Where the person stands with the license. A standing the kernel names that this file does not know is `licensed`, which shows nothing. */
+export function licenseStanding(facts: LicenseFacts): Standing {
+  const named = K.licenseStandingWire(facts)
+
+  return STANDINGS.find(standing => standing === named) ?? 'licensed'
+}
+
+/** When to ask the license server about the key, or null for not at all. */
+export function nextLicenseCheck(facts: LicenseFacts): number | null {
+  const at = K.licenseNextCheckWire(facts)
+
+  return at === 0 ? null : at
 }

@@ -154,3 +154,18 @@ export type DeadlineWire = { name: string; at: number }
 export const armingWire: (isArmed: boolean) => (armedFor: number) => (deadlines: DeadlineWire[]) => { next: string; at: number }
 export const delayMsWire: (at: number) => (now: number) => number
 export const dueNowWire: (deadlines: DeadlineWire[]) => (now: number) => string[]
+
+// The license
+export type LicenseFactsWire = {
+  use: string
+  key: string
+  expiresAt: number
+  keySince: number
+  hasServer: boolean
+  answer: string
+  answeredAt: number
+  triedAt: number
+  now: number
+}
+export const licenseStandingWire: (facts: LicenseFactsWire) => string
+export const licenseNextCheckWire: (facts: LicenseFactsWire) => number

@@ -78,4 +78,9 @@ Plugins for Emacs, Neovim and VS Code live in [`editors/`](editors). They tell t
 
 ## License
 
-MIT. The decision points and insights are adapted, with thanks, from Anthropic's [learning-output-style](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/learning-output-style) plugin, under its Apache 2.0 license. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Source-available, not open source. Read it, change it, share it.
+
+- **Personal use is free.** Learning, hobby projects, unpaid open source. Schools and charities too.
+- **Commercial use is paid.** Using it for a business needs a [commercial license](COMMERCIAL-LICENSE.md). You'll pick personal or commercial the first time you switch it on, and `/bsd license` changes it. No lockouts. A missing key gets a note in the pane, nothing more. A commercial key is checked with our server about once a week, and nothing changes if it can't be reached.
+
+The terms are the [PolyForm Noncommercial License 1.0.0](LICENSE). Commits that carry the MIT license stay MIT. The decision points and insights are adapted, with thanks, from Anthropic's [learning-output-style](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/learning-output-style) plugin, under its Apache 2.0 license. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
