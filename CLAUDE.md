@@ -52,7 +52,7 @@ Stance: the project is against Claude writing the user's code, not neutral. Whil
 - The persona has a face and can be switched off. A small animated character per voice speaks one short line at a time: a critical or design point in the user's latest save, a deep review's takeaway, now and then a joke. Dim at rest, quiet unless a look gives it something to say, one line where rows are scarce, no model calls of its own, off with one setting. Real-person personas get ASCII caricatures in good spirit (owner's call; a first version with mascots was rejected as too timid): Linus with square glasses, Knuth with round glasses, ThePrimeagen with headphones and mustache, the KISS Linux penguin in a top hat, and Claude Code's mascot for `default`.
 - The tutor knows what the user is doing without making them say it: a per-project journal (below). "What are you working on right now?" is asked only on `w`, `/bsd working`, or by the tutor in chat when it is unclear and matters. The user's answer overrides the inference and persists across sessions until changed or taken back. Borrowed from the owner's topstep-claudebot (journal and briefings; not its reflection loop or inbox).
 - Event-driven, not polled (owner, 2026-10-04): a state machine driven by Claude Code's own events and exact deadlines, preferring built-in signals over polling listeners. The owner accepts the extra complexity for a faster, more elegant mod. Polling is confined to one adaptive sensor for what Claude Code cannot push: the user's own saves, commits made outside it, and the editor's caret.
-- Failures are handled gracefully (owner, 2026-10-04): API rate limits, plan limits and Claude outages are told apart, retried with delayed backoff, and nothing pending is lost.
+- Failures are handled gracefully (owner, 2026-10-04): API rate limits, plan limits and Claude outages are told apart, retried with delayed backoff, and nothing pending is lost. Commits made meanwhile are reviewed later: the last three, up to a day old (approved with the plan, the owner can overrule the numbers).
 - Several sessions at once are safe (owner, 2026-10-04: "a seatbelt and suspenders"): writes to the data folder are locked and queued so two sessions never clobber a file, and one session drives a project's background jobs.
 - The pane is always up to date: instant, fresh, async (owner, 2026-10-04).
 - A verbose debug mode, switched on and off (owner, 2026-10-04): everything the tutor does goes to a log file in the data folder, so a developer can have Claude monitor it while working on Backseat Driver. It is about the product itself: one log for all projects, never per project.
@@ -67,6 +67,7 @@ Every roadmap milestone is built and was seen working in short scripted real ses
   - the edit guard's refusal (the tutor never tried to edit)
   - the deep review on its default model and effort (live runs used Sonnet at low)
   - the journal's sitting roll-up, two sessions sharing a journal, and the deep reviewer reading the journal
+  - the deep review's watchdog, a review given up on after three tries, and the retries of the look at progress
 - Never run: the `primeagen` engineering persona.
 - Persona pairs run live: `eli5-tldr-kiss-terse`+`knuth`, `primeagen`+`torvalds`. Every voice's character has been seen live.
 - The editor side has been tried only with a script writing `focus.json`.
@@ -84,7 +85,7 @@ Every roadmap milestone is built and was seen working in short scripted real ses
   - Limits: files under 256 KiB, at most 512 files.
   - Directory installs load as `<name>@synced`.
 - Approved plan for part two: `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine (nine decisions, risks per milestone).
-- In progress: the event-driven plan, `~/.claude/plans/wild-jumping-clover.md` on the owner's machine (approved 2026-10-04). Milestones M0 probes, M1 debug log, M2 locked store, M3 kernel (events, deadlines, health, play-by-play machine, sensor), M4 deep review queue, M5 Explain and journal on deadlines, M6 one driver per project, M7 pane pass, M8 optional push sources, M9 PureScript kernel. Done so far: M0 (see "Probed live" under Mod API), M1 (see "Debug log"; it also added the `session.end` flush of the journal) and M2 (the store and the locks, under "Data folder"). M3 (the kernel: deadlines, the scan, health, the play-by-play's state and status line; under "Play-by-play and watcher") is done too. Deep review (M4), Explain and the journal (M5) still run on their own timers, described below as they are.
+- In progress: the event-driven plan, `~/.claude/plans/wild-jumping-clover.md` on the owner's machine (approved 2026-10-04). Milestones M0 probes, M1 debug log, M2 locked store, M3 kernel (events, deadlines, health, play-by-play machine, sensor), M4 deep review queue, M5 Explain and journal on deadlines, M6 one driver per project, M7 pane pass, M8 optional push sources, M9 PureScript kernel. Done so far: M0 (see "Probed live" under Mod API), M1 (see "Debug log"; it also added the `session.end` flush of the journal) and M2 (the store and the locks, under "Data folder"). M3 (the kernel: deadlines, the scan, health, the play-by-play's state and status line; under "Play-by-play and watcher") and M4 (the queue of commits waiting for their review, its retries and watchdog; under "Deep review") are done too. Explain and the journal (M5) still run on their own timers, described below as they are.
 
 ## Repository
 
@@ -104,6 +105,7 @@ plugin/hooks/*.ts, pane.tsx         pure logic
 plugin/types/index.d.ts             state keys, tool inputs
 plugin/tests/                       claude plugin test; kit.ts is the fake world
 scripts/dev-session.sh              live session in tmux
+scripts/outage-proxy.py             a proxy to cut one live session off from Claude
 scripts/release.sh                  cut a release
 .github/workflows/check.yml         npm run check on push/PR, pinned Claude Code
 .github/workflows/nightly.yml       same check daily on newest Claude Code
@@ -123,6 +125,7 @@ npm run typecheck                # tsc -p plugin/tsconfig.json
 scripts/dev-session.sh           # live session in tmux (default session name bsd)
 scripts/release.sh minor --push  # patch|minor|major|X.Y.Z: bump plugin.json, check, commit, tag, push
 scripts/debug-tail.sh            # follow the tutor's debug log (see "Debug log")
+scripts/outage-proxy.py 18080    # a proxy for staging an outage in a live session (see "Live checks")
 ```
 
 - `claude plugin test` takes only the plugin root. It can't run one test, and the kit has no `only` or filter.
@@ -148,7 +151,9 @@ scripts/debug-tail.sh            # follow the tutor's debug log (see "Debug log"
 - Settings: `--settings '{"pluginConfigs":{"backseat-driver":{"options":{"deep_review_model":"sonnet"}}}}'`. Keep deep-review checks cheap this way.
 - Real model calls on the owner's plan: short prompts, `--model sonnet` unless needed otherwise.
 - The owner's default permission mode is bypass. Pass `--permission-mode default` when the check involves Claude running tools.
-- Saving under `plugin/` reloads the mod mid-session; the mode and pane come back.
+- Saving under `plugin/` reloads the mod mid-session; the mode and pane come back. An idle session looks for the change only every 30 s (`plugin-dir watch … idle, polling every 30000ms` in Claude Code's log), so the reload can be that late. Do not save under `plugin/` while a live check runs unless the reload is the check.
+- An outage is staged with `scripts/outage-proxy.py <port>`: start the session with `--settings '{"env":{"HTTPS_PROXY":"http://127.0.0.1:<port>","NO_PROXY":"127.0.0.1,localhost"}}'`, kill the proxy for the outage, start it again to end it. Without `NO_PROXY` Claude Code cannot reach the mod's own tools, which it serves on a loopback port: every `$.tool.register` then waits out 8 s (64 s for the eight tools, seen live).
+- With no connection, a `$.model.complete` fails within a second, and a subagent only after Claude Code's own 11 tries: 170 s.
 
 ## Architecture
 
@@ -187,6 +192,7 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 | `status.ts` | the pane's status line as a sentence, with a clock time for every wait |
 | `notes.ts`, `prompts.ts` | reviewer reply → notes; reviewer and conversation prompt text |
 | `review.ts` | deep review scope: reflog, what counts as a commit, the request |
+| `reviewqueue.ts` | the commits waiting for their deep review and the look at progress after it: the queue, how often a stage is tried and how far apart, what the tab says while one waits |
 | `languages.ts` | extension → language; a project's main languages |
 | `profiles.ts` | profile storage and changes: answers, hushes, lesson memory, person text |
 | `hash.ts` | fingerprints |
@@ -215,7 +221,7 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 
 ### Mode
 
-- `/bsd` returns at once (live: line at 190 ms, pane at 250 ms). `switchTo` awaits only loading the contract, setting the mode and opening the pane, because the contract must be in force from the next prompt. Everything else (watcher, profiles, reviewer, tools, questions, survey, update check) runs in un-awaited `engage`. `engagement` counts switches, and every step of `engage` and `startWatching` re-checks it after each await, so switching off mid-setup leaves nothing running.
+- `/bsd` returns at once (live: line at 190 ms, pane at 250 ms). `switchTo` awaits only loading the contract, setting the mode and opening the pane, because the contract must be in force from the next prompt. Everything else (watcher, profiles, reviewer, tools, questions, survey, update check) runs in un-awaited `engage`, and `engage` itself does not wait for `registerTools`: `$.tool.register` resolves once Claude Code has connected the tool, or after 8 s. `engagement` counts switches, and every step of `engage` and `startWatching` re-checks it after each await, so switching off mid-setup leaves nothing running.
 - Modes: `off | on | paused`, stored twice. `$.state` survives a module reload (including a `/config` change) but is reset by `/clear`, `/resume` and `/branch`. A module variable survives those but not a reload. `session.start` restores the variable from state; `classic.SessionStart` (source `clear|resume|fork`) writes it back to state. Result: on survives both; every new session starts off.
 
 ### Tutor mode (while `on` or `paused`)
@@ -244,6 +250,7 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
   - `outcomeOf` reads a `$.model.complete` result, `outcomeOfError` one of Claude Code's error words. Troubles: `rate-limit`, `overloaded`, `server`, `offline` (no HTTP status at all), `timeout`, `account` (login, billing, account on hold), `job` (`model_not_found`, `invalid_request`), `reply` (empty).
   - `callModel` reports every outcome to `noteOutcome`. So does `classic.StopFailure` (the conversation's turn or a subagent died on an API error) and a conversation turn that ended with an answer.
   - The shared wait: a `rate-limit`, `overloaded`, `server`, `offline` or `timeout` makes every background job wait (`waiting(until)`), 30 s doubling to 10 min (15 s first for `offline` and `timeout`), somewhere in the upper half so sessions do not come back together. At `until` the state is `recovering`: the next job that asks is the probe (`probing`), and the others wait for its answer. Any answer, a background job's or the conversation's, ends it at once (`ok`).
+  - The probe cannot leave the others waiting for good. One that was cut short by the tutor itself, never started, or came back with a problem of its own (`job`, `reply`) is `abandoned`: the state goes back to `recovering` and the next job asks (`probeEnded`). Until M4 such a probe left every job waiting until the conversation next answered.
   - A `rate-limit` while the plan says a window is 99% spent waits until that window's `resetsAt`, plus up to 30 s.
   - `account` blocks every job until something is answered again. `job` blocks that job only (`jobBlocks`), until it is asked for by hand and answered, or the mod reloads with other settings. `reply` is the look's own business.
   - The look keeps its own pacing after a failed look on top of that: the minimum gap plus 30 s doubling (`backoffMs`), which is never shorter than the shared wait.
@@ -282,10 +289,28 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
   - Any other HEAD move (checkout, pull, reset, rebase) → reset the "since last review" base.
   - No git hooks (they would write into the user's repo).
 - A timed review covers `git diff <base>` against the working tree, plus untracked files by name. A scope fingerprint prevents re-reviewing the same uncommitted work; it is skipped when nothing changed.
-- `$.agent.spawn` resolves at start, with `agentId`. The answer arrives as a `turn.complete` carrying that id and goes to state, never the conversation. One review at a time; a commit made meanwhile is queued (latest only). Done → short notice, and the tab is marked new.
+- `$.agent.spawn` resolves at start, with `agentId`. The answer arrives as a `turn.complete` carrying that id and goes to state, never the conversation. One review at a time. Done → short notice, and the tab is marked new.
+- Commits wait in a queue (`reviewqueue.ts`, `projects/<id>/queue.json`). A commit goes in the moment `checkHead` sees it and comes out when its review and the look at the person's progress are both done with. So a commit made while Claude is not answering, at the plan limit, behind a running review, or just before the session closed is still reviewed: when things are back, or the next time the tutor is on in this project.
+  - At most `MAX_WAITING` (3) wait, a newer one pushing the oldest out, for at most 24 h. An amend replaces the commit it amended. A waiting commit that `git show` no longer finds is let go.
+  - `planReview` starts whatever is next when nothing stands in the way. It is called whenever that may have changed: a commit, the end of a review or of a progress look, `wake` (Claude answering again, the plan's pressure changing), resume, switch-on. The review of the oldest commit without one and the progress look of the oldest commit past its review run side by side, one of each at a time. The deadlines `review` and `assess` are a retry's time or the plan window's `resetsAt`.
+  - While something holds a waiting review back, the tab says what and until when (`heldText`): Claude not answering, the plan limit, a refused account, a model the plan does not have.
+  - The review slot is `reviewAgentId`, `isReviewBusy` and `endedReview` together (`isReviewFree`). `withReviewSlot` holds it while a review is started or its end is put on record, and calls `planReview` when it lets go with nothing running. Without it two events arriving together start the same review twice: in the first version a review's own answer woke the planner (`noteOutcome` → `wake`) before the queue had been marked, and the commit was reviewed again.
+  - A review that ends without a review (`reviewFailed`), for a waiting commit:
+    - `service`: `classic.StopFailure` named an API error. It is no try. The commit waits for the shared health, however long, and when that wait ends the review is the request that finds out. An outage costs a commit none of its tries.
+    - `own`: nothing says why (it said nothing, did not start, did not report back, or an `error` nobody explained). One try of `MAX_ATTEMPTS` (3), 60 s doubling apart. Then the review is given up on, the tab says "Press r to run it again", and the commit still goes on to the progress look.
+    - `final`: stopped by the person, or refused by the model. Not tried again.
+    - A review asked for by hand, a timed one and the look around are not retried: the tab says why it failed.
+  - `turn.complete` says only `error`. `classic.StopFailure` says which, at about the same moment, before or after. So an `error` with no reason yet shows "error" and waits `VERDICT_MS` (2 s) for one (`endedReview`, deadline `review-verdict`).
+  - A `classic.StopFailure` for any other subagent counts as the conversation's. Otherwise a model that the user's own subagent asked for would block the deep review.
+  - Watchdog (deadline `review-watchdog`): 15 min after its start the reviewer is looked up in `$.agent.list()`. Still running, it gets until 45 min. Gone, or at 45 min, that is one failed try and the slot is free. Until M4 a reviewer that died without a `turn.complete` blocked every later review until `/bsd off`.
+  - After a reload of the mod, `adoptReview` finds the running reviewer of the first waiting commit in `$.agent.list()` by its description and takes it up again, so that its answer is collected and no second review is paid for. Any other review that was running (timed, by hand, the look around) cannot be collected, and the tab says so.
+- The timed review is the deadline `review-timer`, set again after each run. It holds back at the plan limit and while Claude is not answering.
+- `r` with a commit waiting reviews that commit, whatever was holding it back.
 - The notes block also carries `decisions` (file, line, choice, tradeoff; at most `MAX_DECISIONS` = 3). The review's `decisions` and `insights` go into the `Review` state; the tab draws the decisions before the review text and the insights after it, so the text should not repeat them. `insights` must describe choices and patterns, not defects. With the first wording, a live review's insights were defects. With "an insight is never a problem", a fresh session's were choices (`Counter`'s insertion order giving first-seen ties, `sorted()` leaving the caller's list alone) while the defects went to decisions and the review: one run each.
 - A contested point is the one review that lands in chat: the tutor delegates it to the same reviewer and reports the verdict.
 - Live: commit noticed within one scan, footer showed a background agent, review in the tab 12 s later. No conversation row, notification or attachment, then or on the next turn. Contested point verdict in chat after 32 s. The 5-min timer with after-commit off reviewed uncommitted work at 5 min.
+- Live with the queue (Sonnet at low, through `scripts/outage-proxy.py`): a commit made with the connection down was queued at once, and its reviewer died 185 s later (Claude Code's own eleven tries), `classic.StopFailure` (`server_error`) and `turn.complete` arriving in the same millisecond. The tab said "Claude is not answering (server error). It is tried again at 19:23, or press r.", the commit kept all its tries, and 23 s later, when the wait was over, the review ran again and was in the tab 7 s after that. With the mod saved 2 s into a review and the connection cut, the reload came 20 s later, `adoptReview` found the running reviewer, and its answer was collected once the connection was back: one reviewer for that commit.
+- Not seen live: the watchdog (a reviewer that never reports back), a review given up on after three tries, the progress look's retries. Tests cover them (`reviewqueue.test.ts`).
 
 ### Profiles
 
@@ -405,9 +430,9 @@ The tutor writes `view.json` in answer and whenever its knowledge of the spot ch
   - At most 600 added lines and 25 files (otherwise import, vendored or generated).
   - At least `MIN_LINES` (3) non-blank added lines in one language.
   - Only added lines are read (`git show --unified=0`); lock files and generated folders never are. The tab's status line says why the last commit didn't count.
-- Weight 1 if the watcher saw at least half the commit's files change before it was made (`watchedPaths`, filled by `scan`, emptied as commits are assessed), else 0.5. First-placement commits are always 0.5.
+- Weight 1 if the watcher saw at least half the commit's files change before it was made (`watchedPaths`, filled by `scan`, emptied once a commit's assessment is settled, so that another try weighs it the same), else 0.5. First-placement commits are always 0.5.
 - When:
-  - `assessCommit` runs from `turn.complete` after a commit's deep review (with its text, or without on failure), or from `checkHead` when after-commit reviews are off. Not near the plan limit.
+  - `assessCommit` runs from the review queue (`startAssessment`): after the commit's deep review (with its text), after that review was given up on (without), or straight away when after-commit reviews are off. It is held back like a review, by the plan limit and by Claude not answering, and waits instead of being dropped. A request that got no answer is no try when that was Claude's doing, and otherwise one of three, 60 s doubling apart. `assess` and `assessCommit` resolve false for "worth another try". A commit reviewed by hand that was not waiting is assessed directly from `turn.complete`.
   - `placeFirst` runs on a fresh switch-on for the first 2 languages in play without a level: up to 5 of the user's commits among the last 30, in one request.
   - `progressQueue` runs one at a time, each re-reading before writing. Full hashes go in `assessed`, so no commit counts twice anywhere.
 - Observations are keyed by full hash (the kit's short hashes are all `0000000`).
@@ -478,7 +503,7 @@ The tutor writes `view.json` in answer and whenever its knowledge of the spot ch
 .backseat-driver              marker; required before any delete
 profiles/<language>.json      answers, hushes, lesson memory
 progress/<language>.json      evidence, level, report
-projects/<name>-<hash>/       journal.json, project.json, reviews.json, files/
+projects/<name>-<hash>/       journal.json, project.json, reviews.json, queue.json, files/
 focus.json                    written by an editor
 view.json                     written by the tutor
 update.json                   last release check
@@ -580,6 +605,7 @@ The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above mem
 - A hook gets 10 s of its own time per dispatch. Time inside `$` calls doesn't count, except `$.clock.sleep` and awaited plain promises. So the `lookup` tool waits ≤6 s, then answers with what it has.
 - A mod's `$` calls go through other plugins' hooks, never its own. `$.prompt.submit` bypasses its own `prompt.submit` hook, so put needed context in the text or a tool.
 - `$.clock.after` is one-shot; `$.clock.every` repeats. Both return a `Timer` with `cancel()`. A reload cancels all.
+- Hooks for events raised together run interleaved: the first to await lets the next one start. `classic.StopFailure` and `turn.complete` for a subagent that died arrive that way, so what one hook's awaited work establishes is not yet true in the other. Hand the other the promise (`reviewFailureNoted`), or set what it needs before the first await. Seen live: the review's end ran while the failure was still being counted, found Claude still looking well, and took an outage for a failure nobody could explain.
 - `dimColor` plus `color` on `Text` renders theme gray (it replaces the color). `color` takes a theme key (`claude` = orange) or a terminal color.
 - State-driven redraws and `$.ui.invalidate` are capped at 30/s in the terminal. The persona ticks about 7/s while talking, zero at rest.
 - `e.props.isFocused` in the pane's `ui.render` says whether it has the keyboard; hotkeys are dead until then, and the pane says how to focus.
@@ -596,7 +622,7 @@ The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above mem
 - `$.model.complete`: about 0.5 s on haiku. `timeoutMs` elapsed resolves `{ reason: 'aborted' }`. An unknown model resolves `{ reason: 'api-error', status: 404, error: 'model_not_found' }`; it does not reject.
 - `session.measure` fires around main-thread turns, the first time naming every unit, with `rateLimits` (`kind`, `percentUsed`, `resetsAt`). It did not fire after a `$.model.complete` alone. `$.session.usage()` is free and holds the same figures.
 - `$.agent.spawn` resolves in about 130 ms with `{ model, agentId }`. `$.agent.list()` rows are `{ id, description, type, status, spawnedBy }`, status `running | completed | failed`; a finished row drops out later.
-- A subagent that dies on an API error raises `turn.complete` with `reason: 'error'` and an empty answer, about 16 s after the spawn (the engine retries first). At the same moment `classic.StopFailure` fires with the error kind (`model_not_found`) and `agent_id`: that is where a failed review's reason comes from.
+- A subagent that dies on an API error raises `turn.complete` with `reason: 'error'` and an empty answer, about 16 s after the spawn for a model that does not exist and 170 s with no connection (the engine retries first, 11 times; the error word is then `server_error`). At the same moment `classic.StopFailure` fires with the error kind (`model_not_found`) and `agent_id`: that is where a failed review's reason comes from.
 - `session.end`: `next.budget` was `{ ms: 1491 }`. Twelve writes and a git run took 109 ms, so a flush at exit fits.
 - `classic.FileChanged` reaches a function hook with no settings hook configured, for paths returned as `watchPaths` from `classic.SessionStart`.
   - `classic.SessionStart` is the only event that takes the list: one returned from `classic.FileChanged` is ignored. So nothing can start a watch when `/bsd` is typed mid-session.
@@ -627,7 +653,8 @@ The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above mem
 - The tutor's own debug log in the kit: seed `data: { 'debug.json': { on: true } }` (and the marker), or run `/bsd debug on`. `session.debugLog()` returns every record across chunks. Records are written `FLUSH_MS` after they are noted, so `await session.clock.advance(FLUSH_MS)` before reading. The kit stubs `session.id` (`SESSION_ID`), `session.version` and `session.end`.
 - Engines with ports are tested without the kit: `explain.test.ts` has `world()`, whose model is answered by hand with `w.answer(request, reply)`, which is how a test changes a file mid-call.
 - `sessionTest` (30 s limit) for anything that starts a session; plain `test` (5 s) for pure functions. All files run in parallel processes, and each test loads the whole mod, so a busy machine takes seconds before the first action.
-- A `$.clock.every` period is one dispatch with 10 s of real time. The 5-min deep-review timer spanning about 150 ticks can exceed it under load ("exceeded 10000ms budget"), failing when several sessions test at once. `await session.clock.settle()` before asserting on timer-started work.
+- A `$.clock.every` period is one dispatch with 10 s of real time ("exceeded 10000ms budget" under load). The timed deep review is no longer one: it is a deadline. `await session.clock.settle()` before asserting on timer-started work.
+- Deep reviews in the kit: `session.spawned`, `$.turn.complete(session.finish(n, answer, reason))`, `$.classic.StopFailure({ error, agent_id: session.agentId(n) })` for why a reviewer died, `session.lostAgents.push(id)` for one Claude Code no longer lists (the watchdog), `data: { 'projects/<id>/queue.json': … }` for commits left waiting. A reload cannot be staged (module variables outlive nothing but the test), so `adoptReview` is checked live only.
 - `$.command.run` resolves when the hook returns, not when its background work finishes: `await session.clock.settle()` after `/bsd` before touching the repo, or the first save becomes the baseline.
 - `$.agent.spawn` in the kit: the stub gets `subagent_type`, must return `{ model }`, and the returned `agentId` is dropped (the plugin sees `{ model: 'inherit' }`). Hence `register.tsx` falls back to `$.agent.list()` by type (also needed when another mod answers the spawn); the kit stubs `agent.list`.
 - The kit auto-answers `$.ui.invalidate('ui.render')` but not prompt-event invalidations: stub `ui.invalidate`.

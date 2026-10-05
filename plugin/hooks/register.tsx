@@ -170,7 +170,28 @@ import {
   shortHash,
   showCommitArgs,
 } from './review'
-import type { ReflogEntry, ReviewScope } from './review'
+import type { ReviewScope } from './review'
+import {
+  commitSubject,
+  current,
+  EMPTY_QUEUE,
+  failedText,
+  heldText,
+  isSpent,
+  nextToAssess,
+  nextToReview,
+  parseQueue,
+  retryMs,
+  reviewed,
+  settledIn,
+  VERDICT_MS,
+  WATCHDOG_LIMIT_MS,
+  WATCHDOG_MS,
+  withAttempt,
+  withCommit,
+  withoutCommit,
+} from './reviewqueue'
+import type { ReviewQueue, Waiting } from './reviewqueue'
 import { DEFAULT_PERSONA, readSettings } from './settings'
 import type { Persona, Settings } from './settings'
 import { createLocks } from './locks'
@@ -266,6 +287,12 @@ let health: Health = HEALTHY
 const jobBlocks = new Map<string, string>()
 /** Why the running deep review's subagent died, when an API error ended it. '' otherwise. */
 let reviewFailure = ''
+/**
+ * The counting of that failure, while it is under way. The review's end
+ * arrives at the same moment and waits for it, so that it finds Claude
+ * already known not to be answering.
+ */
+let reviewFailureNoted: Promise<void> | null = null
 
 /**
  * The profiles in play, as last read from the store. Kept here as well as in
@@ -339,12 +366,31 @@ let lastHead = ''
 /** Where the previous deep review ended, and a fingerprint of what the previous timed review saw. */
 let reviewedHead = ''
 let reviewedPrint = ''
-/** The running review's subagent and what it is reviewing. One review runs at a time. */
+/** The running review's subagent, what it is reviewing, and when it started. One review runs at a time. */
 let reviewAgentId: string | null = null
 let reviewScope: ReviewScope | null = null
-/** A commit made while a review was running. Only the latest is kept. */
-let queuedCommit: ReflogEntry | null = null
-let reviewTimer: Timer | null = null
+let reviewStartedAt = 0
+/**
+ * The commits waiting for their review, or for the look at the person's
+ * progress after it. Kept in the project's folder, so that a commit made
+ * while Claude was not answering is still reviewed later. This is the copy
+ * in memory.
+ */
+let waiting: ReviewQueue = EMPTY_QUEUE
+/** True while the look at the person's progress, for a waiting commit, is under way. */
+let isAssessing = false
+/** After a try that got no answer, when the next one may start: of a review, and of a look at the person's progress. */
+let reviewRetryAt: number | null = null
+let assessRetryAt: number | null = null
+/**
+ * True while a review is being started, or the end of one is being recorded.
+ * With `reviewAgentId` and `endedReview` it is the one review slot: nothing
+ * starts a review while any of them says it is taken, so that two events
+ * arriving together cannot start the same review twice.
+ */
+let isReviewBusy = false
+/** The review that ended a moment ago saying only "error", while its reason may still arrive. */
+let endedReview: { agentId: string; scope: ReviewScope | null } | null = null
 
 /** The journal of what they are doing in this project. Null while the tutor is off, and outside a repository. */
 let recorder: Recorder | null = null
@@ -413,14 +459,20 @@ function snapshot(): Record<string, unknown> {
     review: {
       agentId: reviewAgentId,
       scope: reviewScope === null ? null : scopeSubject(reviewScope),
-      queuedCommit,
+      startedAt: reviewStartedAt,
+      isBusy: isReviewBusy,
+      ended: endedReview === null ? null : endedReview.agentId,
+      waiting,
+      isAssessing,
+      retryAt: reviewRetryAt,
+      assessRetryAt,
       reviewedHead,
       reviewedPrint,
       lastHead,
       headLog,
     },
     explain: { isOn: explainer !== null, waiting: explainer?.pending() ?? 0, focus, editorFocusAt, isFastPolling },
-    timers: { focus: focusTimer !== null, review: reviewTimer !== null, talk: talkTimer !== null, blink: blinkTimer !== null },
+    timers: { focus: focusTimer !== null, talk: talkTimer !== null, blink: blinkTimer !== null },
     profiles: { languages: profiles.languages, subjects: Object.keys(profiles.subjects) },
     progress: { identity, records: [...records.keys()], watchedPaths: [...watchedPaths] },
     journal: recorder === null ? null : { working: workingShown },
@@ -598,6 +650,7 @@ async function callModel(
   trace($, 'model', job, () => ({ request, result }), Date.now() - started)
   // Cut short by the tutor itself, as a lookup is when its file is saved again: that says nothing about Claude.
   if (signal?.aborted !== true) await noteOutcome($, settings, job, outcomeOf(result))
+  else await probeEnded($, settings)
 
   return result
 }
@@ -667,10 +720,23 @@ async function healthDue($: EngineInterface, settings: Settings): Promise<void> 
   await wake($, settings)
 }
 
+/**
+ * The request that was finding out whether Claude is back ended without
+ * saying: it was cut short, or never started. The next job that wants to ask
+ * finds out instead.
+ */
+async function probeEnded($: EngineInterface, settings: Settings): Promise<void> {
+  if (health.state !== 'probing') return
+  health = stepHealth(health, { type: 'abandoned' })
+  trace($, 'state', 'health', () => ({ health, why: 'the request finding out did not say' }))
+  await wake($, settings)
+}
+
 /** Something that held work back has changed. Everything that was waiting looks again at whether it can go. */
 async function wake($: EngineInterface, settings: Settings): Promise<void> {
   if (mode === 'off') return
   await planLook($, settings)
+  await planReview($, settings)
   await explainer?.tick()
   void refreshView($)
 }
@@ -1743,10 +1809,37 @@ async function startedReviewer($: EngineInterface, spawnedId: string | undefined
   }
 }
 
-/** Hands a scope to the deep reviewer. Its answer arrives later, at `turn.complete`. */
-async function startReview($: EngineInterface, scope: ReviewScope): Promise<void> {
+/** Whether a review may start: none is running, being started, or being wound up. */
+function isReviewFree(): boolean {
+  return reviewAgentId === null && !isReviewBusy && endedReview === null
+}
+
+/**
+ * Holds the review slot while a review is started or the end of one is
+ * recorded. When no review is running afterwards, whatever is waiting gets
+ * its turn: that is where a retry is timed and the next commit is taken up.
+ */
+async function withReviewSlot($: EngineInterface, settings: Settings, work: () => Promise<unknown>): Promise<void> {
+  isReviewBusy = true
+  try {
+    await work()
+  } finally {
+    isReviewBusy = false
+  }
+  if (reviewAgentId === null) await planReview($, settings)
+}
+
+/**
+ * Hands a scope to the deep reviewer. Its answer arrives later, at
+ * `turn.complete`. Resolves false when the reviewer did not start. The
+ * caller holds the review slot.
+ */
+async function startReview($: EngineInterface, settings: Settings, scope: ReviewScope): Promise<boolean> {
   const subject = scopeSubject(scope)
   await setReview($, { state: 'running', subject, text: '', isUnseen: false, decisions: [], insights: [] })
+  // After a wait, this review is the request that finds out whether Claude is back.
+  if (health.state === 'recovering') health = stepHealth(health, { type: 'probing' })
+  let refusal = 'the reviewer did not start'
   try {
     const prompt = reviewRequest(
       scope,
@@ -1761,16 +1854,278 @@ async function startReview($: EngineInterface, scope: ReviewScope): Promise<void
     })
     const agentId = spawned.deny === undefined ? await startedReviewer($, spawned.agentId) : undefined
     trace($, 'agent', 'spawn', () => ({ subject, kind: scope.kind, prompt, spawned, agentId }), Date.now() - started)
-    if (agentId === undefined) {
-      await setReview($, { state: 'failed', text: spawned.deny ?? 'the reviewer did not start' })
+    if (agentId !== undefined) {
+      reviewAgentId = agentId
+      reviewScope = scope
+      reviewFailure = ''
+      reviewFailureNoted = null
+      reviewStartedAt = await $.clock.now()
+      // A reviewer that never reports back would otherwise keep every later review waiting behind it.
+      schedulerOf($).set('review-watchdog', reviewStartedAt + WATCHDOG_MS, () => reviewWatchdog($, settings))
 
-      return
+      return true
     }
-    reviewAgentId = agentId
-    reviewScope = scope
+    refusal = spawned.deny ?? refusal
   } catch (error) {
     fail($, 'deep review did not start', error)
-    await setReview($, { state: 'failed', text: 'the reviewer did not start' })
+  }
+  await reviewFailed($, settings, scope, refusal, 'own')
+
+  return false
+}
+
+/** The file that holds the commits waiting in this project. */
+function queuePath(): string {
+  return `${projectDir(dataRoot, repoRoot)}/queue.json`
+}
+
+/** Reads the waiting commits from the project's folder, without those that have waited too long. */
+async function loadQueue($: EngineInterface): Promise<void> {
+  const now = await $.clock.now()
+  waiting = repoRoot === '' || dataRoot === '' ? EMPTY_QUEUE : current(parseQueue(await storeOf($).read(queuePath())), now)
+}
+
+/** Changes the waiting commits, in the project's folder and in memory. */
+async function changeQueue($: EngineInterface, change: (queue: ReviewQueue) => ReviewQueue): Promise<void> {
+  const now = await $.clock.now()
+  if (repoRoot === '' || dataRoot === '') {
+    waiting = change(current(waiting, now))
+
+    return
+  }
+  try {
+    waiting = await updateJson(storeOf($), queuePath(), parseQueue, stored => change(current(stored, now)))
+  } catch (error) {
+    // Not saved: it still waits for as long as this session runs.
+    waiting = change(current(waiting, now))
+    fail($, 'could not save the waiting commits', error)
+  }
+}
+
+/** Reviews one commit now. Resolves false when no review started. The caller holds the review slot. */
+async function reviewCommitNow($: EngineInterface, settings: Settings, commit: { hash: string; title: string }): Promise<boolean> {
+  const shown = await git($, repoRoot, showCommitArgs(commit.hash))
+  if (shown.exitCode !== 0 || shown.stdout.trim() === '') {
+    // It is not in this repository any more: rebased away, or thrown out.
+    trace($, 'agent', 'commit gone', () => ({ commit, exitCode: shown.exitCode }))
+    await changeQueue($, queue => withoutCommit(queue, commit.hash))
+
+    return false
+  }
+
+  return startReview($, settings, { kind: 'commit', hash: commit.hash, title: commit.title, patch: shown.stdout })
+}
+
+/**
+ * A review ended without a review. For a commit that is waiting for one,
+ * `how` says what that means:
+ *
+ * - `service`: Claude's doing, which `noteOutcome` has already been told. It
+ *   is no try. The commit waits until Claude answers again, however long.
+ * - `own`: nothing says why. It is one try: the next is timed, or the review
+ *   is given up on.
+ * - `final`: the person stopped it, or the model refused. It is not tried again.
+ *
+ * A commit whose review is given up on still counts toward the person's
+ * progress. The caller holds the review slot, and what is next is planned
+ * when it lets go.
+ */
+async function reviewFailed(
+  $: EngineInterface,
+  settings: Settings,
+  scope: ReviewScope | null,
+  detail: string,
+  how: 'service' | 'own' | 'final',
+): Promise<void> {
+  // This review may have been the request finding out whether Claude is back, and it did not say.
+  if (how !== 'service') await probeEnded($, settings)
+  if (scope === null || scope.kind !== 'commit' || !settings.deepReview.isAfterCommit || !waiting.commits.some(commit => commit.hash === scope.hash)) {
+    // Asked for by hand, timed, or the look around: nothing tries it again.
+    await setReview($, { state: 'failed', ...(scope === null ? {} : { subject: scopeSubject(scope) }), text: detail })
+
+    return
+  }
+  const subject = scopeSubject(scope)
+  if (how === 'service' && (!mayAsk(health) || jobBlocks.has('deep-review'))) {
+    reviewRetryAt = null
+    await setReview($, { state: 'failed', subject, text: heldText(health, pressure, jobBlocks.get('deep-review'), null) })
+
+    return
+  }
+  if (how !== 'final') await changeQueue($, queue => withAttempt(queue, scope.hash))
+  if (how === 'final' || isSpent(waiting, scope.hash)) {
+    await changeQueue($, queue => reviewed(queue, scope.hash))
+    reviewRetryAt = null
+    await setReview($, { state: 'failed', subject, text: how === 'final' ? detail : failedText(detail, null) })
+
+    return
+  }
+  const attempts = waiting.commits.find(commit => commit.hash === scope.hash)?.attempts ?? 1
+  reviewRetryAt = (await $.clock.now()) + retryMs(attempts)
+  await setReview($, { state: 'failed', subject, text: failedText(detail, reviewRetryAt) })
+}
+
+/**
+ * A review ended saying only "error", and its reason has arrived through
+ * `classic.StopFailure`, or the moment it had for that has passed, in which
+ * case `reason` is null.
+ */
+async function reviewVerdict($: EngineInterface, settings: Settings, reason: string | null): Promise<void> {
+  const ended = endedReview
+  if (ended === null) return
+  schedulerOf($).cancel('review-verdict')
+  await withReviewSlot($, settings, async () => {
+    endedReview = null
+    await reviewFailed($, settings, ended.scope, reason ?? 'error', reason === null ? 'own' : 'service')
+  })
+}
+
+/** The running review has not reported back for a long time: it is looked for, and given up on when it is gone. */
+async function reviewWatchdog($: EngineInterface, settings: Settings): Promise<void> {
+  const agentId = reviewAgentId
+  if (agentId === null) return
+  const now = await $.clock.now()
+  let status = 'gone'
+  try {
+    status = (await $.agent.list()).find(agent => agent.id === agentId)?.status ?? 'gone'
+  } catch {
+    // No list: it is taken to be gone.
+  }
+  // It reported back while the list was being read.
+  if (reviewAgentId !== agentId) return
+  trace($, 'agent', 'watchdog', () => ({ agentId, status, forMs: now - reviewStartedAt }))
+  if ((status === 'running' || status === 'pending' || status === 'waiting') && now - reviewStartedAt < WATCHDOG_LIMIT_MS) {
+    // Still at it. A hard review at a high thinking level takes long: it gets until the limit, and no longer.
+    schedulerOf($).set('review-watchdog', reviewStartedAt + WATCHDOG_LIMIT_MS, () => reviewWatchdog($, settings))
+
+    return
+  }
+  await withReviewSlot($, settings, async () => {
+    const scope = reviewScope
+    reviewAgentId = null
+    reviewScope = null
+    reviewFailure = ''
+    reviewFailureNoted = null
+    await reviewFailed($, settings, scope, 'the reviewer did not report back', 'own')
+  })
+}
+
+/**
+ * After a reload of the module, a review that was running is still running:
+ * Claude Code runs it, not this module. When it is the review of the commit
+ * that waits first, it is taken up again, so that its answer is collected and
+ * the commit is not reviewed a second time. Any other review can no longer
+ * be collected.
+ */
+async function adoptReview($: EngineInterface, settings: Settings): Promise<void> {
+  if (reviewAgentId !== null || (await read($, reviewAtom)).state !== 'running') return
+  const commit = nextToReview(waiting, { wantsReview: true, wantsAssessment: false })
+  let agentId: string | undefined
+  if (commit !== null) {
+    const described = `Deep review of ${commitSubject(commit)}`
+    try {
+      agentId = (await $.agent.list()).find(agent => agent.description === described && (agent.status === 'running' || agent.status === 'pending' || agent.status === 'waiting'))?.id
+    } catch {
+      // No list: it cannot be found.
+    }
+  }
+  trace($, 'agent', 'adopt', () => ({ commit, agentId }))
+  if (commit === null || agentId === undefined || reviewAgentId !== null) {
+    if (reviewAgentId === null) await setReview($, { state: 'failed', text: 'the plugin reloaded while it was running' })
+
+    return
+  }
+  reviewAgentId = agentId
+  reviewScope = { kind: 'commit', hash: commit.hash, title: commit.title, patch: '' }
+  reviewFailure = ''
+  reviewFailureNoted = null
+  // When it started is not known any more. The time it gets counts from here.
+  reviewStartedAt = await $.clock.now()
+  schedulerOf($).set('review-watchdog', reviewStartedAt + WATCHDOG_MS, () => reviewWatchdog($, settings))
+}
+
+/** The look at the person's progress for a waiting commit, after the ones already under way. */
+function startAssessment($: EngineInterface, settings: Settings, commit: Waiting): void {
+  isAssessing = true
+  queueProgress($, async () => {
+    let isSettled = false
+    try {
+      // With its review for context, when it has one.
+      const review = reviews.find(known => known.commit === shortHash(commit.hash))?.text ?? ''
+      isSettled = await assessCommit($, settings, commit.hash, review)
+    } finally {
+      assessRetryAt = null
+      if (isSettled) {
+        await changeQueue($, queue => withoutCommit(queue, commit.hash))
+      } else if (mayAsk(health) && !jobBlocks.has('progress')) {
+        // Claude is answering, and nothing came of it all the same: that is one try.
+        await changeQueue($, queue => withAttempt(queue, commit.hash))
+        if (isSpent(waiting, commit.hash)) await changeQueue($, queue => withoutCommit(queue, commit.hash))
+        else assessRetryAt = (await $.clock.now()) + retryMs(waiting.commits.find(known => known.hash === commit.hash)?.attempts ?? 1)
+      }
+      // Otherwise it was Claude's doing, which is no try: it waits until Claude answers again.
+      isAssessing = false
+      await planReview($, settings)
+    }
+  })
+}
+
+/**
+ * Starts whatever the waiting commits need next, when nothing stands in the
+ * way, and says in the Deep review tab what does when something stands.
+ * Called whenever that may have changed: a commit, the end of a review,
+ * Claude answering again, the plan's window reopening.
+ */
+async function planReview($: EngineInterface, settings: Settings): Promise<void> {
+  const plan = schedulerOf($)
+  if (mode !== 'on' || repoRoot === '' || waiting.commits.length === 0) {
+    plan.cancel('review')
+    plan.cancel('assess')
+
+    return
+  }
+  const wanted = { wantsReview: settings.deepReview.isAfterCommit, wantsAssessment: settings.isProgressOn }
+  // Under these settings nothing is left to do for these.
+  const settled = settledIn(waiting, wanted)
+  if (settled.length > 0) await changeQueue($, queue => settled.reduce(withoutCommit, queue))
+  const now = await $.clock.now()
+  await readPressure($)
+  // What is held back waits, on disk. `wake` plans again when Claude answers, and the plan's window reopening is a deadline of its own.
+  const reopens = pressure.level === 'held' ? pressure.resetsAt : null
+
+  // The review of the oldest commit that has none yet. One review runs at a time, and its end plans again.
+  if (isReviewFree()) {
+    const commit = nextToReview(waiting, wanted)
+    const held = commit === null ? '' : heldText(health, pressure, jobBlocks.get('deep-review'), reviewRetryAt !== null && reviewRetryAt > now ? reviewRetryAt : null)
+    if (commit === null) plan.cancel('review')
+    else if (held !== '') {
+      if (reopens === null) plan.cancel('review')
+      else plan.set('review', reopens, () => planReview($, settings))
+      await setReview($, { state: 'failed', subject: commitSubject(commit), text: held, isUnseen: false })
+    } else if (reviewRetryAt !== null && reviewRetryAt > now) {
+      plan.set('review', reviewRetryAt, () => planReview($, settings))
+    } else {
+      plan.cancel('review')
+      reviewRetryAt = null
+      // One that does not start leaves a time for its next try, or a commit given up on: the slot plans that as it is let go.
+      await withReviewSlot($, settings, () => reviewCommitNow($, settings, commit))
+    }
+  }
+
+  // The look at the person's progress, for the oldest commit whose review is done with. It runs beside the next review.
+  if (!isAssessing) {
+    const commit = nextToAssess(waiting, wanted)
+    if (commit === null) plan.cancel('assess')
+    else if (heldText(health, pressure, jobBlocks.get('progress'), null) !== '') {
+      if (reopens === null) plan.cancel('assess')
+      else plan.set('assess', reopens, () => planReview($, settings))
+    } else if (assessRetryAt !== null && assessRetryAt > now) {
+      plan.set('assess', assessRetryAt, () => planReview($, settings))
+    } else {
+      plan.cancel('assess')
+      assessRetryAt = null
+      startAssessment($, settings, commit)
+    }
   }
 }
 
@@ -1854,22 +2209,14 @@ async function keepReview($: EngineInterface, scope: ReviewScope, answer: string
  * review model, so that the faster models start from the big picture.
  */
 async function maybeSurvey($: EngineInterface, settings: Settings, run: number): Promise<void> {
-  if (project === null || project.isSurveyed || reviewAgentId !== null) return
+  if (project === null || project.isSurveyed || !isReviewFree()) return
   // With both triggers off, the deep review model runs only when asked, and that goes for this too.
   if (!settings.deepReview.isAfterCommit && settings.deepReview.everyMs === 0) return
-  const held = await readPressure($)
-  if (held.level !== 'none' || !mayAsk(health) || run !== engagement || mode !== 'on') return
-  await startReview($, { kind: 'survey' })
-}
-
-async function reviewCommit($: EngineInterface, entry: ReflogEntry): Promise<void> {
-  if (reviewAgentId !== null) {
-    queuedCommit = entry
-
-    return
-  }
-  const shown = await git($, repoRoot, showCommitArgs(entry.hash))
-  await startReview($, { kind: 'commit', hash: entry.hash, title: commitTitle(entry), patch: shown.stdout })
+  await withReviewSlot($, settings, async () => {
+    const held = await readPressure($)
+    if (held.level !== 'none' || !mayAsk(health) || run !== engagement || mode !== 'on') return
+    await startReview($, settings, { kind: 'survey' })
+  })
 }
 
 /**
@@ -1877,14 +2224,30 @@ async function reviewCommit($: EngineInterface, entry: ReflogEntry): Promise<voi
  * timer calls this, and so does "review now" in the pane. Asked for by hand
  * with nothing new, it reviews the last commit again.
  */
-async function reviewSince($: EngineInterface, isAsked: boolean): Promise<void> {
+async function reviewSince($: EngineInterface, settings: Settings, isAsked: boolean): Promise<void> {
   if (mode === 'off' || (mode === 'paused' && !isAsked)) return
-  // The timer holds back near the plan limit. A review asked for by hand does not.
-  if (!isAsked && (await readPressure($)).level === 'held') return
-  if (reviewAgentId !== null) {
+  // The timer holds back near the plan limit, and while Claude is not answering. A review asked for by hand does not.
+  if (!isAsked && ((await readPressure($)).level === 'held' || !mayAsk(health))) return
+  if (!isReviewFree()) {
     if (isAsked) $.ui.toast('A deep review is already running.')
 
     return
+  }
+  await withReviewSlot($, settings, () => startSince($, settings, isAsked))
+}
+
+/** What `reviewSince` starts, with the review slot held. */
+async function startSince($: EngineInterface, settings: Settings, isAsked: boolean): Promise<void> {
+  if (isAsked && repoRoot !== '') {
+    // A commit that is waiting goes first. Asked for, it is tried whatever was holding it back.
+    const commit = nextToReview(waiting, { wantsReview: true, wantsAssessment: false })
+    if (commit !== null) {
+      reviewRetryAt = null
+      schedulerOf($).cancel('review')
+      await reviewCommitNow($, settings, commit)
+
+      return
+    }
   }
   if (repoRoot === '' || reviewedHead === '') {
     if (isAsked) $.ui.toast('A deep review needs a git repository with at least one commit.')
@@ -1901,11 +2264,23 @@ async function reviewSince($: EngineInterface, isAsked: boolean): Promise<void> 
   const scope: ReviewScope = { kind: 'since', from: reviewedHead, log: log.stdout, diff: diff.stdout, untracked }
 
   if (!isEmptyScope(scope) && scopePrint(scope) !== reviewedPrint) {
-    await startReview($, scope)
+    await startReview($, settings, scope)
   } else if (isAsked) {
     const last = parseReflog((await git($, repoRoot, ['log', '-1', '--format=%H%x00commit: %s'])).stdout)
-    if (last !== null) await reviewCommit($, last)
+    if (last !== null) await reviewCommitNow($, settings, { hash: last.hash, title: commitTitle(last) })
   }
+}
+
+/** Sets the timer for the next timed deep review. */
+function planTimedReview($: EngineInterface, settings: Settings, now: number): void {
+  if (settings.deepReview.everyMs <= 0 || mode === 'off' || repoRoot === '') return
+  schedulerOf($).set('review-timer', now + settings.deepReview.everyMs, () => timedReview($, settings))
+}
+
+/** The timed deep review: everything since the previous one. Then the timer is set again. */
+async function timedReview($: EngineInterface, settings: Settings): Promise<void> {
+  await reviewSince($, settings, false)
+  planTimedReview($, settings, await $.clock.now())
 }
 
 /** Notices when HEAD has moved, and starts a review when the move was a commit. */
@@ -1917,6 +2292,7 @@ async function checkHead($: EngineInterface, settings: Settings): Promise<void> 
   const entry = parseReflog((await git($, repoRoot, REFLOG_ARGS)).stdout)
   if (entry === null || entry.hash === lastHead) return
   trace($, 'watch', 'head moved', () => ({ entry, isCommit: isCommit(entry), from: lastHead }))
+  const previous = lastHead
   lastHead = entry.hash
   const movedAt = await $.clock.now()
   if (!isCommit(entry)) {
@@ -1929,22 +2305,12 @@ async function checkHead($: EngineInterface, settings: Settings): Promise<void> 
     return
   }
   recorder?.add({ at: movedAt, kind: 'commit', hash: entry.hash, text: commitTitle(entry) })
-  if (!settings.deepReview.isAfterCommit) {
-    if ((await readPressure($)).level !== 'held') queueProgress($, () => assessCommit($, settings, entry.hash, ''))
-
-    return
-  }
-  if ((await readPressure($)).level === 'held') {
-    await setReview($, {
-      state: 'failed',
-      subject: `commit ${entry.hash.slice(0, 7)}: ${commitTitle(entry)}`,
-      text: 'you are close to your plan limit. Press r to run it anyway.',
-      isUnseen: false,
-    })
-
-    return
-  }
-  await reviewCommit($, entry)
+  if (!settings.deepReview.isAfterCommit && !settings.isProgressOn) return
+  // It waits, on disk, until it has been reviewed and looked at for the person's progress.
+  // That happens at once when nothing stands in the way, and otherwise when Claude answers again or the plan allows.
+  const isAmend = entry.subject.startsWith('commit (amend)')
+  await changeQueue($, queue => withCommit(isAmend ? withoutCommit(queue, previous) : queue, { hash: entry.hash, title: commitTitle(entry) }, movedAt))
+  await planReview($, settings)
 }
 
 /** Plans the next scan of the working tree, as soon after the last as `sensor.ts` says. */
@@ -2011,6 +2377,7 @@ function stopWatching(): void {
   health = HEALTHY
   jobBlocks.clear()
   reviewFailure = ''
+  reviewFailureNoted = null
   focusTimer?.cancel()
   focusTimer = null
   explainer?.stop()
@@ -2023,13 +2390,17 @@ function stopWatching(): void {
   focusText = null
   writtenView = ''
   viewedStamp = ''
-  reviewTimer?.cancel()
-  reviewTimer = null
   watcher = null
   // A review still running finishes in the background, and its answer is ignored.
+  // The commits that were waiting stay in the project's folder, for the next time the tutor is on here.
   reviewAgentId = null
   reviewScope = null
-  queuedCommit = null
+  waiting = EMPTY_QUEUE
+  isAssessing = false
+  isReviewBusy = false
+  reviewRetryAt = null
+  assessRetryAt = null
+  endedReview = null
 }
 
 /** Starts the watcher from the working tree as it stands now. `run` is the switch-on this belongs to. */
@@ -2091,11 +2462,7 @@ async function startWatching($: EngineInterface, settings: Settings, run: number
   activeAt = now
   planScan($, settings, now)
   trace($, 'timer', 'watching started', () => ({ repoRoot: root, reviewEveryMs: settings.deepReview.everyMs, head: tip }))
-  if (settings.deepReview.everyMs > 0) {
-    reviewTimer = $.clock.every(settings.deepReview.everyMs, () => {
-      void reviewSince($, false)
-    })
-  }
+  planTimedReview($, settings, now)
 }
 
 /**
@@ -2404,10 +2771,10 @@ async function assess(
   language: string,
   commits: readonly (AssessedCommit & CommitForAssessment)[],
   review: string,
-): Promise<void> {
+): Promise<boolean> {
   const before = await loadRecord($, language)
   const fresh = commits.filter(commit => !before.assessed.includes(commit.hash))
-  if (fresh.length === 0) return
+  if (fresh.length === 0) return true
   const name = projectId(repoRoot).replace(/-[0-9a-f]{8}$/, '')
   const subject = fresh.length === 1 ? `commit ${fresh[0]?.short ?? ''}` : `${fresh.length} of your recent commits`
   await setProgress($, { busy: `Looking at ${subject} for your ${languageName(language)} progress.` })
@@ -2420,11 +2787,17 @@ async function assess(
       maxTokens: 3000,
       timeoutMs: 240_000,
     })
-    const assessment = result.isAnswered ? parseAssessment(result.text) : null
+    if (!result.isAnswered) {
+      // No answer: it is worth another try, later.
+      await setProgress($, { skipped: `The look at ${subject} got no answer. It is tried again.` })
+
+      return false
+    }
+    const assessment = parseAssessment(result.text)
     if (assessment === null) {
       await setProgress($, { skipped: `The look at ${subject} did not finish. Nothing was recorded.` })
 
-      return
+      return true
     }
     // Added to the record as it stands on disk, in one step: another session may be adding to it too.
     // The file as it was is kept beside it, because the evidence cannot be gathered again.
@@ -2448,38 +2821,50 @@ async function assess(
     await showProgress($, settings)
     await registerReviewer($, settings)
     if (change !== null) $.ui.toast(`${languageName(language)}: ${change.to}${record.isProvisional ? ' (provisional)' : ''}. See the Progress tab.`)
+
+    return true
   } finally {
     await setProgress($, { busy: '' })
   }
 }
 
-/** A commit of the person's, once it has been reviewed or made: the lines it added, by language, if it is theirs. */
-async function assessCommit($: EngineInterface, settings: Settings, hash: string, review: string): Promise<void> {
-  if (!settings.isProgressOn || repoRoot === '' || dataRoot === '' || mode === 'off') return
+/**
+ * A commit of the person's, once it has been reviewed or made: the lines it
+ * added, by language, if it is theirs. Resolves false when a request got no
+ * answer, which is worth trying again, and true when there is nothing more
+ * to do for this commit.
+ */
+async function assessCommit($: EngineInterface, settings: Settings, hash: string, review: string): Promise<boolean> {
+  if (!settings.isProgressOn || repoRoot === '' || dataRoot === '' || mode === 'off') return true
   const info = parseCommitInfo((await git($, repoRoot, commitInfoArgs(hash))).stdout)
-  if (info === null) return
+  if (info === null) return true
   const files = addedLines((await git($, repoRoot, commitPatchArgs(hash))).stdout)
   const verdict = judge(info, identity, files)
   const short = shortHash(info.hash)
   if (!verdict.isYours) {
     await setProgress($, { skipped: `Commit ${short} does not count toward your progress: ${verdict.reason}.` })
 
-    return
+    return true
   }
   // Work the tutor watched arrive in saves counts in full. Work it did not see counts half.
   const watched = verdict.files.filter(file => watchedPaths.has(file.path)).length
   const weight = watched * 2 >= verdict.files.length ? 1 : 0.5
-  for (const file of verdict.files) watchedPaths.delete(file.path)
   const title = info.message.split('\n')[0] ?? ''
   const languages = [...byLanguage(verdict.files)].filter(([, group]) => sizeOf(group) >= MIN_LINES).slice(0, 2)
   if (languages.length === 0) {
+    for (const file of verdict.files) watchedPaths.delete(file.path)
     await setProgress($, { skipped: `Commit ${short} is too small to say anything about your progress.` })
 
-    return
+    return true
   }
+  let isSettled = true
   for (const [language, group] of languages) {
-    await assess($, settings, language, [{ hash: info.hash, short, weight, title, files: group }], review)
+    if (!(await assess($, settings, language, [{ hash: info.hash, short, weight, title, files: group }], review))) isSettled = false
   }
+  // Kept until the commit is settled, so that another try weighs it the same.
+  if (isSettled) for (const file of verdict.files) watchedPaths.delete(file.path)
+
+  return isSettled
 }
 
 /** How many of the person's recent commits a first placement looks through, and how many it uses. */
@@ -2542,8 +2927,14 @@ async function engage($: EngineInterface, settings: Settings, run: number, isFre
     await loadProject($)
     await setUpProgress($, settings)
     await registerReviewer($, settings)
-    await registerTools($)
+    // Not waited for. Claude Code connects each tool before it answers, which took eight seconds a tool
+    // behind a proxy in a live session, and nothing below needs them.
+    void registerTools($).catch(error => fail($, 'could not register the tools', error))
+    await loadQueue($)
+    await adoptReview($, settings)
     await startExplaining($, settings, run)
+    // Commits that were left waiting, by an outage or a closed session, are taken up now.
+    if (run === engagement) await planReview($, settings)
     trace($, 'start', 'engaged', () => ({ run, repoRoot, languages: profiles.languages, main }), Date.now() - started)
     if (isFresh) void maybeSurvey($, settings, run)
     if (isFresh) queueProgress($, () => placeFirst($, settings, run))
@@ -2577,6 +2968,8 @@ async function switchTo($: EngineInterface, next: Mode, settings: Settings): Pro
         await kick($, settings, 'resumed')
         await planLook($, settings)
       }
+      // The commits that are waiting wait through a pause, and are taken up when it ends.
+      await planReview($, settings)
     }
 
     return
@@ -2682,6 +3075,8 @@ async function forget($: EngineInterface, settings: Settings, named: Scope | nul
     if (scope.kind !== 'language') {
       project = repoRoot === '' ? null : emptyProject(repoRoot)
       reviews = []
+      waiting = EMPTY_QUEUE
+      reviewRetryAt = null
       explainer?.reset()
       writtenView = ''
       await update($, explainAtom, () => NO_VIEW)
@@ -2714,10 +3109,6 @@ export const register: Register = (on, options) => {
       trace($, 'hook', 'session.start', () => ({ mode, cwd: e.cwd, isReload: true }))
       const open = await read($, notesAtom)
       nextNoteId = open.reduce((highest, note) => Math.max(highest, note.id), 0) + 1
-      // A review that was running when the module reloaded can no longer be collected.
-      if ((await read($, reviewAtom)).state === 'running') {
-        await setReview($, { state: 'failed', text: 'the plugin reloaded while it was running' })
-      }
       await loadTutor($, settings.persona)
       await openPane($)
       engagement += 1
@@ -2896,45 +3287,69 @@ export const register: Register = (on, options) => {
       // Whatever Claude's tools did to the working tree during the turn is looked at now.
       void kick($, settings, 'a turn ended')
     }
-    if (e.agentId === undefined || e.agentId !== reviewAgentId) return next(e)
-    const scope = reviewScope
-    const failure = reviewFailure
-    reviewAgentId = null
-    reviewScope = null
-    reviewFailure = ''
-    trace($, 'agent', 'finished', () => ({ agentId: e.agentId, reason: e.reason, subject: scope === null ? null : scopeSubject(scope), answer: e.reason === 'answer' ? e.answer : undefined }))
+    const agentId = e.agentId
+    if (agentId === undefined || agentId !== reviewAgentId) return next(e)
+    // The slot is held until what this review leaves behind is on record, so that nothing starts in between.
+    await withReviewSlot($, settings, async () => {
+      const scope = reviewScope
+      const failure = reviewFailure
+      const noted = reviewFailureNoted
+      reviewAgentId = null
+      reviewScope = null
+      reviewFailure = ''
+      reviewFailureNoted = null
+      schedulerOf($).cancel('review-watchdog')
+      trace($, 'agent', 'finished', () => ({ agentId, reason: e.reason, subject: scope === null ? null : scopeSubject(scope), answer: e.reason === 'answer' ? e.answer : undefined }))
 
-    if (e.reason === 'answer' && e.answer.trim() !== '' && scope !== null) {
-      if (scope.kind !== 'survey') {
-        reviewedHead = scope.kind === 'commit' ? scope.hash : lastHead
-        reviewedPrint = scope.kind === 'commit' ? '' : scopePrint(scope)
+      if (e.reason === 'answer' && e.answer.trim() !== '' && scope !== null) {
+        if (scope.kind !== 'survey') {
+          reviewedHead = scope.kind === 'commit' ? scope.hash : lastHead
+          reviewedPrint = scope.kind === 'commit' ? '' : scopePrint(scope)
+        }
+        // The notes at its end go to the project's cache, and never to the pane.
+        const kept = await keepReview($, scope, e.answer)
+        const shown = kept.text
+        const isUnseen = (await read($, tabAtom)) !== 'review'
+        // What the pane puts first: the decision points and insights the review's notes named.
+        const decisions = kept.notes?.decisions ?? []
+        const insights = (kept.notes?.insights ?? []).map(insight => `${insight.file}${insight.symbol === '' ? '' : `, ${insight.symbol}`}: ${insight.text}`)
+        await setReview($, { state: 'done', text: fitReview(shown), isUnseen, decisions, insights })
+        // A survey reviewed none of their work, so it is not part of the record of it.
+        if (scope.kind !== 'survey') recorder?.add({ at: await $.clock.now(), kind: 'review', text: scopeSubject(scope) })
+        if (isUnseen) $.ui.toast(`Deep review ready: ${scopeSubject(scope)}`)
+        // The review ends on the one thing most worth doing next, which is worth saying out loud.
+        // Its last line as shown: the notes after it are not for the person.
+        if (settings.isAnimated) await say($, `${scope.kind === 'survey' ? "I've had a look around." : "Review's in."} ${closingLine(shown)}`)
+        // What it said may be about the spot the Explain tab is on.
+        void refreshView($)
+        reviewRetryAt = null
+        if (scope.kind === 'commit') {
+          // A commit's review is also when the person's progress is brought up to date, with the review for context.
+          // A waiting commit moves on to that. One reviewed by hand that was not waiting gets it directly.
+          if (waiting.commits.some(commit => commit.hash === scope.hash)) await changeQueue($, queue => reviewed(queue, scope.hash))
+          else queueProgress($, async () => void (await assessCommit($, settings, scope.hash, shown)))
+        }
+        // The reviewer answered, so Claude is answering.
+        await noteOutcome($, settings, 'deep-review', { ok: true })
+      } else if (e.reason === 'error' && failure === '') {
+        // An API error says only "error" here. Which one arrives through `classic.StopFailure` at about the same
+        // moment, so it gets one before this counts as a failure nobody can explain.
+        endedReview = { agentId, scope }
+        await setReview($, { state: 'failed', text: 'error' })
+        schedulerOf($).set('review-verdict', (await $.clock.now()) + VERDICT_MS, () => reviewVerdict($, settings, null))
+      } else if (e.reason === 'error') {
+        // Why it died arrived a moment ago and may still be being counted. Seen live: without this wait
+        // Claude still looked well here, and an outage was taken for a failure nobody could explain.
+        await noted?.catch(() => undefined)
+        await reviewFailed($, settings, scope, failure, 'service')
+      } else if (e.reason === 'answer') {
+        // It ended its turn with nothing to say. Claude is answering, though.
+        await noteOutcome($, settings, 'deep-review', { ok: true })
+        await reviewFailed($, settings, scope, 'the reviewer said nothing', 'own')
+      } else {
+        await reviewFailed($, settings, scope, e.reason === 'aborted' ? 'it was stopped' : 'the model refused', 'final')
       }
-      // The notes at its end go to the project's cache, and never to the pane.
-      const kept = await keepReview($, scope, e.answer)
-      const shown = kept.text
-      const isUnseen = (await read($, tabAtom)) !== 'review'
-      // What the pane puts first: the decision points and insights the review's notes named.
-      const decisions = kept.notes?.decisions ?? []
-      const insights = (kept.notes?.insights ?? []).map(insight => `${insight.file}${insight.symbol === '' ? '' : `, ${insight.symbol}`}: ${insight.text}`)
-      await setReview($, { state: 'done', text: fitReview(shown), isUnseen, decisions, insights })
-      // A survey reviewed none of their work, so it is not part of the record of it.
-      if (scope.kind !== 'survey') recorder?.add({ at: await $.clock.now(), kind: 'review', text: scopeSubject(scope) })
-      if (isUnseen) $.ui.toast(`Deep review ready: ${scopeSubject(scope)}`)
-      // The review ends on the one thing most worth doing next, which is worth saying out loud.
-      // Its last line as shown: the notes after it are not for the person.
-      if (settings.isAnimated) await say($, `${scope.kind === 'survey' ? "I've had a look around." : "Review's in."} ${closingLine(shown)}`)
-      // What it said may be about the spot the Explain tab is on.
-      void refreshView($)
-      // A commit's review is also when the person's progress is brought up to date, with the review for context.
-      if (scope.kind === 'commit') queueProgress($, () => assessCommit($, settings, scope.hash, shown))
-    } else {
-      await setReview($, { state: 'failed', text: e.reason === 'answer' ? 'the reviewer said nothing' : failure !== '' ? failure : e.reason })
-      if (scope !== null && scope.kind === 'commit') queueProgress($, () => assessCommit($, settings, scope.hash, ''))
-    }
-
-    const queued = queuedCommit
-    queuedCommit = null
-    if (queued !== null && mode === 'on') await reviewCommit($, queued)
+    })
 
     return next(e)
   })
@@ -2944,10 +3359,16 @@ export const register: Register = (on, options) => {
     if (mode !== 'off') {
       trace($, 'hook', 'classic.StopFailure', () => ({ error: e.error, details: e.error_details, agent: e.agent_id, type: e.agent_type }))
       const outcome = outcomeOfError(e.error)
-      const isReviewer = e.agent_id !== undefined && e.agent_id === reviewAgentId
+      const isRunning = e.agent_id !== undefined && e.agent_id === reviewAgentId
+      const isEnded = endedReview !== null && e.agent_id === endedReview.agentId
       // The review's own end, `turn.complete`, says only "error". This says which.
-      if (isReviewer && !outcome.ok) reviewFailure = outcome.detail
-      await noteOutcome($, settings, e.agent_id === undefined ? 'conversation' : 'deep-review', outcome)
+      if (isRunning && !outcome.ok) reviewFailure = outcome.detail
+      // Any other subagent is one the conversation started: its trouble is not the deep review's setting.
+      const noted = noteOutcome($, settings, isRunning || isEnded ? 'deep-review' : 'conversation', outcome)
+      if (isRunning) reviewFailureNoted = noted
+      await noted
+      // The review ended a moment ago, and this is why.
+      if (isEnded && !outcome.ok) await reviewVerdict($, settings, outcome.detail)
     }
 
     return next(e)
@@ -3180,7 +3601,7 @@ export const register: Register = (on, options) => {
       },
       onReview: () => {
         touched($, settings, 'review now')
-        void reviewSince($, true)
+        void reviewSince($, settings, true)
       },
     })
   })

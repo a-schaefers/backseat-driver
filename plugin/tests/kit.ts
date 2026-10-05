@@ -205,6 +205,8 @@ export function stubSession(on: On, options: StubOptions = {}) {
     spawned: [] as { type: string; description: string; prompt: string }[],
     /** Ids of subagents a test has reported finished, through `finish()`. */
     finishedAgents: [] as string[],
+    /** Ids of subagents that are gone without having reported back: Claude Code no longer lists them. */
+    lostAgents: [] as string[],
     toasts: [] as string[],
     /** The plugin's store, which outlives the session. */
     store: new Map<string, unknown>(Object.entries(options.store ?? {})),
@@ -656,12 +658,14 @@ export function stubSession(on: On, options: StubOptions = {}) {
   // returns, so the plugin finds its reviewer here, as it does when another
   // mod answers its spawn.
   on('agent.list', () => ({
-    value: session.spawned.map((input, index) => ({
-      id: session.agentId(index + 1),
-      description: input.description,
-      type: 'backseat-driver:deep-reviewer',
-      status: session.finishedAgents.includes(session.agentId(index + 1)) ? ('completed' as const) : ('running' as const),
-    })),
+    value: session.spawned
+      .map((input, index) => ({
+        id: session.agentId(index + 1),
+        description: input.description,
+        type: 'backseat-driver:deep-reviewer',
+        status: session.finishedAgents.includes(session.agentId(index + 1)) ? ('completed' as const) : ('running' as const),
+      }))
+      .filter(agent => !session.lostAgents.includes(agent.id)),
   }))
   on('agent.offer', () => ({ isOffered: true }))
   on('turn.complete', () => ({ text: '' }))

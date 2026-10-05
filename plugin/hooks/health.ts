@@ -79,6 +79,8 @@ export type HealthEvent =
   | { type: 'due' }
   /** A job starts asking while recovering. */
   | { type: 'probing' }
+  /** The job that was asking ended without saying anything about Claude: it was cut short, or what came back was its own problem. */
+  | { type: 'abandoned' }
 
 const FIRST_WAIT_MS = 30_000
 /** With no connection, or no answer in time, the first retry comes sooner: a dropped connection is often back at once. */
@@ -107,10 +109,13 @@ export function stepHealth(health: Health, event: HealthEvent): Health {
       return health.state === 'waiting' ? { state: 'recovering', trouble: health.trouble, detail: health.detail, failures: health.failures } : health
     case 'probing':
       return health.state === 'recovering' ? { ...health, state: 'probing' } : health
+    case 'abandoned':
+      // Nothing was found out, so the next job that wants to ask does. Otherwise every job would wait for an answer that is not coming.
+      return health.state === 'probing' ? { ...health, state: 'recovering' } : health
     case 'failed': {
       if (event.trouble === 'account') return { state: 'blocked', detail: event.detail }
       // Not the service's doing: the job that asked deals with it.
-      if (event.trouble === 'job' || event.trouble === 'reply') return health
+      if (event.trouble === 'job' || event.trouble === 'reply') return stepHealth(health, { type: 'abandoned' })
       if (health.state === 'blocked') return health
       const failures = health.state === 'ok' ? 1 : health.failures + 1
       const reopens = event.trouble === 'rate-limit' && typeof event.resetsAt === 'number' && event.resetsAt > event.at ? event.resetsAt : null

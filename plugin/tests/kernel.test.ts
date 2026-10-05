@@ -216,6 +216,22 @@ test('what is not the service\'s doing does not make the other jobs wait', async
   expect(failed(waiting, 5000, 'reply')).toEqual(waiting)
 })
 
+test('the request that finds out whether Claude is back cannot leave the others waiting for good', async () => {
+  const waiting = failed(HEALTHY, 0)
+  const recovering = stepHealth(waiting, { type: 'due' })
+  const probing = stepHealth(recovering, { type: 'probing' })
+  expect(mayAsk(probing)).toBe(false)
+  // It was cut short, or never started: nothing was found out, so the next job asks.
+  expect(stepHealth(probing, { type: 'abandoned' })).toEqual(recovering)
+  // What came back was its own problem, such as an empty reply or a model that does not exist: the same.
+  expect(failed(probing, 40_000, 'reply')).toEqual(recovering)
+  expect(failed(probing, 40_000, 'job')).toEqual(recovering)
+  expect(mayAsk(recovering)).toBe(true)
+  // Only the one that was asking can be abandoned.
+  expect(stepHealth(waiting, { type: 'abandoned' })).toEqual(waiting)
+  expect(stepHealth(HEALTHY, { type: 'abandoned' })).toEqual(HEALTHY)
+})
+
 test('a refused account stops every job until something is answered', async () => {
   const blocked = failed(HEALTHY, 0, 'account')
   expect(blocked).toEqual({ state: 'blocked', detail: 'account' })
