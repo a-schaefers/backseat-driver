@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { isSameShown, textsOf } from '../core/shown'
-import type { Shown } from '../core/shown'
+import { isSameShown, textsOf } from '../hooks/shown'
+import type { Shown } from '../hooks/shown'
 
 /** What the tutor says it is showing: the pieces of text in a drawing, for whoever checks them against the screen. */
 

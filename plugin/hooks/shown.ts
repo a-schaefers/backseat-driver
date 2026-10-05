@@ -2,6 +2,9 @@
  * What the tutor says it is showing, for whoever checks it against the
  * screen (`scripts/jack.py`, with the debug log on).
  *
+ * Part of the Claude Code adapter: it reads Claude Code's element tree
+ * (`Text`, `Button` with its `hotkey`, `Markdown`, `Select`, `Raster`).
+ *
  * A drawing is a tree of elements handed to Claude Code. Whether it reached
  * the screen is not something the mod can see: a pane can be open and never
  * placed, and a session can go on drawing in a process nobody is looking at.

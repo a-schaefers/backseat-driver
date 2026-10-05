@@ -199,8 +199,8 @@ import { freshLeaseState, giveLease as giveLeaseOf, keepLease as keepLeaseOf } f
 import type { LeasePorts, LeaseState } from '../core/leasing'
 import { scanGapMs } from '../core/sensor'
 import { SELF_CHECK_MS } from '../core/sessions'
-import { isSameShown, textsOf } from '../core/shown'
-import type { Shown } from '../core/shown'
+import { isSameShown, textsOf } from './shown'
+import type { Shown } from './shown'
 import { healthLine, playLine, watchOf } from '../core/status'
 import type { Recorder } from '../core/recorder'
 import {
@@ -686,7 +686,7 @@ function debugPortsOf($: EngineInterface, settings: Settings | null = null): Deb
     versions: async () => {
       const [claudeCode, own] = await Promise.all([$.session.version(), ownVersion($)])
 
-      return { claudeCode, plugin: own.version === null ? null : versionText(own.version) }
+      return { host: { claudeCode }, plugin: own.version === null ? null : versionText(own.version) }
     },
     pluginRoot: () => $.plugin.root,
     fullState: () => fullState($),
