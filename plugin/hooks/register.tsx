@@ -401,6 +401,8 @@ let isScanning = false
 /** True when something asked for a scan while one was running: another follows at once. */
 let isScanWanted = false
 let lastScanMs = 0
+/** When the last scan of the working tree finished. What changed before it, the tutor has seen. */
+let lastScanAt = 0
 /** When something last happened: a save, a commit, a caret move, a prompt, a key in the pane. */
 let activeAt: number | null = null
 
@@ -454,17 +456,40 @@ const carryState: CarryState = freshCarryState()
  * answered when the pane was last opened. Whether any of it reached the
  * screen is not something the mod can see. `scripts/jack.py` checks it.
  */
-const shown: { pane: Shown | null; band: Shown | null; hint: string; opened: { at: number; isPlaced: boolean; reason: string } | null } = {
+const shown: {
+  pane: Shown | null
+  band: Shown | null
+  hint: string
+  opened: { at: number; isPlaced: boolean; reason: string } | null
+  /** When the pane was last closed, and by whom: the person (its mark, or Esc), the plugin, or an unload. */
+  closed: { at: number; origin: string } | null
+} = {
   pane: null,
   band: null,
   hint: '',
   opened: null,
+  closed: null,
 }
 /** The drawings as the debug log last recorded them, and the timer that records the next. */
 const shownLogged: { pane: Shown | null; band: Shown | null } = { pane: null, band: null }
 let shownTimer: Timer | null = null
 /** A drawing is written down once it has stood this long, so that a line being said word by word is one record and not ten. */
 const SHOWN_SETTLE_MS = 500
+
+/** How the person was told something outside the pane and the band (`noteSaid`). */
+type SaidHow = 'toast' | 'transcript' | 'command' | 'asked' | 'prompt'
+/** The latest things the person was told outside the pane and the band, oldest first. */
+const saidLately: { at: number; how: SaidHow; text: string }[] = []
+const SAID_KEPT = 12
+/** The question a dialog is asking now, while it waits for the person. */
+let asking: { at: number; question: string } | null = null
+
+/**
+ * This load of the module: when, which version, and with which options.
+ * Saving a file under `plugin/` loads it again in a session on the working
+ * copy, so a session whose load is older than the newest file runs old code.
+ */
+const loaded: { at: number; options: PluginOptions | null } = { at: Date.now(), options: null }
 
 /**
  * The files that hold what is on record about the person, as last seen:
@@ -589,7 +614,7 @@ function snapshot(): Record<string, unknown> {
     engagement,
     repoRoot,
     dataRoot,
-    watcher: watcher === null ? null : { dirty: watcher.dirty(), changed: watcher.changed(), hasPending: watcher.hasPending() },
+    watcher: watcher === null ? null : { dirty: watcher.dirty(), noise: watcher.noise(), changed: watcher.changed(), hasPending: watcher.hasPending() },
     look: {
       isWatchReady,
       isLooking: lookState.isLooking,
@@ -599,7 +624,7 @@ function snapshot(): Record<string, unknown> {
       lookFailure: lookState.lookFailure,
       quietLooks: lookState.quietLooks,
     },
-    scan: { isScanning, isScanWanted, lastScanMs, activeAt },
+    scan: { isScanning, isScanWanted, lastScanMs, lastScanAt, activeAt },
     pushers: pushers.map(pusher => ({ role: pusher.role, isLive: pusher.isLive })),
     deadlines: deadlines?.all() ?? {},
     health,
@@ -621,7 +646,14 @@ function snapshot(): Record<string, unknown> {
       lastHead,
       headLog,
     },
-    explain: { isOn: followState.explainer !== null, waiting: followState.explainer?.pending() ?? 0, focus: followState.focus, editorFocusAt: followState.editorFocusAt, isWatchingClosely: followState.isWatchingClosely },
+    explain: {
+      isOn: followState.explainer !== null,
+      waiting: followState.explainer?.pending() ?? 0,
+      focus: followState.focus,
+      editorFocusAt: followState.editorFocusAt,
+      focusText: followState.focusText,
+      isWatchingClosely: followState.isWatchingClosely,
+    },
     timers: { talk: talkTimer !== null, blink: blinkTimer !== null },
     profiles: { languages: profiles.languages, subjects: Object.keys(profiles.subjects) },
     progress: { identity: progressState.identity, records: [...progressState.records.keys()], watchedPaths: [...progressState.watchedPaths] },
@@ -658,7 +690,10 @@ async function fullState($: EngineInterface): Promise<Record<string, unknown>> {
   return {
     ...snapshot(),
     session: await selfState($),
+    loaded: { ...loaded },
     shown: { ...shown },
+    said: [...saidLately],
+    asking,
     pane: {
       mode: await read($, modeAtom),
       tab: await read($, tabAtom),
@@ -691,7 +726,7 @@ function hostOf($: EngineInterface, settings: Settings | null): Host {
     deadline: { set: (name, at, run) => schedulerOf($).set(name, at, run), cancel: name => void deadlines?.cancel(name) },
     trace: (kind, name, detail) => trace($, kind, name, detail),
     fail: (what, error) => fail($, what, error),
-    toast: text => $.ui.toast(text),
+    toast: text => toastPerson($, text),
     sessionId: async () => await $.session.id(),
     mode: () => mode,
     isOn: () => mode !== 'off',
@@ -985,6 +1020,55 @@ function answered($: EngineInterface, input: { tool: string }, result: string): 
   return { result }
 }
 
+/**
+ * Keeps one thing the person was told outside the pane and the band, and
+ * writes it into the debug log (`said`). The latest few are part of the
+ * state beside the log, so that `scripts/jack.py` can look for each of them
+ * on the screen: a toast nobody saw is the same mystery as a pane nobody saw.
+ */
+function noteSaid($: EngineInterface, how: SaidHow, text: string, detail?: Record<string, unknown>): void {
+  saidLately.push({ at: Date.now(), how, text })
+  if (saidLately.length > SAID_KEPT) saidLately.shift()
+  trace($, 'said', how, () => ({ text, ...detail }))
+}
+
+/** A toast, said and written down. */
+function toastPerson($: EngineInterface, text: string): void {
+  noteSaid($, 'toast', text)
+  $.ui.toast(text)
+}
+
+/** A line in the transcript, said and written down. */
+function tellPerson($: EngineInterface, text: string): void {
+  noteSaid($, 'transcript', text)
+  $.ui.log(text)
+}
+
+/** A prompt sent in the person's name, written down: it shows in the conversation as theirs. */
+function submitForPerson($: EngineInterface, text: string): Promise<unknown> {
+  noteSaid($, 'prompt', text)
+
+  return $.prompt.submit({ text, asUser: true })
+}
+
+/** A question in a dialog, written down with the answer it got, or that it got none. */
+async function askPerson($: EngineInterface, question: string, choices: { options: string[]; header: string }): Promise<string> {
+  noteSaid($, 'asked', question, { options: choices.options, header: choices.header })
+  const open = { at: Date.now(), question }
+  asking = open
+  try {
+    const answer = await $.ui.ask(question, choices)
+    trace($, 'ui', 'answered', () => ({ question, answer }))
+
+    return answer
+  } catch (error) {
+    trace($, 'ui', 'not answered', () => ({ question, why: String(error) }))
+    throw error
+  } finally {
+    if (asking === open) asking = null
+  }
+}
+
 async function loadTutor($: EngineInterface, chosen: Persona): Promise<void> {
   const root = $.plugin.root
   const file = (path: string): Promise<string> => $.fs.read(`${root}/${path}`)
@@ -1175,12 +1259,14 @@ async function openPane($: EngineInterface): Promise<void> {
   const reason = opened.isPlaced ? '' : opened.reason
   const wasWaiting = shown.opened?.isPlaced === false
   shown.opened = { at: Date.now(), isPlaced: opened.isPlaced, reason }
+  shown.closed = null
   trace($, 'ui', 'pane opened', () => ({ isPlaced: opened.isPlaced, reason }))
-  if (!opened.isPlaced && !wasWaiting) $.ui.log(PANE_WAITS)
+  if (!opened.isPlaced && !wasWaiting) tellPerson($, PANE_WAITS)
 }
 
 /** Closes the vertical layout's pane, when it is open. */
 async function closePane($: EngineInterface): Promise<void> {
+  if (shown.opened !== null) shown.closed = { at: Date.now(), origin: 'plugin' }
   shown.opened = null
   shown.pane = null
   try {
@@ -1249,7 +1335,7 @@ async function sayChanged($: EngineInterface, fields: readonly string[]): Promis
       return row === undefined ? [] : [{ field, label: row.label, value: row.value }]
     })
     const text = changedText(named)
-    if (text !== '') $.ui.log(text)
+    if (text !== '') tellPerson($, text)
   } catch (error) {
     fail($, 'could not say which settings changed', error)
   }
@@ -1258,11 +1344,13 @@ async function sayChanged($: EngineInterface, fields: readonly string[]): Promis
 async function changeSetting($: EngineInterface, row: SettingRow, picked: string): Promise<void> {
   await update($, settingsAtom, rows => withSetting(rows, row.key, picked))
   try {
+    // The change loads the module again, which cancels the write the debug log has waiting: it is written now.
+    await flushDebug($)
     const { deny } = await $.config.set({ key: row.key, value: configValue(row, picked) })
     trace($, 'state', 'setting', () => ({ key: row.key, value: picked, deny }))
     if (deny !== undefined) {
       await update($, settingsAtom, rows => withSetting(rows, row.key, row.value))
-      $.ui.toast(`${row.label} stays ${row.value}: ${deny}`)
+      toastPerson($, `${row.label} stays ${row.value}: ${deny}`)
 
       return
     }
@@ -1271,7 +1359,7 @@ async function changeSetting($: EngineInterface, row: SettingRow, picked: string
     reloadWatch = $.clock.after(RELOAD_WAIT_MS, () => {
       reloadWatch = null
       trace($, 'state', 'setting not reloaded', () => ({ key: row.key, value: picked }))
-      $.ui.log(notReloadedText(row.label, picked))
+      tellPerson($, notReloadedText(row.label, picked))
     })
   } catch (error) {
     await update($, settingsAtom, rows => withSetting(rows, row.key, row.value))
@@ -1514,7 +1602,7 @@ async function startLicense($: EngineInterface): Promise<void> {
 async function askLicense($: EngineInterface): Promise<LicenseRecord> {
   let answer: string
   try {
-    answer = await $.ui.ask(USE_QUESTION, { options: [...USE_CHOICES], header: USE_HEADER })
+    answer = await askPerson($, USE_QUESTION, { options: [...USE_CHOICES], header: USE_HEADER })
   } catch {
     return await changeLicense($, record => ({ ...record, isAsked: true }))
   }
@@ -1524,7 +1612,7 @@ async function askLicense($: EngineInterface): Promise<LicenseRecord> {
   const chosen = await changeLicense($, record => ({ ...record, isAsked: true, use: use ?? record.use }))
   if (answer !== COMMERCIAL_CHOICE || chosen.key !== '') return chosen
   try {
-    const key = await $.ui.ask(KEY_QUESTION, { options: [...KEY_CHOICES], header: KEY_HEADER })
+    const key = await askPerson($, KEY_QUESTION, { options: [...KEY_CHOICES], header: KEY_HEADER })
     if (looksLikeKey(key)) return await addKey($, key)
   } catch {
     // Later, then.
@@ -1656,20 +1744,21 @@ async function runUpdate($: EngineInterface): Promise<void> {
   if (install.kind === 'clone') {
     const changed = (await git($, install.top, ['status', '--porcelain', '--untracked-files=no'])).stdout.trim()
     if (changed !== '') {
-      $.ui.log(`This copy, in ${install.top}, has changes of its own, so it was not updated. Commit or stash them, then run /bsd update again.`)
+      tellPerson($, `This copy, in ${install.top}, has changes of its own, so it was not updated. Commit or stash them, then run /bsd update again.`)
 
       return
     }
     const before = (await git($, install.top, ['rev-parse', 'HEAD'])).stdout.trim()
     const pulled = await git($, install.top, ['pull', '--ff-only'], true)
     if (pulled.exitCode !== 0) {
-      $.ui.log(`git pull in ${install.top} did not work: ${(pulled.stderr ?? pulled.stdout).trim().split('\n')[0] ?? 'no reason given'}. Nothing was changed.`)
+      tellPerson($, `git pull in ${install.top} did not work: ${(pulled.stderr ?? pulled.stdout).trim().split('\n')[0] ?? 'no reason given'}. Nothing was changed.`)
 
       return
     }
     await update($, updateAtom, () => '')
     const after = (await git($, install.top, ['rev-parse', 'HEAD'])).stdout.trim()
-    $.ui.log(
+    tellPerson(
+      $,
       after === before
         ? `Already up to date: ${install.top} has everything its origin has.`
         : 'Updated. The plugin reloads by itself in a moment, and the tutor stays as it is.',
@@ -1682,7 +1771,7 @@ async function runUpdate($: EngineInterface): Promise<void> {
     for (const argv of updateCommands(install)) {
       const result = await claudeCli($, argv)
       if (!result.ok) {
-        $.ui.log(`${shellLine(argv)} did not work: ${result.output.split('\n')[0] ?? ''}. Run it in a terminal to see why.`)
+        tellPerson($, `${shellLine(argv)} did not work: ${result.output.split('\n')[0] ?? ''}. Run it in a terminal to see why.`)
 
         return
       }
@@ -1690,25 +1779,25 @@ async function runUpdate($: EngineInterface): Promise<void> {
     await update($, updateAtom, () => '')
     const now = await installedVersion($, install.id)
     if (now !== '' && now === was) {
-      $.ui.log(`Already up to date: ${now} is the newest release.`)
+      tellPerson($, `Already up to date: ${now} is the newest release.`)
 
       return
     }
-    $.ui.log(`Updated${now === '' ? '' : ` to ${now}`}. Reloading plugins: the tutor stays as it is.`)
+    tellPerson($, `Updated${now === '' ? '' : ` to ${now}`}. Reloading plugins: the tutor stays as it is.`)
     try {
       await $.command.run({ command: 'reload-plugins', args: '' })
     } catch {
-      $.ui.log('Run /reload-plugins to start using the new version.')
+      tellPerson($, 'Run /reload-plugins to start using the new version.')
     }
 
     return
   }
   if (install.kind === 'synced') {
-    $.ui.log('This copy comes from your claude.ai organization, which sends updates by itself. Run /reload-plugins to start using one that has arrived.')
+    tellPerson($, 'This copy comes from your claude.ai organization, which sends updates by itself. Run /reload-plugins to start using one that has arrived.')
 
     return
   }
-  $.ui.log('This copy was not installed from a marketplace or cloned with git, so it cannot update itself. Install it as the README says to get updates.')
+  tellPerson($, 'This copy was not installed from a marketplace or cloned with git, so it cannot update itself. Install it as the README says to get updates.')
 }
 
 /** Deletes the data folder itself, only when everything in it is the tutor's own. */
@@ -1734,12 +1823,12 @@ async function runUninstall($: EngineInterface, settings: Settings): Promise<voi
   await resolveHome($)
   const answer = await choose($, UNINSTALL_QUESTION, [UNINSTALL_KEEP, UNINSTALL_ERASE, UNINSTALL_ONLY])
   if (answer !== UNINSTALL_ERASE && answer !== UNINSTALL_ONLY) {
-    $.ui.log('Nothing was removed.')
+    tellPerson($, 'Nothing was removed.')
 
     return
   }
   if (answer === UNINSTALL_ERASE && !isPhrase((await choose($, PHRASE_QUESTION, PHRASE_OPTIONS)) ?? '')) {
-    $.ui.log('Nothing was removed.')
+    tellPerson($, 'Nothing was removed.')
 
     return
   }
@@ -1765,7 +1854,7 @@ async function runUninstall($: EngineInterface, settings: Settings): Promise<voi
     said.push('This copy was not installed from a marketplace, so remove it the way you added it.')
   }
   said.push('Its settings, if you changed any, stay under pluginConfigs in your Claude Code settings.json.')
-  $.ui.log(said.join(' '))
+  tellPerson($, said.join(' '))
 }
 
 
@@ -1823,7 +1912,7 @@ async function askWorking($: EngineInterface): Promise<void> {
   const working = journal.working(await $.clock.now())
   let answer = ''
   try {
-    answer = await $.ui.ask(WORKING_QUESTION, { options: workingChoices(working), header: WORKING_HEADER })
+    answer = await askPerson($, WORKING_QUESTION, { options: workingChoices(working), header: WORKING_HEADER })
   } catch {
     return
   }
@@ -1924,7 +2013,7 @@ async function ask($: EngineInterface, settings: Settings, questions: readonly Q
   const answers: string[] = []
   for (const question of questions) {
     try {
-      answers.push(await $.ui.ask(question.question, { options: question.options, header: question.header }))
+      answers.push(await askPerson($, question.question, { options: question.options, header: question.header }))
     } catch {
       break
     }
@@ -2083,7 +2172,7 @@ async function registerTools($: EngineInterface): Promise<void> {
  */
 async function look($: EngineInterface, settings: Settings, isAsked: boolean): Promise<void> {
   if (!leaseState.isDriver) {
-    if (isAsked) $.ui.toast(FOLLOWING)
+    if (isAsked) toastPerson($, FOLLOWING)
 
     return
   }
@@ -2317,7 +2406,7 @@ async function carryOn($: EngineInterface, settings: Settings): Promise<void> {
  */
 async function comeUp($: EngineInterface, settings: Settings, to: 'on' | 'paused', from: string): Promise<void> {
   await switchTo($, to, settings, { carriedFrom: from })
-  $.ui.log(CARRIED_ON)
+  tellPerson($, CARRIED_ON)
 }
 
 /**
@@ -2734,14 +2823,14 @@ async function maybeSurvey($: EngineInterface, settings: Settings, run: number):
 async function reviewSince($: EngineInterface, settings: Settings, isAsked: boolean): Promise<void> {
   if (mode === 'off' || (mode === 'paused' && !isAsked)) return
   if (!leaseState.isDriver) {
-    if (isAsked) $.ui.toast(FOLLOWING)
+    if (isAsked) toastPerson($, FOLLOWING)
 
     return
   }
   // The timer holds back near the plan limit, and while Claude is not answering. A review asked for by hand does not.
   if (!isAsked && ((await readPressure($)).level === 'held' || !mayAsk(health))) return
   if (!isReviewFree()) {
-    if (isAsked) $.ui.toast('A deep review is already running.')
+    if (isAsked) toastPerson($, 'A deep review is already running.')
 
     return
   }
@@ -2762,7 +2851,7 @@ async function startSince($: EngineInterface, settings: Settings, isAsked: boole
     }
   }
   if (repoRoot === '' || reviewedHead === '') {
-    if (isAsked) $.ui.toast('A deep review needs a git repository with at least one commit.')
+    if (isAsked) toastPerson($, 'A deep review needs a git repository with at least one commit.')
 
     return
   }
@@ -3007,6 +3096,7 @@ async function scan($: EngineInterface, settings: Settings): Promise<void> {
     isScanning = false
     if (now === 0) now = await $.clock.now()
     // Asked for again while this one ran: at once. Otherwise as soon as the cadence says.
+    lastScanAt = now
     if (isScanWanted) schedulerOf($).set('scan', now, () => scan($, settings))
     else planScan($, settings, now)
   }
@@ -3060,6 +3150,7 @@ async function startWatching($: EngineInterface, settings: Settings, run: number
   lookState.failures = 0
   lookState.lookFailure = ''
   lastScanMs = 0
+  lastScanAt = 0
   pressure = NO_PRESSURE
 
   const top = await git($, undefined, ['rev-parse', '--show-toplevel'])
@@ -3531,6 +3622,8 @@ async function changeLayout($: EngineInterface, wanted: Layout): Promise<string>
   // The row's owner is named with where the plugin came from (`backseat-driver@inline` for a working copy).
   const row = rows.find(candidate => candidate.provider.plugin.split('@')[0] === 'backseat-driver' && candidate.key.endsWith('.layout'))
   if (row === undefined) return 'The layout setting was not found in /config.'
+  // The change loads the module again, which cancels the write the debug log has waiting: it is written now.
+  await flushDebug($)
   const { deny } = await $.config.set({ key: row.key, value: wanted })
   if (deny !== undefined) return `The layout stays ${layout}: ${deny}`
   trace($, 'state', 'layout', () => ({ from: layout, to: wanted }))
@@ -3545,7 +3638,7 @@ async function changeLayout($: EngineInterface, wanted: Layout): Promise<string>
 /** Asks one question about forgetting, and answers null when the dialog is dismissed. */
 async function choose($: EngineInterface, question: string, options: readonly string[]): Promise<string | null> {
   try {
-    return await $.ui.ask(question, { options: [...options], header: 'Forget' })
+    return await askPerson($, question, { options: [...options], header: 'Forget' })
   } catch {
     return null
   }
@@ -3574,11 +3667,11 @@ async function pickScope($: EngineInterface): Promise<Scope | string> {
  * of a dialog but the explicit one keeps everything.
  */
 async function forget($: EngineInterface, settings: Settings, named: Scope | null): Promise<void> {
-  const kept = (): void => $.ui.log(NOTHING_FORGOTTEN)
+  const kept = (): void => tellPerson($, NOTHING_FORGOTTEN)
   try {
     await resolveHome($)
     if (dataRoot === '') {
-      $.ui.log('There is no home directory, so nothing is kept and nothing can be forgotten.')
+      tellPerson($, 'There is no home directory, so nothing is kept and nothing can be forgotten.')
 
       return
     }
@@ -3587,7 +3680,7 @@ async function forget($: EngineInterface, settings: Settings, named: Scope | nul
 
     const scope = named ?? (await pickScope($))
     if (typeof scope === 'string') {
-      $.ui.log(scope)
+      tellPerson($, scope)
 
       return
     }
@@ -3604,7 +3697,7 @@ async function forget($: EngineInterface, settings: Settings, named: Scope | nul
       if (!(await disk.remove(path))) failed.push(path)
     }
     if (failed.length > 0) {
-      $.ui.log(`Could not delete ${failed.join(', ')}. Delete it by hand to finish.`)
+      tellPerson($, `Could not delete ${failed.join(', ')}. Delete it by hand to finish.`)
 
       return
     }
@@ -3633,9 +3726,9 @@ async function forget($: EngineInterface, settings: Settings, named: Scope | nul
       await loadLessons($)
       await registerReviewer($, settings)
     }
-    $.ui.log(`Forgot ${describeScope(scope, projectName)}.`)
+    tellPerson($, `Forgot ${describeScope(scope, projectName)}.`)
   } catch (error) {
-    $.ui.log(`Forgetting failed (${String(error)}). Nothing more was deleted.`)
+    tellPerson($, `Forgetting failed (${String(error)}). Nothing more was deleted.`)
   }
 }
 
@@ -3727,7 +3820,7 @@ async function drawTutor(
       // The answer lands in the conversation: an open tab above the prompt would cover it.
       if (layout === 'unified') void update($, unfoldedAtom, () => false)
       // Not awaited: it resolves when the turn starts, which may be after the one now running.
-      void $.prompt.submit({ text: explainRequest(note), asUser: true })
+      void submitForPerson($, explainRequest(note))
       // A decision point or an insight is about this one spot in their code, not an idea now explained to them.
       if (isProblem(note.kind)) void saveSubject($, settings, languageOf(note.file) ?? GENERAL, profile => withExplained(profile, note.topic))
     },
@@ -3749,15 +3842,15 @@ async function drawTutor(
       if (layout === 'unified') void update($, unfoldedAtom, () => false)
       void startStepOf(learningPortsOf($), learningState, id).then(text => {
         // Not awaited: it resolves when the turn starts. The text carries the step, since this prompt skips the mod's own hook.
-        if (text !== '') void $.prompt.submit({ text, asUser: true })
-        else $.ui.toast('Every step of this lesson is done.')
+        if (text !== '') void submitForPerson($, text)
+        else toastPerson($, 'Every step of this lesson is done.')
       })
     },
     onLessonDone: (id: string) => {
       touched($, settings, 'lesson done', () => id)
       void lessonChanged($, settings, async () => {
         const title = await markDoneOf(learningPortsOf($), learningState, id)
-        if (title !== '') $.ui.toast(`Marked done: ${title}. The tutor seeing you do it counts for more.`)
+        if (title !== '') toastPerson($, `Marked done: ${title}. The tutor seeing you do it counts for more.`)
       })
     },
     onQuestions: () => {
@@ -3771,7 +3864,7 @@ async function drawTutor(
     onExplainFetch: () => {
       touched($, settings, 'explain fetch')
       // The press says something even when the file maps to nothing, so it never looks like a dead key.
-      $.ui.toast('Looking this file up…')
+      toastPerson($, 'Looking this file up…')
       void refreshView($, true)
     },
     onExplainAsk: () => {
@@ -3781,7 +3874,7 @@ async function drawTutor(
         const text = explainAsk(view)
         // A prompt the mod submits skips the mod's own `prompt.submit` hook. The text
         // names the file and the lines, and the tutor's lookup tool has the rest.
-        if (text !== '') void $.prompt.submit({ text, asUser: true })
+        if (text !== '') void submitForPerson($, text)
       })
     },
     onDismiss: (note: Note) => {
@@ -3848,15 +3941,120 @@ function noteShown($: EngineInterface, site: 'pane' | 'band', drawing: Shown): v
   })
 }
 
+/** `/bsd` and `/backseat-driver`: what was asked, done, and the answer shown under the command. */
+async function bsdCommand($: EngineInterface, settings: Settings, args: string): Promise<{ text: string }> {
+  const { request, rest, unknown } = parseRequest(args)
+  trace($, 'cmd', request, () => ({ args, mode }))
+  // Typing a command means the prompt had the keyboard, whatever the band last heard (Esc raises no event).
+  if (request !== 'debug') await update($, bandKeysAtom, () => false)
+  if (request === 'help') return { text: helpText(unknown) }
+  if (request === 'debug') {
+    const asked = parseDebugRequest(rest)
+
+    return { text: asked === null ? DEBUG_USAGE : await debugCommand($, settings, asked) }
+  }
+  if (request === 'layout') {
+    const wanted = rest.trim() === '' ? LAYOUTS[(LAYOUTS.indexOf(layout) + 1) % LAYOUTS.length] : layoutOf(rest)
+    if (wanted === null || wanted === undefined) return { text: LAYOUT_USAGE }
+
+    return { text: await changeLayout($, wanted) }
+  }
+  if (request === 'license') return { text: await licenseCommand($, parseLicenseRequest(rest)) }
+  if (request === 'questions') {
+    if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
+    // Not awaited: the dialog stays open for as long as the person takes.
+    void ask($, settings, firstRunQuestions(profiles.languages, false))
+
+    return { text: 'Here are the questions again. Esc stops at any point, and the answers so far are kept.' }
+  }
+  if (request === 'settings') {
+    if (mode === 'off') return { text: SETTINGS_OFF }
+    await update($, tabAtom, () => 'settings')
+    // In the unified layout the tab opens above the prompt. Asking again brings back a pane the user closed by hand, and reads the rows again.
+    if (layout === 'unified') await update($, unfoldedAtom, () => true)
+    await showLayout($)
+
+    return {
+      text: `The settings are in the ${layout === 'vertical' ? 'pane' : 'Settings tab above the prompt'}. Ctrl+X Tab gives it the keyboard, then pick a row and press Enter.`,
+    }
+  }
+  if (request === 'explain') {
+    if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
+    if (settings.explain.mode === 'off') return { text: 'Explain is switched off. Its setting is in /config.' }
+    if (followState.explainer === null) return { text: 'Explain needs a git repository, and a moment after /bsd to get ready.' }
+    await update($, tabAtom, () => 'explain')
+    // In the unified layout the tab opens above the prompt, where the answer lands.
+    await update($, unfoldedAtom, () => true)
+    watchClosely($)
+    const spot = rest.trim() === '' ? followState.focus : parseTarget(rest, repoRoot)
+    if (spot === null) {
+      return { text: rest.trim() === '' ? 'Name a file and a line: /bsd explain src/app.py:42' : `That is not a file in this project: ${rest.trim()}` }
+    }
+    // Not awaited: the answer goes to the pane as it arrives.
+    void setFocus($, { path: spot.path, line: spot.line, ...(spot.endLine === undefined ? {} : { endLine: spot.endLine }), source: 'command' }, true)
+
+    return { text: `Explaining ${describeSpot(spot)} in the ${layout === 'vertical' ? 'pane' : 'Explain tab above the prompt'}.` }
+  }
+  if (request === 'working') {
+    if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
+    if (journalState.recorder === null) {
+      return { text: 'There is no journal to put that in: the tutor is still getting ready, or this folder is not a git repository.' }
+    }
+    const said = parseWorking(rest)
+    if (said === null) {
+      // Not awaited: the dialog stays open for as long as the person takes.
+      void askWorking($)
+
+      return { text: 'Type it, or pick an answer. Esc leaves it as it is.' }
+    }
+    void sayWorking($, said)
+
+    return { text: said === '' ? 'Cleared. The tutor goes by your activity again.' : `Noted. Working on: ${said}` }
+  }
+  if (request === 'update') {
+    void runUpdate($)
+
+    return { text: 'Looking for a newer release.' }
+  }
+  if (request === 'uninstall') {
+    void runUninstall($, settings)
+
+    return { text: 'Nothing is removed until you confirm it. Esc keeps everything.' }
+  }
+  if (request === 'forget') {
+    // Not awaited: the dialogs stay open for as long as the person takes.
+    void forget($, settings, parseScope(rest))
+
+    return { text: 'Nothing is forgotten until you confirm it. Esc keeps everything.' }
+  }
+  if (!isModeRequest(request)) return { text: helpText() }
+
+  const { to, text } = transition(mode, request)
+  const wasOff = mode === 'off'
+  if (to !== mode) await switchTo($, to, settings)
+  // Asking for "on" again brings back a pane the user closed by hand.
+  else if (request === 'on') await showLayout($)
+  if (request === 'on' && wasOff && layout !== 'vertical') return { text: `${text} ${BAND_INTRO}` }
+  if (request !== 'status') return { text }
+
+  return { text: `${text} Voice: ${settings.persona.voice}. Engineering: ${settings.persona.engineering}.` }
+}
+
 export const register: Register = (on, options) => {
   const settings = readSettings(options)
   layout = settings.layout
+  loaded.options = options
 
   on('session.start', async ($, e, next) => {
     // Only a session that began in a terminal is gone for good once it draws nowhere (`core/carrying.ts`).
     carryState.isTerminal = e.surface === 'terminal'
     // After a reload, `$.state` still holds the mode and the notes.
     mode = await read($, modeAtom)
+    // A reload is where things go missing, so the debug log carries on from its first moment.
+    if (mode !== 'off') {
+      await resolveHome($)
+      await startDebug($, settings)
+    }
     // A change in /config, or in the Settings tab, is a reload with other options.
     const before = await noteSettings($, options)
     if (mode !== 'off') {
@@ -3921,106 +4119,17 @@ export const register: Register = (on, options) => {
   // Spelled out so that `claude plugin validate` can print which commands this answers.
   on('command.run', { command: 'backseat-driver-update' }, $ => {
     void runUpdate($)
+    noteSaid($, 'command', 'Looking for a newer release.', { args: 'update' })
 
     return { text: 'Looking for a newer release.' }
   })
 
   on('command.run', { command: ['backseat-driver', 'bsd'] }, async ($, e) => {
-    const { request, rest, unknown } = parseRequest(e.args)
-    trace($, 'cmd', request, () => ({ args: e.args, mode }))
-    // Typing a command means the prompt had the keyboard, whatever the band last heard (Esc raises no event).
-    if (request !== 'debug') await update($, bandKeysAtom, () => false)
-    if (request === 'help') return { text: helpText(unknown) }
-    if (request === 'debug') {
-      const asked = parseDebugRequest(rest)
+    const answer = await bsdCommand($, settings, e.args)
+    // What `/bsd` answered is on the screen, under the command: written down, so that it can be looked for there.
+    noteSaid($, 'command', answer.text, { args: e.args })
 
-      return { text: asked === null ? DEBUG_USAGE : await debugCommand($, settings, asked) }
-    }
-    if (request === 'layout') {
-      const wanted = rest.trim() === '' ? LAYOUTS[(LAYOUTS.indexOf(layout) + 1) % LAYOUTS.length] : layoutOf(rest)
-      if (wanted === null || wanted === undefined) return { text: LAYOUT_USAGE }
-
-      return { text: await changeLayout($, wanted) }
-    }
-    if (request === 'license') return { text: await licenseCommand($, parseLicenseRequest(rest)) }
-    if (request === 'questions') {
-      if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
-      // Not awaited: the dialog stays open for as long as the person takes.
-      void ask($, settings, firstRunQuestions(profiles.languages, false))
-
-      return { text: 'Here are the questions again. Esc stops at any point, and the answers so far are kept.' }
-    }
-    if (request === 'settings') {
-      if (mode === 'off') return { text: SETTINGS_OFF }
-      await update($, tabAtom, () => 'settings')
-      // In the unified layout the tab opens above the prompt. Asking again brings back a pane the user closed by hand, and reads the rows again.
-      if (layout === 'unified') await update($, unfoldedAtom, () => true)
-      await showLayout($)
-
-      return {
-        text: `The settings are in the ${layout === 'vertical' ? 'pane' : 'Settings tab above the prompt'}. Ctrl+X Tab gives it the keyboard, then pick a row and press Enter.`,
-      }
-    }
-    if (request === 'explain') {
-      if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
-      if (settings.explain.mode === 'off') return { text: 'Explain is switched off. Its setting is in /config.' }
-      if (followState.explainer === null) return { text: 'Explain needs a git repository, and a moment after /bsd to get ready.' }
-      await update($, tabAtom, () => 'explain')
-      // In the unified layout the tab opens above the prompt, where the answer lands.
-      await update($, unfoldedAtom, () => true)
-      watchClosely($)
-      const spot = rest.trim() === '' ? followState.focus : parseTarget(rest, repoRoot)
-      if (spot === null) {
-        return { text: rest.trim() === '' ? 'Name a file and a line: /bsd explain src/app.py:42' : `That is not a file in this project: ${rest.trim()}` }
-      }
-      // Not awaited: the answer goes to the pane as it arrives.
-      void setFocus($, { path: spot.path, line: spot.line, ...(spot.endLine === undefined ? {} : { endLine: spot.endLine }), source: 'command' }, true)
-
-      return { text: `Explaining ${describeSpot(spot)} in the ${layout === 'vertical' ? 'pane' : 'Explain tab above the prompt'}.` }
-    }
-    if (request === 'working') {
-      if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
-      if (journalState.recorder === null) {
-        return { text: 'There is no journal to put that in: the tutor is still getting ready, or this folder is not a git repository.' }
-      }
-      const said = parseWorking(rest)
-      if (said === null) {
-        // Not awaited: the dialog stays open for as long as the person takes.
-        void askWorking($)
-
-        return { text: 'Type it, or pick an answer. Esc leaves it as it is.' }
-      }
-      void sayWorking($, said)
-
-      return { text: said === '' ? 'Cleared. The tutor goes by your activity again.' : `Noted. Working on: ${said}` }
-    }
-    if (request === 'update') {
-      void runUpdate($)
-
-      return { text: 'Looking for a newer release.' }
-    }
-    if (request === 'uninstall') {
-      void runUninstall($, settings)
-
-      return { text: 'Nothing is removed until you confirm it. Esc keeps everything.' }
-    }
-    if (request === 'forget') {
-      // Not awaited: the dialogs stay open for as long as the person takes.
-      void forget($, settings, parseScope(rest))
-
-      return { text: 'Nothing is forgotten until you confirm it. Esc keeps everything.' }
-    }
-    if (!isModeRequest(request)) return { text: helpText() }
-
-    const { to, text } = transition(mode, request)
-    const wasOff = mode === 'off'
-    if (to !== mode) await switchTo($, to, settings)
-    // Asking for "on" again brings back a pane the user closed by hand.
-    else if (request === 'on') await showLayout($)
-    if (request === 'on' && wasOff && layout !== 'vertical') return { text: `${text} ${BAND_INTRO}` }
-    if (request !== 'status') return { text }
-
-    return { text: `${text} Voice: ${settings.persona.voice}. Engineering: ${settings.persona.engineering}.` }
+    return answer
   })
 
   on('prompt.compose', async ($, e, next) => {
@@ -4079,6 +4188,7 @@ export const register: Register = (on, options) => {
   // The deep reviewer's answer. It goes to the pane, never into the conversation.
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined && mode !== 'off') {
+      trace($, 'hook', 'turn.complete', () => ({ reason: e.reason }))
       // The conversation's own turn ended. An answer means Claude is answering, which ends any wait.
       if (e.reason === 'answer') await noteOutcome($, settings, 'conversation', { ok: true })
       // Whatever Claude's tools did to the working tree during the turn is looked at now.
@@ -4115,7 +4225,7 @@ export const register: Register = (on, options) => {
         await setReview($, { state: 'done', text: fitReview(shown), isUnseen, decisions, insights })
         // A survey reviewed none of their work, so it is not part of the record of it.
         if (scope.kind !== 'survey') journalState.recorder?.add({ at: await $.clock.now(), kind: 'review', text: scopeSubject(scope) })
-        if (isUnseen) $.ui.toast(`Deep review ready: ${scopeSubject(scope)}`)
+        if (isUnseen) toastPerson($, `Deep review ready: ${scopeSubject(scope)}`)
         // The review ends on the one thing most worth doing next, which is worth saying out loud.
         // Its last line as shown: the notes after it are not for the person.
         if (settings.isAnimated) await say($, `${scope.kind === 'survey' ? "I've had a look around." : "Review's in."} ${closingLine(shown)}`)
@@ -4328,6 +4438,48 @@ export const register: Register = (on, options) => {
     trace($, 'guard', isDenied ? 'denied' : 'let through', () => ({ tool: e.tool, path }))
 
     return isDenied ? { deny: DENIAL } : next(e)
+  })
+
+  // The person closing the pane (its mark, or Esc) is something only Claude Code sees. The tutor writes it down,
+  // so that a pane missing from the screen reads as their choice and not as a fault.
+  on('ui.close', ($, e, next) => {
+    if (e.id === PANE_ID && mode !== 'off') {
+      const origin = e.origin.kind
+      shown.closed = { at: Date.now(), origin }
+      if (origin !== 'plugin') shown.opened = null
+      trace($, 'ui', 'pane closed', () => ({ origin }))
+    }
+
+    return next(e)
+  })
+
+  // A surface joining or leaving the session: a terminal attached to a background session, or one that left it.
+  on('session.attach', ($, e, next) => {
+    if (mode !== 'off') trace($, 'hook', 'session.attach', () => ({ surface: e.surface, clientId: e.clientId, viewport: e.viewport }))
+
+    return next(e)
+  })
+
+  on('session.detach', ($, e, next) => {
+    if (mode !== 'off') trace($, 'hook', 'session.detach', () => ({ surface: e.surface, clientId: e.clientId, reason: e.reason }))
+
+    return next(e)
+  })
+
+  // What Claude Code and other plugins tell the person, while the tutor is on, beside what the tutor said itself.
+  on('ui.toast', ($, e, next) => {
+    // The tutor's own toasts come through here too, and are already written down as said.
+    const mine = saidLately.at(-1)
+    const isMine = mine !== undefined && mine.how === 'toast' && mine.text === e.text && Date.now() - mine.at < 1000
+    if (mode !== 'off' && !isMine) trace($, 'heard', 'toast', () => ({ text: e.text }))
+
+    return next(e)
+  })
+
+  on('ui.log', ($, e, next) => {
+    if (mode !== 'off') trace($, 'heard', e.to, () => ({ text: e.text }))
+
+    return next(e)
   })
 
   on('ui.render', { component: 'Pane', requestId: 'backseat-driver' }, async ($, e) =>

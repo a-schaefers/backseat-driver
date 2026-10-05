@@ -32,6 +32,7 @@ where to look.
     scripts/jack.py state [S] [path]  the tutor's own state, or one part: `state lease`, `state shown.pane.texts`
     scripts/jack.py files           the data folder, with ages
     scripts/jack.py ps              every process that matters, and whose it is
+    scripts/jack.py tour [S]        drive a session in tmux as a person would, and check after every step
     scripts/jack.py keys S <keys>   type into a session in tmux (`keys bsd /bsd Enter`). Only when asked to.
 
 S names a session: the start of its id, its tmux session's name, or the short
@@ -366,20 +367,51 @@ def children(pid: int, procs: dict[int, dict]) -> list[int]:
 
 
 # ------------------------------------------------------------------ sessions ----
-def claude_sessions() -> list[dict]:
-    """Every Claude Code session on this machine, as Claude Code lists them: interactive and background."""
-    code, out, _ = run(["claude", "agents", "--json"], timeout=30, cwd="/")
-    try:
-        rows = json.loads(out) if code == 0 else []
-    except ValueError:
-        rows = []
-    return [r for r in rows if isinstance(r, dict) and r.get("sessionId")]
+def default_config() -> str:
+    return os.environ.get("CLAUDE_CONFIG_DIR") or str(pathlib.Path.home() / ".claude")
 
 
-def roster() -> dict:
+def config_dirs(procs: dict[int, dict] | None = None) -> list[str]:
+    """Every Claude Code config folder in use on this machine: this one's, and each running `claude`'s. Claude Code
+    lists only the sessions of its own config folder, so a session started with another one (a dev session's, say)
+    is found through its process."""
+    found = [default_config()]
+    for pid, info in (procs if procs is not None else all_procs()).items():
+        if not info["argv"] or not pathlib.Path(info["argv"][0]).name.startswith("claude"):
+            continue
+        env = environ(pid)
+        config = env.get("CLAUDE_CONFIG_DIR") or (str(pathlib.Path(env["HOME"]) / ".claude") if env.get("HOME") else "")
+        if config and config not in found:
+            found.append(config)
+    return found
+
+
+def claude_env(config: str) -> dict[str, str]:
+    return {**os.environ, "CLAUDE_CONFIG_DIR": config}
+
+
+def claude_sessions(procs: dict[int, dict] | None = None) -> list[dict]:
+    """Every Claude Code session on this machine, as Claude Code lists them: interactive and background, under
+    every config folder in use. Each row says which (`config`)."""
+    rows: list[dict] = []
+    seen: set[tuple] = set()
+    for config in config_dirs(procs):
+        code, out, _ = run(["claude", "agents", "--json"], timeout=30, cwd="/", env=claude_env(config))
+        try:
+            listed = json.loads(out) if code == 0 else []
+        except ValueError:
+            listed = []
+        for r in listed:
+            if not isinstance(r, dict) or not r.get("sessionId") or (r.get("pid"), r["sessionId"]) in seen:
+                continue
+            seen.add((r.get("pid"), r["sessionId"]))
+            rows.append({**r, "config": config})
+    return rows
+
+
+def roster(config: str | None = None) -> dict:
     """Claude Code's own record of its background sessions: which terminal each has, and how big."""
-    config = pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or pathlib.Path.home() / ".claude")
-    found = read_json(config / "daemon" / "roster.json") or {}
+    found = read_json(pathlib.Path(config or default_config()) / "daemon" / "roster.json") or {}
     return found.get("workers", {}) if isinstance(found, dict) else {}
 
 
@@ -449,7 +481,7 @@ def eyes_for(pid: int, session_id: str, procs: dict[int, dict], panes: list[dict
     for name, worker in workers.items():
         if worker.get("sessionId") == session_id or worker.get("replPid") == pid:
             size = tty_size(tty_of(pid)) or (dig(worker, "dispatch.cols") or 120, dig(worker, "dispatch.rows") or 40)
-            return {"kind": "background", "short": name, "cols": int(size[0]), "rows": int(size[1])}
+            return {"kind": "background", "short": name, "cols": int(size[0]), "rows": int(size[1]), "config": worker.get("_config")}
     return None
 
 
@@ -491,7 +523,7 @@ def screen_of(eyes: dict | None) -> list[str] | None:
         code, out, _ = run(["tmux", "-S", eyes["sock"], "capture-pane", "-p", "-t", eyes["pane"]], timeout=5)
         return out.split("\n") if code == 0 else None
     try:
-        p = subprocess.run(["claude", "logs", eyes["short"]], capture_output=True, timeout=30, cwd="/")
+        p = subprocess.run(["claude", "logs", eyes["short"]], capture_output=True, timeout=30, cwd="/", env=claude_env(eyes.get("config") or default_config()))
     except (OSError, subprocess.TimeoutExpired):
         return None
     return replay(p.stdout, eyes["cols"], eyes["rows"]) if p.returncode == 0 and p.stdout else None
@@ -576,10 +608,12 @@ def world(home_override: str | None = None) -> dict:
     now = now_ms()
     procs = all_procs()
     panes = tmux_panes()
-    workers = roster()
+    rows = claude_sessions(procs)
+    # Each config folder's background sessions, each marked with the folder `claude logs` has to be asked under.
+    workers = {name: {**worker, "_config": config} for config in dict.fromkeys(r["config"] for r in rows) for name, worker in roster(config).items()}
     default_home = pathlib.Path(home_override) if home_override else data_home(dict(os.environ))
     sessions = []
-    for row in claude_sessions():
+    for row in rows:
         pid = row.get("pid") if isinstance(row.get("pid"), int) else 0
         # A background session is a process the daemon had ready: its flags came to it afterwards, and are on record.
         worker = next((v for v in workers.values() if v.get("sessionId") == row["sessionId"]), {})
@@ -608,6 +642,8 @@ def world(home_override: str | None = None) -> dict:
             "debug": folder,
             "state": state if isinstance(state, dict) else None,
             "is_me": pid in ([os.getpid()] + ancestors(os.getpid(), procs)),
+            "config": row.get("config", ""),
+            "argv": argv,
         })
     homes = []
     for home in [default_home] + [s["home"] for s in sessions]:
@@ -629,7 +665,7 @@ def ghost(home: pathlib.Path, session_id: str, entry: dict | None) -> dict:
     return {
         "id": session_id, "short": short(session_id), "bg": "", "pid": 0, "kind": "gone", "status": "—", "name": "",
         "cwd": str((entry or {}).get("cwd", "")), "home": home, "plugin": "?", "eyes": None, "entry": entry,
-        "debug": folder, "state": state if isinstance(state, dict) else None, "is_me": False,
+        "debug": folder, "state": state if isinstance(state, dict) else None, "is_me": False, "config": "", "argv": [],
     }
 
 
@@ -701,8 +737,25 @@ def check_homes(w: dict) -> list[tuple[str, str]]:
     return out
 
 
+# A screen and a state file are read a moment apart, and either may be the newer: what one of them lacks is looked
+# at once more, this long after, before it is called a disagreement.
+RECHECK_S = 1.2
+
+
 def check_session(w: dict, s: dict, rows: list[str] | None) -> list[tuple[str, str]]:
-    """What one session says, against what is so."""
+    """What one session says, against what is so. Where the screen lacks something the tutor says it shows, both
+    are read again a moment later, so that a drawing caught between two writes is not called a fault."""
+    found = check_session_once(w, s, rows)
+    if s["eyes"] is None or s["debug"] is None or not any(level == BAD and "on its screen" in text for level, text in found):
+        return found
+    time.sleep(RECHECK_S)
+    state = read_json(s["debug"] / "state.json")
+    again = {**s, "state": state if isinstance(state, dict) else None}
+    return check_session_once({**w, "now": now_ms()}, again, screen_of(s["eyes"]))
+
+
+def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[str, str]]:
+    """What one session says, against what is so, read once."""
     out: list[tuple[str, str]] = []
     now = w["now"]
     state = s["state"]
@@ -780,12 +833,14 @@ def check_session(w: dict, s: dict, rows: list[str] | None) -> list[tuple[str, s
         else:
             out.append((FINE, f"{who}'s editors light is {'green: ' + light if light else 'red: no editor connected'}"))
 
-    # The notes.
+    # The notes. notes.json may keep more than the pane shows: a note about text changed since is kept there and
+    # never shown again (seen live after /bsd off and on). A note in the pane that notes.json lacks is lost at a restart.
     notes = dig(state, "pane.notes")
     if mode != "off" and is_driver is True and project is not None and isinstance(notes, list):
-        kept = len(project["notes"])
-        if kept != len(notes) and now - (project["notes_at"] or 0) > 5000:
-            out.append((BAD, f"{who} has {len(notes)} open note(s) in its pane, and notes.json keeps {kept}, written {ago(now - (project['notes_at'] or 0))} ago"))
+        kept = {n.get("id") for n in project["notes"] if isinstance(n, dict)}
+        lost = [n for n in notes if isinstance(n, dict) and n.get("id") not in kept]
+        if lost and now - (project["notes_at"] or 0) > 5000:
+            out.append((BAD, f"{who} has {len(notes)} open note(s) in its pane, and notes.json, written {ago(now - (project['notes_at'] or 0))} ago, lacks {len(lost)} of them: a restart would lose them"))
 
     # What it says it shows, against the screen.
     shown = state.get("shown") if isinstance(state.get("shown"), dict) else {}
@@ -795,7 +850,10 @@ def check_session(w: dict, s: dict, rows: list[str] | None) -> list[tuple[str, s
     if mode != "off" and layout == "vertical":
         panes = dig(state, "session.panes")
         mine = next((p for p in panes if isinstance(p, dict) and p.get("id") == PANE_ID), None) if isinstance(panes, list) else None
-        if isinstance(panes, list) and mine is None:
+        closed = shown.get("closed") if isinstance(shown.get("closed"), dict) else None
+        if isinstance(panes, list) and mine is None and closed is not None and closed.get("origin") == "person":
+            out.append((NOTE, f"{who}'s pane was closed by the person {ago(now - (closed.get('at') or now))} ago: nothing of the tutor is on screen until /bsd"))
+        elif isinstance(panes, list) and mine is None:
             out.append((BAD, f"{who} has the tutor {mode} in the vertical layout, and Claude Code lists no pane of its own: nothing is on screen"))
         elif isinstance(opened, dict) and opened.get("isPlaced") is False:
             out.append((BAD, f"{who}'s pane is open and not drawn: {opened.get('reason') or 'no reason given'}. /bsd in that session draws it"))
@@ -815,10 +873,257 @@ def check_session(w: dict, s: dict, rows: list[str] | None) -> list[tuple[str, s
     if rows is not None and mode == "off" and any("1: Play" in row and "2: Review" in row for row in rows):
         out.append((BAD, f"{who} says the tutor is off, and its pane is on the screen"))
 
+    out += check_said(w, s, rows)
+    out += check_world(w, s)
+
     # What went wrong lately.
     recent = [r for r in log_records(s["debug"])[-400:] if r.get("k") == "error" and now - (r.get("t") or 0) < 600_000]
     for r in recent[-3:]:
         out.append((BAD, f"{who} {clock(r.get('t'))} error: {r.get('n')}: {brief(dig(r, 'd.message'), 120)}"))
+    return out
+
+
+# ------------------------------------------------------------------ what it told the person ----
+# How long after the tutor said something it is looked for: drawing takes a moment, and a line scrolls away.
+SAID_SETTLE_MS = 1_500
+SAID_RECENT_MS = 10_000
+# A toast stays about four seconds.
+TOAST_MS = 3_500
+# Of a long line, this much of its start is looked for: the rest may be wrapped or cut.
+SAID_PREFIX = 24
+
+
+def is_said_on_screen(text: str, rows: list[str]) -> bool:
+    """Whether something the tutor told the person is on the screen. The transcript prefixes it with the plugin's
+    name, a toast may be cut short in its box: its start is what is looked for, in the whole screen and each side."""
+    want = squash(demark(text))
+    if len(want) < 3:
+        return True
+    want = want[:SAID_PREFIX].rstrip()
+    return any(want in flow for flow in flows(rows))
+
+
+def check_said(w: dict, s: dict, rows: list[str] | None) -> list[tuple[str, str]]:
+    """What the tutor told the person outside its pane (a toast, a line in the transcript, the answer to /bsd, a
+    prompt sent in their name, a question in a dialog), against the screen."""
+    out: list[tuple[str, str]] = []
+    state = s["state"]
+    if state is None or rows is None:
+        return out
+    now = w["now"]
+    who = s["short"]
+    for item in state.get("said") or []:
+        if not isinstance(item, dict) or not isinstance(item.get("text"), str):
+            continue
+        age = now - (item.get("at") or 0)
+        how = item.get("how")
+        window = TOAST_MS if how == "toast" else SAID_RECENT_MS
+        if how == "asked" or not SAID_SETTLE_MS <= age <= window:
+            continue
+        if is_said_on_screen(item["text"], rows):
+            out.append((FINE, f"{who}'s {how} “{item['text'][:50]}” is on its screen"))
+        else:
+            out.append((BAD, f"{who} says it told the person “{item['text'][:70]}” ({how}, {ago(age)} ago), and it is not on its screen"))
+    asking = state.get("asking")
+    if isinstance(asking, dict) and isinstance(asking.get("question"), str) and now - (asking.get("at") or now) >= SAID_SETTLE_MS:
+        if is_said_on_screen(asking["question"], rows):
+            out.append((FINE, f"{who}'s question is on its screen: “{asking['question'][:50]}”"))
+        else:
+            out.append((BAD, f"{who} says a dialog has asked “{asking['question'][:70]}” for {ago(now - asking['at'])}, and no such question is on its screen"))
+    hint = dig(state, "shown.hint")
+    if tutor_mode(s) != "off" and dig(state, "session.layout") == "unified" and isinstance(hint, str) and hint:
+        if is_said_on_screen(hint, rows):
+            out.append((FINE, f"{who}'s hint line ends as it says: “{hint}”"))
+        else:
+            out.append((BAD, f"{who} says the hint line under the prompt ends “{hint}”, and it is not on its screen"))
+    return out
+
+
+# ------------------------------------------------------------------ what it believes about the world ----
+def git_out(root: str, *args: str) -> str | None:
+    code, out, _ = run(["git", "--no-optional-locks", "-C", root, *args], timeout=10)
+    return out if code == 0 else None
+
+
+def git_dirty(root: str) -> set[str] | None:
+    """The changed files that still exist, as the tutor asks git for them (plugin/core/git.ts `dirtyPaths`)."""
+    out = git_out(root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+    if out is None:
+        return None
+    fields = out.split("\0")
+    paths: set[str] = set()
+    i = 0
+    while i < len(fields):
+        field = fields[i]
+        i += 1
+        if len(field) < 4:
+            continue
+        index, worktree, path = field[0], field[1], field[3:]
+        if index in "RC" or worktree in "RC":
+            i += 1
+        if worktree != "D" and not (index == "D" and worktree == " "):
+            paths.add(path)
+    return paths
+
+
+def git_dir(root: str) -> pathlib.Path | None:
+    out = git_out(root, "rev-parse", "--absolute-git-dir")
+    return pathlib.Path(out.strip()) if out else None
+
+
+# The settings a session reads, in the order a later one wins (Claude Code's user, project and local settings,
+# then a --settings flag). Managed settings are left out: a check that cannot see them says less, never more.
+def settings_layers(s: dict) -> list[dict]:
+    layers = []
+    config = s.get("config") or default_config()
+    for path in [pathlib.Path(config) / "settings.json", pathlib.Path(s["cwd"] or "/nonexistent") / ".claude" / "settings.json",
+                 pathlib.Path(s["cwd"] or "/nonexistent") / ".claude" / "settings.local.json"]:
+        found = read_json(path)
+        if isinstance(found, dict):
+            layers.append(found)
+    argv = s.get("argv") or []
+    for i, word in enumerate(argv):
+        value = argv[i + 1] if word == "--settings" and i + 1 < len(argv) else (word.split("=", 1)[1] if word.startswith("--settings=") else None)
+        if value is None:
+            continue
+        try:
+            given = json.loads(value) if value.lstrip().startswith("{") else json.loads(pathlib.Path(value).read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(given, dict):
+            layers.append(given)
+    return layers
+
+
+def configured_options(s: dict) -> dict:
+    """The plugin's options as the settings files say them, for the copy the session runs: the working copy's are
+    under `backseat-driver@inline`, an installed copy's under its marketplace's name."""
+    is_working_copy = s.get("plugin") not in (None, "installed", "?")
+    merged: dict = {}
+    for layer in settings_layers(s):
+        configs = layer.get("pluginConfigs")
+        if not isinstance(configs, dict):
+            continue
+        for key, value in configs.items():
+            name, _, where = str(key).partition("@")
+            if name != PLUGIN or (where == "inline") != is_working_copy and where != "":
+                continue
+            options = value.get("options") if isinstance(value, dict) else None
+            if isinstance(options, dict):
+                merged.update(options)
+    return merged
+
+
+def same_option(one, other) -> bool:
+    norm = lambda v: str(v).lower() if isinstance(v, bool) else str(v)
+    return norm(one) == norm(other)
+
+
+def newest_source(plugin: str) -> tuple[float, str] | None:
+    """The newest file of a working copy's plugin folder that a session loads, and when it was saved."""
+    root = pathlib.Path(plugin)
+    best: tuple[float, str] | None = None
+    for path in root.rglob("*"):
+        rel = path.relative_to(root)
+        if not path.is_file() or rel.parts[0] in ("tests", "node_modules") or rel.parts[:2] == (".claude-plugin", "types"):
+            continue
+        at = mtime_ms(path) or 0
+        if best is None or at > best[0]:
+            best = (at, str(rel))
+    return best
+
+
+# Claude Code looks for a changed file under --plugin-dir every 30 s while idle: later than that, it missed one.
+RELOAD_GRACE_MS = 45_000
+# The editor's caret is followed within a scan, and the fast lane checks ten times a second: three seconds is late.
+FOLLOW_MS = 3_000
+# A file saved this close before a scan may have been caught half-written: the next scan says.
+SCAN_SLACK_MS = 500
+
+
+def check_world(w: dict, s: dict) -> list[tuple[str, str]]:
+    """What the tutor believes about the world outside the screen, against the world: the code it runs, the
+    settings it runs with, the working tree, HEAD, the commits waiting, the editor's caret."""
+    out: list[tuple[str, str]] = []
+    state = s["state"]
+    if state is None or tutor_mode(s) == "off":
+        return out
+    now = w["now"]
+    who = s["short"]
+
+    # The code it runs.
+    loaded_at = dig(state, "loaded.at")
+    if s.get("plugin") not in (None, "installed", "?") and isinstance(loaded_at, (int, float)):
+        newest = newest_source(s["plugin"])
+        if newest is not None and newest[0] > loaded_at + 1000 and now - newest[0] > RELOAD_GRACE_MS:
+            out.append((BAD, f"{who} loaded the mod {ago(now - loaded_at)} ago, and {newest[1]} was saved {ago(now - newest[0])} ago: it runs code older than the working copy (/reload-plugins in it)"))
+        elif newest is not None:
+            out.append((FINE, f"{who} runs the working copy as it is (loaded {ago(now - loaded_at)} ago)"))
+
+    # The settings it runs with.
+    options = dig(state, "loaded.options")
+    if isinstance(options, dict):
+        said = configured_options(s)
+        differ = [k for k, v in said.items() if k in options and not same_option(v, options[k])]
+        if differ:
+            shown = ", ".join(f"{k}: {said[k]} in the settings, {options[k]} in force" for k in differ[:4])
+            out.append((BAD, f"{who} runs with settings that are not the ones saved ({shown}): a change that did not load the mod again. /reload-plugins applies it"))
+        elif said:
+            out.append((FINE, f"{who} runs with the settings as saved ({len(said)} set)"))
+
+    root = state.get("repoRoot") or ""
+    is_driver = dig(state, "lease.isDriver") is True
+    scanned = dig(state, "scan.lastScanAt")
+    if not root or not is_driver or tutor_mode(s) != "on" or not isinstance(scanned, (int, float)) or scanned <= 0:
+        return out
+
+    # HEAD.
+    gitdir = git_dir(root)
+    head = (git_out(root, "rev-parse", "HEAD") or "").strip()
+    believed = dig(state, "review.lastHead")
+    moved_at = mtime_ms(gitdir / "logs" / "HEAD") if gitdir else None
+    if head and isinstance(believed, str) and believed and head != believed:
+        if moved_at is not None and moved_at < scanned - SCAN_SLACK_MS:
+            out.append((BAD, f"{who} believes HEAD is {believed[:7]}, and it is {head[:7]}, moved {ago(now - moved_at)} ago, before its last scan {ago(now - scanned)} ago: it missed a commit or a checkout"))
+    elif head and believed == head:
+        out.append((FINE, f"{who} knows HEAD: {head[:7]}"))
+
+    # The working tree.
+    dirty = git_dirty(root)
+    seen = set((dig(state, "watcher.dirty") or []) + (dig(state, "watcher.noise") or []))
+    if dirty is not None and dig(state, "watcher") is not None:
+        before = lambda path: (mtime_ms(pathlib.Path(root) / path) or now) < scanned - SCAN_SLACK_MS
+        unseen = sorted(p for p in dirty - seen if before(p))
+        ghosts = sorted(p for p in seen - dirty if (pathlib.Path(root) / p).exists() and before(p) and (moved_at or 0) < scanned - SCAN_SLACK_MS)
+        if unseen:
+            out.append((BAD, f"{who} has not seen {len(unseen)} changed file(s) saved before its last scan {ago(now - scanned)} ago: {', '.join(unseen[:4])}"))
+        if ghosts:
+            out.append((BAD, f"{who} believes {len(ghosts)} file(s) are changed that git calls clean: {', '.join(ghosts[:4])}"))
+        if not unseen and not ghosts:
+            out.append((FINE, f"{who} sees the working tree as git does: {len(dirty)} changed file(s)"))
+
+    # The commits waiting for their review.
+    project = next((p for home in w["homes"] for p in projects(home) if p["id"] == project_id(root)), None)
+    queue_file = project["dir"] / "queue.json" if project else None
+    on_disk = [c.get("hash") for c in (dig(project["queue"], "commits") or []) if isinstance(c, dict)] if project and isinstance(project["queue"], dict) else []
+    in_memory = [c.get("hash") for c in (dig(state, "review.waiting.commits") or []) if isinstance(c, dict)]
+    written = mtime_ms(queue_file) if queue_file else None
+    if (on_disk or in_memory) and on_disk != in_memory and written is not None and written < (state.get("at") or 0) - 2000:
+        out.append((BAD, f"{who} has {len(in_memory)} commit(s) waiting for a review in memory, and queue.json keeps {len(on_disk)}"))
+
+    # The editor's caret.
+    if dig(state, "explain.isOn") is True and s["home"] is not None:
+        here = editors_here(editors(s["home"]), root, now)
+        speaker = max(here, key=lambda e: e["data"].get("changed") or 0, default=None)
+        followed = dig(state, "explain.editorFocusAt") or 0
+        if speaker is not None:
+            d = speaker["data"]
+            moved = d.get("changed") or 0
+            if moved > followed + FOLLOW_MS and now - moved > FOLLOW_MS and is_under(str(d.get("file", "")), root):
+                out.append((BAD, f"{who} last followed the editor {ago(now - followed) if followed else 'never'} ago, and {d.get('editor')} moved to {tilde(str(d.get('file')))}:{d.get('line')} {ago(now - moved)} ago"))
+            elif moved:
+                focus = dig(state, "explain.focus") or {}
+                out.append((FINE, f"{who} follows {d.get('editor')}'s caret: {focus.get('path')}:{focus.get('line')}"))
     return out
 
 
@@ -922,7 +1227,7 @@ def cmd_status(args) -> int:
             holder = str(lease.get("session", ""))
             age = now - (lease.get("at") or 0)
             held = f"{short(holder)}, renewed {ago(age)} ago" if holder and age < LEASE_TTL_MS else ("free" if not holder else f"run out ({short(holder)}, {ago(age)} ago)")
-            waiting = dig(p["queue"], "waiting") if isinstance(p["queue"], dict) else None
+            waiting = dig(p["queue"], "commits") if isinstance(p["queue"], dict) else None
             since = lambda at: f"written {ago(now - at)} ago" if at else "never written"
             print(f"PROJECT {p['id']}{'  ' + tilde(p['root']) if p['root'] else ''}")
             print(f"  lease {held} · notes {len(p['notes'])} open, {len(p['dismissed'])} dismissed ({since(p['notes_at'])}) · "
@@ -1129,6 +1434,8 @@ def cmd_watch(args) -> int:
     last_rows: dict[str, list[str]] = {}
     pending: dict[str, list[str]] = {}
     known_bad: set[str] | None = None
+    # What the tutor told the person, waiting to be seen on their screen: (session, how, text, said at).
+    telling: list[tuple[str, str, str, int]] = []
     quiet = set((args.quiet or "fs,git,poll,timer,shown").split(","))
     turn = 0
     w = world(args.home)
@@ -1148,6 +1455,9 @@ def cmd_watch(args) -> int:
             for r in fresh:
                 if r.get("k") not in quiet:
                     print(f"{record_line(r, args.width, len(chosen) > 1)}", flush=True)
+                text = dig(r, "d.text")
+                if r.get("k") == "said" and r.get("n") != "asked" and isinstance(text, str) and s["eyes"] is not None:
+                    telling.append((s["id"], str(r.get("n")), text, int(r.get("t") or now_ms())))
             every = log_records(folder)
             if every:
                 seen_at[s["id"]] = every[-1]["_at"]
@@ -1175,6 +1485,15 @@ def cmd_watch(args) -> int:
                 elif before is None:
                     last_rows[s["id"]] = calm
                 pending[s["id"]] = calm
+                # Each thing it told the person is looked for until it shows, or until it should have.
+                for item in [t for t in telling if t[0] == s["id"]]:
+                    _, how, text, at = item
+                    if is_said_on_screen(text, rows):
+                        print(f"{clock(now_ms())} {FINE}  {s['short']} {how} on screen {(now_ms() - at) / 1000:.1f}s after it was said: “{text[:70]}”", flush=True)
+                        telling.remove(item)
+                    elif now_ms() - at > (TOAST_MS if how == "toast" else SAID_RECENT_MS):
+                        print(f"{clock(now_ms())} {BAD} {s['short']} said “{text[:90]}” ({how}), and it never showed on its screen", flush=True)
+                        telling.remove(item)
             if found is not None:
                 state = read_json(folder / "state.json") if folder else None
                 s["state"] = state if isinstance(state, dict) else None
@@ -1198,6 +1517,171 @@ def cmd_watch(args) -> int:
         if args.once:
             return 0
         time.sleep(args.every)
+
+
+# ------------------------------------------------------------------ the tour ----
+TOUR_STEPS = ("on", "tabs", "status", "save", "commit", "pause", "off")
+TAB_IDS = {"1": "play", "2": "review", "3": "explain", "4": "profile", "5": "settings"}
+# A deliberate mistake for the play-by-play to find: an average that is off by one.
+TOUR_FILE = "jack_tour.py"
+TOUR_TEXT = "def average(xs):\n    return sum(xs) / len(xs) + 1\n"
+
+
+def fresh_state(s: dict) -> dict | None:
+    folder = debug_dir(s["home"], s["id"]) if s["home"] else None
+    s["debug"] = folder
+    state = read_json(folder / "state.json") if folder else None
+    s["state"] = state if isinstance(state, dict) else None
+    return s["state"]
+
+
+def wait_for(s: dict, what: str, test, timeout: float) -> bool:
+    """Waits until `test(state)` holds, reading the state the tutor writes beside its log. Says how long it took."""
+    started = time.time()
+    while time.time() - started < timeout:
+        state = fresh_state(s)
+        try:
+            if state is not None and test(state):
+                print(f"    {FINE} {what} ({time.time() - started:.1f}s)", flush=True)
+                return True
+        except (TypeError, KeyError, AttributeError):
+            pass
+        time.sleep(0.4)
+    print(f"    {BAD} {what}: not within {timeout:.0f}s", flush=True)
+    return False
+
+
+def tour_keys(s: dict, *keys: str) -> None:
+    eyes = s["eyes"]
+    for key in keys:
+        run(["tmux", "-S", eyes["sock"], "send-keys", "-t", eyes["pane"], key], timeout=5)
+        time.sleep(1.1 if key == "Enter" or len(key) > 1 else 0.3)
+
+
+def tour_command(s: dict, text: str) -> None:
+    print(f"  ⌨ {text}", flush=True)
+    tour_keys(s, text, "Enter")
+
+
+def tour_truth(s: dict, home: str | None) -> int:
+    """The checks, after a step: only what disagrees is printed."""
+    w = world(home)
+    me = next((x for x in w["sessions"] if x["id"] == s["id"]), None)
+    if me is None:
+        print(f"    {BAD} the session is gone", flush=True)
+        return 1
+    rows = screen_of(me["eyes"])
+    found = check_homes(w) + check_session(w, me, rows)
+    bad = [text for level, text in found if level == BAD]
+    for text in bad:
+        print(f"    {BAD} {text}", flush=True)
+    if bad and rows is not None:
+        # What was on the screen when they disagreed, for whoever reads the tour afterwards.
+        print("\n".join(f"      | {row.rstrip()[:160]}" for row in rows if row.strip()), flush=True)
+    if not bad:
+        print(f"    {FINE} {sum(1 for level, _ in found if level == FINE)} checks agree with the screen and the world", flush=True)
+    return len(bad)
+
+
+def cmd_tour(args) -> int:
+    """Drives a session in tmux through what a person does with the tutor, one step at a time, and after each step
+    holds what it says against what its screen shows. Each step is the keys a person would press, or the file a
+    person would save: nothing is called that a person could not do."""
+    w = world(args.home)
+    s = need(w, args.session)
+    if s["eyes"] is None or s["eyes"]["kind"] != "tmux":
+        print(f"{s['short']} is not in tmux ({eyes_label(s['eyes'])}): a tour needs a keyboard to type on.")
+        return 2
+    steps = [step for step in (args.steps.split(",") if args.steps else TOUR_STEPS) if step]
+    unknown = [step for step in steps if step not in TOUR_STEPS]
+    if unknown:
+        sys.exit(f"no such step: {', '.join(unknown)}. The steps: {', '.join(TOUR_STEPS)}")
+    if s["home"] is None or not marked(s["home"]):
+        print("The tutor has no data folder yet: run the `on` step by hand once (/bsd), then the tour.")
+        return 2
+    switch = read_json(s["home"] / "debug.json") or {}
+    if switch.get("on") is not True:
+        print(f"The debug log is off in {tilde(str(s['home']))}: `jack.py in` first, so that the tour can read what the tutor says.")
+        return 2
+    print(f"--- tour of {s['short']} · {eyes_label(s['eyes'])} · {', '.join(steps)}", flush=True)
+    bad = 0
+    for step in steps:
+        print(f"→ {step}", flush=True)
+        state = fresh_state(s) or {}
+        if step == "on":
+            if state.get("mode") != "on":
+                tour_command(s, "/bsd")
+            bad += 0 if wait_for(s, "the tutor says it is on", lambda st: st["mode"] == "on" and dig(st, "pane.mode") == "on", 25) else 1
+            # The first switch-on asks questions. Esc skips them, as a person may.
+            for _ in range(4):
+                if not isinstance(dig(fresh_state(s) or {}, "asking"), dict):
+                    break
+                print("  ⌨ Escape (a question is open)", flush=True)
+                tour_keys(s, "Escape")
+            time.sleep(1.5)
+        elif step == "tabs":
+            for digit, tab in TAB_IDS.items():
+                print(f"  ⌨ C-x Tab, {digit}", flush=True)
+                tour_keys(s, "C-x", "Tab", digit)
+                bad += 0 if wait_for(s, f"the {tab} tab is open", lambda st, tab=tab: dig(st, "pane.tab") == tab, 6) else 1
+                time.sleep(0.8)
+                bad += tour_truth(s, args.home)
+            tour_keys(s, "Escape")
+            tour_keys(s, "C-x", "Tab", "1", "Escape")
+        elif step == "status":
+            asked_at = now_ms()
+            tour_command(s, "/bsd status")
+            answered = lambda st: any(i.get("how") == "command" and "Voice" in i.get("text", "") and (i.get("at") or 0) >= asked_at for i in st.get("said", []))
+            bad += 0 if wait_for(s, "the tutor answered /bsd status", answered, 8) else 1
+            time.sleep(SAID_SETTLE_MS / 1000)
+        elif step in ("save", "commit"):
+            root = state.get("repoRoot") or ""
+            if not root:
+                print(f"    {NOTE} not in a git repository: nothing to save")
+                continue
+            if not (args.write or root.startswith(tempfile.gettempdir())):
+                print(f"    {NOTE} {root} is not a scratch repository: saving and committing in it needs --write")
+                continue
+            if step == "save":
+                before = dig(state, "look.lastLookAt")
+                (pathlib.Path(root) / TOUR_FILE).write_text(TOUR_TEXT)
+                print(f"  ✎ saved {TOUR_FILE} with an average that is off by one", flush=True)
+                bad += 0 if wait_for(s, "the tutor saw the save", lambda st: TOUR_FILE in (dig(st, "watcher.dirty") or []), 15) else 1
+                bad += 0 if wait_for(s, "the play-by-play looked at it", lambda st: dig(st, "look.lastLookAt") != before and not dig(st, "look.isLooking"), 120) else 1
+                notes = [n for n in dig(fresh_state(s) or {}, "pane.notes") or [] if isinstance(n, dict) and n.get("file") == TOUR_FILE]
+                print(f"    {NOTE} {len(notes)} note(s) about it: {'; '.join(str(n.get('text', ''))[:60] for n in notes) or 'none'}", flush=True)
+            else:
+                run(["git", "-C", root, "add", TOUR_FILE], timeout=10)
+                code, _, err = run(["git", "-C", root, "commit", "-qm", "Add average (jack tour)"], timeout=10)
+                if code != 0:
+                    print(f"    {NOTE} nothing to commit: {err.strip()[:80]}", flush=True)
+                    continue
+                head = (git_out(root, "rev-parse", "HEAD") or "").strip()
+                print(f"  ✎ committed {head[:7]}", flush=True)
+                bad += 0 if wait_for(s, "the tutor saw the commit", lambda st: dig(st, "review.lastHead") == head, 15) else 1
+                reviewed = lambda st: head[:7] in str(dig(st, "pane.review.subject") or "") and dig(st, "pane.review.state") in ("done", "failed")
+                bad += 0 if wait_for(s, "its deep review came back", reviewed, 240) else 1
+        elif step == "pause":
+            tour_command(s, "/bsd pause")
+            bad += 0 if wait_for(s, "the tutor says it is paused", lambda st: st["mode"] == "paused", 10) else 1
+            time.sleep(1)
+            bad += tour_truth(s, args.home)
+            tour_command(s, "/bsd resume")
+            bad += 0 if wait_for(s, "the tutor says it is on again", lambda st: st["mode"] == "on", 10) else 1
+        elif step == "off":
+            tour_command(s, "/bsd off")
+            time.sleep(2)
+            rows = screen_of(s["eyes"]) or []
+            if any("Play-by-play" in row and "Deep review" in row for row in rows) or any("1: Play" in row for row in rows):
+                print(f"    {BAD} switched off, and the tutor's tabs are still on the screen", flush=True)
+                bad += 1
+            else:
+                print(f"    {FINE} switched off, and nothing of the tutor is on the screen", flush=True)
+            continue
+        time.sleep(1)
+        bad += tour_truth(s, args.home)
+    print(f"--- {bad} disagreement(s)" if bad else "--- the tour agreed with the screen at every step", flush=True)
+    return 1 if bad else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1240,13 +1724,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("path", nargs="?", help="one part of it: lease, deadlines, shown.pane.texts, pane.watch")
     add("files", cmd_files, session=False)
     add("ps", cmd_ps, session=False)
+    p = add("tour", cmd_tour)
+    p.add_argument("--steps", help=f"which steps, in order (default all): {','.join(TOUR_STEPS)}")
+    p.add_argument("--write", action="store_true", help="let the save and commit steps write into a repository outside the temp folder")
     p = add("keys", cmd_keys, session=False)
     p.add_argument("session")
     p.add_argument("keys", nargs="+")
 
     args = parser.parse_args(argv)
     if args.cmd is None:
-        args = parser.parse_args(["status"] + (argv or sys.argv[1:]))
+        given = list(argv if argv is not None else sys.argv[1:])
+        # `--home <folder>` belongs before the command, and the rest after it.
+        front = given[:2] if given[:1] == ["--home"] else [w for w in given[:1] if w.startswith("--home=")]
+        args = parser.parse_args(front + ["status"] + given[len(front):])
     # `jack.py state lease` names a part, not a session, when no session is called that.
     if args.cmd == "state" and args.session and not args.path and not any(s["id"].startswith(args.session) or s["short"].startswith(args.session) for s in claude_sessions()):
         args.path, args.session = args.session, None

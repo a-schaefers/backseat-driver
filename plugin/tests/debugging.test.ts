@@ -286,3 +286,44 @@ sessionTest('with the log on, the tutor writes down what it says it is showing a
   expect(state.shown.pane?.texts.some(text => text.startsWith('On.'))).toBe(true)
   await ui.unmount()
 })
+
+sessionTest('with the log on, what the person is told outside the pane is written down and kept in the state', { options: { animated_persona: false } }, async ($, on) => {
+  const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { 'debug.json': { on: true } } })
+  session.disk.set(`${DATA_HOME}/${MARKER}`, 'x')
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+  await session.clock.settle()
+  // A lock file is changed too: never looked at, and still something git lists.
+  session.write('stats.py', `${MEAN}# more\n`)
+  session.write('package-lock.json', '{}\n')
+  await session.clock.advance(2000)
+
+  await $.command.run(typed('bsd', 'status'))
+  // A question the person dismisses, and the line that says nothing was done.
+  await $.command.run(typed('bsd', 'forget project'))
+  await session.clock.settle()
+  await session.clock.advance(FLUSH_MS)
+
+  const log = session.debugLog()
+  const said = log.filter(record => record.k === 'said').map((record): [string, string] => [record.n, (record.d as { text: string }).text])
+  expect(said).toContainEqual(['command', 'Backseat Driver is on. Voice: default. Engineering: default.'])
+  expect(said.some(([how, text]) => how === 'asked' && text.startsWith('Forget the journal and cache of this project'))).toBe(true)
+  expect(said).toContainEqual(['transcript', 'Nothing was forgotten.'])
+  expect(log.some(record => record.k === 'ui' && record.n === 'not answered')).toBe(true)
+
+  const folder = [...session.disk.keys()].find(path => path.startsWith(`${DATA_HOME}/debug/`) && path.endsWith('/state.json')) ?? ''
+  const state = JSON.parse(session.disk.get(folder) ?? '{}') as {
+    said: { how: string; text: string }[]
+    asking: unknown
+    loaded: { at: number; options: Record<string, unknown> }
+    scan: { lastScanAt: number }
+    watcher: { dirty: string[]; noise: string[] }
+  }
+  expect(state.said.at(-1)).toMatchObject({ how: 'transcript', text: 'Nothing was forgotten.' })
+  expect(state.said.some(item => item.how === 'command' && item.text.startsWith('Backseat Driver is on.'))).toBe(true)
+  expect(state.asking).toBe(null)
+  expect(state.loaded.options.animated_persona).toBe(false)
+  expect(state.scan.lastScanAt > 0).toBe(true)
+  expect(state.watcher.dirty).toEqual(['stats.py'])
+  expect(state.watcher.noise).toEqual(['package-lock.json'])
+})
