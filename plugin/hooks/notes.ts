@@ -133,8 +133,9 @@ export function applyReply(
     id += 1
   }
 
-  // Over the limit, the least important and oldest go first.
-  const kept = sortNotes(notes).slice(0, MAX_OPEN_NOTES)
+  // Over the limit, the least important and, among those, the oldest go first.
+  const byWorth = [...notes].sort((a, b) => KINDS.indexOf(a.kind) - KINDS.indexOf(b.kind) || b.id - a.id)
+  const kept = sortNotes(byWorth.slice(0, MAX_OPEN_NOTES))
 
   return { notes: kept, nextId: id }
 }
@@ -149,4 +150,71 @@ export function listNotes(notes: readonly Note[]): string {
   return sortNotes(notes)
     .map(note => `${note.id}. [${note.kind}] ${note.file}:${note.line} (${note.topic}) ${note.text}`)
     .join('\n')
+}
+
+/**
+ * The open and dismissed notes as kept on disk for the project, so that a
+ * session that closes without switching off finds them again. `prints` holds
+ * the fingerprint of each noted file's text as the look that raised the note
+ * saw it: a note comes back only while its file still reads that way.
+ */
+export type KeptNotes = { v: 1; notes: Note[]; dismissed: Note[]; prints: Record<string, string> }
+
+export const NO_KEPT_NOTES: KeptNotes = { v: 1, notes: [], dismissed: [], prints: {} }
+
+function parseNote(value: unknown): Note | null {
+  const note = asRecord(value)
+  if (note === null) return null
+  const kind = KINDS.find(known => known === note.kind)
+  if (kind === undefined || typeof note.file !== 'string' || note.file === '' || typeof note.text !== 'string' || note.text === '') return null
+  if (typeof note.id !== 'number' || !Number.isInteger(note.id) || note.id < 1) return null
+
+  return {
+    id: note.id,
+    file: note.file,
+    line: typeof note.line === 'number' && note.line >= 1 ? Math.floor(note.line) : 1,
+    kind,
+    topic: typeof note.topic === 'string' ? note.topic : '',
+    text: note.text.slice(0, MAX_NOTE_CHARS),
+  }
+}
+
+function parseNotes(value: unknown, limit: number): Note[] {
+  return (Array.isArray(value) ? value : []).map(parseNote).filter(note => note !== null).slice(-limit)
+}
+
+export function parseKeptNotes(value: unknown): KeptNotes {
+  const kept = asRecord(value)
+  if (kept === null) return NO_KEPT_NOTES
+  const prints: Record<string, string> = {}
+  for (const [file, print] of Object.entries(asRecord(kept.prints) ?? {})) {
+    if (typeof print === 'string' && print !== '') prints[file] = print
+  }
+
+  return { v: 1, notes: parseNotes(kept.notes, MAX_OPEN_NOTES), dismissed: parseNotes(kept.dismissed, MAX_DISMISSED), prints }
+}
+
+/** What to keep on disk: the notes, and the fingerprint of each noted file that one is known for. */
+export function keepNotes(notes: readonly Note[], dismissed: readonly Note[], prints: ReadonlyMap<string, string>): KeptNotes {
+  const kept: Record<string, string> = {}
+  for (const note of notes) {
+    const print = prints.get(note.file)
+    if (print !== undefined) kept[note.file] = print
+  }
+
+  return { v: 1, notes: [...notes], dismissed: [...dismissed], prints: kept }
+}
+
+/**
+ * The kept notes that still hold: those whose file reads now as it did when
+ * the note was raised. `now` maps a file to its fingerprint today, and has no
+ * entry for a file that is gone. A note about text that has changed since is
+ * never shown: the next look at that file says what is true of it.
+ */
+export function stillOpen(kept: KeptNotes, now: ReadonlyMap<string, string>): Note[] {
+  return kept.notes.filter(note => {
+    const print = kept.prints[note.file]
+
+    return print !== undefined && now.get(note.file) === print
+  })
 }

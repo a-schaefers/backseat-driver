@@ -34,7 +34,7 @@ So the machine goes where it belongs: the back seat. You drive. It watches the r
 
 ## What it is
 
-Type `/bsd`. A pane opens beside the conversation with four tabs.
+Type `/bsd`. A pane opens beside the conversation with five tabs.
 
 **1. Play-by-play.** Live commentary on your code as you write it. Save, pause for a few seconds, and a fast model reads what changed. Worth saying? A short note lands in the pane: a bug, a risky pattern, a better idiom for that language. One idea per note. A hint, never a fix. Fix the code and the note goes away on its own. Nothing worth saying, it says nothing.
 
@@ -46,6 +46,8 @@ Type `/bsd`. A pane opens beside the conversation with four tabs.
 **3. Explain.** Move your cursor (with an editor plugin, below), point at a line (`/bsd explain src/app.py:42`), or just save, and it tells you what that code does, how, why it's there, what to watch out for and what it relies on. Step through a file symbol by symbol with `n` and `p`. Change the code and the old explanation disappears before it can lie to you.
 
 **4. Progress.** An honest level per language, from beginner to senior: where you are, why, and what the next level takes. Judged only on commits you wrote yourself, not imports, not generated code, not anything co-written with an AI. It follows you across projects. It can go down.
+
+**5. Settings.** Change the voice, the models, how hard they think and how often it looks, right in the pane. Same rows as `/config`.
 
 **And the conversation.** Claude is still there in chat, as a tutor. Ask it anything. Ask it to write your code and you get a nudge, then the concept, then a small example somewhere else, one step at a time. Questions about the language get straight answers. Push back and it weighs your argument; a point you contest goes to the deep reviewer for a second opinion. Tell it to drop a topic and it stays dropped, in every project in that language. You have the last word.
 
@@ -80,14 +82,15 @@ Type `/bsd` in Claude Code. The first time you work in a language, it asks a few
 | `/bsd`, `/bsd pause`, `/bsd off` | Switch it on, quiet it, or switch it off |
 | `/bsd explain src/app.py:42` | Explain a spot in the code |
 | `/bsd working on the parser` | Tell it what you're working on |
+| `/bsd settings` | Open the Settings tab |
 | `/bsd forget` | Erase what it remembers: one project, one language, or everything |
 | `/bsd license` | Switch between personal and commercial use, or add a key |
 | `/bsd update`, `/bsd uninstall` | Fetch a newer release when the pane announces one, or remove the plugin |
 | `/bsd help` | Every command and key |
 
-`Ctrl+X Tab` focuses the pane, and `Esc` leaves it. `1` to `4` switch tabs. On a note, `e` explains it, `d` dismisses it, `m` mutes that topic for good. `l` looks at your changes now, `r` reviews now. The pane draws in the terminal and in the desktop app's Code tab.
+`Ctrl+X Tab` focuses the pane, and `Esc` leaves it. `1` to `5` switch tabs. On a note, `e` explains it, `d` dismisses it, `m` mutes that topic for good. `l` looks at your changes now, `r` reviews now. The pane draws in the terminal and in the desktop app's Code tab.
 
-Models, thinking levels, pacing and personas are in `/config`: search for "backseat".
+Models, thinking levels, pacing and personas live in tab `5`, Settings, or `/bsd settings`. They're in `/config` too.
 
 ### Editors
 

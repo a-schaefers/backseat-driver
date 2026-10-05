@@ -3,7 +3,7 @@
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "27.1"))
 ;; URL: https://github.com/a-schaefers/backseat-driver
-;; SPDX-License-Identifier: MIT
+;; SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 
 ;;; Commentary:
 

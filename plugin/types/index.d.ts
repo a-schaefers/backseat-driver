@@ -2,7 +2,22 @@
 export type Mode = 'off' | 'on' | 'paused'
 
 /** The pane's tabs. `play` is the play-by-play and the default view. */
-export type Tab = 'play' | 'review' | 'explain' | 'profile'
+export type Tab = 'play' | 'review' | 'explain' | 'profile' | 'settings'
+
+/** One of the plugin's own `/config` rows, as the Settings tab shows it. */
+export type SettingRow = {
+  /** The row's key in `/config`: `<plugin>.<field>`. */
+  key: string
+  label: string
+  description: string
+  /** A toggle is shown as a pick between `on` and `off`. */
+  kind: 'boolean' | 'choice'
+  /** What it holds now: a choice's option, or `on` or `off`. */
+  value: string
+  options: string[]
+  /** True when managed settings own the value: it is shown and cannot be changed here. */
+  isLocked: boolean
+}
 
 /** How much a note matters, most first: `bug` will break, `risk` may, `idiom` and `tip` teach. */
 /**
@@ -285,10 +300,14 @@ declare module 'claude-code' {
       progress: ProgressView
       /** What the pane says about a newer release, or ''. */
       update: string
+      /** What the pane says about the license, or '': usually nothing. */
+      license: string
       /** The animated persona's line, while the animation is on. */
       speech: Speech
       /** What they are working on, for the line under the status line. */
       working: Working
+      /** The plugin's own `/config` rows, for the Settings tab. Read again whenever the tab is opened. */
+      settings: SettingRow[]
     }
   }
 }

@@ -18,7 +18,7 @@ import {
 import { fingerprint, shortHash } from '../hooks/hash'
 import { emptyProfile, parseProfile, withAnswers, withHush } from '../hooks/profiles'
 import { memoryDisk, readJson, writeJson } from '../hooks/storage'
-import { DATA_HOME, ROOT, SESSION, sessionTest, stubSession, typed } from './kit'
+import { DATA_HOME, LICENSE_ANSWERED, ROOT, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const MEAN = 'def mean(xs):\n    return sum(xs) / len(xs)\n'
 const MARKER_PATH = `${DATA_HOME}/${MARKER}`
@@ -129,6 +129,7 @@ test('forget: what a word names, and what each scope deletes', async () => {
     '/d/focus.json',
     '/d/view.json',
     '/d/update.json',
+    '/d/license.json',
     '/d/debug',
     '/d/debug.json',
     '/d/locks.git',
@@ -147,6 +148,7 @@ sessionTest('profiles left in the plugin store move into files, once', async ($,
   const session = stubSession(on, {
     head: { 'stats.py': MEAN },
     store: { 'subject/python': stored, 'subject/general': withAnswers(emptyProfile(), { knows: 'Go' }), other: 1 },
+    data: LICENSE_ANSWERED,
   })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))

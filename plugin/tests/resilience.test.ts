@@ -1,6 +1,7 @@
-import { expect } from 'claude-code/testing'
+import { expect, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 
+import { outcomeOfError } from '../hooks/health'
 import { clockTime } from '../hooks/status'
 import { PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
@@ -335,4 +336,24 @@ sessionTest('"look now" looks at once, whatever the pacing says', async ($, on) 
   expect(await ui.find({ type: 'Text', text: 'What does this do for an empty list?' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'On. Watching for your next save.' })).toBeDefined()
   await ui.unmount()
+})
+
+sessionTest('a request Claude Code refuses to send cannot leave every job waiting', { options: { explain: 'off' } }, async ($, on) => {
+  const session = stubSession(on, { head: { 'stats.py': MEAN } })
+  session.failing.push('offline', 'refused')
+  await start($, session)
+  session.write('stats.py', `${MEAN}# more\n`)
+  await session.clock.advance(11_000)
+  expect(session.requests.length).toBe(1)
+
+  // The next look is the request that finds out whether Claude is back, and it is refused before it is sent.
+  await session.clock.advance(90_000)
+  expect(session.requests.length).toBe(2)
+  // That says nothing about Claude: the look after it may ask.
+  await session.clock.advance(300_000)
+  expect(session.requests.length).toBe(3)
+})
+
+test('expired cloud credentials are the account, not an outage', () => {
+  expect(outcomeOfError('cloud_credential_error').ok === false && outcomeOfError('cloud_credential_error')).toMatchObject({ trouble: 'account' })
 })
