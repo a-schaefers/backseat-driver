@@ -1,6 +1,6 @@
 import type { Elements } from 'claude-code'
 
-import type { ExplainView, Mode, Note, OutlineRow, Profile, Profiles, ProgressRecord, ProgressView, Review, Speech, Tab, Watch, Working } from '../types'
+import type { ExplainView, Mode, Note, OutlineRow, Profile, Profiles, ProgressRecord, ProgressView, Review, SettingRow, Speech, Tab, Watch, Working } from '../types'
 import { bubbleColumn, bubbleWidth, isTalking, poseOf, saidSoFar, wordsSaid } from './avatar'
 import type { Avatar } from './avatar'
 import { languageName } from './languages'
@@ -12,8 +12,8 @@ import { DEFAULT_PERSONA } from './settings'
 import { clockTime, playLine } from './status'
 import type { Persona } from './settings'
 
-/** The elements the pane is built from. Every surface that draws panes has them. */
-export type Kit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdown'>
+/** The elements the pane is built from. Every surface that draws panes has them, save `Select`, which some lack. */
+export type Kit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdown'> & Partial<Pick<Elements['terminal'], 'Select'>>
 
 /** Everything the pane shows, as plain data. */
 export type PaneView = {
@@ -44,6 +44,8 @@ export type PaneView = {
   character: { avatar: Avatar; speech: Speech } | null
   /** True where rows are scarce, as in a pane above the prompt: the character is then drawn in one line. */
   isCompact: boolean
+  /** The plugin's own `/config` rows, for the Settings tab. */
+  settings: readonly SettingRow[]
 }
 
 /** What the pane's controls do. The closures come from register.tsx. */
@@ -67,6 +69,8 @@ export type PaneActions = {
   onExplainAsk: () => void
   /** Ask what they are working on, so that they can say it themselves or take it back. */
   onWorking: () => void
+  /** Change one of the plugin's `/config` rows to the value picked. */
+  onSetting: (row: SettingRow, value: string) => void
 }
 
 const TABS: readonly { tab: Tab; label: string; short: string; hotkey: string }[] = [
@@ -75,6 +79,7 @@ const TABS: readonly { tab: Tab; label: string; short: string; hotkey: string }[
   { tab: 'explain', label: 'Explain', short: 'Explain', hotkey: '3' },
   // Still `profile` inside: the tab grew from the Profile tab, and its key is what tests and muscle memory press.
   { tab: 'profile', label: 'Progress', short: 'Progress', hotkey: '4' },
+  { tab: 'settings', label: 'Settings', short: 'Settings', hotkey: '5' },
 ]
 
 const NEW = ' (new)'
@@ -98,6 +103,7 @@ export function tabBadge(tab: Tab, view: Partial<Pick<PaneView, 'notes' | 'revie
     return review.state === 'running' ? BUSY : review.state === 'failed' ? TROUBLE : ''
   }
   if (tab === 'explain') return view.explain?.status === 'updating' ? BUSY : ''
+  if (tab === 'settings') return ''
 
   return view.progress !== undefined && view.progress.busy !== '' ? BUSY : ''
 }
@@ -590,6 +596,39 @@ function profileTab(kit: Kit, view: PaneView, actions: PaneActions) {
   )
 }
 
+/** What the Settings tab says above the rows. */
+export const SETTINGS_HINT = 'The same settings as in /config. Pick a row, then Enter to change it. A change applies at once.'
+
+/** What the Settings tab says where it cannot offer a pick. */
+export const SETTINGS_ELSEWHERE = 'The settings as they are now. They are changed in /config here.'
+
+/** The plugin's `/config` rows, each changed in place with a pick. */
+function settingsTab({ Box, Text, Select }: Kit, view: PaneView, actions: PaneActions) {
+  if (view.settings.length === 0) return <Text dimColor>Reading the settings from /config.</Text>
+
+  return (
+    <Box flexDirection="column">
+      <Text dimColor>{Select === undefined ? SETTINGS_ELSEWHERE : SETTINGS_HINT}</Text>
+      <Text> </Text>
+      {view.settings.map(row =>
+        row.isLocked || Select === undefined ? (
+          <Text dimColor>{`${row.label}: ${row.value}${row.isLocked ? ' (set by your organization)' : ''}`}</Text>
+        ) : (
+          <Select
+            key={`setting-${row.key}`}
+            label={`${row.label}: `}
+            options={row.options.map(option => ({ value: option }))}
+            value={row.value}
+            onSelect={value => {
+              if (value !== row.value) actions.onSetting(row, value)
+            }}
+          />
+        ),
+      )}
+    </Box>
+  )
+}
+
 export function renderPane(kit: Kit, view: PaneView, actions: PaneActions) {
   const { Box, Text, Button } = kit
   const row = tabRow(view)
@@ -623,6 +662,7 @@ export function renderPane(kit: Kit, view: PaneView, actions: PaneActions) {
       {view.tab === 'review' && deepReview(kit, view, actions)}
       {view.tab === 'explain' && explainTab(kit, view, actions)}
       {view.tab === 'profile' && profileTab(kit, view, actions)}
+      {view.tab === 'settings' && settingsTab(kit, view, actions)}
       {!view.isFocused && <Text dimColor>{KEYBOARD_HINT}</Text>}
     </Box>
   )

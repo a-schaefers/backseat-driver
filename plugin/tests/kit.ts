@@ -2,7 +2,7 @@
  * Shared inputs and stubs for the tests. In a test nothing is real: each
  * stub here answers in Claude Code's place.
  */
-import type { AgentSpec, ModelCompleteRequest, On, ToolSpec } from 'claude-code'
+import type { AgentSpec, ConfigRow, ModelCompleteRequest, On, ToolSpec } from 'claude-code'
 import { mock, test } from 'claude-code/testing'
 import type { TestBody, TestOptions, TestRest } from 'claude-code/testing'
 
@@ -173,6 +173,32 @@ export function stubSession(on: On, options: StubOptions = {}) {
   let cloneTop = ''
   let cloneHead = commitHash(500)
   const session = {
+    /** The rows of `/config`, as `$.config.list()` answers: two of the plugin's own and one of another plugin's. */
+    config: [
+      {
+        key: 'backseat-driver.voice',
+        label: 'Voice persona',
+        description: 'How the tutor talks.',
+        kind: 'choice',
+        value: 'default',
+        options: ['default', 'torvalds', 'knuth'],
+        provider: { plugin: 'backseat-driver', tier: 'user' },
+        isLocked: false,
+      },
+      {
+        key: 'backseat-driver.animated_persona',
+        label: 'Animated persona',
+        kind: 'boolean',
+        value: true,
+        provider: { plugin: 'backseat-driver', tier: 'user' },
+        isLocked: false,
+      },
+      { key: 'theme', label: 'Theme', kind: 'choice', value: 'dark', options: ['dark', 'light'], provider: { plugin: 'engine', tier: 'core' }, isLocked: false },
+    ] as ConfigRow[],
+    /** Every `$.config.set` the plugin made, in order. */
+    configured: [] as { key: string; value: unknown }[],
+    /** Set to refuse the next `$.config.set` with this reason. */
+    configDeny: '',
     opened: [] as string[],
     closed: [] as string[],
     /** Every prompt that reached Claude Code, and what the plugin attached to it for Claude alone. */
@@ -693,6 +719,16 @@ export function stubSession(on: On, options: StubOptions = {}) {
   }))
   on('agent.offer', () => ({ isOffered: true }))
   on('turn.complete', () => ({ text: '' }))
+  on('config.list', () => ({ value: session.config }))
+  on('config.set', ($, e) => {
+    session.configured.push({ key: e.key, value: e.value })
+    const deny = session.configDeny
+    session.configDeny = ''
+    if (deny !== '') return { deny }
+    session.config = session.config.map(row => (row.key === e.key ? { ...row, value: e.value } : row))
+
+    return { value: e.value }
+  })
   on('ui.toast', ($, e) => {
     session.toasts.push(e.text)
 
