@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, PluginOptions, Register, Timer, UiFocusResult } from 'claude-code'
 
-import type { ExplainView, Hush, LevelChange, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, SettingRow, Speech, Spot, Tab, Watch, Working } from '../types'
+import type { ExplainView, Hush, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, SettingRow, Speech, Spot, Tab, Watch, Working } from '../types'
 import {
   avatarFor,
   BLINK_MS,
@@ -27,19 +27,6 @@ import { backdropOf } from '../core/sprite'
 import type { Backdrop } from '../core/sprite'
 import { personaPrompt, reframeInstructions, SESSION_NOTES, stripComments, stripFrontmatter, tutorSections } from './contract'
 import {
-  addedLines,
-  byLanguage,
-  commitInfoArgs,
-  commitPatchArgs,
-  identityOf,
-  judge,
-  MIN_LINES,
-  parseCommitInfo,
-  parseRecent,
-  RECENT_COMMITS_ARGS,
-  sizeOf,
-} from '../core/authorship'
-import {
   dataHome,
   debugRoot,
   debugSwitchPath,
@@ -54,7 +41,6 @@ import {
   MARKER,
   MARKER_TEXT,
   profilePath,
-  progressPath,
   projectDir,
   projectId,
   sharedFolders,
@@ -131,8 +117,17 @@ import {
   versionText,
 } from '../core/update'
 import type { Install } from '../core/update'
-import { assessmentRequest, emptyRecord, parseAssessment, parseRecord, progressText, recordText, withAssessment } from '../core/progress'
-import type { AssessedCommit, CommitForAssessment } from '../core/progress'
+import { emptyRecord, progressText, recordText } from '../core/progress'
+import {
+  assessCommit as assessCommitOf,
+  freshProgressState,
+  loadRecord as loadRecordOf,
+  placeFirst as placeFirstOf,
+  queueProgress as queueProgressWork,
+  setUpProgress as setUpProgressOf,
+  showProgress as showProgressOf,
+} from '../core/progressing'
+import type { ProgressPorts, ProgressState } from '../core/progressing'
 import { helpText, isModeRequest, LAYOUT_USAGE, parseRequest, SETTINGS_OFF, transition } from '../core/mode'
 import { isNoiseFile } from '../core/noise'
 import { isLookDue, playOf, wakeAt } from '../core/play'
@@ -467,13 +462,10 @@ let project: ProjectKnowledge | null = null
  * last commit (work it watched arrive counts in full), the records of the
  * languages in play, and the queue that runs one assessment at a time.
  */
-let identity: string[] = []
-const watchedPaths = new Set<string>()
+const progressState: ProgressState = freshProgressState()
 
 /** The fingerprint of each noted file's text as the look that raised its notes saw it, so that kept notes come back only while true. */
 const notePrints = new Map<string, string>()
-const records = new Map<string, ProgressRecord>()
-let progressQueue: Promise<void> = Promise.resolve()
 let progressInstructions = ''
 let reviews: ReviewRecord[] = []
 
@@ -600,7 +592,7 @@ function snapshot(): Record<string, unknown> {
     explain: { isOn: explainer !== null, waiting: explainer?.pending() ?? 0, focus, editorFocusAt, isWatchingClosely },
     timers: { talk: talkTimer !== null, blink: blinkTimer !== null },
     profiles: { languages: profiles.languages, subjects: Object.keys(profiles.subjects) },
-    progress: { identity, records: [...records.keys()], watchedPaths: [...watchedPaths] },
+    progress: { identity: progressState.identity, records: [...progressState.records.keys()], watchedPaths: [...progressState.watchedPaths] },
     journal: recorder === null ? null : { working: workingShown },
     project: project === null ? null : { isSurveyed: project.isSurveyed, insights: project.insights.length },
     quiet,
@@ -1935,8 +1927,8 @@ async function bringIntoPlay($: EngineInterface, languages: readonly string[]): 
   for (const language of added) subjects[language] = await loadSubject($, language)
   profiles = { languages: [...profiles.languages, ...added], subjects }
   await update($, profilesAtom, () => profiles)
-  for (const language of added) records.set(language, await loadRecord($, language))
-  await setProgress($, { records: profiles.languages.map(language => records.get(language) ?? emptyRecord(language)) })
+  for (const language of added) progressState.records.set(language, await loadRecord($, language))
+  await setProgress($, { records: profiles.languages.map(language => progressState.records.get(language) ?? emptyRecord(language)) })
 }
 
 /**
@@ -2435,11 +2427,11 @@ async function refreshShared($: EngineInterface, settings: Settings): Promise<vo
   if (settings.isProgressOn) {
     for (const language of profiles.languages) {
       const record = await loadRecord($, language)
-      if (JSON.stringify(record) === JSON.stringify(records.get(language))) continue
-      records.set(language, record)
+      if (JSON.stringify(record) === JSON.stringify(progressState.records.get(language))) continue
+      progressState.records.set(language, record)
       isProgressNew = true
     }
-    if (isProgressNew) await setProgress($, { records: profiles.languages.map(language => records.get(language) ?? emptyRecord(language)) })
+    if (isProgressNew) await setProgress($, { records: profiles.languages.map(language => progressState.records.get(language) ?? emptyRecord(language)) })
   }
   if (!areProfilesNew && !isProgressNew) return
   trace($, 'state', 'shared', () => ({ areProfilesNew, isProgressNew }))
@@ -2961,7 +2953,7 @@ async function scan($: EngineInterface, settings: Settings): Promise<void> {
       trace($, 'watch', 'saved', () => ({ files: active.changed(), dirty: active.dirty(), scanMs: now - started }))
       // Read before the save is followed, so that what it sets going knows how close the limit is.
       await readPressure($)
-      for (const path of active.changed()) watchedPaths.add(path)
+      for (const path of active.changed()) progressState.watchedPaths.add(path)
       await followSaves($, active.changed(), now)
     }
     // Until an editor has written its focus file, looking for it this often is enough.
@@ -3006,7 +2998,7 @@ function stopWatching(): void {
   sharedCheckedAt = 0
   explainer?.stop()
   explainer = null
-  watchedPaths.clear()
+  progressState.watchedPaths.clear()
   notePrints.clear()
   project = null
   reviews = []
@@ -3406,16 +3398,14 @@ async function lookUp($: EngineInterface, spot: Spot): Promise<string> {
 
 /** What every prompt is told about the person: their profile, and what has been seen of their own work. */
 function aboutPerson(): string {
-  const seen = profiles.languages.map(language => records.get(language)).filter(record => record !== undefined)
+  const seen = profiles.languages.map(language => progressState.records.get(language)).filter(record => record !== undefined)
 
   return [personText(profiles), progressText(seen)].filter(part => part !== '').join('\n\n')
 }
 
 /** Runs one piece of progress work after the ones before it, so that two never write one record at once. */
 function queueProgress($: EngineInterface, work: () => Promise<void>): void {
-  progressQueue = progressQueue.then(work).catch(error => {
-    fail($, 'progress failed', error)
-  })
+  queueProgressWork(progressState, (what, error) => fail($, what, error), work)
 }
 
 async function setProgress($: EngineInterface, change: Partial<ProgressView>): Promise<void> {
@@ -3423,105 +3413,43 @@ async function setProgress($: EngineInterface, change: Partial<ProgressView>): P
   await update($, progressAtom, (view): ProgressView => ({ ...view, ...change }))
 }
 
+/** What the look at the person's progress needs from Claude Code. */
+function progressPortsOf($: EngineInterface, settings: Settings): ProgressPorts {
+  return {
+    settings,
+    now: async () => await $.clock.now(),
+    ask: (job, request) => callModel($, settings, job, request),
+    git: args => git($, repoRoot === '' ? undefined : repoRoot, args),
+    store: () => storeOf($),
+    repoRoot: () => repoRoot,
+    dataRoot: () => dataRoot,
+    projectName: () => projectId(repoRoot).replace(/-[0-9a-f]{8}$/, ''),
+    isOn: () => mode !== 'off',
+    isDriver: () => isDriver,
+    engagement: () => engagement,
+    profiles: () => profiles,
+    instructions: () => progressInstructions,
+    readPressure: () => readPressure($),
+    mayAsk: () => mayAsk(health),
+    setProgress: change => setProgress($, change),
+    registerReviewer: () => registerReviewer($, settings),
+    toast: text => $.ui.toast(text),
+    fail: (what, error) => fail($, what, error),
+  }
+}
+
 /** The Progress tab shows the records of the languages in play, main ones first. */
 async function showProgress($: EngineInterface, settings: Settings): Promise<void> {
-  const shown = profiles.languages.map(language => records.get(language) ?? emptyRecord(language))
-  await setProgress($, { isOn: settings.isProgressOn, identity, records: shown })
+  await showProgressOf(progressPortsOf($, settings), progressState)
 }
 
 async function loadRecord($: EngineInterface, language: string): Promise<ProgressRecord> {
-  if (dataRoot === '') return emptyRecord(language)
-
-  return parseRecord(await storeOf($).read(progressPath(dataRoot, language)), language)
+  return await loadRecordOf({ store: () => storeOf($), dataRoot: () => dataRoot }, language)
 }
 
 /** Whose commits count, and the records of the languages in play. */
 async function setUpProgress($: EngineInterface, settings: Settings): Promise<void> {
-  const where = repoRoot === '' ? undefined : repoRoot
-  // `git config` answers the repository's own setting, else the global one in ~/.gitconfig.
-  const effective = (await git($, where, ['config', '--get', 'user.email'])).stdout
-  const global = (await git($, where, ['config', '--global', '--get', 'user.email'])).stdout
-  identity = identityOf(effective, global)
-  records.clear()
-  for (const language of profiles.languages) records.set(language, await loadRecord($, language))
-  await showProgress($, settings)
-}
-
-/** What they said about themselves in one language, in a line. It is never evidence. */
-function saidAbout(language: string): string {
-  const answers = { ...profiles.subjects[GENERAL]?.answers, ...profiles.subjects[language]?.answers }
-
-  return Object.entries(answers)
-    .map(([id, answer]) => `${ANSWER_LABELS[id] ?? id}: ${answer}`)
-    .join('; ')
-}
-
-/**
- * One assessment: the person's own lines from these commits go to the deep
- * review model, and what it saw is added to the record under the rules in
- * `progress.ts`. Commits already assessed add nothing.
- */
-async function assess(
-  $: EngineInterface,
-  settings: Settings,
-  language: string,
-  commits: readonly (AssessedCommit & CommitForAssessment)[],
-  review: string,
-): Promise<boolean> {
-  const before = await loadRecord($, language)
-  const fresh = commits.filter(commit => !before.assessed.includes(commit.hash))
-  if (fresh.length === 0) return true
-  const name = projectId(repoRoot).replace(/-[0-9a-f]{8}$/, '')
-  const subject = fresh.length === 1 ? `commit ${fresh[0]?.short ?? ''}` : `${fresh.length} of your recent commits`
-  await setProgress($, { busy: `Looking at ${subject} for your ${languageName(language)} progress.` })
-  try {
-    const result = await callModel($, settings, 'progress', {
-      model: settings.deepReview.model,
-      effort: settings.deepReview.thinking,
-      system: progressInstructions,
-      prompt: assessmentRequest({ language, project: name, record: before, said: saidAbout(language), commits: fresh, review }),
-      maxTokens: 3000,
-      timeoutMs: 240_000,
-    })
-    if (!result.isAnswered) {
-      // No answer: it is worth another try, later.
-      await setProgress($, { skipped: `The look at ${subject} got no answer. It is tried again.` })
-
-      return false
-    }
-    const assessment = parseAssessment(result.text)
-    if (assessment === null) {
-      await setProgress($, { skipped: `The look at ${subject} did not finish. Nothing was recorded.` })
-
-      return true
-    }
-    // Added to the record as it stands on disk, in one step: another session may be adding to it too.
-    // The file as it was is kept beside it, because the evidence cannot be gathered again.
-    const at = await $.clock.now()
-    const made: { change: LevelChange | null } = { change: null }
-    const record = await updateJson(
-      storeOf($),
-      progressPath(dataRoot, language),
-      stored => parseRecord(stored, language),
-      latest => {
-        const added = withAssessment(latest, assessment, fresh, name, at)
-        made.change = added.change
-
-        return added.record
-      },
-      { keepBackup: true },
-    )
-    const change = made.change
-    records.set(language, record)
-    await setProgress($, { skipped: '' })
-    await showProgress($, settings)
-    await registerReviewer($, settings)
-    if (change !== null) $.ui.toast(`${languageName(language)}: ${change.to}${record.isProvisional ? ' (provisional)' : ''}. See the Progress tab.`)
-
-    return true
-  } finally {
-    await setProgress($, { busy: '' })
-  }
+  await setUpProgressOf(progressPortsOf($, settings), progressState)
 }
 
 /**
@@ -3531,76 +3459,12 @@ async function assess(
  * to do for this commit.
  */
 async function assessCommit($: EngineInterface, settings: Settings, hash: string, review: string): Promise<boolean> {
-  if (!settings.isProgressOn || repoRoot === '' || dataRoot === '' || mode === 'off') return true
-  const asked = await git($, repoRoot, commitInfoArgs(hash))
-  // Git did not answer: worth another try. A commit git says it does not have is let go.
-  if (asked.exitCode === -1) return false
-  const info = parseCommitInfo(asked.stdout)
-  if (info === null) return true
-  const files = addedLines((await git($, repoRoot, commitPatchArgs(hash))).stdout)
-  const verdict = judge(info, identity, files)
-  const short = shortHash(info.hash)
-  if (!verdict.isYours) {
-    await setProgress($, { skipped: `Commit ${short} does not count toward your progress: ${verdict.reason}.` })
-
-    return true
-  }
-  // Work the tutor watched arrive in saves counts in full. Work it did not see counts half.
-  const watched = verdict.files.filter(file => watchedPaths.has(file.path)).length
-  const weight = watched * 2 >= verdict.files.length ? 1 : 0.5
-  const title = info.message.split('\n')[0] ?? ''
-  const languages = [...byLanguage(verdict.files)].filter(([, group]) => sizeOf(group) >= MIN_LINES).slice(0, 2)
-  if (languages.length === 0) {
-    for (const file of verdict.files) watchedPaths.delete(file.path)
-    await setProgress($, { skipped: `Commit ${short} is too small to say anything about your progress.` })
-
-    return true
-  }
-  let isSettled = true
-  for (const [language, group] of languages) {
-    if (!(await assess($, settings, language, [{ hash: info.hash, short, weight, title, files: group }], review))) isSettled = false
-  }
-  // Kept until the commit is settled, so that another try weighs it the same.
-  if (isSettled) for (const file of verdict.files) watchedPaths.delete(file.path)
-
-  return isSettled
+  return await assessCommitOf(progressPortsOf($, settings), progressState, hash, review)
 }
 
-/** How many of the person's recent commits a first placement looks through, and how many it uses. */
-const PLACEMENT_SCAN = 30
-const PLACEMENT_COMMITS = 5
-
-/**
- * A language with no level yet gets a first placement from up to five of the
- * person's recent commits in this project, read in one request. They count
- * half, because the tutor did not watch that work arrive.
- */
+/** A language with no level yet gets a first placement from the person's recent commits in this project. */
 async function placeFirst($: EngineInterface, settings: Settings, run: number): Promise<void> {
-  if (!settings.isProgressOn || identity.length === 0 || repoRoot === '' || dataRoot === '' || !isDriver) return
-  const held = await readPressure($)
-  if (held.level !== 'none' || !mayAsk(health)) return
-  const mine = parseRecent((await git($, repoRoot, [...RECENT_COMMITS_ARGS])).stdout)
-    .filter(commit => identity.includes(commit.email))
-    .slice(0, PLACEMENT_SCAN)
-  if (mine.length === 0) return
-
-  for (const language of profiles.languages.slice(0, 2)) {
-    const record = await loadRecord($, language)
-    if (record.level !== null || run !== engagement) continue
-    const picked: (AssessedCommit & CommitForAssessment)[] = []
-    for (const commit of mine) {
-      if (picked.length >= PLACEMENT_COMMITS || run !== engagement) break
-      if (record.assessed.includes(commit.hash)) continue
-      const info = parseCommitInfo((await git($, repoRoot, commitInfoArgs(commit.hash))).stdout)
-      if (info === null) continue
-      const verdict = judge(info, identity, addedLines((await git($, repoRoot, commitPatchArgs(commit.hash))).stdout))
-      const group = verdict.isYours ? byLanguage(verdict.files).get(language) : undefined
-      if (group === undefined || sizeOf(group) < MIN_LINES) continue
-      picked.push({ hash: info.hash, short: shortHash(info.hash), weight: 0.5, title: info.message.split('\n')[0] ?? '', files: group })
-    }
-    // Read newest first from git log; assessed oldest first, so that the record runs in time order.
-    if (picked.length > 0 && run === engagement) await assess($, settings, language, picked.reverse(), '')
-  }
+  await placeFirstOf(progressPortsOf($, settings), progressState, run)
 }
 
 /**
@@ -4392,8 +4256,8 @@ export const register: Register = (on, options) => {
     if (mode === 'off') return answered($, e, 'Backseat Driver is off.')
     if (!settings.isProgressOn) return answered($, e, 'The progress report is switched off in /config.')
     const language = String(e.language ?? '').trim().toLowerCase()
-    const record = records.get(language) ?? (await loadRecord($, language))
-    const whose = identity.length === 0 ? 'Git has no user.email here, so no commit can be confirmed as theirs.' : `Only commits by ${identity.join(' or ')} count.`
+    const record = progressState.records.get(language) ?? (await loadRecord($, language))
+    const whose = progressState.identity.length === 0 ? 'Git has no user.email here, so no commit can be confirmed as theirs.' : `Only commits by ${progressState.identity.join(' or ')} count.`
 
     return answered($, e, record.observations.length === 0 ? `Nothing is on record for ${language} yet. ${whose}` : `${recordText(record)}\n\n${whose}`)
   })
