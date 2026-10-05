@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { HELP, helpText, isModeRequest, parseRequest, transition } from '../hooks/mode'
-import { parseProfile, subjectKey } from '../hooks/profiles'
+import { HELP, helpText, isModeRequest, parseRequest, transition } from '../core/mode'
+import { parseProfile, subjectKey } from '../core/profiles'
 import { LICENSE_ANSWERED, SESSION, sessionTest, stubSession, typed } from './kit'
 
 test('parseRequest: no argument means on, an unknown word means help', async () => {

@@ -1,9 +1,9 @@
 import { expect, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 
-import { projectId } from '../hooks/datahome'
-import { HEALTHY, NO_PRESSURE } from '../hooks/health'
-import type { Health, Pressure } from '../hooks/health'
+import { projectId } from '../core/datahome'
+import { HEALTHY, NO_PRESSURE } from '../core/health'
+import type { Health, Pressure } from '../core/health'
 import {
   commitSubject,
   current,
@@ -26,9 +26,9 @@ import {
   withAttempt,
   withCommit,
   withoutCommit,
-} from '../hooks/reviewqueue'
-import type { ReviewQueue } from '../hooks/reviewqueue'
-import { clockTime } from '../hooks/status'
+} from '../core/reviewqueue'
+import type { ReviewQueue } from '../core/reviewqueue'
+import { clockTime } from '../core/status'
 import { commitHash, PANE, ROOT, SESSION, sessionTest, stubSession, typed } from './kit'
 
 /** The commits that wait for their deep review, and what becomes of them when a review does not go to plan. */

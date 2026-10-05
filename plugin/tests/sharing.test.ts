@@ -2,11 +2,11 @@ import { expect } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 
 import type { Profile } from '../types'
-import { MARKER } from '../hooks/datahome'
-import { FORGET, PHRASE, SCOPE_EVERYTHING } from '../hooks/forget'
-import { LOCK_TTL_MS, LOCK_WAIT_MS, lockRef } from '../hooks/locks'
-import { emptyProfile, withAnswers, withHush } from '../hooks/profiles'
-import { READ_RETRY_MS } from '../hooks/store'
+import { MARKER } from '../core/datahome'
+import { FORGET, PHRASE, SCOPE_EVERYTHING } from '../core/forget'
+import { LOCK_TTL_MS, LOCK_WAIT_MS, lockRef } from '../core/locks'
+import { emptyProfile, withAnswers, withHush } from '../core/profiles'
+import { READ_RETRY_MS } from '../core/store'
 import { DATA_HOME, SESSION, sessionTest, stubSession, typed } from './kit'
 
 /** Several sessions share the tutor's data folder. These are the moments where they meet. */

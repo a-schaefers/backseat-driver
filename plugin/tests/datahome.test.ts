@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { dataHome, fileEntryPath, isRemovable, MARKER, profilePath, progressPath, projectDir, projectId, safeName } from '../hooks/datahome'
+import { dataHome, fileEntryPath, isRemovable, MARKER, profilePath, progressPath, projectDir, projectId, safeName } from '../core/datahome'
 import {
   confirmQuestion,
   FORGET,
@@ -14,10 +14,10 @@ import {
   SCOPE_PROJECT,
   scopeOf,
   scopePaths,
-} from '../hooks/forget'
-import { fingerprint, shortHash } from '../hooks/hash'
-import { emptyProfile, parseProfile, withAnswers, withHush } from '../hooks/profiles'
-import { memoryDisk, readJson, writeJson } from '../hooks/storage'
+} from '../core/forget'
+import { fingerprint, shortHash } from '../core/hash'
+import { emptyProfile, parseProfile, withAnswers, withHush } from '../core/profiles'
+import { memoryDisk, readJson, writeJson } from '../core/storage'
 import { DATA_HOME, LICENSE_ANSWERED, ROOT, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const MEAN = 'def mean(xs):\n    return sum(xs) / len(xs)\n'

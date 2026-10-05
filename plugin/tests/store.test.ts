@@ -1,8 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
-import type { Lock } from '../hooks/locks'
-import { memoryDisk } from '../hooks/storage'
-import { backupPath, brokenPath, createStore, plainStore, READ_RETRY_MS, toText, updateJson, WRITE_TRIES } from '../hooks/store'
+import type { Lock } from '../core/locks'
+import { memoryDisk } from '../core/storage'
+import { backupPath, brokenPath, createStore, plainStore, READ_RETRY_MS, toText, updateJson, WRITE_TRIES } from '../core/store'
 
 const FILE = '/d/profiles/python.json'
 

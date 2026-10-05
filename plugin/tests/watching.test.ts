@@ -1,9 +1,9 @@
 import { expect, test } from 'claude-code/testing'
 
-import { backoffMs, shouldLook, slowedGapMs, throttle, usagePressure } from '../hooks/gate'
-import { dirtyPaths, parseStatus } from '../hooks/git'
-import { isNoiseFile, isTrivialChange, looksBinary } from '../hooks/noise'
-import { createWatcher } from '../hooks/watcher'
+import { backoffMs, shouldLook, slowedGapMs, throttle, usagePressure } from '../core/gate'
+import { dirtyPaths, parseStatus } from '../core/git'
+import { isNoiseFile, isTrivialChange, looksBinary } from '../core/noise'
+import { createWatcher } from '../core/watcher'
 
 test('parseStatus reads NUL-separated entries and skips the old name of a rename', async () => {
   const output = ' M src/a.py\0?? notes with space.txt\0R  new.py\0old.py\0 D gone.py\0D  staged-gone.py\0A  added.py\0'

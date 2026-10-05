@@ -1,10 +1,10 @@
 import { expect } from 'claude-code/testing'
 
-import { MARKER, projectId } from '../hooks/datahome'
-import { FORGET } from '../hooks/forget'
-import { parseJournal } from '../hooks/journal'
+import { MARKER, projectId } from '../core/datahome'
+import { FORGET } from '../core/forget'
+import { parseJournal } from '../core/journal'
 import { NOT_CLEAR } from '../hooks/pane'
-import { LET_IT_INFER, WORKING_QUESTION } from '../hooks/working'
+import { LET_IT_INFER, WORKING_QUESTION } from '../core/working'
 import { DATA_HOME, PANE, ROOT, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const MEAN = 'def mean(xs):\n    return sum(xs) / len(xs)\n'

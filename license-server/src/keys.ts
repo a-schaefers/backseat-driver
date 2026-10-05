@@ -1,6 +1,6 @@
 /**
  * Making and signing commercial license keys. The format is the plugin's
- * (plugin/hooks/licensekey.ts): `BSD1.<payload>.<signature>`, the payload
+ * (plugin/core/licensekey.ts): `BSD1.<payload>.<signature>`, the payload
  * JSON in base64url, the signature ECDSA P-256 with SHA-256 over the payload's
  * base64url text, as r and s (64 bytes). The tests check every key made here
  * with the plugin's own checker.
@@ -9,7 +9,7 @@
 import { createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign } from 'node:crypto'
 import type { KeyObject } from 'node:crypto'
 
-import type { KeyPayload, PublicKey } from '../../plugin/hooks/licensekey.ts'
+import type { KeyPayload, PublicKey } from '../../plugin/core/licensekey.ts'
 
 export const KEY_PREFIX = 'BSD1'
 

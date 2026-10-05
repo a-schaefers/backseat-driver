@@ -1,10 +1,10 @@
-import { clockTime } from '../hooks/status'
+import { clockTime } from '../core/status'
 import { expect, test } from 'claude-code/testing'
 
 import type { Review } from '../types'
 
 import { reviewSchedule } from '../hooks/pane'
-import { paneContext } from '../hooks/prompts'
+import { paneContext } from '../core/prompts'
 import {
   commitTitle,
   fitReview,
@@ -14,8 +14,8 @@ import {
   reviewRequest,
   scopePrint,
   scopeSubject,
-} from '../hooks/review'
-import type { ReviewScope } from '../hooks/review'
+} from '../core/review'
+import type { ReviewScope } from '../core/review'
 import { commitHash, finished, PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const MEAN = 'def mean(xs):\n    return sum(xs) / len(xs)\n'

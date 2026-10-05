@@ -1,9 +1,9 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Note } from '../types'
-import { diffLines } from '../hooks/diff'
-import { applyReply, listNotes, MAX_DISMISSED, MAX_OPEN_NOTES, parseReply, sortNotes, withDismissed } from '../hooks/notes'
-import { excerpt, notesContext, playByPlayPrompt, reviewerSystem } from '../hooks/prompts'
+import { diffLines } from '../core/diff'
+import { applyReply, listNotes, MAX_DISMISSED, MAX_OPEN_NOTES, parseReply, sortNotes, withDismissed } from '../core/notes'
+import { excerpt, notesContext, playByPlayPrompt, reviewerSystem } from '../core/prompts'
 
 const note = (id: number, overrides: Partial<Note> = {}): Note => ({
   id,

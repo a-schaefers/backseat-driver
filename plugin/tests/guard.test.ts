@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { isUsersFile, normalizePath } from '../hooks/guard'
+import { isUsersFile, normalizePath } from '../core/guard'
 
 test('normalizePath resolves dots without touching the file system', async () => {
   expect(normalizePath('/work/src/../lib/./a.py')).toBe('/work/lib/a.py')

@@ -1,8 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
-import { projectId } from '../hooks/datahome'
-import { fingerprint } from '../hooks/hash'
-import { sourcePrint } from '../hooks/knowledge'
+import { projectId } from '../core/datahome'
+import { fingerprint } from '../core/hash'
+import { sourcePrint } from '../core/knowledge'
 import {
   emptyProject,
   insightLine,
@@ -15,10 +15,10 @@ import {
   splitReview,
   withReview,
   withReviewNotes,
-} from '../hooks/project'
-import type { KeptInsight } from '../hooks/project'
-import { playByPlayPrompt } from '../hooks/prompts'
-import { reviewRequest, scopeSubject } from '../hooks/review'
+} from '../core/project'
+import type { KeptInsight } from '../core/project'
+import { playByPlayPrompt } from '../core/prompts'
+import { reviewRequest, scopeSubject } from '../core/review'
 import { PANE, ROOT, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const STATS = [

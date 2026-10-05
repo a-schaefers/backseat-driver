@@ -1,8 +1,8 @@
 import { expect } from 'claude-code/testing'
 
-import { MARKER } from '../hooks/datahome'
-import { DEBUG_USAGE, FLUSH_MS } from '../hooks/debuglog'
-import { FORGET, PHRASE, SCOPE_EVERYTHING } from '../hooks/forget'
+import { MARKER } from '../core/datahome'
+import { DEBUG_USAGE, FLUSH_MS } from '../core/debuglog'
+import { FORGET, PHRASE, SCOPE_EVERYTHING } from '../core/forget'
 import { DATA_HOME, ROOT, SESSION, SESSION_ID, sessionTest, stubSession, typed } from './kit'
 
 const MEAN = 'def mean(xs):\n    return sum(xs) / len(xs)\n'

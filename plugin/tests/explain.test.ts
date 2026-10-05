@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { createExplainer, RETRY_MS, SETTLE_MS } from '../hooks/explainer'
-import { detailRequest, isMappable, outlineRequest, parseDetailReply, parseOutline } from '../hooks/explain-prompts'
+import { createExplainer, RETRY_MS, SETTLE_MS } from '../core/explainer'
+import { detailRequest, isMappable, outlineRequest, parseDetailReply, parseOutline } from '../core/explain-prompts'
 import {
   firstChange,
   freshSymbols,
@@ -13,10 +13,10 @@ import {
   symbolAt,
   withDetail,
   withOutline,
-} from '../hooks/knowledge'
-import type { Detail } from '../hooks/knowledge'
-import { memoryDisk } from '../hooks/storage'
-import { plainStore } from '../hooks/store'
+} from '../core/knowledge'
+import type { Detail } from '../core/knowledge'
+import { memoryDisk } from '../core/storage'
+import { plainStore } from '../core/store'
 
 const STATS = [
   'def mean(xs):',

@@ -6,8 +6,8 @@ import type { AgentSpec, ConfigRow, ModelCompleteRequest, On, RenderElement, Too
 import { mock, test } from 'claude-code/testing'
 import type { TestBody, TestOptions, TestRest } from 'claude-code/testing'
 
-import { projectId } from '../hooks/datahome'
-import { emptyProject } from '../hooks/project'
+import { projectId } from '../core/datahome'
+import { emptyProject } from '../core/project'
 
 /**
  * A test gets five seconds unless it asks for more. One that starts a session
