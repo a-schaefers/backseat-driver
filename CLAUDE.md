@@ -50,6 +50,12 @@ Stance: the project is against Claude writing the user's code, not neutral. Whil
   - Voices: `default`, `torvalds`, `knuth`, `primeagen`, `eli5-tldr-kiss-terse`. Engineering: `default`, `torvalds`, `knuth`, `primeagen`.
 - The persona has a face and can be switched off. A small animated character per voice speaks one short line at a time: a critical or design point in the user's latest save, a deep review's takeaway, now and then a joke. Dim at rest, quiet unless a look gives it something to say, one line where rows are scarce, no model calls of its own, off with one setting. Real-person personas get ASCII caricatures in good spirit (owner's call; a first version with mascots was rejected as too timid): Linus with square glasses, Knuth with round glasses, ThePrimeagen with headphones and mustache, the KISS Linux penguin in a top hat, and Claude Code's mascot for `default`.
 - The tutor knows what the user is doing without making them say it: a per-project journal (below). "What are you working on right now?" is asked only on `w`, `/bsd working`, or by the tutor in chat when it is unclear and matters. The user's answer overrides the inference and persists across sessions until changed or taken back. Borrowed from the owner's topstep-claudebot (journal and briefings; not its reflection loop or inbox).
+- Event-driven, not polled (owner, 2026-10-04): a state machine driven by Claude Code's own events and exact deadlines, preferring built-in signals over polling listeners. The owner accepts the extra complexity for a faster, more elegant mod. Polling is confined to one adaptive sensor for what Claude Code cannot push: the user's own saves, commits made outside it, and the editor's caret.
+- Failures are handled gracefully (owner, 2026-10-04): API rate limits, plan limits and Claude outages are told apart, retried with delayed backoff, and nothing pending is lost.
+- Several sessions at once are safe (owner, 2026-10-04: "a seatbelt and suspenders"): writes to the data folder are locked and queued so two sessions never clobber a file, and one session drives a project's background jobs.
+- The pane is always up to date: instant, fresh, async (owner, 2026-10-04).
+- A verbose debug mode, switched on and off (owner, 2026-10-04): everything the tutor does goes to a log file in the data folder, so a developer can have Claude monitor it while working on Backseat Driver. It is about the product itself: one log for all projects, never per project.
+- Functional where possible (owner, 2026-10-04): logic goes in a PureScript kernel modeled on `../merecatholicity.com` (`purescript/src/Domain/*`, one `core.ts` membrane), to detect, prevent and reduce bugs, provided it integrates with Claude Code. It is the last step of the event-driven plan.
 
 ## Status
 
@@ -75,6 +81,7 @@ Every roadmap milestone is built and was seen working in short scripted real ses
   - Limits: files under 256 KiB, at most 512 files.
   - Directory installs load as `<name>@synced`.
 - Approved plan for part two: `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine (nine decisions, risks per milestone).
+- In progress: the event-driven plan, `~/.claude/plans/wild-jumping-clover.md` on the owner's machine (approved 2026-10-04). Milestones M0 probes, M1 debug log, M2 locked store, M3 kernel (events, deadlines, health, play-by-play machine, sensor), M4 deep review queue, M5 Explain and journal on deadlines, M6 one driver per project, M7 pane pass, M8 optional push sources, M9 PureScript kernel. Done so far: none. Until M3 lands, the sections below describe the polling design.
 
 ## Repository
 
