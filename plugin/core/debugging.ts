@@ -75,16 +75,22 @@ export function trace(
   })
 }
 
-/** Writes the debug log and, beside it, the tutor's whole state as it stands. */
-export async function flushDebug(ports: DebuggingPorts, state: DebuggingState): Promise<void> {
+/**
+ * Writes the debug log and, beside it, the tutor's whole state as it stands,
+ * stamped with when (`at`). The state is written when it changed, and with
+ * `isBeat` also when it did not: a session that is quiet and one that is
+ * stuck look the same from outside until one of them stops stamping.
+ */
+export async function flushDebug(ports: DebuggingPorts, state: DebuggingState, isBeat = false): Promise<void> {
   const log = state.tracer.log()
   if (log === null) return
   await log.flush()
   try {
-    const text = JSON.stringify(await ports.fullState(), null, 1)
-    if (text === state.stateWritten) return
+    const full = await ports.fullState()
+    const text = JSON.stringify(full, null, 1)
+    if (text === state.stateWritten && !isBeat) return
     state.stateWritten = text
-    await ports.write(`${log.dir()}/state.json`, `${text}\n`)
+    await ports.write(`${log.dir()}/state.json`, `${JSON.stringify({ at: Date.now(), ...full }, null, 1)}\n`)
   } catch {
     // The state file is a convenience. The log itself has been written.
   }
@@ -120,6 +126,8 @@ export async function startDebug(ports: DebuggingPorts, state: DebuggingState): 
     const log = createDebugLog({ write: (path, text) => ports.write(path, text), list: path => debugNames(ports, path) }, dir)
     await ports.markHome()
     await log.open()
+    // What happened before the log was on, as far as it is remembered: what, and when, without the details.
+    const earlier = state.tracer.ring()
     state.tracer.attach(log, sessionId)
     state.stateWritten = ''
     const { claudeCode, plugin } = await ports.versions()
@@ -133,6 +141,7 @@ export async function startDebug(ports: DebuggingPorts, state: DebuggingState): 
       mode: ports.mode(),
       settings: ports.settings,
     }))
+    if (earlier.length > 0) trace(ports, state, 'meta', 'before the log', () => ({ latest: earlier }))
   } catch (error) {
     ports.log(`could not start the debug log: ${String(error)}`)
   }
@@ -146,6 +155,21 @@ export async function stopDebug(ports: DebuggingPorts, state: DebuggingState, wh
   state.flushTimer = null
   await flushDebug(ports, state)
   state.tracer.detach()
+}
+
+/**
+ * Starts or stops this session's log when the switch was changed elsewhere:
+ * by `/bsd debug` in another session, or from outside every session
+ * (`scripts/jack.py`), which is how a developer listens in on a session that
+ * is already running. Nothing tells a session that the switch changed, so it
+ * is looked at now and then.
+ */
+export async function followSwitch(ports: DebuggingPorts, state: DebuggingState): Promise<void> {
+  if (ports.dataRoot() === '' || ports.mode() === 'off') return
+  const isOn = await isDebugSwitchedOn(ports)
+  if (isOn === state.tracer.isOn()) return
+  if (isOn) await startDebug(ports, state)
+  else await stopDebug(ports, state, 'switched off elsewhere')
 }
 
 /** `/bsd debug`: switches the debug log, says where it is, writes down what just happened, or deletes the logs. */

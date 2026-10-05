@@ -21,6 +21,18 @@ module Kernel.Main
   , leaseBeatMs
   , leaseTtlMs
   , leaseSlackMs
+  , sessionsCarriedFrom
+  , sessionsSaid
+  , sessionsLeft
+  , sessionsWithdrawn
+  , sessionsIsSayDue
+  , sessionsBound
+  , sessionsSayEveryMs
+  , sessionsAliveMs
+  , sessionsHandoffMs
+  , sessionsKeepMs
+  , sessionsRecheckMs
+  , sessionsCheckEveryMs
   ) where
 
 import Kernel.Health (mayAskWire, outcomeOfErrorWire, outcomeOfWire, retryDelayMsWire, stepWire, troubleOfWire)
@@ -33,6 +45,8 @@ import Kernel.Queue (currentQueueWire, failedTextWire, heldTextWire, isSpentWire
 import Kernel.Store (afterReadWire, afterWriteWire, keepsBackupWire, readRetryMs, readTries, stepOfWire, writeTries)
 import Kernel.Status (healthLineWire, playLineWire, slowScanMs, watchStateWire)
 import Kernel.Schedule (armingWire, delayMsWire, dueNowWire)
+import Kernel.Sessions (Asking, Carried, Drawing, Entry)
+import Kernel.Sessions as Sessions
 import Kernel.Sensor (focusGapMs, focusScanMs, hotForMs, hotScanMs, idleAfterMs, idleScanMs, longestFocusGapMs, longestScanGapMs, pushedFocusMs, pushedScanMs, scanGapMsWire, scanMs)
 
 leaseIsHeld :: Lease -> Number -> Boolean
@@ -55,3 +69,39 @@ leaseTtlMs = Lease.ttlMs
 
 leaseSlackMs :: Number
 leaseSlackMs = Lease.slackMs
+
+sessionsCarriedFrom :: Array Entry -> Asking -> Carried
+sessionsCarriedFrom = Sessions.carriedFrom
+
+sessionsSaid :: Array Entry -> Entry -> Array Entry
+sessionsSaid = Sessions.said
+
+sessionsLeft :: Array Entry -> String -> Number -> Array Entry
+sessionsLeft = Sessions.left
+
+sessionsWithdrawn :: Array Entry -> String -> Array Entry
+sessionsWithdrawn = Sessions.withdrawn
+
+sessionsIsSayDue :: Number -> Number -> Boolean
+sessionsIsSayDue = Sessions.isSayDue
+
+sessionsBound :: Drawing -> String
+sessionsBound = Sessions.boundWire
+
+sessionsSayEveryMs :: Number
+sessionsSayEveryMs = Sessions.sayEveryMs
+
+sessionsAliveMs :: Number
+sessionsAliveMs = Sessions.aliveMs
+
+sessionsHandoffMs :: Number
+sessionsHandoffMs = Sessions.handoffMs
+
+sessionsKeepMs :: Number
+sessionsKeepMs = Sessions.keepMs
+
+sessionsRecheckMs :: Number
+sessionsRecheckMs = Sessions.recheckMs
+
+sessionsCheckEveryMs :: Number
+sessionsCheckEveryMs = Sessions.checkEveryMs

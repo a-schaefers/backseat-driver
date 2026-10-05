@@ -17,3 +17,6 @@ kernel/output/
 license-server/*.pem
 license-server/*.key
 license-server/licenses.json
+
+# Python leaves these beside the scripts it runs (scripts/jack.py and its tests).
+__pycache__/

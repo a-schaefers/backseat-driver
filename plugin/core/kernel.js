@@ -20,6 +20,9 @@ var replicateImpl = typeof Array.prototype.fill === "function" ? replicateFill :
 var length = function(xs) {
   return xs.length;
 };
+var indexImpl = function(just, nothing, xs, i) {
+  return i < 0 || i >= xs.length ? nothing : just(xs[i]);
+};
 var findIndexImpl = function(just, nothing, f, xs) {
   for (var i = 0, l = xs.length; i < l; i++) {
     if (f(xs[i])) return just(i);
@@ -722,6 +725,12 @@ var slice = /* @__PURE__ */ runFn3(sliceImpl);
 var $$null = function(xs) {
   return length(xs) === 0;
 };
+var index = /* @__PURE__ */ (function() {
+  return runFn4(indexImpl)(Just.create)(Nothing.value);
+})();
+var last = function(xs) {
+  return index(xs)(length(xs) - 1 | 0);
+};
 var foldl2 = /* @__PURE__ */ foldl(foldableArray);
 var findIndex = /* @__PURE__ */ (function() {
   return runFn4(findIndexImpl)(Just.create)(Nothing.value);
@@ -1324,7 +1333,7 @@ var step = function($copy_v) {
           ;
           throw new Error("Failed pattern match at Kernel.Health (line 151, column 11 - line 153, column 63): " + [reopens.constructor.name]);
         })();
-        var kept = (function() {
+        var kept2 = (function() {
           if (v instanceof Waiting) {
             return max1(v.value0.until)(until);
           }
@@ -1359,7 +1368,7 @@ var step = function($copy_v) {
         return new Waiting({
           trouble: v1.value0.trouble,
           detail: v1.value0.detail,
-          until: kept,
+          until: kept2,
           failures
         });
       }
@@ -3168,6 +3177,167 @@ var focusGapMs = function(facts) {
   throw new Error("Failed pattern match at Kernel.Sensor (line 134, column 1 - line 134, column 35): " + [facts.constructor.name]);
 };
 
+// output/Kernel.Sessions/index.js
+var max11 = /* @__PURE__ */ max(ordNumber);
+var map5 = /* @__PURE__ */ map(functorArray);
+var sortWith3 = /* @__PURE__ */ sortWith(ordNumber);
+var Drawn = /* @__PURE__ */ (function() {
+  function Drawn2() {
+  }
+  ;
+  Drawn2.value = new Drawn2();
+  return Drawn2;
+})();
+var Unsure = /* @__PURE__ */ (function() {
+  function Unsure2() {
+  }
+  ;
+  Unsure2.value = new Unsure2();
+  return Unsure2;
+})();
+var Gone = /* @__PURE__ */ (function() {
+  function Gone2() {
+  }
+  ;
+  Gone2.value = new Gone2();
+  return Gone2;
+})();
+var withdrawn = function(entries) {
+  return function(session) {
+    return filter(function(entry) {
+      return entry.session !== session;
+    })(entries);
+  };
+};
+var sayEveryMs = 3e5;
+var recheckMs = 2e3;
+var keepMs = 864e5;
+var kept = function(entries) {
+  return function(now) {
+    return filter(function(entry) {
+      return now - max11(entry.at)(entry.leftAt) <= keepMs;
+    })(entries);
+  };
+};
+var left = function(entries) {
+  return function(session) {
+    return function(now) {
+      var mark = function(entry) {
+        if (entry.session === session && entry.leftAt === 0) {
+          return {
+            session: entry.session,
+            at: entry.at,
+            born: entry.born,
+            cwd: entry.cwd,
+            mode: entry.mode,
+            leftAt: now
+          };
+        }
+        ;
+        if (otherwise) {
+          return entry;
+        }
+        ;
+        throw new Error("Failed pattern match at Kernel.Sessions (line 136, column 3 - line 138, column 24): " + [entry.constructor.name]);
+      };
+      return kept(map5(mark)(entries))(now);
+    };
+  };
+};
+var said = function(entries) {
+  return function(entry) {
+    return snoc(filter(function(other) {
+      return other.session !== entry.session;
+    })(kept(entries)(entry.at)))(entry);
+  };
+};
+var isSayDue = function(saidAt) {
+  return function(now) {
+    return now - saidAt >= sayEveryMs;
+  };
+};
+var hasTutorOn = function(entry) {
+  return entry.mode === "on" || entry.mode === "paused";
+};
+var handoffMs = 6e4;
+var checkEveryMs = 1e4;
+var boundOf = function(drawing) {
+  if (!drawing.isTerminal) {
+    return Drawn.value;
+  }
+  ;
+  if (drawing.surfaces > 0) {
+    return Drawn.value;
+  }
+  ;
+  if (drawing.wasUnsure) {
+    return Gone.value;
+  }
+  ;
+  if (otherwise) {
+    return Unsure.value;
+  }
+  ;
+  throw new Error("Failed pattern match at Kernel.Sessions (line 166, column 1 - line 166, column 28): " + [drawing.constructor.name]);
+};
+var boundWire = function(drawing) {
+  var v = boundOf(drawing);
+  if (v instanceof Drawn) {
+    return "drawn";
+  }
+  ;
+  if (v instanceof Unsure) {
+    return "unsure";
+  }
+  ;
+  if (v instanceof Gone) {
+    return "gone";
+  }
+  ;
+  throw new Error("Failed pattern match at Kernel.Sessions (line 174, column 21 - line 177, column 17): " + [v.constructor.name]);
+};
+var aliveMs = 66e4;
+var isCurrent = function(entry) {
+  return function(now) {
+    if (entry.leftAt > 0) {
+      return now - entry.leftAt <= handoffMs;
+    }
+    ;
+    if (otherwise) {
+      return now - entry.at <= aliveMs;
+    }
+    ;
+    throw new Error("Failed pattern match at Kernel.Sessions (line 98, column 1 - line 98, column 40): " + [entry.constructor.name, now.constructor.name]);
+  };
+};
+var carriedFrom = function(entries) {
+  return function(asking) {
+    var counts = function(entry) {
+      return entry.born === asking.born && (entry.cwd === asking.cwd && (hasTutorOn(entry) && isCurrent(entry)(asking.now)));
+    };
+    var v = last(sortWith3(function(v1) {
+      return v1.at;
+    })(filter(counts)(entries)));
+    if (v instanceof Just) {
+      return {
+        isFound: true,
+        session: v.value0.session,
+        mode: v.value0.mode
+      };
+    }
+    ;
+    if (v instanceof Nothing) {
+      return {
+        isFound: false,
+        session: "",
+        mode: "off"
+      };
+    }
+    ;
+    throw new Error("Failed pattern match at Kernel.Sessions (line 108, column 3 - line 110, column 60): " + [v.constructor.name]);
+  };
+};
+
 // output/Data.Number.Format/foreign.js
 function wrap(method) {
   return function(d) {
@@ -3726,6 +3896,18 @@ var afterReadWire = function(attempt) {
 };
 
 // output/Kernel.Main/index.js
+var sessionsWithdrawn = withdrawn;
+var sessionsSayEveryMs = sayEveryMs;
+var sessionsSaid = said;
+var sessionsRecheckMs = recheckMs;
+var sessionsLeft = left;
+var sessionsKeepMs = keepMs;
+var sessionsIsSayDue = isSayDue;
+var sessionsHandoffMs = handoffMs;
+var sessionsCheckEveryMs = checkEveryMs;
+var sessionsCarriedFrom = carriedFrom;
+var sessionsBound = boundWire;
+var sessionsAliveMs = aliveMs;
 var leaseTtlMs = ttlMs;
 var leaseSlackMs = slackMs;
 var leaseReleased = released;
@@ -3787,6 +3969,18 @@ export {
   reviewedWire,
   scanGapMsWire,
   scanMs,
+  sessionsAliveMs,
+  sessionsBound,
+  sessionsCarriedFrom,
+  sessionsCheckEveryMs,
+  sessionsHandoffMs,
+  sessionsIsSayDue,
+  sessionsKeepMs,
+  sessionsLeft,
+  sessionsRecheckMs,
+  sessionsSaid,
+  sessionsSayEveryMs,
+  sessionsWithdrawn,
   settledInWire,
   slowScanMs,
   slowedGapMs,

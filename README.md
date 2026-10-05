@@ -34,9 +34,9 @@ So the machine goes where it belongs: the back seat. You drive. It watches the r
 
 ## What it is
 
-Type `/bsd`. It shows up right above your prompt, with five tabs. No extra window.
+Type `/bsd`. A pane opens beside your conversation, with five tabs.
 
-**1. Play-by-play.** Live commentary on your code as you write it. Save, pause for a few seconds, and a fast model reads what changed. Worth saying? A short note lands right above your prompt: a bug, a risky pattern, a better idiom for that language. One idea per note. A hint, never a fix. Fix the code and the note goes away on its own. Nothing worth saying, it says nothing.
+**1. Play-by-play.** Live commentary on your code as you write it. Save, pause for a few seconds, and a fast model reads what changed. Worth saying? A short note lands in the pane: a bug, a risky pattern, a better idiom for that language. One idea per note. A hint, never a fix. Fix the code and the note goes away on its own. Nothing worth saying, it says nothing.
 
 - **Your call.** When your code hits a real design choice (how errors are handled, which data structure, what the user sees), the note says so, lays out what each way costs, and leaves the choice to you.
 - **★ Insight.** Now and then, something about how *this* codebase does things. Never a lecture you could read anywhere.
@@ -83,19 +83,19 @@ Type `/bsd` in Claude Code. The first time you work in a language, it asks a few
 | `/bsd explain src/app.py:42` | Explain a spot in the code |
 | `/bsd working on the parser` | Tell it what you're working on |
 | `/bsd settings` | Open the Settings tab |
-| `/bsd layout` | Above the prompt, a horizontal frame, or a vertical pane. It remembers |
+| `/bsd layout` | A pane at the side, a frame above the prompt, or a few lines above it. It remembers |
 | `/bsd forget` | Erase what it remembers: one project, one language, or everything |
 | `/bsd license` | Switch between personal and commercial use, or add a key |
 | `/bsd update`, `/bsd uninstall` | Fetch a newer release when it announces one, or remove the plugin |
 | `/bsd help` | Every command and key |
 
-`Ctrl+X Tab` hands it the keyboard, and `Esc` takes it back. `1` to `5` open the tabs. On a note, `e` explains it, `d` dismisses it, `m` mutes that topic for good. `l` looks at your changes now, `r` reviews now. It draws in the terminal and in the desktop app's Code tab.
+`Ctrl+X Tab` hands it the keyboard, and `Esc` takes it back. `1` to `5` open the tabs. On a note, `e` explains it, `d` dismisses it, `m` mutes that topic for good. `l` looks at your changes now, `r` reviews now. It draws in the terminal and in the desktop app's Code tab. Send the conversation to the background and the tutor goes with it.
 
 Models, thinking levels, pacing and personas live in tab `5`, Settings, or `/bsd settings`. They're in `/config` too.
 
 ### Editors
 
-Plugins for Emacs, Neovim and VS Code live in [`editors/`](editors). They tell the tutor where your cursor is, what you've selected and what's open, so Explain follows your cursor and the tutor knows where you've been. The tutor says which editor is connected. Nothing to configure.
+Plugins for Emacs, Neovim and VS Code live in [`editors/`](editors). They tell the tutor where your cursor is, what you've selected and what's open, so Explain follows your cursor and the tutor knows where you've been. A light in the tutor goes green when your editor connects and red when it's gone. Nothing to configure.
 
 - **Neovim** (0.9+): `vim.opt.rtp:append('/path/to/backseat-driver/editors/neovim')` in `init.lua`.
 - **Emacs** (27+): `(add-to-list 'load-path "/path/to/backseat-driver/editors/emacs")`, `(require 'backseat-driver)`, `(backseat-driver-mode 1)`.

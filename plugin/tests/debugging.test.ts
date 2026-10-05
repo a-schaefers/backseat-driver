@@ -3,7 +3,8 @@ import { expect } from 'claude-code/testing'
 import { MARKER } from '../core/datahome'
 import { DEBUG_USAGE, FLUSH_MS } from '../core/debuglog'
 import { FORGET, PHRASE, SCOPE_EVERYTHING } from '../core/forget'
-import { DATA_HOME, ROOT, SESSION, SESSION_ID, sessionTest, stubSession, typed } from './kit'
+import { SELF_CHECK_MS } from '../core/sessions'
+import { DATA_HOME, PANE, ROOT, SESSION, SESSION_ID, sessionTest, stubSession, typed } from './kit'
 
 const MEAN = 'def mean(xs):\n    return sum(xs) / len(xs)\n'
 const DEBUG = `${DATA_HOME}/debug`
@@ -222,4 +223,66 @@ sessionTest('a /clear ends the conversation but not the log', async ($, on) => {
   await session.clock.advance(4000)
   await session.clock.advance(FLUSH_MS)
   expect(session.debugLog().length > written).toBe(true)
+})
+
+sessionTest('a switch flipped from outside the session starts its log within its next look at itself, with what came before', async ($, on) => {
+  const session = stubSession(on, { head: { 'stats.py': MEAN } })
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+  await session.clock.settle()
+  await session.clock.advance(3000)
+  expect(session.debugLog()).toEqual([])
+
+  // `scripts/jack.py in`, or `/bsd debug on` in another session: nothing tells this one.
+  session.disk.set(`${DATA_HOME}/debug.json`, JSON.stringify({ on: true, by: 'jack' }))
+  await session.clock.advance(SELF_CHECK_MS)
+  await session.clock.advance(FLUSH_MS)
+  const log = session.debugLog()
+  expect(log.some(record => record.k === 'meta' && record.n === 'log started')).toBe(true)
+  // What happened before the log was on is in it, by what and when, without the details.
+  const before = log.find(record => record.k === 'meta' && record.n === 'before the log')?.d as { latest: { k: string; n: string; d?: unknown }[] }
+  expect(before.latest.some(entry => entry.k === 'cmd' && entry.n === 'on')).toBe(true)
+  expect(before.latest.every(entry => entry.d === undefined)).toBe(true)
+
+  // Switched off the same way, it stops, and says why.
+  session.disk.set(`${DATA_HOME}/debug.json`, JSON.stringify({ on: false }))
+  await session.clock.advance(SELF_CHECK_MS)
+  await session.clock.advance(FLUSH_MS)
+  const stopped = session.debugLog().find(record => record.k === 'meta' && record.n === 'log stopped')?.d as { why: string }
+  expect(stopped.why).toBe('switched off elsewhere')
+})
+
+sessionTest('with the log on, the tutor writes down what it says it is showing and where it draws', { options: { animated_persona: false } }, async ($, on) => {
+  const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { 'debug.json': { on: true } } })
+  session.disk.set(`${DATA_HOME}/${MARKER}`, 'x')
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+  await session.clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await session.clock.advance(2000)
+  await session.clock.advance(FLUSH_MS)
+
+  // The drawing, once it has stood a moment: the pieces of text in it.
+  const drawn = session.debugLog().filter(record => record.k === 'shown' && record.n === 'pane')
+  expect(drawn.length > 0).toBe(true)
+  const last = drawn.at(-1)?.d as { placement: string; columns: number; texts: string[] }
+  expect(last.placement).toBe('dock')
+  expect(last.texts.some(text => text.startsWith('On.'))).toBe(true)
+  expect(last.texts).toContain('1: Play')
+  expect(last.texts).toContain('No editor is connected.')
+
+  // And beside the log, the state: who the session is, where it draws, what Claude Code said of its pane.
+  const folder = [...session.disk.keys()].find(path => path.startsWith(`${DATA_HOME}/debug/`) && path.endsWith('/state.json')) ?? ''
+  const state = JSON.parse(session.disk.get(folder) ?? '{}') as {
+    session: { id: string; cwd: string; surfaces: string[]; layout: string; panes: { id: string; isPlaced: boolean }[] }
+    shown: { pane: { texts: string[] } | null; opened: { isPlaced: boolean } | null }
+  }
+  expect(state.session.id).toBe(SESSION_ID)
+  expect(state.session.cwd).toBe(ROOT)
+  expect(state.session.surfaces).toEqual(['terminal'])
+  expect(state.session.layout).toBe('vertical')
+  expect(state.session.panes.map(pane => pane.id)).toEqual(['backseat-driver'])
+  expect(state.shown.opened?.isPlaced).toBe(true)
+  expect(state.shown.pane?.texts.some(text => text.startsWith('On.'))).toBe(true)
+  await ui.unmount()
 })

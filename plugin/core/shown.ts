@@ -1,0 +1,79 @@
+/**
+ * What the tutor says it is showing, for whoever checks it against the
+ * screen (`scripts/jack.py`, with the debug log on).
+ *
+ * A drawing is a tree of elements handed to Claude Code. Whether it reached
+ * the screen is not something the mod can see: a pane can be open and never
+ * placed, and a session can go on drawing in a process nobody is looking at.
+ * So the mod writes down what it drew, as the pieces of text a person would
+ * read, and the checker looks for them where the person is looking.
+ */
+
+/** One drawing, as last handed over. */
+export type Shown = {
+  /** When, in milliseconds since the epoch. */
+  at: number
+  /** `dock` or `inline` for the pane. '' above the prompt, where there is one place. */
+  placement: string
+  columns: number
+  rows: number
+  isFocused: boolean
+  isCompact: boolean
+  /** The pieces of text in it, in the order drawn. */
+  texts: string[]
+}
+
+function inline(value: unknown): string {
+  if (value === null || value === undefined || typeof value === 'boolean') return ''
+  if (typeof value === 'string' || typeof value === 'number') return String(value)
+  if (Array.isArray(value)) return value.map(inline).join('')
+  if (typeof value !== 'object') return ''
+
+  return inline((value as { children?: unknown }).children)
+}
+
+function tidy(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * The pieces of text in a drawing, in the order drawn: each `Text`, each
+ * button's label (with its key, where it is drawn with one), each line of a
+ * `Markdown`, each pick as "label: value". Pictures say nothing.
+ */
+export function textsOf(tree: unknown): string[] {
+  const texts: string[] = []
+  const push = (text: string): void => {
+    const piece = tidy(text)
+    if (piece !== '') texts.push(piece)
+  }
+  const walk = (node: unknown): void => {
+    if (node === null || node === undefined || typeof node === 'boolean') return
+    if (typeof node === 'string' || typeof node === 'number') return push(String(node))
+    if (Array.isArray(node)) return node.forEach(walk)
+    if (typeof node !== 'object') return
+    const { type, props, children } = node as { type?: unknown; props?: unknown; children?: unknown }
+    const given = (typeof props === 'object' && props !== null ? props : {}) as Record<string, unknown>
+    if (type === 'Text') return push(inline(children))
+    if (type === 'Button') {
+      const label = typeof given.label === 'string' ? given.label : ''
+
+      return push(typeof given.hotkey === 'string' && given.plain === true ? `${given.hotkey}: ${label}` : label)
+    }
+    if (type === 'Markdown') return String(given.text ?? '').split('\n').forEach(push)
+    if (type === 'Select') return push(`${String(given.label ?? '')}: ${String(given.value ?? '')}`)
+    if (type === 'Raster' || type === 'Image') return
+
+    return walk(children)
+  }
+  walk(tree)
+
+  return texts
+}
+
+/** Whether two drawings say the same. */
+export function isSameShown(one: Shown | null, other: Shown | null): boolean {
+  if (one === null || other === null) return one === other
+
+  return one.placement === other.placement && one.columns === other.columns && one.isFocused === other.isFocused && one.texts.join('\n') === other.texts.join('\n')
+}

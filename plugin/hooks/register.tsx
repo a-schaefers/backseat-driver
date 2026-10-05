@@ -25,6 +25,8 @@ import {
 } from '../core/avatar'
 import { backdropOf } from '../core/sprite'
 import type { Backdrop } from '../core/sprite'
+import { carryOn as carryOnOf, checkBound as checkBoundOf, checkSelf as checkSelfOf, freshCarryState, sayLeft as sayLeftOf, sayOff as sayOffOf, sayOn as sayOnOf } from '../core/carrying'
+import type { CarryPorts, CarryState } from '../core/carrying'
 import { personaPrompt, reframeInstructions, SESSION_NOTES, stripComments, stripFrontmatter, tutorSections } from './contract'
 import {
   dataHome,
@@ -42,7 +44,7 @@ import {
   projectId,
   sharedFolders,
 } from '../core/datahome'
-import { debugCommand as runDebugCommand, flushDebug as flushDebugLog, freshDebuggingState, startDebug as startDebugLog, stopDebug as stopDebugLog, trace as noteTrace } from '../core/debugging'
+import { debugCommand as runDebugCommand, flushDebug as flushDebugLog, followSwitch as followDebugSwitch, freshDebuggingState, startDebug as startDebugLog, stopDebug as stopDebugLog, trace as noteTrace } from '../core/debugging'
 import type { DebuggingPorts, DebuggingState } from '../core/debugging'
 import { DEBUG_USAGE, parseDebugRequest } from '../core/debuglog'
 import type { DebugRequest } from '../core/debuglog'
@@ -196,6 +198,9 @@ import type { Scheduler } from '../core/scheduler'
 import { freshLeaseState, giveLease as giveLeaseOf, keepLease as keepLeaseOf } from '../core/leasing'
 import type { LeasePorts, LeaseState } from '../core/leasing'
 import { scanGapMs } from '../core/sensor'
+import { SELF_CHECK_MS } from '../core/sessions'
+import { isSameShown, textsOf } from '../core/shown'
+import type { Shown } from '../core/shown'
 import { healthLine, playLine, watchOf } from '../core/status'
 import type { Recorder } from '../core/recorder'
 import {
@@ -240,6 +245,7 @@ import {
   changedFields,
   changedText,
   configValue,
+  DEFAULT_LAYOUT,
   DEFAULT_PERSONA,
   LAYOUTS,
   layoutOf,
@@ -317,7 +323,7 @@ const PANE_COLUMNS = 64
 let bandId = ''
 
 /** The layout in force, from the settings this load of the module was given, or from `/bsd layout`. */
-let layout: Layout = 'unified'
+let layout: Layout = DEFAULT_LAYOUT
 const settingsAtom = atom({ plugin: 'backseat-driver', key: 'settings' } as const, [])
 const appliedAtom = atom({ plugin: 'backseat-driver', key: 'applied' } as const, null)
 
@@ -427,6 +433,32 @@ let areToolsRegistered = false
  * repository, or with no data folder.
  */
 const leaseState: LeaseState = freshLeaseState()
+/**
+ * Carrying the tutor on when Claude Code moves the conversation into another
+ * process, and laying it down in the one the conversation left
+ * (`core/carrying.ts`): what this session last said of itself in
+ * `sessions.json`, and whether it still has somewhere to draw.
+ */
+const carryState: CarryState = freshCarryState()
+
+/**
+ * What the tutor says it is showing: each drawing as last handed to Claude
+ * Code, by where it is drawn, the hint line's ending, and what Claude Code
+ * answered when the pane was last opened. Whether any of it reached the
+ * screen is not something the mod can see. `scripts/jack.py` checks it.
+ */
+const shown: { pane: Shown | null; band: Shown | null; hint: string; opened: { at: number; isPlaced: boolean; reason: string } | null } = {
+  pane: null,
+  band: null,
+  hint: '',
+  opened: null,
+}
+/** The drawings as the debug log last recorded them, and the timer that records the next. */
+const shownLogged: { pane: Shown | null; band: Shown | null } = { pane: null, band: null }
+let shownTimer: Timer | null = null
+/** A drawing is written down once it has stood this long, so that a line being said word by word is one record and not ten. */
+const SHOWN_SETTLE_MS = 500
+
 /**
  * The files that hold what is on record about the person, as last seen:
  * names, sizes and times in one string. Another session may change them.
@@ -589,10 +621,34 @@ function snapshot(): Record<string, unknown> {
   }
 }
 
-/** The whole state: what is held in memory, and what the pane is drawn from. */
+/** What the session is, and where it says it draws: checked from outside against what is so. */
+async function selfState($: EngineInterface): Promise<Record<string, unknown>> {
+  const asked = async <T,>(question: () => Promise<T>): Promise<T | string> => {
+    try {
+      return await question()
+    } catch (error) {
+      return `(could not be asked: ${String(error)})`
+    }
+  }
+
+  return {
+    id: await asked(() => $.session.id()),
+    born: await asked(async () => (await $.session.usage()).startedAt),
+    cwd: await asked(() => $.session.cwd()),
+    surfaces: await asked(() => $.session.surfaces()),
+    panes: await asked(() => $.ui.panes()),
+    layout,
+    pluginRoot: $.plugin.root,
+    said: { ...carryState },
+  }
+}
+
+/** The whole state: what is held in memory, what the pane is drawn from, and what was last drawn. */
 async function fullState($: EngineInterface): Promise<Record<string, unknown>> {
   return {
     ...snapshot(),
+    session: await selfState($),
+    shown: { ...shown },
     pane: {
       mode: await read($, modeAtom),
       tab: await read($, tabAtom),
@@ -651,6 +707,13 @@ async function startDebug($: EngineInterface, settings: Settings): Promise<void>
 /** Stops the debug log, writing what it still holds. */
 async function stopDebug($: EngineInterface, why: string): Promise<void> {
   await stopDebugLog(debugPortsOf($), debugState, why)
+}
+
+/** Starts or stops this session's log when the switch was changed from outside: another session's `/bsd debug`, or `scripts/jack.py`. */
+async function followDebug($: EngineInterface, settings: Settings): Promise<void> {
+  await followDebugSwitch(debugPortsOf($, settings), debugState)
+  // While someone listens in, the state beside the log is never older than one look at itself, however quiet the session.
+  await flushDebugLog(debugPortsOf($), debugState, true)
 }
 
 /** `/bsd debug`: switches the debug log, says where it is, writes down what just happened, or deletes the logs. */
@@ -1064,13 +1127,29 @@ async function markHome($: EngineInterface): Promise<void> {
   isHomeMarked = true
 }
 
+/** Said once when the pane is open and Claude Code does not draw it: a tutor that is on with nothing on screen is otherwise a mystery. */
+const PANE_WAITS = 'Backseat Driver is on. Its pane waits for a wider terminal: /bsd opens it now.'
+
+/** Opens the vertical layout's pane, and keeps what Claude Code said of it: open is not yet drawn. */
 async function openPane($: EngineInterface): Promise<void> {
-  await $.ui.open({ id: PANE_ID, title: 'Backseat', columns: PANE_COLUMNS })
+  const opened = await $.ui.open({ id: PANE_ID, title: 'Backseat', columns: PANE_COLUMNS })
+  const reason = opened.isPlaced ? '' : opened.reason
+  const wasWaiting = shown.opened?.isPlaced === false
+  shown.opened = { at: Date.now(), isPlaced: opened.isPlaced, reason }
+  trace($, 'ui', 'pane opened', () => ({ isPlaced: opened.isPlaced, reason }))
+  if (!opened.isPlaced && !wasWaiting) $.ui.log(PANE_WAITS)
 }
 
 /** Closes the vertical layout's pane, when it is open. */
 async function closePane($: EngineInterface): Promise<void> {
-  if ((await $.ui.panes()).some(pane => pane.id === PANE_ID)) await $.ui.close({ id: PANE_ID })
+  shown.opened = null
+  shown.pane = null
+  try {
+    if ((await $.ui.panes()).some(pane => pane.id === PANE_ID)) await $.ui.close({ id: PANE_ID })
+  } catch (error) {
+    // A process its conversation has left may have no pane to close.
+    fail($, 'could not close the pane', error)
+  }
 }
 
 /**
@@ -2161,6 +2240,82 @@ const TAB_ORDER: readonly Tab[] = ['play', 'review', 'explain', 'profile', 'sett
 /** Said once at switch-on in the layouts with no pane, which do not say by themselves how to reach them. */
 const BAND_INTRO = 'Notes show above the prompt. Ctrl+X Tab gives it the keyboard, then 1 to 5 open its tabs. /bsd layout switches to a pane.'
 
+/** Said once in a process that carries the tutor on from the one its conversation left. */
+const CARRIED_ON = 'Backseat Driver is still on. It came along with the conversation.'
+
+/** What carrying the tutor from one process of a conversation to the next needs from Claude Code. */
+function carryPortsOf($: EngineInterface, settings: Settings): CarryPorts {
+  return {
+    now: async () => await $.clock.now(),
+    trace: (kind, name, detail) => trace($, kind, name, detail),
+    fail: (what, error) => fail($, what, error),
+    dataRoot: () => dataRoot,
+    mode: () => mode,
+    sessionId: async () => await $.session.id(),
+    born: async () => (await $.session.usage()).startedAt,
+    cwd: async () => await $.session.cwd(),
+    surfaces: async () => (await $.session.surfaces()).length,
+    store: () => storeOf($),
+    deadline: { set: (name, at, run) => schedulerOf($).set(name, at, run) },
+    comeUp: (to, from) => comeUp($, settings, to, from),
+    standDown: () => standDown($, settings),
+  }
+}
+
+/**
+ * For a process that started by forking or resuming a conversation: the tutor
+ * comes up as that conversation had it a moment ago, in the process it left.
+ * One read of one small file, and nothing more when it was not on there.
+ */
+async function carryOn($: EngineInterface, settings: Settings): Promise<void> {
+  await resolveHome($)
+  await carryOnOf(carryPortsOf($, settings), carryState)
+}
+
+/**
+ * The conversation this process continues had the tutor on a moment ago:
+ * it is switched on here as it was there, with no questions asked again. The
+ * lease that session held is this one's from the start.
+ */
+async function comeUp($: EngineInterface, settings: Settings, to: 'on' | 'paused', from: string): Promise<void> {
+  await switchTo($, to, settings, { carriedFrom: from })
+  $.ui.log(CARRIED_ON)
+}
+
+/**
+ * The conversation left this process, which draws nowhere now. The tutor is
+ * laid down here, lease and all, as when it is switched off. What it said of
+ * itself in `sessions.json` stays, marked as gone, for the process that
+ * carries on from it.
+ */
+async function standDown($: EngineInterface, settings: Settings): Promise<void> {
+  try {
+    await switchTo($, 'off', settings, { isStandingDown: true })
+  } catch (error) {
+    fail($, 'could not lay the tutor down', error)
+  }
+}
+
+/** Says, where every session reads it, that this one has the tutor on, or that its mode changed. */
+async function sayOn($: EngineInterface, settings: Settings, isChanged: boolean): Promise<void> {
+  await sayOnOf(carryPortsOf($, settings), carryState, isChanged)
+}
+
+/** Whether this session still draws anywhere. One that does not lays the tutor down. */
+async function checkBound($: EngineInterface, settings: Settings): Promise<void> {
+  await checkBoundOf(carryPortsOf($, settings), carryState)
+}
+
+/**
+ * What a session with the tutor on looks at about itself, now and then:
+ * whether it still draws anywhere, whether it is time to say again that it
+ * is on, and whether the debug log was switched from outside. Nothing tells
+ * it any of the three.
+ */
+async function checkSelf($: EngineInterface, settings: Settings): Promise<void> {
+  await checkSelfOf(carryPortsOf($, settings), carryState, () => followDebug($, settings))
+}
+
 /** What a session that does not drive says when it is asked for a look or a review. */
 const FOLLOWING = 'Another session is driving Backseat Driver in this project. Ask for it there.'
 
@@ -2203,11 +2358,12 @@ function leasePortsOf($: EngineInterface, settings: Settings): LeasePorts {
  * from, as when the tutor is switched on.
  */
 async function startDriving($: EngineInterface, settings: Settings, run: number): Promise<void> {
-  await startWatching($, settings, run)
-  if (run !== engagement || !leaseState.isDriver) return
-  await startJournal($, run, false)
-  await loadQueue($)
-  await planReview($, settings)
+  if (run !== engagement) return
+  // Everything starts again, as at a reload, this time as the driver: the watcher, the journal, what is known of
+  // the project, Explain, the lease's own renewal. What the pane showed for the driver before comes back from the
+  // project's folder. Starting the watcher alone laid all of that down and left this session driving without it.
+  engagement += 1
+  await engage($, settings, engagement, false, null, '')
 }
 
 /**
@@ -2224,6 +2380,7 @@ async function stopDriving($: EngineInterface, settings: Settings): Promise<void
   reviewState.waiting = EMPTY_QUEUE
   if (leaving !== null) await flushJournal($, leaving, await $.clock.now(), true)
   await showWorking($, await $.clock.now())
+  await forgetEditors($)
   await showPlay($, settings)
 }
 
@@ -2977,15 +3134,21 @@ async function readFocus($: EngineInterface): Promise<boolean> {
   return await readFocusOf(followPortsOf($), followState)
 }
 
-/** Tells the pane which editors are connected to this project, when that changed. */
+/** Tells the pane which editors are connected to this project, when that changed. '' is none: the light is red, not out. */
 async function showEditors($: EngineInterface, line: string): Promise<void> {
-  const shown = await read($, watchAtom)
-  if ((shown.editors ?? '') === line) return
+  const before = await read($, watchAtom)
+  if (before.editors === line) return
   trace($, 'state', 'editors', () => ({ line }))
+  await update($, watchAtom, (w): Watch => ({ ...w, editors: line }))
+}
+
+/** The editors' light goes out: this session is not the one reading their files, so it cannot say. */
+async function forgetEditors($: EngineInterface): Promise<void> {
+  if ((await read($, watchAtom)).editors === undefined) return
   await update($, watchAtom, (w): Watch => {
     const { editors: _editors, ...rest } = w
 
-    return line === '' ? rest : { ...rest, editors: line }
+    return rest
   })
 }
 
@@ -3162,18 +3325,31 @@ async function placeFirst($: EngineInterface, settings: Settings, run: number): 
  * at once however slow git is. `isFresh` is false when the tutor was already
  * on and the module reloaded, in which case no questions are asked.
  */
-async function engage($: EngineInterface, settings: Settings, run: number, isFresh: boolean, before: Settings | null = null): Promise<void> {
+async function engage(
+  $: EngineInterface,
+  settings: Settings,
+  run: number,
+  isFresh: boolean,
+  before: Settings | null = null,
+  takesUp: string | null = null,
+): Promise<void> {
   try {
     const started = Date.now()
     await startDebug($, settings)
-    trace($, 'start', 'engaging', () => ({ run, isFresh }))
+    trace($, 'start', 'engaging', () => ({ run, isFresh, takesUp }))
     await startAnimating($, settings, isFresh)
     if (run !== engagement) return
     await startWatching($, settings, run)
     if (run !== engagement) return
     tracer.inProject(repoRoot === '' ? '' : projectId(repoRoot))
+    // The lease of the session this one carries on from is its own: nothing waits for it to run out.
+    if (takesUp !== null && takesUp !== '') leaseState.holder = takesUp
     // Who drives this project is settled before anything that only the driver does.
     await keepLease($, settings, run)
+    if (run !== engagement) return
+    // Said where a process that carries this conversation on will look, and looked at again now and then.
+    await sayOn($, settings, true)
+    schedulerOf($).set('self', (await $.clock.now()) + SELF_CHECK_MS, () => checkSelf($, settings))
     if (run !== engagement) return
     if (leaseState.isDriver) await startJournal($, run, isFresh)
     if (run !== engagement) return
@@ -3181,7 +3357,7 @@ async function engage($: EngineInterface, settings: Settings, run: number, isFre
     const main = await setUpProfiles($)
     await loadProject($)
     // What the pane showed when the tutor was last on here: notes still true, and the last review.
-    if (leaseState.isDriver) await restorePaneFromDisk($, isFresh)
+    if (leaseState.isDriver) await restorePaneFromDisk($, isFresh || takesUp !== null)
     await setUpProgress($, settings)
     await registerReviewer($, settings)
     // Not waited for. Claude Code connects each tool before it answers, which took eight seconds a tool
@@ -3212,8 +3388,18 @@ async function engage($: EngineInterface, settings: Settings, run: number, isFre
   }
 }
 
-/** Moves to `next`, with everything that has to change along with the mode. */
-async function switchTo($: EngineInterface, next: Mode, settings: Settings): Promise<void> {
+/**
+ * Moves to `next`, with everything that has to change along with the mode.
+ * `carriedFrom` is the session this process carries the tutor on from, when
+ * nobody switched it on here. `isStandingDown` is a process laying the tutor
+ * down because its conversation has left it.
+ */
+async function switchTo(
+  $: EngineInterface,
+  next: Mode,
+  settings: Settings,
+  how: { carriedFrom?: string; isStandingDown?: boolean } = {},
+): Promise<void> {
   const wasEngaged = mode !== 'off'
   const isEngaged = next !== 'off'
   // Awaited, because the contract has to be in force from the first prompt after the command.
@@ -3237,6 +3423,8 @@ async function switchTo($: EngineInterface, next: Mode, settings: Settings): Pro
       }
       // The commits that are waiting wait through a pause, and are taken up when it ends.
       await planReview($, settings)
+      // A process that carries this conversation on comes up in the same mode.
+      void sayOn($, settings, true)
     }
 
     return
@@ -3246,14 +3434,20 @@ async function switchTo($: EngineInterface, next: Mode, settings: Settings): Pro
   $.ui.invalidate('prompt.context')
   if (isEngaged) {
     isWatchReady = false
+    // Which editors are connected is not known until their files are read.
+    await forgetEditors($)
     await showPlay($, settings)
     await showLayout($)
-    void engage($, settings, engagement, true)
+    void engage($, settings, engagement, how.carriedFrom === undefined, null, how.carriedFrom ?? null)
   } else {
     // The lease goes back at once, so that a session waiting for it takes over without waiting for it to run out.
     if (leaseState.isDriver && repoRoot !== '' && dataRoot !== '') void giveLease($, leasePath(dataRoot, repoRoot), leaseState.holder)
     stopWatching()
     stopAnimating()
+    shownTimer?.cancel()
+    shownTimer = null
+    shown.band = null
+    shown.hint = ''
     await update($, speechAtom, () => SILENT)
     // The journal is written one last time, with the attention added up so far. The command does not wait for it.
     const leaving = journalState.recorder
@@ -3270,7 +3464,9 @@ async function switchTo($: EngineInterface, next: Mode, settings: Settings): Pro
     await update($, profilesAtom, () => NO_PROFILES)
     await update($, unfoldedAtom, () => false)
     await showLayout($)
-    await stopDebug($, 'the tutor was switched off')
+    // Switched off, the session takes back what it said of itself. Left behind by its conversation, it has said goodbye instead.
+    if (how.isStandingDown !== true) await sayOffOf(carryPortsOf($, settings), carryState)
+    await stopDebug($, how.isStandingDown === true ? 'the conversation left this process' : 'the tutor was switched off')
   }
 }
 
@@ -3392,7 +3588,12 @@ async function forget($: EngineInterface, settings: Settings, named: Scope | nul
 }
 
 /** Draws the tutor for one of the three layouts, in the room the site gives it. */
-async function drawTutor($: EngineInterface, settings: Settings, kit: Kit, where: Pick<PaneView, 'layout' | 'isFocused' | 'columns' | 'isCompact' | 'rows'>) {
+async function drawTutor(
+  $: EngineInterface,
+  settings: Settings,
+  kit: Kit,
+  where: Pick<PaneView, 'layout' | 'isFocused' | 'columns' | 'isCompact' | 'rows'> & { placement?: string },
+) {
   quiet.renders += 1
   // One round for everything the pane shows, not a dozen in a row for every frame.
   const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, shownSettings, licensing, backdrop, isUnfolded] = await Promise.all([
@@ -3430,13 +3631,17 @@ async function drawTutor($: EngineInterface, settings: Settings, kit: Kit, where
     progress,
     update: release,
     license: licensing,
-    ...where,
+    layout: where.layout,
+    isFocused: where.isFocused,
+    columns: where.columns,
+    isCompact: where.isCompact,
+    rows: where.rows,
     character: settings.isAnimated ? { avatar: avatarFor(settings.persona.voice), speech, backdrop } : null,
     isUnfolded,
     settings: shownSettings,
   }
 
-  return renderPane(kit, view, {
+  const tree = renderPane(kit, view, {
     onTab: (tab: Tab) => {
       touched($, settings, 'tab', () => tab)
       // Read again each time: a change made in /config meanwhile shows.
@@ -3534,6 +3739,37 @@ async function drawTutor($: EngineInterface, settings: Settings, kit: Kit, where
       void reviewSince($, settings, true)
     },
   })
+  noteShown($, where.layout === 'vertical' ? 'pane' : 'band', {
+    at: Date.now(),
+    placement: where.placement ?? '',
+    columns: where.columns,
+    rows: where.rows,
+    isFocused: where.isFocused,
+    isCompact: where.isCompact,
+    texts: textsOf(tree),
+  })
+
+  return tree
+}
+
+/**
+ * Keeps what was just drawn, for the state the debug log writes beside
+ * itself, and writes the drawing into the log once it has stood a moment.
+ * What reached the screen is for `scripts/jack.py` to say: this is the claim.
+ */
+function noteShown($: EngineInterface, site: 'pane' | 'band', drawing: Shown): void {
+  shown[site] = drawing
+  if (!tracer.isOn() || shownTimer !== null) return
+  if (isSameShown(shownLogged.pane, shown.pane) && isSameShown(shownLogged.band, shown.band)) return
+  shownTimer = $.clock.after(SHOWN_SETTLE_MS, () => {
+    shownTimer = null
+    for (const at of ['pane', 'band'] as const) {
+      const latest = shown[at]
+      if (isSameShown(shownLogged[at], latest)) continue
+      shownLogged[at] = latest
+      trace($, 'shown', at, () => latest)
+    }
+  })
 }
 
 export const register: Register = (on, options) => {
@@ -3541,6 +3777,8 @@ export const register: Register = (on, options) => {
   layout = settings.layout
 
   on('session.start', async ($, e, next) => {
+    // Only a session that began in a terminal is gone for good once it draws nowhere (`core/carrying.ts`).
+    carryState.isTerminal = e.surface === 'terminal'
     // After a reload, `$.state` still holds the mode and the notes.
     mode = await read($, modeAtom)
     // A change in /config, or in the Settings tab, is a reload with other options.
@@ -3593,8 +3831,12 @@ export const register: Register = (on, options) => {
       journalState.workingShown = ''
       await showWorking($, await $.clock.now())
       await showLicense($)
-      // The session may go by another id now. The lease is renewed under it.
+      // The session may go by another id now. The lease is renewed under it, and it says so under it.
       await keepLease($, settings, engagement)
+      await sayOn($, settings, true)
+    } else if (e.source !== 'clear') {
+      // A conversation Claude Code moved into this process, by a fork or a resume, keeps its tutor.
+      await carryOn($, settings)
     }
 
     return next(e)
@@ -3765,6 +4007,8 @@ export const register: Register = (on, options) => {
       if (e.reason === 'answer') await noteOutcome($, settings, 'conversation', { ok: true })
       // Whatever Claude's tools did to the working tree during the turn is looked at now.
       void kick($, settings, 'a turn ended')
+      // A turn cut short is how it looks, here, when the conversation is sent to the background mid-answer.
+      if (e.reason !== 'answer') void checkBound($, settings)
     }
     const agentId = e.agentId
     if (agentId === undefined || agentId !== reviewState.reviewAgentId) return next(e)
@@ -3878,6 +4122,8 @@ export const register: Register = (on, options) => {
       if (e.reason === 'clear' || e.reason === 'resume') await flushDebug($)
       else {
         if (leaseState.isDriver && repoRoot !== '' && dataRoot !== '') await giveLease($, leasePath(dataRoot, repoRoot), leaseState.holder)
+        // A conversation sent to the background ends this process first and comes up in another a moment later.
+        await sayLeftOf(carryPortsOf($, settings), carryState)
         await stopDebug($, `the session ended (${e.reason})`)
       }
     }
@@ -4001,8 +4247,12 @@ export const register: Register = (on, options) => {
       isFocused: e.props.isFocused,
       rows: e.viewport?.rows ?? 48,
       columns: e.props.bodyColumns,
-      // Above the prompt rows are scarce, and other surfaces may not draw text art in a fixed-width font.
-      isCompact: e.props.placement === 'inline' || e.surface !== 'terminal',
+      placement: e.props.placement,
+      // A fullscreen terminal seats the pane beside the conversation, and above the prompt once it is too narrow
+      // for that: it is drawn whole there too, so that narrowing the window moves the pane and never swaps it for
+      // another look. Where panes are never seated at the side, rows above the prompt are scarce, and other
+      // surfaces may not draw text art in a fixed-width font.
+      isCompact: e.surface !== 'terminal' || (e.props.placement === 'inline' && e.viewport?.isFullscreen !== true),
     }),
   )
 
@@ -4012,7 +4262,9 @@ export const register: Register = (on, options) => {
     const [shownMode, watch, hasKeys] = await Promise.all([read($, modeAtom), read($, watchAtom), read($, bandKeysAtom)])
     // Something typed in the prompt means the prompt has the keys, whatever the band last heard.
 
-    return next({ ...e, props: { ...e.props, tail: statusEntry({ mode: shownMode, watch }, hasKeys && !e.props.isDraft) } })
+    shown.hint = statusEntry({ mode: shownMode, watch }, hasKeys && !e.props.isDraft)
+
+    return next({ ...e, props: { ...e.props, tail: shown.hint } })
   })
 
   // The focus ring says two things nothing else does: whether the band has the keyboard, and which note the person is on.

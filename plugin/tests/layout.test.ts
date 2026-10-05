@@ -7,10 +7,13 @@ import { BAND, HINT, PANE, SESSION, sessionTest, stubSession, typed } from './ki
 
 const NO_REVIEW: Review = { state: 'none', subject: '', text: '', isUnseen: false, decisions: [], insights: [] }
 
-test('the layout is unified unless /config says otherwise, and a word that is not a layout is no layout', async () => {
-  expect(readSettings({}).layout).toBe('unified')
-  expect(readSettings({ layout: 'vertical' }).layout).toBe('vertical')
-  expect(readSettings({ layout: 'sideways' }).layout).toBe('unified')
+/** The layout that draws above the prompt and opens no pane. Vertical is the default. */
+const UNIFIED = { options: { layout: 'unified' } } as const
+
+test('the layout is vertical unless /config says otherwise, and a word that is not a layout is no layout', async () => {
+  expect(readSettings({}).layout).toBe('vertical')
+  expect(readSettings({ layout: 'unified' }).layout).toBe('unified')
+  expect(readSettings({ layout: 'sideways' }).layout).toBe('vertical')
   expect(layoutOf(' Horizontal ')).toBe('horizontal')
   expect(layoutOf('pane')).toBe(null)
 })
@@ -64,7 +67,7 @@ test('above the prompt the tabs carry their digits only while the band has the k
   expect(hasDigits({ layout: 'vertical', isFocused: false })).toBe(true)
 })
 
-sessionTest('unified, the default, opens no pane: it draws above the prompt and ends the hint line', async ($, on) => {
+sessionTest('unified opens no pane: it draws above the prompt and ends the hint line', UNIFIED, async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
   const quiet = await $.ui.mount({ ...BAND, surface: 'terminal' })
@@ -94,7 +97,7 @@ sessionTest('unified, the default, opens no pane: it draws above the prompt and 
   await after.unmount()
 })
 
-sessionTest('unified, a tab key opens the tab above the prompt, and the same key or x folds it', async ($, on) => {
+sessionTest('unified, a tab key opens the tab above the prompt, and the same key or x folds it', UNIFIED, async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -115,7 +118,7 @@ sessionTest('unified, a tab key opens the tab above the prompt, and the same key
   await band.unmount()
 })
 
-sessionTest('unified, the open notes show above the prompt one line each', async ($, on) => {
+sessionTest('unified, the open notes show above the prompt one line each', UNIFIED, async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': 'def mean(xs):\n    return sum(xs) / len(xs)\n' } })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -166,7 +169,7 @@ sessionTest('vertical opens the pane and leaves the band and the hint line to Cl
   await pane.unmount()
 })
 
-sessionTest('the band gives way to a survey', async ($, on) => {
+sessionTest('the band gives way to a survey', UNIFIED, async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -177,7 +180,7 @@ sessionTest('the band gives way to a survey', async ($, on) => {
   await band.unmount()
 })
 
-sessionTest('/bsd layout changes the layout in /config, shows it at once, and steps to the next when bare', async ($, on) => {
+sessionTest('/bsd layout changes the layout in /config, shows it at once, and steps to the next when bare', UNIFIED, async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -214,7 +217,7 @@ sessionTest('/bsd layout works while the tutor is off, and opens nothing', async
   expect(session.opened).toEqual(['backseat-driver'])
 })
 
-sessionTest('unified, switching on says where the notes are, and an open tab folds when the conversation goes on', async ($, on) => {
+sessionTest('unified, switching on says where the notes are, and an open tab folds when the conversation goes on', UNIFIED, async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
   const started = await $.command.run(typed('bsd'))

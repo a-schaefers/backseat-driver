@@ -256,6 +256,8 @@ export function stubSession(on: On, options: StubOptions = {}) {
     configDeny: '',
     opened: [] as string[],
     closed: [] as string[],
+    /** Why Claude Code opens a pane without drawing it, as it does unasked on a narrow terminal. '' for a pane that is drawn. */
+    paneWaits: '',
     /** Every `$.ui.status` call, in order: the text, or undefined for a cleared line. */
     statuses: [] as (string | undefined)[],
 
@@ -344,6 +346,10 @@ export function stubSession(on: On, options: StubOptions = {}) {
     failing: [] as string[],
     /** Claude Code's id for this session. `/clear` gives a session another: a test sets it and fires `classic.SessionStart`. */
     sessionId: SESSION_ID as string,
+    /** Where the session draws. A test empties it for a process whose conversation went to the background. */
+    surfaces: ['terminal'] as ('terminal' | 'desktop' | 'mobile' | 'vscode')[],
+    /** When the session's conversation first began, which a fork and a resume of it share. */
+    born: 0,
     /** The jobs (`look`, `explain`, `progress`) whose model requests stay open, as a slow model's do, until `release()`. */
     stalled: [] as string[],
     /** The answers held back for those requests. */
@@ -443,6 +449,8 @@ export function stubSession(on: On, options: StubOptions = {}) {
   on('session.start', () => ({ cwd: ROOT }))
   on('session.end', () => ({ sessionId: session.sessionId }))
   on('session.id', () => ({ value: session.sessionId }))
+  on('session.cwd', () => ({ value: ROOT }))
+  on('session.surfaces', () => ({ value: session.surfaces }))
   on('session.version', () => ({ value: { version: '2.1.289', base: '2.1.289', builtAt: '2026-10-03T19:21:39Z' } }))
   on('classic.SessionStart', () => ({}))
   on('classic.StopFailure', () => ({}))
@@ -472,7 +480,7 @@ export function stubSession(on: On, options: StubOptions = {}) {
     session.opened.push(e.id)
     if (!panes.includes(e.id)) panes.push(e.id)
 
-    return { value: { isPlaced: true } }
+    return { value: session.paneWaits === '' ? { isPlaced: true } : { isPlaced: false, reason: session.paneWaits } }
   })
   on('ui.close', ($, e) => {
     session.closed.push(e.id)
@@ -872,7 +880,7 @@ export function stubSession(on: On, options: StubOptions = {}) {
   }))
   on('session.usage', () => ({
     value: {
-      startedAt: 0,
+      startedAt: session.born,
       context: { tokens: 0, window: 200_000, percent: 0 },
       rateLimits: session.limits,
     } as never,

@@ -69,7 +69,11 @@ export type Watch = {
   line: string
   /** What keeps going wrong in the background, as a sentence for the dim row under the status line. Absent or '' when nothing does. */
   health?: string
-  /** Which editors are connected to this project, as a sentence (`editors.ts`). Absent or '' when none is. */
+  /**
+   * Which editors are connected to this project, as a sentence (`editors.ts`), and '' when none is: the pane's
+   * light is green for the one and red for the other. Absent while this session cannot say: before the editors'
+   * files were first read, and in a session that does not read them.
+   */
   editors?: string
 }
 

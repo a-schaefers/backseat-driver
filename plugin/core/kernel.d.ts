@@ -58,6 +58,24 @@ export const leaseBeatMs: number
 export const leaseTtlMs: number
 export const leaseSlackMs: number
 
+// The sessions the tutor is on in
+export type SessionEntryWire = { session: string; born: number; cwd: string; mode: string; at: number; leftAt: number }
+export const sessionsCarriedFrom: (
+  entries: SessionEntryWire[],
+) => (asking: { born: number; cwd: string; now: number }) => { isFound: boolean; session: string; mode: string }
+export const sessionsSaid: (entries: SessionEntryWire[]) => (entry: SessionEntryWire) => SessionEntryWire[]
+export const sessionsLeft: (entries: SessionEntryWire[]) => (session: string) => (now: number) => SessionEntryWire[]
+export const sessionsWithdrawn: (entries: SessionEntryWire[]) => (session: string) => SessionEntryWire[]
+export const sessionsIsSayDue: (saidAt: number) => (now: number) => boolean
+/** `drawn`, `unsure` or `gone`. */
+export const sessionsBound: (drawing: { surfaces: number; wasUnsure: boolean; isTerminal: boolean }) => string
+export const sessionsSayEveryMs: number
+export const sessionsAliveMs: number
+export const sessionsHandoffMs: number
+export const sessionsKeepMs: number
+export const sessionsRecheckMs: number
+export const sessionsCheckEveryMs: number
+
 // The play-by-play
 export type PressureWire = { level: string; percent: number; window: string; hasResetsAt: boolean; resetsAt: number }
 export type PlayFactsWire = {

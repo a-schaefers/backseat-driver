@@ -24,6 +24,12 @@
 # BSD_DEBUG       set to 1 to switch the tutor's debug log on in that data
 #                 folder, with Claude Code's own debug log beside it.
 #                 scripts/debug-tail.sh -d "$BSD_DATA_DIR" follows it
+#
+# scripts/jack.py sees the session from outside: its screen, what the tutor
+# says it is doing, and where the two disagree (`scripts/jack.py --home
+# "$BSD_DATA_DIR" in`). You have the plugin installed as well? Then pass
+# --settings '{"enabledPlugins":{"backseat-driver@backseat-driver":false}}'
+# so that only this working copy loads.
 set -euo pipefail
 
 plugin="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/plugin"
@@ -49,7 +55,29 @@ launch=(env -i HOME="$HOME" USER="${USER:-$(id -un)}" SHELL=/bin/bash LANG=C.UTF
 if [ "${BSD_FULLSCREEN:-0}" = "1" ]; then
   launch+=(CLAUDE_CODE_NO_FLICKER=1)
 fi
-launch+=(claude --plugin-dir "$plugin" "$@")
+# A session sent to the background (a left arrow on an empty prompt) goes on under Claude Code's
+# daemon, which gives it the daemon's own environment and this session's flags. So the data folder
+# is also put into the settings given on the command line: without it the backgrounded session
+# would keep its files in your real folder. A --settings given as JSON is merged with it.
+eval "args=($(python3 - "$data" "$@" <<'PY'
+import json, shlex, sys
+data, given = sys.argv[1], sys.argv[2:]
+out, merged, i = [], False, 0
+while i < len(given):
+    if given[i] == "--settings" and i + 1 < len(given) and given[i + 1].lstrip().startswith("{"):
+        settings = json.loads(given[i + 1])
+        settings.setdefault("env", {}).setdefault("BACKSEAT_DRIVER_HOME", data)
+        out += ["--settings", json.dumps(settings)]
+        merged, i = True, i + 2
+        continue
+    out.append(given[i])
+    i += 1
+if not merged:
+    out += ["--settings", json.dumps({"env": {"BACKSEAT_DRIVER_HOME": data}})]
+print(" ".join(shlex.quote(word) for word in out))
+PY
+))"
+launch+=(claude --plugin-dir "$plugin" "${args[@]}")
 if [ "${BSD_DEBUG:-0}" = "1" ]; then
   mkdir -p "$data/debug"
   printf '{"on": true}\n' > "$data/debug.json"

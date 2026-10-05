@@ -153,6 +153,19 @@ sessionTest('above the prompt, where rows are scarce, the character takes one li
   await ui.unmount()
 })
 
+sessionTest('a fullscreen terminal narrowed until the pane sits above the prompt still gets the whole pane, not another look', async ($, on) => {
+  const session = stubSession(on)
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+  await session.clock.advance(SAY_ALL)
+
+  // Under 110 columns Claude Code seats the pane above the prompt. The tutor draws it as it did at the side.
+  const ui = await $.ui.mount({ ...PANE, viewport: { columns: 100, rows: 48, isFullscreen: true }, props: { ...PANE.props, placement: 'inline' }, surface: 'terminal' })
+  expect(await ui.find({ type: 'Raster' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: AVATARS.default.mini.rest })).toBeUndefined()
+  await ui.unmount()
+})
+
 sessionTest('now and then a resting character blinks', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)

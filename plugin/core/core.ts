@@ -7,6 +7,7 @@ import type { Lease } from './lease'
 import type { LicenseFacts, Standing } from './license'
 import type { Play, PlayFacts, Why } from './play'
 import type { ReviewQueue, Waiting, Wanted } from './reviewqueue'
+import type { Bound, SessionBook, SessionEntry } from './sessions'
 import { clockTime } from './clock'
 import type { FocusFacts, ScanFacts } from './sensor'
 import type { HealthFacts } from './status'
@@ -206,6 +207,63 @@ export function released(lease: Lease, me: string): Lease {
 /** When to look at the lease again. `random` is a number from 0 up to 1. */
 export function nextLeaseCheck(lease: Lease, me: string, now: number, random: number): number {
   return K.leaseNextCheck({ session: lease.session, at: lease.at })(me)(now)(random)
+}
+
+// --- The sessions the tutor is on in (Kernel.Sessions)
+
+/** How often a session says again that it has the tutor on. */
+export const SAY_EVERY_MS: number = K.sessionsSayEveryMs
+/** An entry whose session has not said so for this long is not carried on from. */
+export const ALIVE_MS: number = K.sessionsAliveMs
+/** How long after a session's goodbye its entry is still carried on from. */
+export const HANDOFF_MS: number = K.sessionsHandoffMs
+/** An entry nobody has stood behind for this long is dropped. */
+export const SESSIONS_KEEP_MS: number = K.sessionsKeepMs
+/** How long after a session found nowhere to draw it looks again. */
+export const RECHECK_MS: number = K.sessionsRecheckMs
+/** How often a session with the tutor on looks at itself. */
+export const SELF_CHECK_MS: number = K.sessionsCheckEveryMs
+
+function entriesOf(book: SessionBook): SessionEntry[] {
+  return book.sessions.map(entry => ({ ...entry }))
+}
+
+function bookOf(entries: readonly { session: string; born: number; cwd: string; mode: string; at: number; leftAt: number }[]): SessionBook {
+  return { v: 1, sessions: entries.map(entry => ({ ...entry, mode: entry.mode === 'paused' ? 'paused' : 'on' })) }
+}
+
+/** What a process that starts by forking or resuming carries the tutor on from, or null when it starts off. */
+export function carriedFrom(book: SessionBook, asking: { born: number; cwd: string; now: number }): { session: string; mode: 'on' | 'paused' } | null {
+  const found = K.sessionsCarriedFrom(entriesOf(book))(asking)
+
+  return found.isFound ? { session: found.session, mode: found.mode === 'paused' ? 'paused' : 'on' } : null
+}
+
+/** The sessions after `entry`'s session has said it has the tutor on. */
+export function saidOn(book: SessionBook, entry: SessionEntry): SessionBook {
+  return bookOf(K.sessionsSaid(entriesOf(book))({ ...entry }))
+}
+
+/** The sessions after `session` said goodbye at `now`. */
+export function saidLeft(book: SessionBook, session: string, now: number): SessionBook {
+  return bookOf(K.sessionsLeft(entriesOf(book))(session)(now))
+}
+
+/** The sessions after the tutor was switched off in `session`. */
+export function withdrawn(book: SessionBook, session: string): SessionBook {
+  return bookOf(K.sessionsWithdrawn(entriesOf(book))(session))
+}
+
+/** Whether a session that last said so at `saidAt` says so again at `now`. */
+export function isSayDue(saidAt: number, now: number): boolean {
+  return K.sessionsIsSayDue(saidAt)(now)
+}
+
+/** Whether a session still has somewhere to draw. A word the kernel names that this file does not know is `drawn`, which changes nothing. */
+export function boundOf(drawing: { surfaces: number; wasUnsure: boolean; isTerminal: boolean }): Bound {
+  const named = K.sessionsBound(drawing)
+
+  return named === 'unsure' || named === 'gone' ? named : 'drawn'
 }
 
 // --- The play-by-play (Kernel.Play)

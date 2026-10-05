@@ -8,6 +8,7 @@ import { shortHash } from './hash'
  *   projects/<name>-<hash>/    one project's journal and cache
  *   editors/<editor>-<pid>.json one per running editor: where its caret is (editors.ts)
  *   debug.json, debug/         the debug log's switch, and the log (debuglog.ts)
+ *   sessions.json              the sessions the tutor is on in (sessions.ts)
  *   locks.git/                 a bare git repository whose refs are the locks on these files (locks.ts)
  */
 
@@ -105,6 +106,11 @@ export function licensePath(root: string): string {
   return `${root}/license.json`
 }
 
+/** The file in which each session that has the tutor on says so (`sessions.ts`). */
+export function sessionsPath(root: string): string {
+  return `${root}/sessions.json`
+}
+
 /** The file that says whether the debug log is on, for every session. */
 export function debugSwitchPath(root: string): string {
   return `${root}/debug.json`
@@ -129,7 +135,7 @@ export function isOwnFolder(names: readonly string[]): boolean {
 }
 
 /** What the tutor may delete: only these, directly under its own folder. */
-export const REMOVABLE = ['profiles', 'progress', 'projects', 'editors', 'focus.json', 'view.json', 'update.json', 'license.json', 'debug', 'debug.json', 'locks.git'] as const
+export const REMOVABLE = ['profiles', 'progress', 'projects', 'editors', 'focus.json', 'view.json', 'update.json', 'license.json', 'sessions.json', 'debug', 'debug.json', 'locks.git'] as const
 
 /**
  * Whether `path` is something the tutor may delete: inside one of its own

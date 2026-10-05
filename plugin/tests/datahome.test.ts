@@ -130,6 +130,7 @@ test('forget: what a word names, and what each scope deletes', async () => {
     '/d/view.json',
     '/d/update.json',
     '/d/license.json',
+    '/d/sessions.json',
     '/d/debug',
     '/d/debug.json',
     '/d/locks.git',

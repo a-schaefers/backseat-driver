@@ -196,7 +196,7 @@ sessionTest('/bsd explain turns the pane to a spot and looks it up', async ($, o
   expect((await $.command.run(typed('bsd', 'explain'))).text).toBe('Name a file and a line: /bsd explain src/app.py:42')
 
   const answer = await $.command.run(typed('bsd', 'explain stats.py:6'))
-  expect(answer.text).toBe('Explaining stats.py, line 6 in the Explain tab above the prompt.')
+  expect(answer.text).toBe('Explaining stats.py, line 6 in the pane.')
   await session.clock.settle()
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })

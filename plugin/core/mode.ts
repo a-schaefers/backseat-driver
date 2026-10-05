@@ -53,7 +53,7 @@ export const HELP = [
   '  /bsd resume      carry on',
   '  /bsd status      whether it is on, its voice and its engineering persona',
   '  /bsd explain     explain a spot in the code: /bsd explain src/app.py:42',
-  '  /bsd layout      unified (the default), horizontal or vertical; kept',
+  '  /bsd layout      vertical (the default), horizontal or unified; kept',
   '                   /bsd layout alone moves to the next one',
   '  /bsd settings    change its settings in the pane, as in /config',
   '  /bsd questions   answer the first-run questions again',

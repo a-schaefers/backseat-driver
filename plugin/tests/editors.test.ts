@@ -2,6 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { connectedHere, EDITOR_TTL_MS, editorName, editorsLine, isCaretHere, parseEditorFile, speaker } from '../core/editors'
 import { parseFocusFile } from '../core/focus'
+import { editorLight, NO_EDITOR } from '../hooks/pane'
 import { PANE, ROOT, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const MEAN = 'def mean(xs):\n    return sum(xs) / len(xs)\n'
@@ -64,20 +65,39 @@ test('editorsLine names who is connected', () => {
   expect(editorsLine(['Emacs', 'Neovim', 'VS Code'])).toBe('Emacs, Neovim and VS Code are connected.')
 })
 
-sessionTest('the pane says which editors are connected to this project, and stops when they go quiet', async ($, on) => {
+sessionTest('the editors light is red until an editor with something of this project open is connected, and green while one is', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
   await session.clock.settle()
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const light = async (text: string) => (await ui.find({ type: 'Text', text })) !== undefined
   await session.clock.advance(1000)
+  // The editors' files have been read, and there is none: the light is red, not out.
+  expect(await light('No editor is connected.')).toBe(true)
 
   session.editor(`${ROOT}/stats.py`, 2, undefined, { editor: 'neovim', root: ROOT, at: session.clock.now() })
   session.editor('/elsewhere/main.rs', 1, undefined, { editor: 'emacs', root: '/elsewhere', at: session.clock.now() })
   await session.clock.advance(3000)
-  expect(await ui.find({ type: 'Text', text: 'Neovim is connected.' })).toBeDefined()
+  expect(await light('Neovim is connected.')).toBe(true)
+  expect(await light('No editor is connected.')).toBe(false)
 
   // Neovim was closed without a word: after a minute without a beat it is not connected.
   await session.clock.advance(70_000)
-  expect(await ui.find({ type: 'Text', text: 'Neovim is connected.' })).toBeUndefined()
+  expect(await light('Neovim is connected.')).toBe(false)
+  expect(await light('No editor is connected.')).toBe(true)
+
+  // Paused, nothing reads the editors' files, so the light says nothing.
+  await $.command.run(typed('bsd', 'pause'))
+  await session.clock.settle()
+  expect(await light('No editor is connected.')).toBe(false)
+  await ui.unmount()
+})
+
+test('the light is out while the session cannot say, red for none, green with the names', () => {
+  const watch = { state: 'idle', lastLookAt: null, line: 'On.' } as const
+  expect(editorLight({ mode: 'on', watch })).toBeNull()
+  expect(editorLight({ mode: 'on', watch: { ...watch, editors: '' } })).toEqual({ isOn: false, text: NO_EDITOR })
+  expect(editorLight({ mode: 'on', watch: { ...watch, editors: 'Emacs is connected.' } })).toEqual({ isOn: true, text: 'Emacs is connected.' })
+  expect(editorLight({ mode: 'paused', watch: { ...watch, editors: 'Emacs is connected.' } })).toBeNull()
 })

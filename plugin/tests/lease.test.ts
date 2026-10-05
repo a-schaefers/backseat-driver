@@ -210,3 +210,19 @@ sessionTest('what another session recorded is in the next prompt, in a session t
   const { sections } = await $.prompt.compose(COMPOSE)
   expect(sections[sections.length - 1]?.text).toMatch('type hints in Python')
 })
+
+sessionTest('a session that took over goes on saying so, and Explain and the project come with it', QUIET, async ($, on) => {
+  const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { [LEASE]: { v: 1, session: OTHER, at: 0 } } })
+  await start($, session)
+  expect(leaseIn(session).session).toBe(OTHER)
+
+  await session.clock.advance(LEASE_TTL_MS + 3000)
+  await session.clock.settle()
+  expect(leaseIn(session).session).toBe(SESSION_ID)
+  const taken = leaseIn(session).at
+
+  // A lease that is not renewed is free again a minute later, and a third session would drive beside this one.
+  await session.clock.advance(LEASE_BEAT_MS + 1000)
+  await session.clock.settle()
+  expect(leaseIn(session).at > taken).toBe(true)
+})

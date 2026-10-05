@@ -719,12 +719,35 @@ function settingsTab({ Box, Text, Select }: Kit, view: PaneView, actions: PaneAc
   )
 }
 
-/** The lines under the tabs: what the play-by-play is doing, what keeps going wrong, the editors connected, a newer release, the license. */
-function statusRows({ Text }: Kit, view: PaneView, withStatus: boolean) {
+/** What the editors' light says while it is red. */
+export const NO_EDITOR = 'No editor is connected.'
+
+/**
+ * The editors' light: green with the editors' names while one with something
+ * of this project open is connected, red while none is. Out (null) while the
+ * session cannot say: paused, before the editors' files were first read, or
+ * in a session that leaves them to the one that drives the project.
+ */
+export function editorLight(view: Pick<PaneView, 'mode' | 'watch'>): { isOn: boolean; text: string } | null {
+  const editors = view.watch.editors
+  if (view.mode === 'paused' || editors === undefined) return null
+
+  return editors === '' ? { isOn: false, text: NO_EDITOR } : { isOn: true, text: editors }
+}
+
+/** The lines under the tabs: what the play-by-play is doing, what keeps going wrong, the editors' light, a newer release, the license. */
+function statusRows({ Box, Text }: Kit, view: PaneView, withStatus: boolean) {
+  const light = editorLight(view)
+
   return [
     withStatus && <Text dimColor>{statusLine(view)}</Text>,
     view.mode !== 'paused' && (view.watch.health ?? '') !== '' && <Text dimColor>{view.watch.health}</Text>,
-    view.mode !== 'paused' && (view.watch.editors ?? '') !== '' && <Text dimColor>{view.watch.editors}</Text>,
+    light !== null && (
+      <Box flexDirection="row" columnGap={1}>
+        <Text color={light.isOn ? 'green' : 'red'}>●</Text>
+        <Text dimColor={!light.isOn}>{light.text}</Text>
+      </Box>
+    ),
     view.update !== '' && <Text color="yellow">{view.update}</Text>,
     (view.license ?? '') !== '' && <Text dimColor>{view.license}</Text>,
   ]

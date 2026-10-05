@@ -1,0 +1,364 @@
+#!/usr/bin/env python3
+"""Tests for scripts/jack.py: what it reads off a screen, and what it calls a disagreement.
+
+    python3 scripts/test_jack.py        (also `npm run tools`, and part of `npm run check`)
+
+Nothing here needs a running session. The one test that needs tmux is skipped without it.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import pathlib
+import re
+import shutil
+import sys
+import tempfile
+import unittest
+
+HERE = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import jack  # noqa: E402
+
+REPO = HERE.parent
+
+# A fullscreen terminal with the tutor's pane docked beside the conversation, cut down to twelve rows.
+DOCKED = """\
+                                                    │                                                  ✕
+ ▐▛███▛█   Claude Code v2.1.289                     │1: Play (1)  2: Review  3: Explain  4: Progress
+▝▜██████▀  Haiku 4.5 · Claude Pro                   │On. Watching for your next save.
+ ▝▝   ▝▝   /tmp/ride                                │● No editor is connected.
+                                                    │w: Working on adding a median function
+❯ /bsd                                              │
+  ⎿  backseat-driver: Backseat Driver is on.        │stats.py
+● The idea behind note 1 is the difference between  │❯ 1  ✘ bug · line 6
+  an odd and an even count: with four numbers there │    For even-length lists, median should average
+  is no single middle one, so which do you return?  │    the two middle values, not take the upper one.
+────────────────────────────────────────────────────│
+❯                                                   │e: explain   d: dismiss   m: mute   l: look now
+""".split("\n")
+
+TEXTS = [
+    "1: Play (1)", "2: Review", "3: Explain", "4: Progress", "On. Watching for your next save.", "●", "No editor is connected.",
+    "w: Working on", "adding a median function", "stats.py", "1", "✘ bug · line 6",
+    "For even-length lists, median should average the two middle values, not take the upper one.", "e: explain", "l: look now",
+]
+
+
+def session(**over) -> dict:
+    base = {
+        "id": "aaaaaaaa-1111-4000-8000-000000000001", "short": "aaaaaaaa", "bg": "", "pid": 0, "kind": "interactive", "status": "idle",
+        "name": "", "cwd": "/tmp/ride", "home": None, "plugin": "installed", "eyes": None, "entry": None, "debug": None, "state": None, "is_me": False,
+    }
+    made = {**base, **over}
+    # A session that says the tutor is on has said so where the others read it, unless a test says otherwise.
+    if made["state"] is not None and "entry" not in over:
+        made["entry"] = {"session": made["id"], "mode": made["state"].get("mode", "on"), "at": 0, "leftAt": 0}
+    return made
+
+
+def state(now: int, **over) -> dict:
+    base = {
+        "at": now - 2000, "mode": "on", "repoRoot": "", "deadlines": {}, "pushers": [], "lease": {"isDriver": True, "holder": "x"},
+        "session": {"id": "aaaaaaaa", "surfaces": ["terminal"], "layout": "vertical", "panes": [{"id": "backseat-driver", "isPlaced": True, "isShown": True}]},
+        "pane": {"mode": "on", "notes": [], "watch": {}},
+        "shown": {"pane": {"at": now - 3000, "placement": "dock", "columns": 48, "texts": TEXTS}, "band": None, "hint": "", "opened": {"at": now - 9000, "isPlaced": True, "reason": ""}},
+    }
+    return {**base, **over}
+
+
+def world(sessions: list[dict], homes: list[pathlib.Path] | None = None, now: int | None = None) -> dict:
+    now = jack.now_ms() if now is None else now
+    return {"now": now, "procs": {}, "sessions": sessions, "gone": [], "homes": homes or [], "panes": []}
+
+
+def bad(found: list[tuple[str, str]]) -> list[str]:
+    return [text for level, text in found if level == jack.BAD]
+
+
+class Numbers(unittest.TestCase):
+    """The tool judges by the tutor's own numbers. They are written twice, so they are held together here."""
+
+    def number(self, path: str, name: str) -> float:
+        text = (REPO / path).read_text()
+        found = re.search(rf"^{name}\s*=\s*([0-9_.]+)", text, re.M) or re.search(rf"\b{name}\s*=\s*([0-9_.]+)", text)
+        self.assertIsNotNone(found, f"{name} not found in {path}")
+        return float(found.group(1).replace("_", ""))
+
+    def test_they_are_the_kernels(self):
+        self.assertEqual(jack.LEASE_TTL_MS, self.number("kernel/src/Kernel/Lease.purs", "ttlMs"))
+        self.assertEqual(jack.SELF_CHECK_MS, self.number("kernel/src/Kernel/Sessions.purs", "checkEveryMs"))
+        self.assertEqual(jack.ALIVE_MS, self.number("kernel/src/Kernel/Sessions.purs", "aliveMs"))
+        self.assertEqual(jack.EDITOR_TTL_MS, self.number("plugin/core/editors.ts", "EDITOR_TTL_MS"))
+
+    def test_a_project_folder_is_named_as_the_tutor_names_it(self):
+        # Both seen in real data folders.
+        self.assertEqual(jack.project_id("/home/grok/repos/bashscripts"), "bashscripts-2c7d6042")
+        self.assertEqual(jack.project_id("/tmp/bsd-jack-ride/"), "bsd-jack-ride-419d5870")
+
+    def test_the_data_folder_is_found_as_the_tutor_finds_it(self):
+        self.assertEqual(jack.data_home({"HOME": "/home/me"}), pathlib.Path("/home/me/.local/share/backseat-driver"))
+        self.assertEqual(jack.data_home({"HOME": "/home/me", "XDG_DATA_HOME": "/x/"}), pathlib.Path("/x/backseat-driver"))
+        self.assertEqual(jack.data_home({"HOME": "/home/me", "XDG_DATA_HOME": "/x", "BACKSEAT_DRIVER_HOME": "/scratch/"}), pathlib.Path("/scratch"))
+        self.assertIsNone(jack.data_home({}))
+
+    def test_a_background_session_gets_its_environment_from_its_settings(self):
+        argv = ["claude", "--model", "haiku", "--settings", json.dumps({"env": {"BACKSEAT_DRIVER_HOME": "/scratch"}}), "--plugin-dir", "/repo/plugin"]
+        self.assertEqual(jack.settings_env(argv), {"BACKSEAT_DRIVER_HOME": "/scratch"})
+        self.assertEqual(jack.settings_env(["claude", "--settings=not json"]), {})
+        self.assertEqual(jack.plugin_dirs(argv), ["/repo/plugin"])
+        self.assertEqual(jack.plugin_source(["claude"]), "installed")
+        self.assertEqual(jack.plugin_source(["claude", "--plugin-dir", str(REPO / "plugin")]), str(REPO / "plugin"))
+
+
+class Screen(unittest.TestCase):
+    def test_a_docked_pane_is_told_from_the_conversation_beside_it(self):
+        self.assertEqual(jack.divider(DOCKED), 52)
+        self.assertIsNone(jack.divider(["❯ hello", "  a │ b", "plain"]))
+        parts = jack.sides(DOCKED)
+        self.assertEqual(sorted(parts), ["conversation", "pane"])
+        self.assertIn("On. Watching for your next save.", parts["pane"])
+        self.assertIn("❯ /bsd", parts["conversation"])
+        self.assertEqual(sorted(jack.sides(["one screen"])), ["screen"])
+
+    def test_what_the_tutor_says_it_drew_is_found_where_it_is(self):
+        head, rest = jack.missing_pieces(TEXTS, DOCKED)
+        self.assertEqual((head, rest), ([], []))
+
+    def test_text_wrapped_inside_the_pane_is_found_whole(self):
+        where = jack.flows(DOCKED)
+        self.assertTrue(jack.is_on_screen("For even-length lists, median should average the two middle values", where))
+        # The same words do not run on across the conversation: only the pane's own side has them together.
+        self.assertNotIn("average the two middle", where[0])
+
+    def test_what_is_not_there_is_missed_and_the_top_of_the_pane_counts_most(self):
+        gone = [row[:52] for row in DOCKED]
+        head, rest = jack.missing_pieces(TEXTS, gone)
+        self.assertEqual(head, ["1: Play (1)", "2: Review", "3: Explain", "4: Progress", "On. Watching for your next save."])
+        self.assertIn("No editor is connected.", rest)
+        # One mark says too little to be missed.
+        self.assertNotIn("●", head + rest)
+        self.assertNotIn("1", rest)
+
+    def test_markdown_is_compared_as_a_terminal_draws_it(self):
+        where = jack.flows(["  Review", "  The mean is fine, and the median sorts a copy."])
+        self.assertTrue(jack.is_on_screen("## Review", where))
+        self.assertTrue(jack.is_on_screen("The **mean** is fine, and the `median` sorts a copy.", where))
+        self.assertTrue(jack.is_on_screen("- The mean is fine", where))
+        self.assertFalse(jack.is_on_screen("The mode is wrong", where))
+
+    def test_a_spinner_and_a_running_clock_are_not_news(self):
+        rows = ["❯ hello", "✻ Brewing… (12s · esc to interrupt)", "  ⏵⏵ bypass permissions on · esc to interrupt", "│On. Watching.", "  3s · ↓ 1.2k tokens)"]
+        self.assertEqual(jack.steady(rows), ["❯ hello", "│On. Watching."])
+
+    @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
+    def test_terminal_output_is_replayed_into_the_screen_it_made(self):
+        raw = b"first\r\nsecond\r\n\x1b[1;1Hfirst row, rewritten\x1b[3;1Hthird"
+        rows = jack.replay(raw, 40, 6)
+        self.assertEqual([row.rstrip() for row in rows[:3]], ["first row, rewritten", "second", "third"])
+
+
+class Log(unittest.TestCase):
+    def test_a_log_is_read_across_its_chunks_and_a_line_caught_mid_write_is_left_for_later(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = pathlib.Path(tmp)
+            (folder / "000000.jsonl").write_text('{"t":1,"seq":1,"k":"cmd","n":"on"}\n{"t":2,"seq":2,"k":"state","n":"mode"}\n')
+            (folder / "000001.jsonl").write_text('{"t":3,"seq":3,"k":"look","n":"start"}\n{"t":4,"seq":4,"k":"lo')
+            (folder / "state.json").write_text("{}")
+            records = jack.log_records(folder)
+            self.assertEqual([r["seq"] for r in records], [1, 2, 3])
+            # From where the last reading ended: only what is new.
+            (folder / "000001.jsonl").write_text('{"t":3,"seq":3,"k":"look","n":"start"}\n{"t":4,"seq":4,"k":"look","n":"done"}\n')
+            self.assertEqual([r["seq"] for r in jack.log_records(folder, records[-1]["_at"])], [4])
+            self.assertEqual(jack.log_records(None), [])
+
+    def test_claude_codes_own_log_is_read_for_what_it_refused_and_not_for_everyday_lines(self):
+        everyday = [
+            "2026-10-05T21:12:46.969Z [DEBUG] $.fs.list (backseat-driver): /tmp/home/editors failed: ENOENT: no such file or directory, scandir '/tmp/home/editors'",
+            "2026-10-05T21:11:49.321Z [DEBUG] hooks module backseat-driver@inline tool.call skipped: re-entry (the plugin's own code raised it; origin backseat-driver)",
+            "2026-10-05T21:12:50.352Z [DEBUG] hooks module backseat-driver@inline session.end settled in 99.0ms (worker hop, next() included)",
+            '2026-10-05T21:12:50.000Z [DEBUG] MCP server "backseat-driver": Channel notifications skipped: server did not declare claude/channel capability',
+            "2026-10-05T21:12:50.000Z [ERROR] MCP server \"plugin:github:github\" Connection failed (400)",
+        ]
+        refused = [
+            "backseat-driver: ui.render (Pane) refused: Box borderStyle is a number; the engine drew its own",
+            "backseat-driver@inline: ui.render (AbovePrompt) threw while drawn: x is undefined; the engine drew its own",
+            "ui.render (Pane): a hook returned a tree that does not validate: Text takes no key",
+            "backseat-driver: hooks module did not load: /repo/plugin/hooks/register.tsx, compiled line 2554",
+            "hooks module backseat-driver@inline prompt.submit failed: TypeError (41 chars)",
+            "hooks module backseat-driver@inline tool.call skipped: exceeded 10000ms budget",
+        ]
+        self.assertEqual([line for line in everyday if jack.is_trouble(line)], [])
+        self.assertEqual([line for line in refused if not jack.is_trouble(line)], [])
+
+    def test_a_record_is_one_line(self):
+        line = jack.record_line({"t": 0, "k": "model", "n": "play-by-play", "ms": 1905, "d": {"request": {"prompt": "x" * 400}}}, 60)
+        self.assertIn("model/play-by-play 1905ms", line)
+        self.assertTrue(line.endswith("…"))
+        self.assertEqual(jack.dig({"a": [{"b": 7}]}, "a.0.b"), 7)
+        self.assertIsNone(jack.dig({"a": 1}, "a.b"))
+
+
+class Disagreements(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = pathlib.Path(self.tmp.name)
+        # The files' own times are compared with the clock, so the clock is the real one.
+        self.now = jack.now_ms()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def project(self, root: str, lease: dict, notes: int = 0, notes_age_ms: int = 0) -> None:
+        folder = self.home / "projects" / jack.project_id(root)
+        folder.mkdir(parents=True)
+        (folder / "project.json").write_text(json.dumps({"v": 1, "root": root}))
+        (folder / "lease.json").write_text(json.dumps({"v": 1, **lease}))
+        (folder / "notes.json").write_text(json.dumps({"v": 1, "notes": [{"id": i} for i in range(notes)], "dismissed": [], "prints": {}}))
+        written = (self.now - notes_age_ms) / 1000
+        os.utime(folder / "notes.json", (written, written))
+
+    def test_a_session_that_says_what_is_so_has_nothing_against_it(self):
+        s = session(state=state(self.now))
+        found = jack.check_session(world([s], now=self.now), s, DOCKED)
+        self.assertEqual(bad(found), [])
+        self.assertTrue(any("is on its screen as it says" in text for _, text in found))
+
+    def test_a_pane_it_says_it_shows_and_the_screen_does_not_have(self):
+        s = session(state=state(self.now))
+        agents = ["Your conversation moved to the background — enter opens it", "Needs input", " ✻ current session"]
+        found = bad(jack.check_session(world([s], now=self.now), s, agents))
+        self.assertEqual(len(found), 1)
+        self.assertIn("not on its screen", found[0])
+        self.assertIn("“1: Play (1)”", found[0])
+
+    def test_a_screen_that_cannot_be_seen_is_said_and_not_counted(self):
+        s = session(state=state(self.now))
+        found = jack.check_session(world([s], now=self.now), s, None)
+        self.assertEqual(bad(found), [])
+        self.assertTrue(any(level == jack.NOTE and "cannot be seen" in text for level, text in found))
+
+    def test_a_session_on_and_drawing_nowhere(self):
+        told = state(self.now)
+        told["session"]["surfaces"] = []
+        s = session(state=told)
+        self.assertTrue(any("draws nowhere" in text for text in bad(jack.check_session(world([s], now=self.now), s, None))))
+
+    def test_a_session_whose_timers_stopped(self):
+        s = session(state=state(self.now, at=self.now - jack.STATE_STALE_MS - 1000))
+        found = bad(jack.check_session(world([s], now=self.now), s, DOCKED))
+        self.assertEqual(len(found), 1)
+        self.assertIn("its timers do not run", found[0])
+
+    def test_a_pane_that_is_open_and_not_drawn(self):
+        told = state(self.now)
+        told["shown"]["opened"] = {"at": self.now, "isPlaced": False, "reason": "100 columns, and an unasked pane needs 144"}
+        told["shown"]["pane"] = None
+        s = session(state=told)
+        found = bad(jack.check_session(world([s], now=self.now), s, ["❯ "]))
+        self.assertTrue(any("open and not drawn: 100 columns" in text for text in found))
+
+    def test_a_deadline_that_came_and_went(self):
+        s = session(state=state(self.now, deadlines={"scan": self.now - 60_000, "lease": self.now + 5000}))
+        found = bad(jack.check_session(world([s], now=self.now), s, DOCKED))
+        self.assertEqual(len(found), 1)
+        self.assertIn("`scan`", found[0])
+
+    def test_the_mode_held_twice_and_differing(self):
+        told = state(self.now)
+        told["pane"]["mode"] = "off"
+        s = session(state=told)
+        self.assertTrue(any("holds the mode twice" in text for text in bad(jack.check_session(world([s], now=self.now), s, DOCKED))))
+
+    def test_a_driver_the_lease_does_not_name_and_one_that_stopped_renewing(self):
+        root = "/tmp/ride"
+        self.project(root, {"session": "someone-else", "at": self.now - 1000})
+        s = session(home=self.home, state=state(self.now, repoRoot=root))
+        found = bad(jack.check_session(world([s], [self.home], self.now), s, DOCKED))
+        self.assertTrue(any("says it drives" in text and "the lease names someonee" in text for text in found), found)
+
+        other = pathlib.Path(tempfile.mkdtemp())
+        try:
+            self.home = other
+            self.project(root, {"session": s["id"], "at": self.now - jack.LEASE_TTL_MS - 5000})
+            s = session(home=other, state=state(self.now, repoRoot=root))
+            found = bad(jack.check_session(world([s], [other], self.now), s, DOCKED))
+            self.assertTrue(any("last renewed its lease" in text for text in found), found)
+        finally:
+            shutil.rmtree(other)
+
+    def test_notes_in_the_pane_that_the_project_folder_does_not_keep(self):
+        root = "/tmp/ride"
+        self.project(root, {"session": "aaaaaaaa-1111-4000-8000-000000000001", "at": self.now - 1000}, notes=0, notes_age_ms=60_000)
+        told = state(self.now, repoRoot=root)
+        told["pane"]["notes"] = [{"id": 1}, {"id": 2}]
+        s = session(home=self.home, state=told)
+        found = bad(jack.check_session(world([s], [self.home], self.now), s, DOCKED))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("2 open note(s) in its pane, and notes.json keeps 0", found[0])
+
+    def test_an_editor_light_that_does_not_match_the_editors_files(self):
+        root = "/tmp/ride"
+        self.project(root, {"session": "aaaaaaaa-1111-4000-8000-000000000001", "at": self.now - 1000})
+        (self.home / "editors").mkdir()
+        (self.home / "editors" / "emacs-1.json").write_text(json.dumps({"v": 1, "editor": "emacs", "pid": 1, "at": self.now - 5000, "file": f"{root}/stats.py", "line": 2}))
+        told = state(self.now, repoRoot=root)
+        told["pane"]["watch"] = {"editors": ""}
+        s = session(home=self.home, state=told)
+        found = bad(jack.check_session(world([s], [self.home], self.now), s, DOCKED))
+        self.assertTrue(any("shows a red light" in text and "emacs" in text for text in found), found)
+
+        told["pane"]["watch"] = {"editors": "Emacs is connected."}
+        self.assertEqual(bad(jack.check_session(world([s], [self.home], self.now), s, DOCKED)), [])
+        # A minute without a word, and it is not connected: a green light is then a lie.
+        late = world([s], [self.home], self.now + jack.EDITOR_TTL_MS)
+        told["at"] = late["now"] - 1000
+        (self.home / "projects" / jack.project_id(root) / "lease.json").write_text(json.dumps({"v": 1, "session": s["id"], "at": late["now"] - 1000}))
+        self.assertTrue(any("shows a green light" in text for text in bad(jack.check_session(late, s, DOCKED))))
+
+    def test_a_lease_held_by_a_session_that_is_not_running(self):
+        # The owner's afternoon of 2026-10-05: the process a conversation had left went on holding the lease.
+        self.project("/tmp/ride", {"session": "ba556cdf-cb41-461e-973b-5db27b210b5a", "at": self.now - 4000})
+        found = bad(jack.check_homes(world([session()], [self.home], self.now)))
+        self.assertEqual(len(found), 1)
+        self.assertIn("held by ba556cdf", found[0])
+        self.assertIn("no such session is running", found[0])
+        # Run out, it is nobody's, and nothing is wrong.
+        self.assertEqual(bad(jack.check_homes(world([session()], [self.home], self.now + jack.LEASE_TTL_MS))), [])
+
+    def test_a_lease_held_by_a_session_that_draws_nowhere(self):
+        told = state(self.now)
+        told["session"]["surfaces"] = []
+        s = session(state=told)
+        self.project("/tmp/ride", {"session": s["id"], "at": self.now - 4000})
+        found = bad(jack.check_homes(world([s], [self.home], self.now)))
+        self.assertTrue(any("which draws nowhere" in text for text in found), found)
+
+    def test_a_session_that_said_it_was_on_and_is_gone_without_a_goodbye(self):
+        entry = {"session": "dead0000-0000-4000-8000-000000000000", "born": 1, "cwd": "/tmp/ride", "mode": "on", "at": self.now - 30_000, "leftAt": 0}
+        (self.home / "sessions.json").write_text(json.dumps({"v": 1, "sessions": [entry, {**entry, "session": "left0000", "leftAt": self.now - 1000}]}))
+        found = bad(jack.check_homes(world([session()], [self.home], self.now)))
+        self.assertEqual(len(found), 1)
+        self.assertIn("dead0000", found[0])
+        self.assertIn("no goodbye", found[0])
+
+    def test_what_the_tutor_says_its_mode_is(self):
+        self.assertEqual(jack.tutor_mode(session()), "off")
+        self.assertEqual(jack.tutor_mode(session(entry={"mode": "paused", "leftAt": 0})), "paused")
+        self.assertEqual(jack.tutor_mode(session(entry={"mode": "on", "leftAt": 5})), "off")
+        self.assertEqual(jack.tutor_mode(session(state={"mode": "on"}, entry=None)), "on")
+
+    def test_the_session_to_look_at_is_the_one_with_the_tutor_on(self):
+        me = session(id="me000000-0", short="me000000", is_me=True, state={"mode": "on"})
+        off = session(id="off00000-0", short="off00000")
+        on = session(id="on000000-0", short="on000000", entry={"mode": "on", "leftAt": 0}, eyes={"kind": "tmux", "name": "bsd", "cols": 1, "rows": 1})
+        w = world([me, off, on])
+        self.assertIs(jack.pick(w, None), on)
+        self.assertIs(jack.pick(w, "off"), off)
+        self.assertIs(jack.pick(w, "bsd"), on)
+        self.assertIsNone(jack.pick(w, "nobody"))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=1)

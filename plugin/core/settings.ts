@@ -26,8 +26,11 @@ export type Persona = {
  */
 export type Layout = 'unified' | 'horizontal' | 'vertical'
 
-/** In the order `/bsd layout` steps through them. The first is the default. */
+/** In the order `/bsd layout` steps through them. */
 export const LAYOUTS: readonly Layout[] = ['unified', 'horizontal', 'vertical']
+
+/** The layout until the person picks another. */
+export const DEFAULT_LAYOUT: Layout = 'vertical'
 
 /** A layout as set in /config or typed after `/bsd layout`. Anything else is null. */
 export function layoutOf(value: unknown): Layout | null {
@@ -100,7 +103,7 @@ export function readSettings(options: Options): Settings {
       voice: personaName(options.voice),
       engineering: personaName(options.engineering),
     },
-    layout: layoutOf(options.layout) ?? 'unified',
+    layout: layoutOf(options.layout) ?? DEFAULT_LAYOUT,
     isAnimated: options.animated_persona !== false,
     isProgressOn: options.progress_report !== false,
     isUpdateCheckOn: options.update_check !== false,
