@@ -947,6 +947,12 @@ function renderUnified(kit: Kit, view: PaneView, actions: PaneActions) {
           <Text dimColor>{moreLine(notes.length, shown)}</Text>
         </Box>
       )}
+      {/* The note keys (e d m) act on an open tab. Folded, j opens the notes, so none of them falls through into the prompt. */}
+      {!view.isUnfolded && notes.length > 0 && hasDigits(view) && (
+        <Box paddingLeft={2} columnGap={2}>
+          <Button key="open-notes" label="open the notes" hotkey="j" plain dimColor onPress={() => actions.onTab('play')} />
+        </Box>
+      )}
       {view.isUnfolded && (
         <Box flexDirection="column" paddingLeft={2}>
           <Box flexDirection="row" columnGap={2}>
