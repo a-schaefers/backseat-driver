@@ -5,7 +5,7 @@ import { claimed, isHeld, LEASE_BEAT_MS, LEASE_TTL_MS, nextLeaseCheck, NO_LEASE,
 import type { Lease } from '../hooks/lease'
 import type { Health, HealthEvent, Pressure, Trouble } from '../hooks/health'
 import { isLookDue, playOf, wakeAt } from '../hooks/play'
-import type { PlayFacts } from '../hooks/play'
+import type { Play, PlayFacts, Why } from '../hooks/play'
 import { current, isSpent, MAX_ATTEMPTS, MAX_WAIT_MS, MAX_WAITING, nextToAssess, nextToReview, reviewed, settledIn, withAttempt, withCommit, withoutCommit } from '../hooks/reviewqueue'
 import type { ReviewQueue } from '../hooks/reviewqueue'
 import { createScheduler } from '../hooks/scheduler'
@@ -711,4 +711,60 @@ test('the store reads a broken file a few times, writes a few times, and always 
   expect(keepsBackup({ wantsBackup: false, isSound: true, exists: true })).toBe(false)
   expect(keepsBackup({ wantsBackup: true, isSound: false, exists: true })).toBe(false)
   expect(keepsBackup({ wantsBackup: true, isSound: true, exists: false })).toBe(false)
+})
+
+test('whatever the play-by-play is doing, a wait names when it ends, and the row under it never says what the line says', async () => {
+  const TROUBLES: Trouble[] = ['rate-limit', 'overloaded', 'server', 'offline', 'timeout', 'account', 'job', 'reply']
+  const random = seeded(41)
+  const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T
+  const lines = new Set<string>()
+  const rows = new Set<string>()
+  for (let turn = 0; turn < 20_000; turn += 1) {
+    const now = 1_790_000_000_000 + Math.floor(random() * 86_400_000)
+    const trouble = pick(TROUBLES)
+    const until = pick([null, now + Math.floor(random() * 900_000)])
+    const why: Why = pick<Why>([
+      { kind: 'failed', detail: pick(['no connection', 'empty reply']) },
+      { kind: 'trouble', trouble, detail: 'overloaded' },
+      { kind: 'plan', percent: 96, window: 'five_hour' },
+      { kind: 'account', detail: 'billing error' },
+      { kind: 'job', detail: 'model not found' },
+    ])
+    const play: Play = pick<Play>([
+      { at: 'starting' },
+      { at: 'no-git' },
+      { at: 'following' },
+      { at: 'paused' },
+      { at: 'watching' },
+      { at: 'on-request' },
+      { at: 'looking' },
+      { at: 'settling', dueAt: now + 10_000, isSpacing: random() < 0.5 },
+      { at: 'waiting', until, why },
+    ])
+    const health: Health = pick<Health>([
+      { state: 'ok' },
+      { state: 'waiting', trouble, detail: 'x', until: now + Math.floor(random() * 600_000), failures: 2 },
+      { state: 'recovering', trouble, detail: 'x', failures: 2 },
+      { state: 'probing', trouble, detail: 'x', failures: 3 },
+      { state: 'blocked', detail: 'billing error' },
+    ])
+    const pressure: Pressure = {
+      level: pick(['none', 'slowed', 'held'] as const),
+      percent: Math.floor(random() * 100),
+      window: 'five_hour',
+      resetsAt: pick([null, now + 3_600_000]),
+    }
+    const facts = { play, health, pressure, lastScanMs: pick([0, 40, 1499, 1500, 2345, 31_999.5, random() * 5000]), failing: pick([[], ['a scan'], ['a scan', 'a lookup']]) }
+    const line = playLine(play)
+    const row = healthLine(facts)
+    // A wait for a retry, the service or the plan names the time it ends, as the clock shows it.
+    if (play.at === 'waiting' && play.until !== null && (play.why.kind === 'failed' || play.why.kind === 'trouble' || play.why.kind === 'plan')) {
+      if (!line.includes(clockTime(play.until))) throw new Error(`turn ${turn}: "${line}" does not say ${clockTime(play.until)}`)
+    }
+    // A look that is held back already says why, so the row leaves the service and the plan out.
+    if (play.at === 'waiting' && (row.includes('Claude') || row.includes('plan limit'))) throw new Error(`turn ${turn}: the row repeats the line: "${row}"`)
+    // Nothing is said about the background while it is not this session's, or not running.
+    if ((play.at === 'paused' || play.at === 'following' || play.at === 'starting' || play.at === 'no-git') && row !== '') throw new Error(`turn ${turn}: "${row}"`)
+    if (watchOf(play, null, row).line !== line) throw new Error(`turn ${turn}: watchOf says another line`)
+  }
 })

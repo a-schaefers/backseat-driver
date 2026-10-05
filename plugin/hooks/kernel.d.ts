@@ -136,3 +136,12 @@ export const afterWriteWire: (attempt: number) => (isConfirmed: boolean) => { ne
 export const readTries: number
 export const readRetryMs: number
 export const writeTries: number
+
+// The status line
+export const playLineWire: (clock: (ms: number) => string) => (play: PlayWire) => string
+export const healthLineWire: (
+  clock: (ms: number) => string,
+) => (facts: { play: PlayWire; health: HealthWire; pressure: PressureWire; lastScanMs: number; failing: string[] }) => string
+/** `starting`, `no-git`, `looking`, `settling`, `waiting` or `idle`. */
+export const watchStateWire: (play: PlayWire) => string
+export const slowScanMs: number

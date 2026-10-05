@@ -21,6 +21,8 @@ module Kernel.Play
   , FactsWire
   , PlayWire
   , playOfWire
+  , playToWire
+  , playFromWire
   , wakeAtWire
   , isLookDueWire
   ) where
@@ -28,7 +30,7 @@ module Kernel.Play
 import Prelude
 
 import Data.Maybe (Maybe(..))
-import Kernel.Health (Health, HealthWire, Trouble, healthFromWire, mayAsk, troubleTag)
+import Kernel.Health (Health, HealthWire, Trouble, healthFromWire, mayAsk, troubleFromTag, troubleTag)
 import Kernel.Health as Health
 import Kernel.Pace (Pressure, PressureWire, backoffMs, gapFactor, pressureFromWire, slowedGapMs)
 
@@ -238,6 +240,27 @@ playToWire = case _ of
     PlanSpent percent window -> wire { why = "plan", percent = percent, window = window }
     AccountRefused detail -> wire { why = "account", detail = detail }
     JobRefused detail -> wire { why = "job", detail = detail }
+
+-- | A state nobody knows is `Starting`, which promises nothing. A reason
+-- | nobody knows is a failed look, which is tried again.
+playFromWire :: PlayWire -> Play
+playFromWire w = case w.at of
+  "no-git" -> NoGit
+  "following" -> Following
+  "paused" -> Paused
+  "watching" -> Watching
+  "on-request" -> OnRequest
+  "looking" -> Looking
+  "settling" -> Settling { dueAt: w.dueAt, isSpacing: w.isSpacing }
+  "waiting" -> Waiting { until: if w.hasUntil then Just w.until else Nothing, why }
+  _ -> Starting
+  where
+  why = case w.why of
+    "trouble" -> InTrouble (troubleFromTag w.trouble) w.detail
+    "plan" -> PlanSpent w.percent w.window
+    "account" -> AccountRefused w.detail
+    "job" -> JobRefused w.detail
+    _ -> LookFailed w.detail
 
 playOfWire :: FactsWire -> PlayWire
 playOfWire = playToWire <<< playOf <<< factsFromWire

@@ -1,3 +1,4 @@
+import type { Watch } from '../types'
 import type { Throttle } from './gate'
 import type { Health, HealthEvent, ModelResult, Outcome, Pressure, Trouble } from './health'
 import * as K from './kernel.js'
@@ -7,6 +8,7 @@ import type { Play, PlayFacts, Why } from './play'
 import type { ReviewQueue, Waiting, Wanted } from './reviewqueue'
 import { clockTime } from './clock'
 import type { ScanFacts } from './sensor'
+import type { HealthFacts } from './status'
 
 /**
  * The one bridge between the kernel and the rest of the mod.
@@ -444,4 +446,56 @@ export function afterWrite(attempt: number, isConfirmed: boolean): AfterWrite {
     default:
       return { next: 'unconfirmed' }
   }
+}
+
+// --- The status line (Kernel.Status)
+
+function playToWire(play: Play): K.PlayWire {
+  const wire: K.PlayWire = { at: play.at, dueAt: 0, isSpacing: false, hasUntil: false, until: 0, why: '', detail: '', trouble: '', percent: 0, window: '' }
+  switch (play.at) {
+    case 'settling':
+      return { ...wire, dueAt: play.dueAt, isSpacing: play.isSpacing }
+    case 'waiting': {
+      const waiting = { ...wire, hasUntil: play.until !== null, until: play.until ?? 0, why: play.why.kind }
+      switch (play.why.kind) {
+        case 'trouble':
+          return { ...waiting, trouble: play.why.trouble, detail: play.why.detail }
+        case 'plan':
+          return { ...waiting, percent: play.why.percent, window: play.why.window }
+        default:
+          return { ...waiting, detail: play.why.detail }
+      }
+    }
+    default:
+      return wire
+  }
+}
+
+/** A scan of the working tree that took this long is worth a word. */
+export const SLOW_SCAN_MS: number = K.slowScanMs
+
+/** What the status line says while the tutor is on or paused. */
+export function playLine(play: Play): string {
+  return K.playLineWire(clockTime)(playToWire(play))
+}
+
+/**
+ * What keeps going wrong in the background, for the dim row under the status
+ * line. '' when nothing does. It leaves out what the status line itself says.
+ */
+export function healthLine(facts: HealthFacts): string {
+  return K.healthLineWire(clockTime)({
+    play: playToWire(facts.play),
+    health: healthToWire(facts.health),
+    pressure: pressureToWire(facts.pressure),
+    lastScanMs: facts.lastScanMs,
+    failing: [...facts.failing],
+  })
+}
+
+/** The state the animated character takes its pose from. */
+export function watchState(play: Play): Watch['state'] {
+  const state = K.watchStateWire(playToWire(play))
+
+  return state === 'starting' || state === 'no-git' || state === 'looking' || state === 'settling' || state === 'waiting' ? state : 'idle'
 }

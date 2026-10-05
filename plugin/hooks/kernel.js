@@ -103,6 +103,23 @@ var functorArray = {
   map: arrayMap
 };
 
+// output/Data.Semigroup/foreign.js
+var concatArray = function(xs) {
+  return function(ys) {
+    if (xs.length === 0) return ys;
+    if (ys.length === 0) return xs;
+    return xs.concat(ys);
+  };
+};
+
+// output/Data.Semigroup/index.js
+var semigroupArray = {
+  append: concatArray
+};
+var append = function(dict) {
+  return dict.append;
+};
+
 // output/Control.Applicative/index.js
 var pure = function(dict) {
   return dict.pure;
@@ -291,6 +308,17 @@ var min = function(dictOrd) {
       }
       ;
       throw new Error("Failed pattern match at Data.Ord (line 172, column 3 - line 175, column 12): " + [v.constructor.name]);
+    };
+  };
+};
+var clamp = function(dictOrd) {
+  var min1 = min(dictOrd);
+  var max13 = max(dictOrd);
+  return function(low) {
+    return function(hi) {
+      return function(x) {
+        return min1(hi)(max13(low)(x));
+      };
     };
   };
 };
@@ -525,6 +553,9 @@ var snoc = function(xs) {
   };
 };
 var slice = /* @__PURE__ */ runFn3(sliceImpl);
+var $$null = function(xs) {
+  return length(xs) === 0;
+};
 var findIndex = /* @__PURE__ */ (function() {
   return runFn4(findIndexImpl)(Just.create)(Nothing.value);
 })();
@@ -608,6 +639,11 @@ var replaceAll = function(s1) {
     return function(s3) {
       return s3.replace(new RegExp(s1.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&"), "g"), s2);
     };
+  };
+};
+var joinWith = function(s) {
+  return function(xs) {
+    return xs.join(s);
   };
 };
 
@@ -1503,6 +1539,72 @@ var Waiting2 = /* @__PURE__ */ (function() {
   };
   return Waiting3;
 })();
+var playFromWire = function(w) {
+  var why = (function() {
+    if (w.why === "trouble") {
+      return new InTrouble(troubleFromTag(w.trouble), w.detail);
+    }
+    ;
+    if (w.why === "plan") {
+      return new PlanSpent(w.percent, w.window);
+    }
+    ;
+    if (w.why === "account") {
+      return new AccountRefused(w.detail);
+    }
+    ;
+    if (w.why === "job") {
+      return new JobRefused(w.detail);
+    }
+    ;
+    return new LookFailed(w.detail);
+  })();
+  if (w.at === "no-git") {
+    return NoGit.value;
+  }
+  ;
+  if (w.at === "following") {
+    return Following.value;
+  }
+  ;
+  if (w.at === "paused") {
+    return Paused.value;
+  }
+  ;
+  if (w.at === "watching") {
+    return Watching.value;
+  }
+  ;
+  if (w.at === "on-request") {
+    return OnRequest.value;
+  }
+  ;
+  if (w.at === "looking") {
+    return Looking.value;
+  }
+  ;
+  if (w.at === "settling") {
+    return new Settling({
+      dueAt: w.dueAt,
+      isSpacing: w.isSpacing
+    });
+  }
+  ;
+  if (w.at === "waiting") {
+    return new Waiting2({
+      until: (function() {
+        if (w.hasUntil) {
+          return new Just(w.until);
+        }
+        ;
+        return Nothing.value;
+      })(),
+      why
+    });
+  }
+  ;
+  return Starting.value;
+};
 var plain = function(at) {
   return {
     at,
@@ -1595,7 +1697,7 @@ var playToWire = /* @__PURE__ */ (function() {
         };
       }
       ;
-      throw new Error("Failed pattern match at Kernel.Play (line 235, column 22 - line 240, column 63): " + [why.constructor.name]);
+      throw new Error("Failed pattern match at Kernel.Play (line 237, column 22 - line 242, column 63): " + [why.constructor.name]);
     };
   };
   var withUntil = function(until) {
@@ -1619,7 +1721,7 @@ var playToWire = /* @__PURE__ */ (function() {
         return wire;
       }
       ;
-      throw new Error("Failed pattern match at Kernel.Play (line 232, column 26 - line 234, column 20): " + [until.constructor.name]);
+      throw new Error("Failed pattern match at Kernel.Play (line 234, column 26 - line 236, column 20): " + [until.constructor.name]);
     };
   };
   return function(v) {
@@ -1671,7 +1773,7 @@ var playToWire = /* @__PURE__ */ (function() {
       return withUntil(v.value0.until)(withWhy(v.value0.why)(plain("waiting")));
     }
     ;
-    throw new Error("Failed pattern match at Kernel.Play (line 221, column 14 - line 230, column 67): " + [v.constructor.name]);
+    throw new Error("Failed pattern match at Kernel.Play (line 223, column 14 - line 232, column 67): " + [v.constructor.name]);
   };
 })();
 var paced = function(facts) {
@@ -1685,7 +1787,7 @@ var paced = function(facts) {
         return max6(facts.lastChangeAt.value0 + facts.quietMs)(facts.lastLookAt.value0 + slowedGapMs(facts.minGapMs)(gapFactor(facts.pressure.percent)) + backoffMs(facts.failures));
       }
       ;
-      throw new Error("Failed pattern match at Kernel.Play (line 96, column 7 - line 99, column 110): " + [facts.lastLookAt.constructor.name]);
+      throw new Error("Failed pattern match at Kernel.Play (line 98, column 7 - line 101, column 110): " + [facts.lastLookAt.constructor.name]);
     })());
   }
   ;
@@ -1726,11 +1828,11 @@ var playOf = function(facts) {
         return false;
       }
       ;
-      throw new Error("Failed pattern match at Kernel.Play (line 130, column 18 - line 132, column 21): " + [facts.lastChangeAt.constructor.name]);
+      throw new Error("Failed pattern match at Kernel.Play (line 132, column 18 - line 134, column 21): " + [facts.lastChangeAt.constructor.name]);
     };
     var failed = (function() {
-      var $44 = facts.failures > 0;
-      if ($44) {
+      var $47 = facts.failures > 0;
+      if ($47) {
         return new Just(new LookFailed(facts.failure));
       }
       ;
@@ -1746,7 +1848,7 @@ var playOf = function(facts) {
           return new InTrouble(trouble, detail);
         }
         ;
-        throw new Error("Failed pattern match at Kernel.Play (line 127, column 30 - line 129, column 40): " + [failed.constructor.name]);
+        throw new Error("Failed pattern match at Kernel.Play (line 129, column 30 - line 131, column 40): " + [failed.constructor.name]);
       };
     };
     var held = function(dueAt) {
@@ -1800,10 +1902,10 @@ var playOf = function(facts) {
           });
         }
         ;
-        throw new Error("Failed pattern match at Kernel.Play (line 124, column 14 - line 126, column 65): " + [failed.constructor.name]);
+        throw new Error("Failed pattern match at Kernel.Play (line 126, column 14 - line 128, column 65): " + [failed.constructor.name]);
       }
       ;
-      throw new Error("Failed pattern match at Kernel.Play (line 116, column 3 - line 126, column 65): " + [dueAt.constructor.name]);
+      throw new Error("Failed pattern match at Kernel.Play (line 118, column 3 - line 128, column 65): " + [dueAt.constructor.name]);
     };
     var v = paced(facts);
     if (v instanceof Nothing) {
@@ -1814,10 +1916,10 @@ var playOf = function(facts) {
       return held(v.value0);
     }
     ;
-    throw new Error("Failed pattern match at Kernel.Play (line 111, column 17 - line 113, column 31): " + [v.constructor.name]);
+    throw new Error("Failed pattern match at Kernel.Play (line 113, column 17 - line 115, column 31): " + [v.constructor.name]);
   }
   ;
-  throw new Error("Failed pattern match at Kernel.Play (line 103, column 1 - line 103, column 24): " + [facts.constructor.name]);
+  throw new Error("Failed pattern match at Kernel.Play (line 105, column 1 - line 105, column 24): " + [facts.constructor.name]);
 };
 var wakeAt = function(facts) {
   var v = playOf(facts);
@@ -1895,11 +1997,11 @@ var factsFromWire = function(w) {
     jobBlock: w.jobBlock
   };
 };
-var isLookDueWire = function($75) {
-  return isLookDue(factsFromWire($75));
+var isLookDueWire = function($78) {
+  return isLookDue(factsFromWire($78));
 };
-var playOfWire = function($76) {
-  return playToWire(playOf(factsFromWire($76)));
+var playOfWire = function($79) {
+  return playToWire(playOf(factsFromWire($79)));
 };
 var wakeAtWire = function(facts) {
   var v = wakeAt(factsFromWire(facts));
@@ -1917,7 +2019,7 @@ var wakeAtWire = function(facts) {
     };
   }
   ;
-  throw new Error("Failed pattern match at Kernel.Play (line 247, column 20 - line 249, column 37): " + [v.constructor.name]);
+  throw new Error("Failed pattern match at Kernel.Play (line 270, column 20 - line 272, column 37): " + [v.constructor.name]);
 };
 
 // output/Kernel.Queue/index.js
@@ -2401,6 +2503,313 @@ var focusGapMs = function(tookMs) {
   return min6(longestFocusGapMs)(max8(focusScanMs)(tookMs * 4));
 };
 
+// output/Data.Number.Format/foreign.js
+function wrap(method) {
+  return function(d) {
+    return function(num) {
+      return method.apply(num, [d]);
+    };
+  };
+}
+var toPrecisionNative = wrap(Number.prototype.toPrecision);
+var toFixedNative = wrap(Number.prototype.toFixed);
+var toExponentialNative = wrap(Number.prototype.toExponential);
+
+// output/Data.Number.Format/index.js
+var clamp2 = /* @__PURE__ */ clamp(ordInt);
+var Precision = /* @__PURE__ */ (function() {
+  function Precision2(value0) {
+    this.value0 = value0;
+  }
+  ;
+  Precision2.create = function(value0) {
+    return new Precision2(value0);
+  };
+  return Precision2;
+})();
+var Fixed = /* @__PURE__ */ (function() {
+  function Fixed2(value0) {
+    this.value0 = value0;
+  }
+  ;
+  Fixed2.create = function(value0) {
+    return new Fixed2(value0);
+  };
+  return Fixed2;
+})();
+var Exponential = /* @__PURE__ */ (function() {
+  function Exponential2(value0) {
+    this.value0 = value0;
+  }
+  ;
+  Exponential2.create = function(value0) {
+    return new Exponential2(value0);
+  };
+  return Exponential2;
+})();
+var toStringWith = function(v) {
+  if (v instanceof Precision) {
+    return toPrecisionNative(v.value0);
+  }
+  ;
+  if (v instanceof Fixed) {
+    return toFixedNative(v.value0);
+  }
+  ;
+  if (v instanceof Exponential) {
+    return toExponentialNative(v.value0);
+  }
+  ;
+  throw new Error("Failed pattern match at Data.Number.Format (line 59, column 1 - line 59, column 43): " + [v.constructor.name]);
+};
+var fixed = /* @__PURE__ */ (function() {
+  var $9 = clamp2(0)(20);
+  return function($10) {
+    return Fixed.create($9($10));
+  };
+})();
+
+// output/Kernel.Status/index.js
+var append1 = /* @__PURE__ */ append(semigroupArray);
+var watchState = function(v) {
+  if (v instanceof Starting) {
+    return "starting";
+  }
+  ;
+  if (v instanceof NoGit) {
+    return "no-git";
+  }
+  ;
+  if (v instanceof Looking) {
+    return "looking";
+  }
+  ;
+  if (v instanceof Settling) {
+    return "settling";
+  }
+  ;
+  if (v instanceof Waiting2) {
+    return "waiting";
+  }
+  ;
+  return "idle";
+};
+var watchStateWire = function($40) {
+  return watchState(playFromWire($40));
+};
+var troubleText = function(v) {
+  if (v instanceof RateLimit) {
+    return "Claude is rate limited";
+  }
+  ;
+  if (v instanceof Overloaded) {
+    return "Claude is overloaded";
+  }
+  ;
+  if (v instanceof Server) {
+    return "Claude had a server error";
+  }
+  ;
+  if (v instanceof Offline) {
+    return "There is no connection to Claude";
+  }
+  ;
+  if (v instanceof Timeout) {
+    return "Claude did not answer in time";
+  }
+  ;
+  return "Claude is not answering";
+};
+var slowScanMs = 1500;
+var playLine = function(clock) {
+  return function(v) {
+    if (v instanceof Paused) {
+      return "Paused. /bsd resume to continue.";
+    }
+    ;
+    if (v instanceof Starting) {
+      return "On. Getting ready.";
+    }
+    ;
+    if (v instanceof NoGit) {
+      return "On. This folder is not a git repository, so there is no play-by-play.";
+    }
+    ;
+    if (v instanceof Following) {
+      return "On. Another session is driving this project. This one is for the conversation.";
+    }
+    ;
+    if (v instanceof Watching) {
+      return "On. Watching for your next save.";
+    }
+    ;
+    if (v instanceof OnRequest) {
+      return "On. Looking only when you ask.";
+    }
+    ;
+    if (v instanceof Settling) {
+      if (v.value0.isSpacing) {
+        return "On. Saw your save. Next look after " + (clock(v.value0.dueAt) + ".");
+      }
+      ;
+      if (otherwise) {
+        return "On. Saw your save. Looking when you pause.";
+      }
+      ;
+    }
+    ;
+    if (v instanceof Looking) {
+      return "On. Looking at your changes.";
+    }
+    ;
+    if (v instanceof Waiting2) {
+      var next = (function() {
+        if (v.value0.until instanceof Nothing) {
+          return "";
+        }
+        ;
+        if (v.value0.until instanceof Just) {
+          return " Next try " + (clock(v.value0.until.value0) + ".");
+        }
+        ;
+        throw new Error("Failed pattern match at Kernel.Status (line 65, column 12 - line 67, column 49): " + [v.value0.until.constructor.name]);
+      })();
+      if (v.value0.why instanceof LookFailed) {
+        return "On. The last look failed (" + (v.value0.why.value0 + (")." + (function() {
+          var $19 = next === "";
+          if ($19) {
+            return " It will try again.";
+          }
+          ;
+          return next;
+        })()));
+      }
+      ;
+      if (v.value0.why instanceof InTrouble) {
+        return "On. " + (troubleText(v.value0.why.value0) + ("." + next));
+      }
+      ;
+      if (v.value0.why instanceof PlanSpent) {
+        if (v.value0.until instanceof Nothing) {
+          return "On. Holding back, because you are close to your plan limit. It still looks when you ask.";
+        }
+        ;
+        if (v.value0.until instanceof Just) {
+          return "On. Holding back until " + (clock(v.value0.until.value0) + ", because you are close to your plan limit. It still looks when you ask.");
+        }
+        ;
+        throw new Error("Failed pattern match at Kernel.Status (line 59, column 22 - line 61, column 133): " + [v.value0.until.constructor.name]);
+      }
+      ;
+      if (v.value0.why instanceof AccountRefused) {
+        return "On. Claude is refusing this account (" + (v.value0.why.value0 + "). Nothing runs in the background until that is sorted out.");
+      }
+      ;
+      if (v.value0.why instanceof JobRefused) {
+        return "On. The play-by-play cannot run (" + (v.value0.why.value0 + "). Its model is set in /config.");
+      }
+      ;
+      throw new Error("Failed pattern match at Kernel.Status (line 56, column 29 - line 63, column 108): " + [v.value0.why.constructor.name]);
+    }
+    ;
+    throw new Error("Failed pattern match at Kernel.Status (line 45, column 18 - line 67, column 49): " + [v.constructor.name]);
+  };
+};
+var playLineWire = function(clock) {
+  var $41 = playLine(clock);
+  return function($42) {
+    return $41(playFromWire($42));
+  };
+};
+var healthLine = function(clock) {
+  return function(facts) {
+    var until = function(v) {
+      if (v instanceof Just) {
+        return " until " + clock(v.value0);
+      }
+      ;
+      if (v instanceof Nothing) {
+        return "";
+      }
+      ;
+      throw new Error("Failed pattern match at Kernel.Status (line 103, column 11 - line 105, column 18): " + [v.constructor.name]);
+    };
+    var slowGit = (function() {
+      if (facts.lastScanMs >= slowScanMs) {
+        return ["git is slow here: the last look at the working tree took " + (toStringWith(fixed(1))(facts.lastScanMs / 1e3) + " s.")];
+      }
+      ;
+      if (otherwise) {
+        return [];
+      }
+      ;
+      throw new Error("Failed pattern match at Kernel.Status (line 106, column 3 - line 108, column 21): ");
+    })();
+    var service = (function() {
+      if (facts.play instanceof Waiting2) {
+        return [];
+      }
+      ;
+      if (facts.health instanceof Blocked) {
+        return ["Claude is refusing this account (" + (facts.health.value0.detail + "). Nothing runs in the background until that is sorted out.")];
+      }
+      ;
+      if (facts.health instanceof Waiting) {
+        return [troubleText(facts.health.value0.trouble) + (". Background work waits until " + (clock(facts.health.value0.until) + "."))];
+      }
+      ;
+      if (facts.pressure.isHeld) {
+        return ["You are close to your plan limit. Nothing runs in the background" + (until(facts.pressure.resetsAt) + " unless you ask.")];
+      }
+      ;
+      if (otherwise) {
+        return [];
+      }
+      ;
+      throw new Error("Failed pattern match at Kernel.Status (line 96, column 10 - line 102, column 26): " + [facts.health.constructor.name]);
+    })();
+    var keepsFailing = (function() {
+      if ($$null(facts.failing)) {
+        return [];
+      }
+      ;
+      if (otherwise) {
+        return ["Keeps failing: " + (joinWith(", ")(facts.failing) + ". /bsd debug dump saves the details.")];
+      }
+      ;
+      throw new Error("Failed pattern match at Kernel.Status (line 109, column 3 - line 111, column 113): ");
+    })();
+    if (facts.play instanceof Paused) {
+      return "";
+    }
+    ;
+    if (facts.play instanceof Following) {
+      return "";
+    }
+    ;
+    if (facts.play instanceof Starting) {
+      return "";
+    }
+    ;
+    if (facts.play instanceof NoGit) {
+      return "";
+    }
+    ;
+    return joinWith(" ")(append1(service)(append1(slowGit)(keepsFailing)));
+  };
+};
+var healthLineWire = function(clock) {
+  return function(w) {
+    return healthLine(clock)({
+      play: playFromWire(w.play),
+      health: healthFromWire(w.health),
+      pressure: pressureFromWire(w.pressure),
+      lastScanMs: w.lastScanMs,
+      failing: w.failing
+    });
+  };
+};
+
 // output/Kernel.Store/index.js
 var Unchanged = /* @__PURE__ */ (function() {
   function Unchanged2() {
@@ -2668,6 +3077,7 @@ export {
   focusGapMs,
   focusScanMs,
   gapFactor,
+  healthLineWire,
   heldTextWire,
   hotForMs,
   hotScanMs,
@@ -2695,6 +3105,7 @@ export {
   outcomeOfErrorWire,
   outcomeOfWire,
   planHeld,
+  playLineWire,
   playOfWire,
   readRetryMs,
   readTries,
@@ -2705,12 +3116,14 @@ export {
   scanGapMsWire,
   scanMs,
   settledInWire,
+  slowScanMs,
   slowedGapMs,
   stepOfWire,
   stepWire,
   troubleOfWire,
   verdictMs,
   wakeAtWire,
+  watchStateWire,
   watchdogLimitMs,
   watchdogMs,
   withAttemptWire,
