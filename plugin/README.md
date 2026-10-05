@@ -1,0 +1,5 @@
+# Backseat Driver
+
+A coding tutor inside Claude Code that never writes your code. You write every line. Type `/bsd` and a pane opens beside the conversation: play-by-play commentary on each save, a deep review of each commit, an explanation of the code you point at, and an honest skill level per language. Claude stays in chat as a tutor: hints and explanations, never patches. While it's on, a hook blocks Claude's editing tools. `/bsd off` gives you Claude Code back, and `/bsd help` lists every command.
+
+Needs Claude Code 2.1.287 or newer, git, and a Claude plan. Free for personal use; commercial use needs a license. More at https://github.com/a-schaefers/backseat-driver.
