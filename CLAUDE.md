@@ -16,7 +16,6 @@ AI-only reference for this repository. Terse by design. `README.md` is the only 
   - Never apologize for the project or hedge it ("trying to", "I see the irony"). State what it does with confidence.
   - Never suggest autosave to make it closer to live: editor plugins are the answer.
   - Never link to this file or to design detail. A new feature gets a line at most.
-  - No drawings or screenshots of the UI: it changes. Describe features in bullets.
   - It carries facts that must stay true: install commands, minimum Claude Code version (text and badge), the `/bsd` command table, the footprint paragraph at the end of "What it is".
 - Pronouns: the owner's are not stated. Use "the owner" or they/them.
 
