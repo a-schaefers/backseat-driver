@@ -1,4 +1,4 @@
-import { profilePath, progressPath, projectDir, REMOVABLE } from './datahome'
+import { lessonsDir, profilePath, progressPath, projectDir, REMOVABLE } from './datahome'
 import { languageName } from './languages'
 import { backupPath, brokenPath } from './store'
 
@@ -66,7 +66,11 @@ export function scopePaths(root: string, repoRoot: string, scope: Scope): string
       return repoRoot === '' ? [] : [projectDir(root, repoRoot)]
     case 'language':
       // With each file go the copies the store keeps beside it.
-      return [profilePath(root, scope.language), progressPath(root, scope.language)].flatMap(path => [path, backupPath(path), brokenPath(path)])
+      // The lessons of the language are part of its progress.
+      return [
+        ...[profilePath(root, scope.language), progressPath(root, scope.language)].flatMap(path => [path, backupPath(path), brokenPath(path)]),
+        lessonsDir(root, scope.language),
+      ]
     case 'everything':
       return REMOVABLE.map(name => `${root}/${name}`)
   }

@@ -157,7 +157,7 @@ export async function assess(
     await ports.setProgress({ skipped: '' })
     await showProgress(ports, state)
     await ports.registerReviewer()
-    if (change !== null) ports.toast(`${languageName(language)}: ${change.to}${record.isProvisional ? ' (provisional)' : ''}. See the Progress tab.`)
+    if (change !== null) ports.toast(`${languageName(language)}: ${change.to}${record.isProvisional ? ' (provisional)' : ''}. See the Growth tab.`)
 
     return true
   } finally {

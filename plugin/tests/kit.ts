@@ -530,6 +530,17 @@ export function stubSession(on: On, options: StubOptions = {}) {
       [...session.disk.keys()].some(path => path.startsWith(`${e.path}/`)),
   }))
   on('fs.list', ($, e) => {
+    // The plugin's own files, named by the end of their path: a folder of them lists what is in it.
+    const own = Object.keys(options.pluginFiles ?? {}).filter(suffix => {
+      const folder = suffix.slice(0, suffix.lastIndexOf('/'))
+
+      return folder !== '' && e.path.endsWith(folder)
+    })
+    if (own.length > 0) {
+      return {
+        value: own.map(suffix => ({ name: suffix.slice(suffix.lastIndexOf('/') + 1), kind: 'file' as const, size: options.pluginFiles?.[suffix]?.length ?? 0, mtimeMs: 0, isLink: false })),
+      }
+    }
     const inside = [...session.disk.keys()].filter(path => path.startsWith(`${e.path}/`))
     if (inside.length === 0) return { deny: `no such folder: ${e.path}` }
     const names = [...new Set(inside.map(path => path.slice(String(e.path).length + 1).split('/')[0] ?? ''))]

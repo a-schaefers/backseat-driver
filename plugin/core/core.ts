@@ -3,6 +3,7 @@ import type { Throttle } from './gate'
 import type { Health, HealthEvent, ModelResult, Outcome, Pressure, Trouble } from './health'
 import * as K from './kernel.js'
 import type { HealthWire, PlayFactsWire, WaitingWire } from './kernel.js'
+import type { Growth, GrowthFacts } from './growth'
 import type { Lease } from './lease'
 import type { LicenseFacts, Standing } from './license'
 import type { Play, PlayFacts, Why } from './play'
@@ -606,4 +607,33 @@ export function nextLicenseCheck(facts: LicenseFacts): number | null {
   const at = K.licenseNextCheckWire(facts)
 
   return at === 0 ? null : at
+}
+
+// --- Growth (Kernel.Growth)
+
+const RANKS = ['beginner', 'junior', 'mid', 'senior'] as const
+
+/** The growth score of one language, and what to show with it. */
+export function growthOfFacts(facts: GrowthFacts): Growth {
+  const wire = K.growthWire({
+    seen: facts.seen.map(seen => ({ commit: seen.commit, skill: seen.skill, rank: RANKS.indexOf(seen.level), isShown: seen.isShown, weight: seen.weight })),
+    lessons: facts.lessons.map(({ level, ...lesson }) => ({ ...lesson, rank: RANKS.indexOf(level) })),
+    topics: facts.topics,
+  })
+
+  return {
+    level: RANKS[wire.rank] ?? null,
+    score: wire.score,
+    toNext: wire.toNext,
+    shown: wire.shown,
+    missed: wire.missed,
+    lessonSteps: wire.lessonSteps,
+    habitsImproved: wire.habitsImproved,
+    stillComing: wire.stillComing,
+    workOn: wire.workOn,
+    neededHelp: wire.neededHelp,
+    improved: wire.improved,
+    toRaise: wire.toRaise,
+    encouragement: wire.encouragement[0] ?? null,
+  }
 }

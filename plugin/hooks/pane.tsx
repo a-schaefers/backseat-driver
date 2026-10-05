@@ -1,6 +1,6 @@
 import type { Elements } from 'claude-code'
 
-import type { ExplainView, Mode, Note, OutlineRow, Profile, Profiles, ProgressRecord, ProgressView, Review, SettingRow, Speech, Tab, Watch, Working } from '../types'
+import type { ExplainView, LessonsView, LessonView, Mode, Note, OutlineRow, Profile, Profiles, ProgressRecord, ProgressView, Review, SettingRow, Speech, Tab, Watch, Working } from '../types'
 import { bubbleColumn, bubbleWidth, isTalking, poseOf, saidSoFar, wordsSaid } from '../core/avatar'
 import type { Avatar } from '../core/avatar'
 import { artShape, characterArt } from './character'
@@ -8,7 +8,10 @@ import type { Backdrop } from '../core/sprite'
 import { languageName } from '../core/languages'
 import { isProblem, sortNotes } from '../core/notes'
 import { ANSWER_LABELS, explained, GENERAL, recurring } from '../core/profiles'
-import { lately, levelPhrase, skillStates } from '../core/progress'
+import { encouragementLine, growthCounts, growthHeadline, helpLine, improvedLine, raiseLine, workOnLine } from '../core/growth'
+import type { Growth } from '../core/growth'
+import { lessonLanguage, lessonProgress } from '../core/lessons'
+import { lately, levelPhrase } from '../core/progress'
 import { readableReview, SURVEY_SUBJECT } from '../core/review'
 import { DEFAULT_PERSONA } from '../core/settings'
 import { clockTime, playLine } from '../core/status'
@@ -36,6 +39,10 @@ export type PaneView = {
   /** What they are working on: what they said, what a look made of it, and where their activity is. */
   working: Working
   progress: ProgressView
+  /** Growth in each language in play that has a record, worked out for the Growth tab. Empty on the other tabs. */
+  growth?: readonly { language: string; growth: Growth }[]
+  /** The Lessons tab: the paths, where they are in each, and the one opened. */
+  lessons?: LessonsView
   /** What to say about a newer release, or ''. */
   update: string
   /** What to say about the license, or ''. Optional: most of the time there is nothing. */
@@ -85,15 +92,22 @@ export type PaneActions = {
   onStep: (step: 1 | -1) => void
   /** Change one of the plugin's `/config` rows to the value picked. */
   onSetting: (row: SettingRow, value: string) => void
+  /** Open a path in the Lessons tab, or go back to the list with null. */
+  onLessonOpen?: (id: string | null) => void
+  /** Start the next step of a path: it is taught in the conversation. */
+  onLessonStart?: (id: string) => void
+  /** They did the next step of a path, by their word. */
+  onLessonDone?: (id: string) => void
 }
 
-const TABS: readonly { tab: Tab; label: string; short: string; hotkey: string }[] = [
-  { tab: 'play', label: 'Play-by-play', short: 'Play', hotkey: '1' },
-  { tab: 'review', label: 'Deep review', short: 'Review', hotkey: '2' },
-  { tab: 'explain', label: 'Explain', short: 'Explain', hotkey: '3' },
-  // Still `profile` inside: the tab grew from the Profile tab, and its key is what tests and muscle memory press.
-  { tab: 'profile', label: 'Progress', short: 'Progress', hotkey: '4' },
-  { tab: 'settings', label: 'Settings', short: 'Settings', hotkey: '5' },
+const TABS: readonly { tab: Tab; label: string; short: string; tiny: string; hotkey: string }[] = [
+  { tab: 'play', label: 'Play-by-play', short: 'Play', tiny: 'Play', hotkey: '1' },
+  { tab: 'review', label: 'Deep review', short: 'Review', tiny: 'Review', hotkey: '2' },
+  { tab: 'explain', label: 'Explain', short: 'Explain', tiny: 'Expl', hotkey: '3' },
+  // Still `profile` inside: the tab grew from the Profile tab, then the Progress tab, and its key is what tests and muscle memory press.
+  { tab: 'profile', label: 'Growth', short: 'Growth', tiny: 'Growth', hotkey: '4' },
+  { tab: 'lessons', label: 'Lessons', short: 'Lessons', tiny: 'Lessons', hotkey: '5' },
+  { tab: 'settings', label: 'Settings', short: 'Settings', tiny: 'Set', hotkey: '6' },
 ]
 
 const NEW = ' (new)'
@@ -117,7 +131,7 @@ export function tabBadge(tab: Tab, view: Partial<Pick<PaneView, 'notes' | 'revie
     return review.state === 'running' ? BUSY : review.state === 'failed' ? TROUBLE : ''
   }
   if (tab === 'explain') return view.explain?.status === 'updating' ? BUSY : ''
-  if (tab === 'settings') return ''
+  if (tab === 'settings' || tab === 'lessons') return ''
 
   return view.progress !== undefined && view.progress.busy !== '' ? BUSY : ''
 }
@@ -141,7 +155,12 @@ export function tabRow(
   if (fits(short, 1)) return { labels: short, gap: 1 }
 
   // No room for everything: the review's badge is the one that asks for a look, so it stays.
-  return { labels: TABS.map(({ tab, short: name }) => (tab === 'review' ? `${name}${tabBadge(tab, view)}` : name)), gap: 2 }
+  const reviewOnly = TABS.map(({ tab, short: name }) => (tab === 'review' ? `${name}${tabBadge(tab, view)}` : name))
+  if (fits(reviewOnly, 2)) return { labels: reviewOnly, gap: 2 }
+  if (fits(reviewOnly, 1)) return { labels: reviewOnly, gap: 1 }
+
+  // Narrower than a docked pane: the longest names give way, and still the review's badge stays.
+  return { labels: TABS.map(({ tab, tiny }) => (tab === 'review' ? `${tiny}${tabBadge(tab, view)}` : tiny)), gap: 1 }
 }
 
 /** Shown while the pane does not have the keyboard: its keys do nothing until it does. */
@@ -562,25 +581,45 @@ export function identityLine(progress: ProgressView): string {
   return `Judged only on commits by ${progress.identity.join(' or ')}, and only on the lines they add.`
 }
 
-/** One language's progress, as the tab shows it. */
-function progressSection({ Box, Text }: Kit, record: ProgressRecord) {
-  const { report } = record
-  const states = skillStates(record)
-  const recent = lately(record, 3)
+/** A heading and its lines, or nothing when there are none. */
+function listOf({ Box, Text }: Kit, heading: string, lines: readonly string[]) {
+  if (lines.length === 0) return null
 
   return (
     <Box flexDirection="column">
-      <Text>{`Level: ${levelPhrase(record).replace(/^no level yet: /, 'not placed yet, ')}`}</Text>
+      <Text dimColor>{heading}</Text>
+      {lines.map(line => (
+        <Text>{`- ${line}`}</Text>
+      ))}
+    </Box>
+  )
+}
+
+/** One language's growth, as the tab shows it: the score, what to work on, where they needed help, what would raise it, what improved. */
+function growthSection(kit: Kit, record: ProgressRecord, growth: Growth | undefined) {
+  const { Box, Text } = kit
+  const { report } = record
+  const recent = lately(record, 3)
+  // A plain fact about what improved first. The model's own line only when there is none: it is kept apart from the level.
+  const fact = growth === undefined ? '' : encouragementLine(growth)
+  const encouragement = fact !== '' ? fact : (report?.encouragement ?? '')
+
+  return (
+    <Box flexDirection="column">
+      {growth !== undefined && <Text bold>{growthHeadline(growth)}</Text>}
+      {growth !== undefined && <Text dimColor>{growthCounts(growth)}</Text>}
+      <Text dimColor>{`From your commits alone: ${levelPhrase(record).replace(/^no level yet: /, 'not placed yet, ')}`}</Text>
       {report !== null && report.why !== '' && <Text>{report.why}</Text>}
+      {growth !== undefined && listOf(kit, 'Work on', growth.workOn.map(workOnLine))}
+      {growth !== undefined && listOf(kit, 'Needed help with', growth.neededHelp.map(helpLine))}
+      {growth !== undefined && listOf(kit, 'To raise your score', growth.toRaise.map(raiseLine))}
       {report !== null && report.next !== '' && <Text>{`Next level: ${report.next}`}</Text>}
-      {report !== null && report.working.length > 0 && <Text>{`Working on: ${report.working.join('; ')}`}</Text>}
-      {states.shown.length > 0 && <Text dimColor>{`Shown: ${states.shown.join(', ')}`}</Text>}
-      {states.slipping.length > 0 && <Text>{`Slipping: ${states.slipping.join(', ')}`}</Text>}
+      {growth !== undefined && listOf(kit, 'Improved', growth.improved.map(improvedLine))}
       {recent.length > 0 && <Text dimColor>Lately</Text>}
       {recent.map(line => (
         <Text dimColor>{`- ${line}`}</Text>
       ))}
-      {report !== null && report.encouragement !== '' && <Text>{report.encouragement}</Text>}
+      {encouragement !== '' && <Text>{encouragement}</Text>}
     </Box>
   )
 }
@@ -608,7 +647,7 @@ function profileTab(kit: Kit, view: PaneView, actions: PaneActions) {
         return (
           <Box flexDirection="column">
             <Text bold>{languageName(subject)}</Text>
-            {progress.isOn && record !== undefined && progressSection(kit, record)}
+            {progress.isOn && record !== undefined && growthSection(kit, record, view.growth?.find(entry => entry.language === subject)?.growth)}
             {Object.entries(profile.answers).map(([id, answer]) => (
               <Text dimColor>{`${ANSWER_LABELS[id] ?? id}: ${answer}`}</Text>
             ))}
@@ -623,8 +662,9 @@ function profileTab(kit: Kit, view: PaneView, actions: PaneActions) {
                 <Text>{`Muted: ${hush.text}`}</Text>
               </Box>
             ))}
-            {covered.length > 0 && <Text dimColor>{`Explained so far: ${covered.join(', ')}`}</Text>}
-            {themes.length > 0 && (
+            {/* With a record, the growth section says these under "Needed help with" and "Work on". */}
+            {!(progress.isOn && record !== undefined) && covered.length > 0 && <Text dimColor>{`Explained so far: ${covered.join(', ')}`}</Text>}
+            {!(progress.isOn && record !== undefined) && themes.length > 0 && (
               <Text dimColor>{`Keeps coming back: ${themes.map(theme => `${theme.topic} (${theme.times})`).join(', ')}`}</Text>
             )}
             {Object.keys(profile.answers).length === 0 && <Text dimColor>No answers yet.</Text>}
@@ -644,12 +684,97 @@ function profileTab(kit: Kit, view: PaneView, actions: PaneActions) {
   )
 }
 
+/** What the Lessons tab says above the list. */
+export const LESSONS_HINT = 'Learning paths, done in your own code. Open one, then s starts its next step in the conversation. Skipping them costs nothing.'
+
+/** What it says when the plugin has none. */
+export const NO_LESSONS = 'No lessons are installed. A path is a markdown file in the plugin\'s lessons folder.'
+
+/** A step's mark: done with the tutor, done by their word, started, the next one, or not yet. */
+function stepMark(state: string, isNext: boolean): string {
+  if (state === 'checked') return '✓'
+  if (state === 'done') return '✓'
+  if (isNext) return '▸'
+
+  return ' '
+}
+
+/** One path opened: its steps, and what can be done with it. */
+function lessonDetail({ Box, Text, Button }: Kit, lesson: LessonView, actions: PaneActions) {
+  const next = lesson.steps[lesson.next]
+
+  return (
+    <Box flexDirection="column">
+      <Text bold>{lesson.title}</Text>
+      <Text dimColor>{`${lessonLanguage(lesson.language)}, ${lesson.level}. ${lessonProgress(lesson)}.`}</Text>
+      {lesson.summary !== '' && <Text>{lesson.summary}</Text>}
+      <Text> </Text>
+      {lesson.steps.map((step, index) => (
+        <Text dimColor={step.state === 'checked' || step.state === 'done'}>
+          {`${stepMark(step.state, index === lesson.next)} ${index + 1}. ${step.title}${step.state === 'done' ? ' (your word)' : ''}${step.helped > 0 ? ' (needed help)' : ''}`}
+        </Text>
+      ))}
+      <Text> </Text>
+      <Box flexDirection="row" columnGap={2}>
+        {next !== undefined && (
+          <Button
+            key="lesson-start"
+            label={next.state === 'started' ? `continue step ${lesson.next + 1}` : `start step ${lesson.next + 1}`}
+            hotkey="s"
+            plain
+            onPress={() => actions.onLessonStart?.(lesson.id)}
+          />
+        )}
+        {next !== undefined && <Button key="lesson-done" label={`I did step ${lesson.next + 1}`} hotkey="c" plain onPress={() => actions.onLessonDone?.(lesson.id)} />}
+        <Button key="lesson-back" label="all lessons" hotkey="b" plain onPress={() => actions.onLessonOpen?.(null)} />
+      </Box>
+      {next === undefined && <Text dimColor>Every step is done.</Text>}
+    </Box>
+  )
+}
+
+/** The Lessons tab: the paths, by language, or the one opened. */
+function lessonsTab(kit: Kit, view: PaneView, actions: PaneActions) {
+  const { Box, Text, Button } = kit
+  const lessons = view.lessons ?? { paths: [], selected: null, problems: [] }
+  const opened = lessons.paths.find(lesson => lesson.id === lessons.selected)
+  if (opened !== undefined) return lessonDetail(kit, opened, actions)
+  const languages = [...new Set(lessons.paths.map(lesson => lesson.language))]
+
+  return (
+    <Box flexDirection="column">
+      <Text dimColor>{lessons.paths.length === 0 ? NO_LESSONS : LESSONS_HINT}</Text>
+      {languages.map(language => (
+        <Box flexDirection="column">
+          <Text> </Text>
+          <Text bold>{lessonLanguage(language)}</Text>
+          {lessons.paths
+            .filter(lesson => lesson.language === language)
+            .map(lesson => (
+              <Button
+                key={`lesson-${lesson.id}`}
+                label={`${lesson.title} · ${lesson.level} · ${lessonProgress(lesson)}`}
+                plain
+                onPress={() => actions.onLessonOpen?.(lesson.id)}
+              />
+            ))}
+        </Box>
+      ))}
+      {lessons.problems.length > 0 && <Text> </Text>}
+      {lessons.problems.map(problem => (
+        <Text dimColor>{`Not a lesson: ${problem}`}</Text>
+      ))}
+    </Box>
+  )
+}
+
 /** The tab's own contents, under the parts every tab shares. */
 function tabBody(kit: Kit, view: PaneView, actions: PaneActions) {
   if (view.tab === 'play') return playByPlay(kit, view, actions)
   if (view.tab === 'review') return deepReview(kit, view, actions)
   if (view.tab === 'explain') return explainTab(kit, view, actions)
   if (view.tab === 'settings') return settingsTab(kit, view, actions)
+  if (view.tab === 'lessons') return lessonsTab(kit, view, actions)
 
   return profileTab(kit, view, actions)
 }
