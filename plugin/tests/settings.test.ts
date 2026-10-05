@@ -2,7 +2,20 @@ import { expect, test } from 'claude-code/testing'
 
 import { SETTINGS_OFF } from '../hooks/mode'
 import { SETTINGS_HINT } from '../hooks/pane'
-import { configValue, durationMs, readSettings, settingRows, withSetting } from '../hooks/settings'
+import {
+  catchUp,
+  changedFields,
+  changedText,
+  configValue,
+  durationMs,
+  notReloadedText,
+  readSettings,
+  RELOAD_WAIT_MS,
+  SETTING_EFFECTS,
+  settingRows,
+  unclassified,
+  withSetting,
+} from '../hooks/settings'
 import type { ConfigRowLike } from '../hooks/settings'
 import { PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
@@ -143,12 +156,20 @@ sessionTest('the Settings tab changes a setting as /config would', async ($, on)
     { key: 'backseat-driver.voice', value: 'knuth' },
     { key: 'backseat-driver.animated_persona', value: false },
   ])
+  // Claude Code loads the mod again after a change, which cancels this module's timers. The kit does not, which is
+  // the case where nothing reloaded: the person is told, for the last pick only.
+  await session.clock.advance(RELOAD_WAIT_MS)
+  expect(session.logs).toContain(notReloadedText('Animated persona', 'off'))
+  expect(session.logs).not.toContain(notReloadedText('Voice persona', 'knuth'))
 
   // Refused: the row goes back to what it was, and a toast says why.
   session.configDeny = 'managed elsewhere'
   await ui.select({ key: 'setting-backseat-driver.voice', value: 'torvalds' })
   await session.clock.settle()
   expect(session.toasts).toContain('Voice persona stays knuth: managed elsewhere')
+  // Refused, nothing was saved, so no reload is owed.
+  await session.clock.advance(RELOAD_WAIT_MS)
+  expect(session.logs.filter(line => line.includes('/reload-plugins'))).toHaveLength(1)
   await ui.unmount()
 })
 
@@ -164,4 +185,53 @@ sessionTest('/bsd settings opens the Settings tab, and says where they are while
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ key: 'setting-backseat-driver.voice' })).toBeDefined()
   await ui.unmount()
+})
+
+sessionTest('every setting in plugin.json says when a change to it takes effect', async ($, on) => {
+  const session = stubSession(on)
+  // Claude Code hands the module every field of userConfig, defaults filled in. One missing from SETTING_EFFECTS is reported.
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+  await session.clock.settle()
+  expect(session.logs.filter(line => line.includes('SETTING_EFFECTS'))).toEqual([])
+})
+
+test('unclassified names the fields with no entry', async () => {
+  expect(unclassified({ voice: 'knuth', layout: 'unified' })).toEqual([])
+  expect(unclassified({ voice: 'knuth', sound: true })).toEqual(['sound'])
+  expect(Object.keys(SETTING_EFFECTS)).toContain('update_check')
+})
+
+test('changedFields lists what a reload changed, a value left to its default included', async () => {
+  expect(changedFields({ voice: 'knuth', quiet_time: '10 seconds' }, { voice: 'knuth', quiet_time: '10 seconds' })).toEqual([])
+  expect(changedFields({ voice: 'knuth', quiet_time: '10 seconds' }, { voice: 'torvalds', quiet_time: '30 seconds' })).toEqual(['voice', 'quiet_time'])
+  expect(changedFields({ animated_persona: true }, {})).toEqual(['animated_persona'])
+})
+
+test('catchUp starts the work that otherwise waits for the next switch-on', async () => {
+  const off = readSettings({ update_check: false, progress_report: false, deep_review_after_commit: false })
+  expect(catchUp(off, readSettings({ progress_report: false, deep_review_after_commit: false }))).toEqual({
+    isUpdateCheck: true,
+    isPlacement: false,
+    isSurvey: false,
+  })
+  expect(catchUp(off, readSettings({ update_check: false, deep_review_after_commit: false }))).toEqual({
+    isUpdateCheck: false,
+    isPlacement: true,
+    isSurvey: false,
+  })
+  expect(catchUp(off, readSettings({ update_check: false, progress_report: false, deep_review_after_commit: false, deep_review_every: '5 minutes' })).isSurvey).toBe(true)
+  // Already on, or switched off: nothing to catch up on.
+  expect(catchUp(readSettings({}), readSettings({}))).toEqual({ isUpdateCheck: false, isPlacement: false, isSurvey: false })
+  expect(catchUp(readSettings({}), off)).toEqual({ isUpdateCheck: false, isPlacement: false, isSurvey: false })
+})
+
+test('changedText names each change and from when it counts', async () => {
+  expect(changedText([])).toBe('')
+  expect(
+    changedText([
+      { field: 'voice', label: 'Voice persona', value: 'torvalds' },
+      { field: 'deep_review_model', label: 'Deep review model', value: 'sonnet' },
+    ]),
+  ).toBe('Voice persona: torvalds, in effect now. Deep review model: sonnet, from the next review.')
 })

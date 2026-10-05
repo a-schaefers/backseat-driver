@@ -312,6 +312,8 @@ declare module 'claude-code' {
       bandKeys: boolean
       /** The plugin's own `/config` rows, for the Settings tab. Read again whenever the tab is opened. */
       settings: SettingRow[]
+      /** The `userConfig` values this module was last loaded with, so that a reload can tell which of them changed. */
+      applied: Readonly<Record<string, string | number | boolean | readonly string[]>> | null
     }
   }
 }
