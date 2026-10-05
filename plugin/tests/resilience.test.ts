@@ -1,8 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 
-import { outcomeOfError } from '../hooks/health'
-import { clockTime } from '../hooks/status'
+import { outcomeOfError } from '../core/health'
+import { clockTime } from '../core/status'
 import { PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
 /**

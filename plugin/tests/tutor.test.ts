@@ -1,7 +1,7 @@
 import { expect } from 'claude-code/testing'
 
 import { CONTRACT_ID, INSTRUCTIONS_PREAMBLE, SESSION_NOTES, TUTOR_TASKS } from '../hooks/contract'
-import { DENIAL } from '../hooks/guard'
+import { DENIAL } from '../core/guard'
 import { COMPOSE, ENGINE_SECTIONS, HOME, SESSION, sessionTest, STOCK_CLAUDE_MD, stubSession, typed } from './kit'
 
 const EDIT = { tool: 'Edit', file_path: '/work/src/a.py', old_string: 'a', new_string: 'b' } as const

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { isOwnFolder, MARKER } from '../hooks/datahome'
+import { isOwnFolder, MARKER } from '../core/datahome'
 import {
   CHECK_EVERY_MS,
   compareVersions,
@@ -14,8 +14,8 @@ import {
   UNINSTALL_KEEP,
   UNINSTALL_ONLY,
   updateNotice,
-} from '../hooks/update'
-import { PHRASE } from '../hooks/forget'
+} from '../core/update'
+import { PHRASE } from '../core/forget'
 import { DATA_HOME, HOME, PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const MANIFEST = { '/.claude-plugin/plugin.json': JSON.stringify({ name: 'backseat-driver', version: '0.2.0', repository: 'https://github.com/a-schaefers/backseat-driver' }) }

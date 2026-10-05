@@ -12,8 +12,8 @@ import {
   treeExclude,
   treeWatchArgv,
   watcherComplaint,
-} from '../hooks/filewatch'
-import { PUSHED_SCAN_MS } from '../hooks/sensor'
+} from '../core/filewatch'
+import { PUSHED_SCAN_MS } from '../core/sensor'
 import { DATA_HOME, PANE, ROOT, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const PLACES = { root: '/work/my proj', gitDir: '/work/my proj/.git', dataRoot: '/home/me/.local/share/backseat-driver' }

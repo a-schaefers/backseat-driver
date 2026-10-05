@@ -6,7 +6,7 @@
 import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { deflateSync } from 'node:zlib'
 
-import { cellWords, dimmed, pixels, type Pixel, type SpriteArt } from '../plugin/hooks/sprite.ts'
+import { cellWords, dimmed, pixels, type Pixel, type SpriteArt } from '../plugin/core/sprite.ts'
 
 const POSES = ['rest', 'talk', 'blink', 'think'] as const
 const SCALE = 10
@@ -65,7 +65,7 @@ function png(width: number, height: number, rgb: Uint8Array): Buffer {
 
 const out = process.argv[2] ?? 'local/persona-preview'
 mkdirSync(out, { recursive: true })
-const folder = new URL('../plugin/hooks/art/', import.meta.url)
+const folder = new URL('../plugin/core/art/', import.meta.url)
 const only = process.argv[3]
 for (const file of readdirSync(folder).filter(name => name.endsWith('.ts')).sort()) {
   const voice = file.replace(/\.ts$/, '')

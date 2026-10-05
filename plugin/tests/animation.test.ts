@@ -1,10 +1,10 @@
 import { expect } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
-import type { Pose } from '../hooks/avatar'
-import { AVATARS, TALK_MS } from '../hooks/avatar'
+import type { Pose } from '../core/avatar'
+import { AVATARS, TALK_MS } from '../core/avatar'
 import { ASLEEP } from '../hooks/pane'
-import { rasterCells } from '../hooks/sprite'
+import { rasterCells } from '../core/sprite'
 import { PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const MEAN = 'def mean(xs):\n    return sum(xs) / len(xs)\n'

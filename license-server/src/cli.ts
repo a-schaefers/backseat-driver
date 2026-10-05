@@ -5,7 +5,7 @@
  *   node license-server/src/cli.ts keygen <kid> <private-key-file>
  *       Makes a signing key. The private half goes to the file (keep it out of
  *       the repository); the public half is printed, for PUBLIC_KEYS in
- *       plugin/hooks/licensekey.ts.
+ *       plugin/core/licensekey.ts.
  *   node license-server/src/cli.ts issue <to> <seats> [<exp YYYY-MM-DD>]
  *   node license-server/src/cli.ts revoke <id>
  *   node license-server/src/cli.ts serve [port]

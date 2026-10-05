@@ -23,9 +23,9 @@ import {
   SILENT,
   speech,
   TALK_MS,
-} from './avatar'
-import { backdropOf } from './sprite'
-import type { Backdrop } from './sprite'
+} from '../core/avatar'
+import { backdropOf } from '../core/sprite'
+import type { Backdrop } from '../core/sprite'
 import { personaPrompt, reframeInstructions, SESSION_NOTES, stripComments, stripFrontmatter, tutorSections } from './contract'
 import {
   addedLines,
@@ -39,7 +39,7 @@ import {
   parseRecent,
   RECENT_COMMITS_ARGS,
   sizeOf,
-} from './authorship'
+} from '../core/authorship'
 import {
   dataHome,
   debugRoot,
@@ -59,17 +59,17 @@ import {
   projectDir,
   projectId,
   sharedFolders,
-} from './datahome'
-import { createDebugLog, createTracer, DEBUG_USAGE, FLUSH_MS, parseDebugRequest, parseSwitch, sessionFolder } from './debuglog'
-import type { DebugRequest } from './debuglog'
-import { createExplainer, NO_VIEW } from './explainer'
-import { EDITORS_FOLDER, focusWatchArgv, ignoredFolders, isEstablished, lineSplitter, nudgesOf, treeWatchArgv, watcherComplaint } from './filewatch'
-import type { Nudge, WatchPlaces, WatchRole } from './filewatch'
-import type { Explainer, Intent } from './explainer'
-import { connectedHere, editorsLine, isConnected, parseEditorFile, speaker } from './editors'
-import type { EditorSeen } from './editors'
-import { describeSpot, parseFocusFile, parseTarget, relativeTo, viewFile, viewText } from './focus'
-import type { Focus } from './focus'
+} from '../core/datahome'
+import { createDebugLog, createTracer, DEBUG_USAGE, FLUSH_MS, parseDebugRequest, parseSwitch, sessionFolder } from '../core/debuglog'
+import type { DebugRequest } from '../core/debuglog'
+import { createExplainer, NO_VIEW } from '../core/explainer'
+import { EDITORS_FOLDER, focusWatchArgv, ignoredFolders, isEstablished, lineSplitter, nudgesOf, treeWatchArgv, watcherComplaint } from '../core/filewatch'
+import type { Nudge, WatchPlaces, WatchRole } from '../core/filewatch'
+import type { Explainer, Intent } from '../core/explainer'
+import { connectedHere, editorsLine, isConnected, parseEditorFile, speaker } from '../core/editors'
+import type { EditorSeen } from '../core/editors'
+import { describeSpot, parseFocusFile, parseTarget, relativeTo, viewFile, viewText } from '../core/focus'
+import type { Focus } from '../core/focus'
 import {
   confirmQuestion,
   describeScope,
@@ -87,15 +87,15 @@ import {
   SCOPE_QUESTION,
   scopeOf,
   scopePaths,
-} from './forget'
-import type { Scope } from './forget'
-import { HEALTHY, mayAsk, NO_PRESSURE, outcomeOf, outcomeOfError, pressureOf, stepHealth } from './health'
-import type { Health, Outcome, Pressure } from './health'
-import { parseStatus } from './git'
-import { NO_ACTIVITY } from './glance'
-import { DENIAL, isUsersFile } from './guard'
-import { languageName, languageOf, mainLanguages } from './languages'
-import { sourcePrint } from './knowledge'
+} from '../core/forget'
+import type { Scope } from '../core/forget'
+import { HEALTHY, mayAsk, NO_PRESSURE, outcomeOf, outcomeOfError, pressureOf, stepHealth } from '../core/health'
+import type { Health, Outcome, Pressure } from '../core/health'
+import { parseStatus } from '../core/git'
+import { NO_ACTIVITY } from '../core/glance'
+import { DENIAL, isUsersFile } from '../core/guard'
+import { languageName, languageOf, mainLanguages } from '../core/languages'
+import { sourcePrint } from '../core/knowledge'
 import {
   isCheckDue,
   installedEntry,
@@ -115,15 +115,15 @@ import {
   updateCommands,
   updateNotice,
   versionText,
-} from './update'
-import type { Install } from './update'
-import { assessmentRequest, emptyRecord, parseAssessment, parseRecord, progressText, recordText, withAssessment } from './progress'
-import type { AssessedCommit, CommitForAssessment } from './progress'
-import { helpText, isModeRequest, LAYOUT_USAGE, parseRequest, SETTINGS_OFF, transition } from './mode'
-import { isNoiseFile } from './noise'
-import { isLookDue, playOf, wakeAt } from './play'
-import type { Play, PlayFacts } from './play'
-import { applyReply, isProblem, keepNotes, parseKeptNotes, parseReply, stillOpen, withDismissed } from './notes'
+} from '../core/update'
+import type { Install } from '../core/update'
+import { assessmentRequest, emptyRecord, parseAssessment, parseRecord, progressText, recordText, withAssessment } from '../core/progress'
+import type { AssessedCommit, CommitForAssessment } from '../core/progress'
+import { helpText, isModeRequest, LAYOUT_USAGE, parseRequest, SETTINGS_OFF, transition } from '../core/mode'
+import { isNoiseFile } from '../core/noise'
+import { isLookDue, playOf, wakeAt } from '../core/play'
+import type { Play, PlayFacts } from '../core/play'
+import { applyReply, isProblem, keepNotes, parseKeptNotes, parseReply, stillOpen, withDismissed } from '../core/notes'
 import { renderPane, reviewSchedule, statusEntry, steppedNote } from './pane'
 import type { Kit, PaneView } from './pane'
 import {
@@ -141,7 +141,7 @@ import {
   withFlagged,
   withHush,
   withoutHush,
-} from './profiles'
+} from '../core/profiles'
 import {
   emptyProject,
   insightLine,
@@ -155,20 +155,20 @@ import {
   splitReview,
   withReview,
   withReviewNotes,
-} from './project'
-import type { Insight, KeptInsight, ProjectKnowledge, ReviewNotes, ReviewRecord } from './project'
-import { explainAsk, explainContext, explainRequest, paneContext, playByPlayPrompt, reviewerSystem } from './prompts'
-import type { Bubble } from './prompts'
-import { firstRunQuestions, groupAnswers } from './questions'
-import type { Question } from './questions'
-import { createRecorder } from './recorder'
-import { createScheduler } from './scheduler'
-import type { Scheduler } from './scheduler'
-import { claimed, nextLeaseCheck, parseLease, released } from './lease'
-import type { Lease } from './lease'
-import { FOCUS_SCAN_MS, focusGapMs, scanGapMs } from './sensor'
-import { healthLine, playLine, watchOf } from './status'
-import type { Recorder } from './recorder'
+} from '../core/project'
+import type { Insight, KeptInsight, ProjectKnowledge, ReviewNotes, ReviewRecord } from '../core/project'
+import { explainAsk, explainContext, explainRequest, paneContext, playByPlayPrompt, reviewerSystem } from '../core/prompts'
+import type { Bubble } from '../core/prompts'
+import { firstRunQuestions, groupAnswers } from '../core/questions'
+import type { Question } from '../core/questions'
+import { createRecorder } from '../core/recorder'
+import { createScheduler } from '../core/scheduler'
+import type { Scheduler } from '../core/scheduler'
+import { claimed, nextLeaseCheck, parseLease, released } from '../core/lease'
+import type { Lease } from '../core/lease'
+import { FOCUS_SCAN_MS, focusGapMs, scanGapMs } from '../core/sensor'
+import { healthLine, playLine, watchOf } from '../core/status'
+import type { Recorder } from '../core/recorder'
 import {
   commitTitle,
   fitReview,
@@ -183,8 +183,8 @@ import {
   shortHash,
   showCommitArgs,
   withReviewChange,
-} from './review'
-import type { ReviewScope } from './review'
+} from '../core/review'
+import type { ReviewScope } from '../core/review'
 import {
   commitSubject,
   current,
@@ -204,8 +204,8 @@ import {
   withAttempt,
   withCommit,
   withoutCommit,
-} from './reviewqueue'
-import type { ReviewQueue, Waiting } from './reviewqueue'
+} from '../core/reviewqueue'
+import type { ReviewQueue, Waiting } from '../core/reviewqueue'
 import {
   catchUp,
   changedFields,
@@ -220,14 +220,14 @@ import {
   settingRows,
   unclassified,
   withSetting,
-} from './settings'
-import type { ChangedRow, Layout, Persona, Settings } from './settings'
-import { createLocks } from './locks'
-import { memoryDisk } from './storage'
-import type { Disk } from './storage'
-import { createStore, plainStore, updateJson } from './store'
-import type { Store } from './store'
-import { createWatcher } from './watcher'
+} from '../core/settings'
+import type { ChangedRow, Layout, Persona, Settings } from '../core/settings'
+import { createLocks } from '../core/locks'
+import { memoryDisk } from '../core/storage'
+import type { Disk } from '../core/storage'
+import { createStore, plainStore, updateJson } from '../core/store'
+import type { Store } from '../core/store'
+import { createWatcher } from '../core/watcher'
 import {
   checkUrl,
   COMMERCIAL_CHOICE,
@@ -248,12 +248,12 @@ import {
   USE_QUESTION,
   useOfAnswer,
   withKey,
-} from './license'
-import type { LicenseRecord, LicenseRequest, Standing } from './license'
-import { checkKey, cleanKey, looksLikeKey } from './licensekey'
-import type { KeyCheck } from './licensekey'
-import type { Watcher } from './watcher'
-import { chosen, parseWorking, tidy, WORKING_HEADER, WORKING_QUESTION, workingChoices } from './working'
+} from '../core/license'
+import type { LicenseRecord, LicenseRequest, Standing } from '../core/license'
+import { checkKey, cleanKey, looksLikeKey } from '../core/licensekey'
+import type { KeyCheck } from '../core/licensekey'
+import type { Watcher } from '../core/watcher'
+import { chosen, parseWorking, tidy, WORKING_HEADER, WORKING_QUESTION, workingChoices } from '../core/working'
 
 const COMMANDS = ['backseat-driver', 'bsd'] as const
 
@@ -4204,6 +4204,8 @@ async function drawTutor($: EngineInterface, settings: Settings, kit: Kit, where
     },
     onExplainFetch: () => {
       touched($, settings, 'explain fetch')
+      // The press says something even when the file maps to nothing, so it never looks like a dead key.
+      $.ui.toast('Looking this file up…')
       void refreshView($, true)
     },
     onExplainAsk: () => {
@@ -4217,6 +4219,9 @@ async function drawTutor($: EngineInterface, settings: Settings, kit: Kit, where
     },
     onDismiss: (note: Note) => {
       touched($, settings, 'dismiss', () => note)
+      // The keys carry on with the next note in the order drawn, not the first.
+      const after = steppedNote(view, 1)
+      void update($, selectedAtom, () => (after === undefined || after.id === note.id ? null : after.id))
       // Remembered, so that the next look does not bring the same point back.
       void Promise.all([
         update($, notesAtom, open => open.filter(other => other.id !== note.id)),

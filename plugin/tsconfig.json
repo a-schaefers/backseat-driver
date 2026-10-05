@@ -13,6 +13,6 @@
     "jsxFactory": "h",
     "jsxFragmentFactory": "Fragment"
   },
-  "include": [".claude-plugin/types", "hooks", "types", "tests"],
+  "include": [".claude-plugin/types", "core", "hooks", "types", "tests"],
   "exclude": ["types/runtime.d.ts"]
 }

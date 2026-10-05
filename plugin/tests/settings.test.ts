@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { SETTINGS_OFF } from '../hooks/mode'
+import { SETTINGS_OFF } from '../core/mode'
 import { SETTINGS_HINT } from '../hooks/pane'
 import {
   catchUp,
@@ -15,8 +15,8 @@ import {
   settingRows,
   unclassified,
   withSetting,
-} from '../hooks/settings'
-import type { ConfigRowLike } from '../hooks/settings'
+} from '../core/settings'
+import type { ConfigRowLike } from '../core/settings'
 import { PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
 test('durationMs reads the labels the /config pickers offer', async () => {

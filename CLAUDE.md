@@ -111,12 +111,15 @@ plugin/prompts/                     play-by-play.md, deep-review.md, explain.md,
 LICENSE, plugin/LICENSE             PolyForm Noncommercial 1.0.0, identical
 COMMERCIAL-LICENSE.md (also plugin/) the commercial terms, identical
 THIRD_PARTY_NOTICES.md (also plugin/) the Apache-2.0 parts: learning-output-style, adapted
+plugin/hooks/                       the Claude Code adapter (see "Host seam")
 plugin/hooks/hooks.json             {"modules": ["./register.tsx"]}
 plugin/hooks/register.tsx           all effects
-plugin/hooks/*.ts, pane.tsx         pure logic
-plugin/hooks/art/<voice>.ts         each character's pixel art (palette + rows of letters)
-plugin/hooks/kernel.js              the kernel, compiled from PureScript; committed, never edited by hand
-plugin/hooks/kernel.d.ts, core.ts   what the kernel exports, and the one file that calls it
+plugin/hooks/pane.tsx, character.tsx, contract.ts  the pane's and the prompt's Claude Code side
+plugin/core/                        shared: every module that does not know Claude Code
+plugin/core/*.ts                    pure logic, and the engines with ports
+plugin/core/art/<voice>.ts          each character's pixel art (palette + rows of letters)
+plugin/core/kernel.js               the kernel, compiled from PureScript; committed, never edited by hand
+plugin/core/kernel.d.ts, core.ts    what the kernel exports, and the one file that calls it
 kernel/src/Kernel/*.purs            the kernel's source (dev tooling: not shipped)
 kernel/spago.yaml, spago.lock       its package set, pinned
 kernel/toolchain.json               the PureScript compiler, pinned by sha256
@@ -127,7 +130,7 @@ plugin/tests/                       claude plugin test; kit.ts is the fake world
 scripts/dev-session.sh              live session in tmux
 scripts/outage-proxy.py             a proxy to cut one live session off from Claude
 scripts/toolchain.py                fetches the pinned compiler into local/bin (git-ignored)
-scripts/build-kernel.sh             kernel/src -> plugin/hooks/kernel.js
+scripts/build-kernel.sh             kernel/src -> plugin/core/kernel.js
 scripts/release.sh                  cut a release
 scripts/persona-preview.ts          the persona art as a terminal shows it, and as PNGs
 editors/                            editor plugins: neovim/, emacs/, vscode/ (dev side: not shipped with the mod)
@@ -135,6 +138,7 @@ license-server/                     reference license server: issue, check, revo
 .github/workflows/check.yml         npm run check on push/PR, pinned Claude Code
 .github/workflows/nightly.yml       same check daily on newest Claude Code
 research/                           research notes for the owner (not shipped): opencode.md, the plan for an OpenCode client
+research/personas/                  one file per persona: how the person speaks and judges code, with sources; what the persona prompts are checked against
 ```
 
 The ground rules in README ("Claude does not edit your files" etc.) describe end-user product behavior, not rules for working in this repo.
@@ -144,8 +148,8 @@ The ground rules in README ("Claude does not edit your files" etc.) describe end
 ```bash
 npm install                      # once: TypeScript, and spago and esbuild for the kernel
 npm run check                    # kernel + validate + licenses + test + typecheck + core + server
-npm run build:kernel             # kernel/src -> plugin/hooks/kernel.js (fetches the pinned compiler the first time)
-npm run kernel                   # fails when plugin/hooks/kernel.js is not what kernel/src builds
+npm run build:kernel             # kernel/src -> plugin/core/kernel.js (fetches the pinned compiler the first time)
+npm run kernel                   # fails when plugin/core/kernel.js is not what kernel/src builds
 npm run licenses                 # LICENSE, COMMERCIAL-LICENSE.md, THIRD_PARTY_NOTICES.md: root and plugin/ copies identical
 npm run validate                 # claude plugin validate . --strict && ./plugin --strict
 npm test                         # claude plugin test ./plugin
@@ -192,13 +196,14 @@ scripts/outage-proxy.py 18080    # a proxy for staging an outage in a live sessi
 - Contract: `SKILL.md`, the single source of tutor behavior. The mod injects it and never carries a copy.
   - `SKILL.md` describes behavior only. Anything naming this plugin's commands, tools or agents goes in `SESSION_NOTES` in `contract.ts`, so the skill works alone (as `/backseat-driver:tutor`) with mods off. That fallback is a conversational tutor without background reviews.
 - Personas: the chosen engineering file, then the voice file, are injected after the contract and into both review prompts. Each persona file states which half it is and that it leaves the other alone; a new persona file needs that paragraph too.
-- Mod: `plugin/hooks/`. Commands via `$.command.register` (`/backseat-driver`, `/bsd`, `/backseat-driver-update`); tools via `$.tool.register` (`hush`, `unhush`, `record`, `lookup`, `progress`, `profile`, `working`, `activity`); pane via `$.ui.open` plus a `ui.render` hook, contents in `$.state`. Why a mod, not a skill plus a monitor: a monitor would turn every save into a conversation turn on the main model. The mod reviews out of band.
+  - `research/personas/` holds the research behind each persona (voice and engineering judgment, with sources, folklore marked) and where the prompts diverge from it (2026-10-05). Read it before changing a persona prompt; a new persona gets a research file first.
+- Mod: `plugin/hooks/` (the adapter) over `plugin/core/` (shared). Commands via `$.command.register` (`/backseat-driver`, `/bsd`, `/backseat-driver-update`); tools via `$.tool.register` (`hush`, `unhush`, `record`, `lookup`, `progress`, `profile`, `working`, `activity`); pane via `$.ui.open` plus a `ui.render` hook, contents in `$.state`. Why a mod, not a skill plus a monitor: a monitor would turn every save into a conversation turn on the main model. The mod reviews out of band.
 
 ### Module shape (enforced by Claude Code)
 
 A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.noun.method(...)` must be spelled in the module itself. Hence:
 
-- `register.tsx` is the only file with effects: all hooks, all `$` calls, all functions taking `$`.
+- `register.tsx` is the only file with effects: all hooks, all `$` calls, all functions taking `$`. It imports the shared modules as `../core/<name>`.
 - Every other file is pure (plain values in and out), tested directly without stubs.
 - Effects cross imports as capabilities, i.e. closures over `$` (`args => $.process.run(['git', ...args])`). Passing a closure is allowed; passing `$` is not.
 - `atom(...)` definitions live in `register.tsx` with literal `plugin` and `key`. Every state key is declared in `plugin/types/index.d.ts`.
@@ -263,10 +268,10 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 
 ### Host seam (Claude Code vs shared)
 
-Preparation for a second client (`research/opencode.md`, owner, 2026-10-05: one shared core, Claude Code first class, nothing duplicated). Started 2026-10-05 as tidiness only: nothing a user sees changes. Next steps, in the plan's order: move the shared modules to `plugin/core/` once the open branches have merged, then pull `register.tsx`'s wiring into the core behind one `Host` interface, one engine at a time.
+Preparation for a second client (`research/opencode.md`, owner, 2026-10-05: one shared core, Claude Code first class, nothing duplicated). Started 2026-10-05 as tidiness only: nothing a user sees changes. The shared modules moved to `plugin/core/` (2026-10-05, a pure rename). Next, in the plan's order: pull `register.tsx`'s wiring into the core behind one `Host` interface, one engine at a time.
 
-- Adapter files, which may know Claude Code: `register.tsx` (every hook and `$` call), `pane.tsx` and `character.tsx` (Claude Code's `Elements`), `contract.ts` (its prompt sections: `doing_tasks` swapped, the `claudeMd` preamble reframed; `SESSION_NOTES` names the tools as `mcp__backseat-driver__…`). Its persona and comment helpers are shared and move out when the core does. Every other `.ts` in `plugin/hooks/` is shared.
-- Enforced by `npm run core` (`plugin/tsconfig.core.json`): the shared modules typecheck with no Claude Code types and no globals beyond ES2023 and `types/runtime.d.ts` (`AbortController`, `AbortSignal`). An import of `claude-code`, of an adapter file, or a use of a timer or `fetch` fails it. A global the shared code needs goes in `runtime.d.ts` only if every host has it (Claude Code's mod environment and Bun both).
+- Adapter files, which may know Claude Code: `register.tsx` (every hook and `$` call), `pane.tsx` and `character.tsx` (Claude Code's `Elements`), `contract.ts` (its prompt sections: `doing_tasks` swapped, the `claudeMd` preamble reframed; `SESSION_NOTES` names the tools as `mcp__backseat-driver__…`). Its persona and comment helpers are shared and move out when the core does. They are `plugin/hooks/`. Everything in `plugin/core/` is shared, and imports nothing from `hooks/`.
+- Enforced by `npm run core` (`plugin/tsconfig.core.json`): `plugin/core/` typechecks with no Claude Code types and no globals beyond ES2023 and `types/runtime.d.ts` (`AbortController`, `AbortSignal`). An import of `claude-code`, of an adapter file, or a use of a timer or `fetch` fails it. A global the shared code needs goes in `runtime.d.ts` only if every host has it (Claude Code's mod environment and Bun both).
 - Where the shared code needs a Claude Code type, it spells the shape itself: `Options` in `settings.ts` (Claude Code's `PluginOptions`), `ConfigRowLike` (`ConfigRow`), `ModelResult` in `health.ts`.
 - Shared files that still carry a Claude Code assumption in what they say or decide (seams for the `Host`, not bugs):
   - `health.ts`, `Kernel.Health`: the error words are Claude Code's and Anthropic's API's; `pressureOf` reads Claude plan windows (`rateLimits`).
@@ -287,7 +292,7 @@ The owner wants the logic functional where it can be, "to detect, prevent and re
 - `PORTED`: `Kernel.Health` (the shared wait after failures, what an API error means), `Kernel.Play` (what the play-by-play is doing, when to come back, whether a look is due), `Kernel.Pace` (backoff after failed looks, the gap near the plan limit), `Kernel.Sensor` (how often to scan, and to check the spot in focus), `Kernel.Lease` (who may take a project's lease, and when to look at it again), `Kernel.Queue` (the commits waiting for their review: at most three, each once, one stage at a time, the tries and their spacing, what the tab says while one waits), `Kernel.Store` (the store's retry policy: when a file is read again, counts as broken, is checked before a write without the lock, is written again, or given up on, and when the old copy is kept), `Kernel.Status` (the status line, the row under it, and the state the character's pose comes from), `Kernel.Schedule` (when the one timer is armed and for how long, which deadlines are due and in what order). Born there: `Kernel.License` (where the person stands with the license, when to ask the server). Their TypeScript files (`health.ts`, `play.ts`, `gate.ts`, `sensor.ts`, `lease.ts`, `reviewqueue.ts`, `store.ts`, `status.ts`, `scheduler.ts`) keep the types and the parsing and re-export the kernel's functions from `core.ts`.
 - `TO PORT`: nothing. The engines with ports (`explainer.ts`, `recorder.ts`, `watcher.ts`) hold effects and text and stay TypeScript; a decision found in one of them is a candidate. Not for the kernel: anything that parses text or JSON from outside (`parseLease`, `parseQueue`, `pressureOf`'s dates), which stays at the edge.
 - How it reaches the mod:
-  - `scripts/build-kernel.sh` (`npm run build:kernel`): `scripts/toolchain.py` puts `purs` 0.15.16 in `local/bin` (downloaded from the GitHub release, tarball and binary each checked against the sha256 in `kernel/toolchain.json`), `spago build` compiles `kernel/src` with the package set pinned in `kernel/spago.yaml` and `spago.lock`, and esbuild (pinned exactly in `package.json`) bundles the entry module `Kernel.Main` into one ES module, `plugin/hooks/kernel.js`.
+  - `scripts/build-kernel.sh` (`npm run build:kernel`): `scripts/toolchain.py` puts `purs` 0.15.16 in `local/bin` (downloaded from the GitHub release, tarball and binary each checked against the sha256 in `kernel/toolchain.json`), `spago build` compiles `kernel/src` with the package set pinned in `kernel/spago.yaml` and `spago.lock`, and esbuild (pinned exactly in `package.json`) bundles the entry module `Kernel.Main` into one ES module, `plugin/core/kernel.js`.
   - `kernel.js` is committed: installs copy the repository, and nothing is built on a user's machine. It is 89 KB for ten modules (the limit for a file in a plugin directory listing is 256 KiB). Never edit it.
   - `npm run kernel` builds beside it and compares. `npm run check` starts with it, and so does CI, which keeps `local/bin` and `kernel/.spago` between runs.
   - `Kernel.Main` re-exports what crosses. What it does not export is not in the bundle.
@@ -437,6 +442,7 @@ The owner wants the logic functional where it can be, "to detect, prevent and re
   - Switch-on says where the notes are and how to reach them (`BAND_INTRO`), because nothing in the band does.
 - Keys above the prompt: Claude Code lets a bare digit typed into an EMPTY prompt press a band button (meant for surveys), so the tab buttons carry their digits only while the band has the keyboard (`hasDigits`, `bandKeys` atom). `bandKeys` comes from `ui.focus` on the band (Ctrl+X Tab raises one with the element). Esc raises nothing, so a digit pressed after it still reaches a tab button: `pressBandTab` first moves the focus ring onto that tab with `$.ui.focus`, which Claude Code refuses when the band does not hold the keyboard, and then puts the digit into the prompt with `$.prompt.fill` instead. The kit cannot answer a plugin's own `$.ui.focus`, so that refusal is checked live only.
 - Folded, the preview lines have no keys of their own, so while the band has the keyboard a `j` button ("open the notes") unfolds the play-by-play; `e d m` then act on an open tab and never fall into the prompt. `bandKeys` is also reset on every `/bsd` command and on a reload, since Esc raises no event.
+- Open play tab polish: a problem's row carries its `noteMark` glyph; muting is undone with an "unmute" button (not `x`, which folds) beside "Muted: …"; dismissing moves the selection to the next note drawn; `f` ("look this up") toasts "Looking this file up…" so a file that maps to nothing doesn't look like a dead key.
 - The focus ring landing on a note (`note-<id>`) selects it, so `e d m` act on the note the person is on. `j`/`k` step through the notes; all layouts draw them in one order (`drawnOrder`: decisions, problems, insights) and the keys start on the first one drawn.
 - Live (2026-10-05, a stand-in model on a local port, 80 to 170 columns, main screen and fullscreen): all three layouts drawn and switched by `/bsd layout` in both directions; `vertical` docked at 64 columns in fullscreen; a digit after Esc landed in the prompt (`❯ 3`); at 80 columns the band kept its face on one row and dropped the line.
 

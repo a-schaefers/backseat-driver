@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { connectedHere, EDITOR_TTL_MS, editorName, editorsLine, isCaretHere, parseEditorFile, speaker } from '../hooks/editors'
-import { parseFocusFile } from '../hooks/focus'
+import { connectedHere, EDITOR_TTL_MS, editorName, editorsLine, isCaretHere, parseEditorFile, speaker } from '../core/editors'
+import { parseFocusFile } from '../core/focus'
 import { PANE, ROOT, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const MEAN = 'def mean(xs):\n    return sum(xs) / len(xs)\n'

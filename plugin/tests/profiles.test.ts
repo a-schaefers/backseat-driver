@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Profile } from '../types'
-import { languageName, languageOf, mainLanguages } from '../hooks/languages'
+import { languageName, languageOf, mainLanguages } from '../core/languages'
 import {
   emptyProfile,
   explained,
@@ -16,8 +16,8 @@ import {
   withFlagged,
   withHush,
   withoutHush,
-} from '../hooks/profiles'
-import { firstRunQuestions, groupAnswers, MAX_QUESTIONS } from '../hooks/questions'
+} from '../core/profiles'
+import { firstRunQuestions, groupAnswers, MAX_QUESTIONS } from '../core/questions'
 import { COMPOSE, LICENSE_ANSWERED, PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const MEAN = 'def mean(xs):\n    return sum(xs) / len(xs)\n'
@@ -286,9 +286,9 @@ sessionTest('"m" on a note hushes its topic, and the Profile tab can undo it', a
   expect(await ui.find({ type: 'Text', text: 'No notes. Keep going.' })).toBeDefined()
 
   await ui.press({ key: 'tab-profile' })
-  expect(await ui.find({ type: 'Text', text: 'Not bringing up: type hints' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Muted: type hints' })).toBeDefined()
   await ui.press({ key: 'unhush-python-type-hints' })
-  expect(await ui.find({ type: 'Text', text: 'Not bringing up: type hints' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'Muted: type hints' })).toBeUndefined()
   await ui.unmount()
 })
 

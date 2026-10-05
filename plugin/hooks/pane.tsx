@@ -1,18 +1,18 @@
 import type { Elements } from 'claude-code'
 
 import type { ExplainView, Mode, Note, OutlineRow, Profile, Profiles, ProgressRecord, ProgressView, Review, SettingRow, Speech, Tab, Watch, Working } from '../types'
-import { bubbleColumn, bubbleWidth, isTalking, poseOf, saidSoFar, wordsSaid } from './avatar'
-import type { Avatar } from './avatar'
+import { bubbleColumn, bubbleWidth, isTalking, poseOf, saidSoFar, wordsSaid } from '../core/avatar'
+import type { Avatar } from '../core/avatar'
 import { artShape, characterArt } from './character'
-import type { Backdrop } from './sprite'
-import { languageName } from './languages'
-import { isProblem, sortNotes } from './notes'
-import { ANSWER_LABELS, explained, GENERAL, recurring } from './profiles'
-import { lately, levelPhrase, skillStates } from './progress'
-import { readableReview, SURVEY_SUBJECT } from './review'
-import { DEFAULT_PERSONA } from './settings'
-import { clockTime, playLine } from './status'
-import type { Layout, Persona } from './settings'
+import type { Backdrop } from '../core/sprite'
+import { languageName } from '../core/languages'
+import { isProblem, sortNotes } from '../core/notes'
+import { ANSWER_LABELS, explained, GENERAL, recurring } from '../core/profiles'
+import { lately, levelPhrase, skillStates } from '../core/progress'
+import { readableReview, SURVEY_SUBJECT } from '../core/review'
+import { DEFAULT_PERSONA } from '../core/settings'
+import { clockTime, playLine } from '../core/status'
+import type { Layout, Persona } from '../core/settings'
 
 /** The elements the pane is built from. Every surface that draws panes has them, save `Select`, which some lack, and `Raster`, which only the terminal has. */
 export type Kit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdown'> & Partial<Pick<Elements['terminal'], 'Select' | 'Raster'>>
@@ -381,7 +381,7 @@ function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
         {explain.outline.length > 1 && <Button key="explain-next" label="next" hotkey="n" plain onPress={() => actions.onExplainMove(1)} />}
         {explain.outline.length > 1 && <Button key="explain-previous" label="previous" hotkey="p" plain onPress={() => actions.onExplainMove(-1)} />}
         {target !== null && <Button key="explain-ask" label="ask about this" hotkey="e" plain onPress={() => actions.onExplainAsk()} />}
-        {canFetch && <Button key="explain-fetch" label="fetch" hotkey="f" plain onPress={() => actions.onExplainFetch()} />}
+        {canFetch && <Button key="explain-fetch" label="look this up" hotkey="f" plain onPress={() => actions.onExplainFetch()} />}
       </Box>
     </Box>
   )
@@ -525,7 +525,7 @@ function playByPlay(kit: Kit, view: PaneView, actions: PaneActions) {
       {others.map((note, index) => (
         <Box flexDirection="column">
           {note.file !== others[index - 1]?.file && <Text bold>{note.file}</Text>}
-          {noteRow(kit, note, current, `${note.id}  ${note.kind} · line ${note.line}`, actions)}
+          {noteRow(kit, note, current, `${note.id}  ${noteMark(note).mark} ${note.kind} · line ${note.line}`, actions)}
         </Box>
       ))}
       {insights.length > 0 && (decisions.length > 0 || others.length > 0) && <Text> </Text>}
@@ -570,7 +570,7 @@ function progressSection({ Box, Text }: Kit, record: ProgressRecord) {
 
   return (
     <Box flexDirection="column">
-      <Text>{`Level: ${levelPhrase(record)}`}</Text>
+      <Text>{`Level: ${levelPhrase(record).replace(/^no level yet: /, 'not placed yet, ')}`}</Text>
       {report !== null && report.why !== '' && <Text>{report.why}</Text>}
       {report !== null && report.next !== '' && <Text>{`Next level: ${report.next}`}</Text>}
       {report !== null && report.working.length > 0 && <Text>{`Working on: ${report.working.join('; ')}`}</Text>}
@@ -616,11 +616,11 @@ function profileTab(kit: Kit, view: PaneView, actions: PaneActions) {
               <Box flexDirection="row" columnGap={1}>
                 <Button
                   key={`unhush-${subject}-${hush.topic}`}
-                  label="x"
+                  label="unmute"
                   plain
                   onPress={() => actions.onUnhush(subject, hush.topic)}
                 />
-                <Text>{`Not bringing up: ${hush.text}`}</Text>
+                <Text>{`Muted: ${hush.text}`}</Text>
               </Box>
             ))}
             {covered.length > 0 && <Text dimColor>{`Explained so far: ${covered.join(', ')}`}</Text>}

@@ -16,9 +16,9 @@ import {
   speech,
   wordsSaid,
   wrap,
-} from '../hooks/avatar'
-import type { Pose } from '../hooks/avatar'
-import { backdropOf, base64, cellWords, dimmed, pixels, poseGrid, rasterCells, spriteSize } from '../hooks/sprite'
+} from '../core/avatar'
+import type { Pose } from '../core/avatar'
+import { backdropOf, base64, cellWords, dimmed, pixels, poseGrid, rasterCells, spriteSize } from '../core/sprite'
 
 const POSES: readonly Pose[] = ['rest', 'talk', 'blink', 'think']
 

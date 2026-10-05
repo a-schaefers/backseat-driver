@@ -14,10 +14,10 @@ import {
   parseLicenseRequest,
   PERSONAL_CHOICE,
   withKey,
-} from '../hooks/license'
-import type { LicenseFacts, LicenseRecord } from '../hooks/license'
-import { checkKey, fromBase64url, KEY_PREFIX, parseKey, verifyP256 } from '../hooks/licensekey'
-import type { KeyPayload, PublicKey } from '../hooks/licensekey'
+} from '../core/license'
+import type { LicenseFacts, LicenseRecord } from '../core/license'
+import { checkKey, fromBase64url, KEY_PREFIX, parseKey, verifyP256 } from '../core/licensekey'
+import type { KeyPayload, PublicKey } from '../core/licensekey'
 import { PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
 /** Personal or commercial use, the commercial key, and the kernel's light touch. */
