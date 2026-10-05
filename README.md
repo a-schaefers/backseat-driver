@@ -37,7 +37,7 @@ Backseat Driver puts the machine where it belongs: in the back seat. You drive. 
 - **Progress.** An honest level per language, beginner to senior, judged only on commits you wrote. It follows you across projects, and it can go down.
 - **Conversation.** Ask anything. Push back, and a contested point gets a second opinion. Tell it to drop a topic, and it's dropped for good. You have the last word.
 
-While it's on, a hook blocks Claude's editing tools, so your code stays yours no matter what the model decides. It installs no git hooks and never writes to your working tree. What it remembers stays in `~/.local/share/backseat-driver/`. Its only network request of its own is a check for a newer release, at most every six hours.
+While it's on, a hook blocks Claude's editing tools, so your code stays yours no matter what the model decides. It installs no git hooks and never writes to your working tree. Got `inotifywait` on your PATH? It hears your saves and commits the moment they land. No `inotifywait`, it checks every few seconds instead. What it remembers stays in `~/.local/share/backseat-driver/`. Its only network request of its own is a check for a newer release, at most every six hours.
 
 ## Who it's for
 

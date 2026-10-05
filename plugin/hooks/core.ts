@@ -4,7 +4,7 @@ import * as K from './kernel.js'
 import type { HealthWire, PlayFactsWire } from './kernel.js'
 import type { Lease } from './lease'
 import type { Play, PlayFacts, Why } from './play'
-import type { ScanFacts } from './sensor'
+import type { FocusFacts, ScanFacts } from './sensor'
 
 /**
  * The one bridge between the kernel and the rest of the mod.
@@ -149,15 +149,19 @@ export const LONGEST_SCAN_GAP_MS: number = K.longestScanGapMs
 export const FOCUS_SCAN_MS: number = K.focusScanMs
 /** However slow the disk is, the spot in focus is checked this often. */
 export const LONGEST_FOCUS_GAP_MS: number = K.longestFocusGapMs
+/** Between scans while a watcher pushes the working tree's changes. */
+export const PUSHED_SCAN_MS: number = K.pushedScanMs
+/** Between checks of the spot in focus while a watcher pushes the changes to it. */
+export const PUSHED_FOCUS_MS: number = K.pushedFocusMs
 
 /** How long to wait before the next scan. */
 export function scanGapMs(facts: ScanFacts): number {
-  return K.scanGapMsWire({ now: facts.now, hasActiveAt: facts.activeAt !== null, activeAt: facts.activeAt ?? 0, lastScanMs: facts.lastScanMs })
+  return K.scanGapMsWire({ now: facts.now, hasActiveAt: facts.activeAt !== null, activeAt: facts.activeAt ?? 0, lastScanMs: facts.lastScanMs, isPushed: facts.isPushed })
 }
 
 /** How long to wait before the next check of the spot in focus. A check that was slow is not run back to back. */
-export function focusGapMs(tookMs: number): number {
-  return K.focusGapMs(tookMs)
+export function focusGapMs(facts: FocusFacts): number {
+  return K.focusGapMs(facts)
 }
 
 // --- The lease (Kernel.Lease)

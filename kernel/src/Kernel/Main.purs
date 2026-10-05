@@ -23,7 +23,7 @@ import Kernel.Lease (Lease)
 import Kernel.Lease as Lease
 import Kernel.Pace (backoffMs, gapFactor, isHeldAt, slowedGapMs)
 import Kernel.Play (isLookDueWire, playOfWire, wakeAtWire)
-import Kernel.Sensor (focusGapMs, focusScanMs, hotForMs, hotScanMs, idleAfterMs, idleScanMs, longestFocusGapMs, longestScanGapMs, scanGapMsWire, scanMs)
+import Kernel.Sensor (focusGapMs, focusScanMs, hotForMs, hotScanMs, idleAfterMs, idleScanMs, longestFocusGapMs, longestScanGapMs, pushedFocusMs, pushedScanMs, scanGapMsWire, scanMs)
 
 leaseIsHeld :: Lease -> Number -> Boolean
 leaseIsHeld = Lease.isHeld
