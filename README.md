@@ -22,7 +22,7 @@ Inspired by the ideas discussed in the [Enchant Games Journal](https://enchant.g
 >
 > Now we ask them to think for us.
 
-This project is trying to reverse course.
+Backseat Driver reverses course.
 
 It's not about speed. If it takes me longer but I grok it, I win. **It's about owning your understanding.**
 

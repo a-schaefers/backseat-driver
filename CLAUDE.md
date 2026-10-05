@@ -13,6 +13,7 @@ AI-only reference for this repository. Terse by design. `README.md` is the only 
   - No internal status (what was or wasn't tried, tested or installed): the owner called it invasive.
   - Never tell users how to run their workflow (which terminal or editor, where to run `claude`). State what works and where.
   - Never frame writing your own code as the slow option (no "for getting code written as fast as possible"). Saying the tutor isn't for having Claude write code, and that `/bsd off` restores normal Claude Code, is fine.
+  - Never apologize for the project or hedge it ("trying to", "I see the irony"). State what it does with confidence.
   - Never suggest autosave to make it closer to live: editor plugins are the answer.
   - Never link to this file or to design detail. A new feature gets a line at most.
   - It carries facts that must stay true: install commands, minimum Claude Code version (text and badge), the `/bsd` command table, the footprint line under "What it is not".
