@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["hooks/**/*.ts", "types/index.d.ts", "types/runtime.d.ts"],
+  "exclude": ["hooks/contract.ts"]
+}

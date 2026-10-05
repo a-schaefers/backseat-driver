@@ -121,6 +121,8 @@ kernel/src/Kernel/*.purs            the kernel's source (dev tooling: not shippe
 kernel/spago.yaml, spago.lock       its package set, pinned
 kernel/toolchain.json               the PureScript compiler, pinned by sha256
 plugin/types/index.d.ts             state keys, tool inputs
+plugin/types/runtime.d.ts           the globals shared modules may assume (read by tsconfig.core.json only)
+plugin/tsconfig.core.json           the shared modules, checked without Claude Code's types
 plugin/tests/                       claude plugin test; kit.ts is the fake world
 scripts/dev-session.sh              live session in tmux
 scripts/outage-proxy.py             a proxy to cut one live session off from Claude
@@ -141,13 +143,14 @@ The ground rules in README ("Claude does not edit your files" etc.) describe end
 
 ```bash
 npm install                      # once: TypeScript, and spago and esbuild for the kernel
-npm run check                    # kernel + validate + licenses + test + typecheck + server
+npm run check                    # kernel + validate + licenses + test + typecheck + core + server
 npm run build:kernel             # kernel/src -> plugin/hooks/kernel.js (fetches the pinned compiler the first time)
 npm run kernel                   # fails when plugin/hooks/kernel.js is not what kernel/src builds
 npm run licenses                 # LICENSE, COMMERCIAL-LICENSE.md, THIRD_PARTY_NOTICES.md: root and plugin/ copies identical
 npm run validate                 # claude plugin validate . --strict && ./plugin --strict
 npm test                         # claude plugin test ./plugin
 npm run typecheck                # tsc -p plugin/tsconfig.json
+npm run core                     # tsc -p plugin/tsconfig.core.json: the shared modules typecheck without Claude Code's types (see "Host seam")
 npm run server                   # the license server's typecheck and node:test tests (they check its keys with the plugin's checker)
 scripts/dev-session.sh           # live session in tmux (default session name bsd)
 scripts/release.sh minor --push  # patch|minor|major|X.Y.Z: bump plugin.json, check, commit, tag, push
@@ -256,6 +259,24 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 | `questions.ts` | first-run questions |
 | `debuglog.ts` | the debug log: records, chunks, the ring of latest records, the tracer, `/bsd debug` parsing |
 | `pane.tsx` | the tutor's drawing in each layout from plain data, handlers passed in |
+
+### Host seam (Claude Code vs shared)
+
+Preparation for a second client (`research/opencode.md`, owner, 2026-10-05: one shared core, Claude Code first class, nothing duplicated). Started 2026-10-05 as tidiness only: nothing a user sees changes. Next steps, in the plan's order: move the shared modules to `plugin/core/` once the open branches have merged, then pull `register.tsx`'s wiring into the core behind one `Host` interface, one engine at a time.
+
+- Adapter files, which may know Claude Code: `register.tsx` (every hook and `$` call), `pane.tsx` and `character.tsx` (Claude Code's `Elements`), `contract.ts` (its prompt sections: `doing_tasks` swapped, the `claudeMd` preamble reframed; `SESSION_NOTES` names the tools as `mcp__backseat-driver__…`). Its persona and comment helpers are shared and move out when the core does. Every other `.ts` in `plugin/hooks/` is shared.
+- Enforced by `npm run core` (`plugin/tsconfig.core.json`): the shared modules typecheck with no Claude Code types and no globals beyond ES2023 and `types/runtime.d.ts` (`AbortController`, `AbortSignal`). An import of `claude-code`, of an adapter file, or a use of a timer or `fetch` fails it. A global the shared code needs goes in `runtime.d.ts` only if every host has it (Claude Code's mod environment and Bun both).
+- Where the shared code needs a Claude Code type, it spells the shape itself: `Options` in `settings.ts` (Claude Code's `PluginOptions`), `ConfigRowLike` (`ConfigRow`), `ModelResult` in `health.ts`.
+- Shared files that still carry a Claude Code assumption in what they say or decide (seams for the `Host`, not bugs):
+  - `health.ts`, `Kernel.Health`: the error words are Claude Code's and Anthropic's API's; `pressureOf` reads Claude plan windows (`rateLimits`).
+  - `Kernel.Status`, `Kernel.Queue`'s tab text, `Kernel.Play`'s comments: "Claude is not answering".
+  - `mode.ts`: "Claude Code is back to normal", `/config` in `HELP` and `SETTINGS_OFF`.
+  - `settings.ts`: `Thinking` is Claude Code's effort scale; `settingRows` reads `/config` rows.
+  - `guard.ts`: Claude Code's own paths (`~/.claude/`, `/tmp/claude-<uid>/`).
+  - `update.ts`: `claude plugin`, `installed_plugins.json`, `plugins/synced/`, marketplace clones.
+  - `avatar.ts`, `art/default.ts`: the `default` voice is Claude Code's mascot, which another client may not use.
+  - `sprite.ts`: theme names from `/config`.
+- Not shared, by nature: `prompt.compose`, `prompt.context`, `prompt.submit`, the edit guard's hook, tool and command registration, `$.state` atoms, `/config`, update and uninstall. See the plan's "What is not a port".
 
 ### Kernel (PureScript)
 
@@ -808,6 +829,7 @@ The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above mem
   - `update-ref <ref> <new> <40 zeros>` creates only when absent (exit 128 when held). `update-ref -d <ref> <holder>` deletes only on a match (exit 1 otherwise). `update-ref <ref> <new> <old>` steals.
   - 40 racing processes: one winner. Two writers making 100 locked increments each lost none.
   - Through `$.process.run`: 10 ms per `update-ref`, 14 ms for `hash-object -w --stdin`, 34 ms for `init --bare`. The ref file's mtime is when the lock was taken.
+- A hooks module may import from a sibling folder of `hooks/` inside the plugin (2026-10-05, for the move to `plugin/core/`): with `hash.ts` moved to `plugin/core/` and imported as `../core/hash`, `claude plugin validate --strict` passed, `claude -p '/bsd help' --plugin-dir` loaded the module (`hooks module backseat-driver@inline loaded`) and answered, and `claude plugin test` ran the tests (those that need the plugin inside this repository aside).
 - Compiled PureScript loads. `purs` output bundled by esbuild into one ES module and imported by the hooks module (`import * as K from './kernel.js'`) passes `claude plugin validate`, runs in a live session, and runs under `claude plugin test`. A 100-line module using prelude, arrays, maybe and integers bundled to 12 KB.
 
 ## Tests
