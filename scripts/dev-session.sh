@@ -21,6 +21,9 @@
 #                 (default: a folder under $TMPDIR, never your real one)
 # BSD_FULLSCREEN  set to 1 for the fullscreen layout, where the pane docks
 #                 beside the conversation; tmux gets the main screen otherwise
+# BSD_DEBUG       set to 1 to switch the tutor's debug log on in that data
+#                 folder, with Claude Code's own debug log beside it.
+#                 scripts/debug-tail.sh -d "$BSD_DATA_DIR" follows it
 set -euo pipefail
 
 plugin="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/plugin"
@@ -47,6 +50,11 @@ if [ "${BSD_FULLSCREEN:-0}" = "1" ]; then
   launch+=(CLAUDE_CODE_NO_FLICKER=1)
 fi
 launch+=(claude --plugin-dir "$plugin" "$@")
+if [ "${BSD_DEBUG:-0}" = "1" ]; then
+  mkdir -p "$data/debug"
+  printf '{"on": true}\n' > "$data/debug.json"
+  launch+=(--debug-file "$data/debug/claude-code.log")
+fi
 
 tmux kill-session -t "$session" 2>/dev/null || true
 tmux new-session -d -s "$session" -x 170 -y 48 -c "$ride" "$(printf '%q ' "${launch[@]}")"

@@ -8,7 +8,7 @@
  * logic needs an effect, it is handed a closure written here.
  */
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, ModelCompleteResult, Register, Timer } from 'claude-code'
+import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Register, Timer } from 'claude-code'
 
 import type { Hush, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, Spot, Tab, Watch, Working } from '../types'
 import {
@@ -40,6 +40,8 @@ import {
 } from './authorship'
 import {
   dataHome,
+  debugRoot,
+  debugSwitchPath,
   fileEntryPath,
   focusPath,
   isOwnFolder,
@@ -52,6 +54,8 @@ import {
   projectDir,
   projectId,
 } from './datahome'
+import { createDebugLog, createTracer, DEBUG_USAGE, FLUSH_MS, parseDebugRequest, parseSwitch, sessionFolder } from './debuglog'
+import type { DebugRequest } from './debuglog'
 import { createExplainer, NO_VIEW } from './explainer'
 import type { Explainer, Intent } from './explainer'
 import { describeSpot, parseFocusFile, parseTarget, relativeTo, viewFile, viewText } from './focus'
@@ -324,6 +328,259 @@ let recorder: Recorder | null = null
 /** What the pane was last told they are working on, as JSON, so that it is told again only when that changes. */
 let workingShown = ''
 
+/**
+ * The debug log. The tracer always keeps the latest records in memory, and
+ * writes every one of them to a file while the log is switched on.
+ */
+const tracer = createTracer(() => Date.now())
+let flushTimer: Timer | null = null
+/** The tutor's state as last written beside the log, so that it is written again only when it changes. */
+let stateWritten = ''
+/** Polls that find nothing new are counted and summed up now and then, not logged one by one. */
+let quiet = { polls: 0, stats: 0, renders: 0, composes: 0 }
+let quietSince = 0
+const QUIET_SUMMARY_MS = 30_000
+/** What `git status` last answered, which is how a poll that found nothing new is told. */
+let lastStatus = ''
+/** What the tutor last put into the system prompt, so that it is logged only when it changes. */
+let composedLast = ''
+
+/** Records one thing the tutor did. Its details are worked out only while the debug log is on. */
+function trace($: EngineInterface, kind: string, name: string, detail?: () => unknown, ms?: number): void {
+  tracer.note(kind, name, detail, ms)
+  if (!tracer.isOn() || flushTimer !== null) return
+  flushTimer = $.clock.after(FLUSH_MS, () => {
+    flushTimer = null
+    void flushDebug($)
+  })
+}
+
+/** Something went wrong and the tutor carried on. It is said in Claude Code's debug log and in the tutor's own. */
+function fail($: EngineInterface, what: string, error: unknown): void {
+  $.ui.log(`${what}: ${String(error)}`, { to: 'debug' })
+  trace($, 'error', what, () => ({ message: String(error), stack: error instanceof Error ? error.stack : undefined }))
+}
+
+/** Sums up the polls that found nothing new since the last summary. */
+function traceQuiet($: EngineInterface): void {
+  const now = Date.now()
+  if (now - quietSince < QUIET_SUMMARY_MS) return
+  const counted = quiet
+  if (counted.polls + counted.stats + counted.renders + counted.composes > 0) {
+    trace($, 'poll', 'nothing new', () => ({ ...counted, overMs: quietSince === 0 ? null : now - quietSince }))
+  }
+  quiet = { polls: 0, stats: 0, renders: 0, composes: 0 }
+  quietSince = now
+}
+
+/** What the tutor holds in memory that says what it is doing: the part of its state no pane shows. */
+function snapshot(): Record<string, unknown> {
+  return {
+    mode,
+    engagement,
+    repoRoot,
+    dataRoot,
+    watcher: watcher === null ? null : { dirty: watcher.dirty(), changed: watcher.changed(), hasPending: watcher.hasPending() },
+    look: { isLooking, isPolling, lastChangeAt, lastLookAt, failures, ticksToSkip, quietLooks },
+    slowdown: { ...slowdown, readAt: slowdownReadAt },
+    review: {
+      agentId: reviewAgentId,
+      scope: reviewScope === null ? null : scopeSubject(reviewScope),
+      queuedCommit,
+      reviewedHead,
+      reviewedPrint,
+      lastHead,
+      headLog,
+    },
+    explain: { isOn: explainer !== null, waiting: explainer?.pending() ?? 0, focus, editorFocusAt, isFastPolling },
+    timers: { poll: timer !== null, focus: focusTimer !== null, review: reviewTimer !== null, talk: talkTimer !== null, blink: blinkTimer !== null },
+    profiles: { languages: profiles.languages, subjects: Object.keys(profiles.subjects) },
+    progress: { identity, records: [...records.keys()], watchedPaths: [...watchedPaths] },
+    journal: recorder === null ? null : { working: workingShown },
+    project: project === null ? null : { isSurveyed: project.isSurveyed, insights: project.insights.length },
+    quiet,
+  }
+}
+
+/** The whole state: what is held in memory, and what the pane is drawn from. */
+async function fullState($: EngineInterface): Promise<Record<string, unknown>> {
+  return {
+    ...snapshot(),
+    pane: {
+      mode: await read($, modeAtom),
+      tab: await read($, tabAtom),
+      notes: await read($, notesAtom),
+      dismissed: await read($, dismissedAtom),
+      selected: await read($, selectedAtom),
+      watch: await read($, watchAtom),
+      review: await read($, reviewAtom),
+      explain: await read($, explainAtom),
+      working: await read($, workingAtom),
+      progress: await read($, progressAtom),
+      update: await read($, updateAtom),
+      speech: await read($, speechAtom),
+    },
+  }
+}
+
+/** Writes the debug log and, beside it, the tutor's whole state as it stands. */
+async function flushDebug($: EngineInterface): Promise<void> {
+  const log = tracer.log()
+  if (log === null) return
+  await log.flush()
+  try {
+    const text = JSON.stringify(await fullState($), null, 1)
+    if (text === stateWritten) return
+    stateWritten = text
+    await $.fs.write(`${log.dir()}/state.json`, `${text}\n`)
+  } catch {
+    // The state file is a convenience. The log itself has been written.
+  }
+}
+
+/** Whether the debug log's switch in the data folder says on. */
+async function isDebugSwitchedOn($: EngineInterface): Promise<boolean> {
+  try {
+    return parseSwitch(JSON.parse(await $.fs.read(debugSwitchPath(dataRoot))))
+  } catch {
+    // No switch, or not JSON: off.
+    return false
+  }
+}
+
+/** The names in a folder of the debug log, or none when it is not there. */
+async function debugNames($: EngineInterface, path: string): Promise<string[]> {
+  try {
+    return (await $.fs.list(path)).map(entry => entry.name)
+  } catch {
+    return []
+  }
+}
+
+/** Starts this session's debug log, when the switch in the data folder says it is on. */
+async function startDebug($: EngineInterface, settings: Settings): Promise<void> {
+  if (tracer.isOn() || dataRoot === '') return
+  try {
+    if (!(await isDebugSwitchedOn($))) return
+    const sessionId = await $.session.id()
+    const root = debugRoot(dataRoot)
+    const dir = `${root}/${sessionFolder(await debugNames($, root), Date.now(), sessionId)}`
+    const log = createDebugLog({ write: (path, text) => $.fs.write(path, text), list: path => debugNames($, path) }, dir)
+    await markHome($)
+    await log.open()
+    tracer.attach(log, sessionId)
+    stateWritten = ''
+    const [claudeCode, own] = await Promise.all([$.session.version(), ownVersion($)])
+    trace($, 'meta', 'log started', () => ({
+      sessionId,
+      claudeCode,
+      plugin: own.version === null ? null : versionText(own.version),
+      pluginRoot: $.plugin.root,
+      dataRoot,
+      repoRoot,
+      mode,
+      settings,
+    }))
+  } catch (error) {
+    $.ui.log(`could not start the debug log: ${String(error)}`, { to: 'debug' })
+  }
+}
+
+/** Stops the debug log, writing what it still holds. */
+async function stopDebug($: EngineInterface, why: string): Promise<void> {
+  if (!tracer.isOn()) return
+  trace($, 'meta', 'log stopped', () => ({ why }))
+  flushTimer?.cancel()
+  flushTimer = null
+  await flushDebug($)
+  tracer.detach()
+}
+
+/** `/bsd debug`: switches the debug log, says where it is, writes down what just happened, or deletes the logs. */
+async function debugCommand($: EngineInterface, settings: Settings, request: DebugRequest): Promise<string> {
+  await resolveHome($)
+  if (dataRoot === '') return 'There is no home directory, so there is nowhere to keep a debug log.'
+  const root = debugRoot(dataRoot)
+
+  if (request === 'on' || request === 'off') {
+    await markHome($)
+    await $.fs.write(debugSwitchPath(dataRoot), `${JSON.stringify({ on: request === 'on', since: await $.clock.now() })}\n`)
+    if (request === 'off') {
+      await stopDebug($, 'switched off')
+
+      return `The debug log is off. What was logged is kept in ${root}, and /bsd debug clear deletes it.`
+    }
+    if (mode !== 'off') await startDebug($, settings)
+    const where = tracer.log()?.dir()
+
+    return [
+      `The debug log is on. It records everything the tutor does, your code and prompts included, in ${root}.`,
+      where === undefined ? 'It starts when the tutor is switched on.' : `This session writes ${where}.`,
+    ].join(' ')
+  }
+
+  if (request === 'status') {
+    const isOn = await isDebugSwitchedOn($)
+    const where = tracer.log()?.current()
+
+    return [
+      `The debug log is ${isOn ? 'on' : 'off'}.`,
+      where !== undefined ? `This session is writing ${where}.` : isOn ? 'It starts when the tutor is switched on.' : '',
+      `Logs are kept in ${root}.`,
+    ]
+      .filter(part => part !== '')
+      .join(' ')
+  }
+
+  if (request === 'dump') {
+    const latest = tracer.ring()
+    const path = `${root}/dump-${sessionFolder([], Date.now(), await $.session.id())}.json`
+    await markHome($)
+    await $.fs.write(path, `${JSON.stringify({ at: await $.clock.now(), state: await fullState($), latest }, null, 1)}\n`)
+
+    return `Wrote the tutor's state and its latest ${latest.length} records to ${path}.`
+  }
+
+  if ((await debugNames($, root)).length === 0) return `There are no debug logs in ${root}.`
+  const wasOn = tracer.isOn()
+  await stopDebug($, 'the logs were deleted')
+  const isGone = await diskOf($).remove(root)
+  if (wasOn) await startDebug($, settings)
+  if (!isGone) return `Could not delete ${root}. Delete it by hand.`
+
+  return wasOn ? `Deleted every debug log in ${root}. This session carries on in a new one.` : `Deleted every debug log in ${root}.`
+}
+
+/** One request to a model, with what was asked and what came back kept for the debug log. */
+async function callModel($: EngineInterface, job: string, request: ModelCompleteRequest, signal?: AbortSignal): Promise<ModelCompleteResult> {
+  const started = Date.now()
+  const result = signal === undefined ? await $.model.complete(request) : await $.model.complete(request, { signal })
+  trace($, 'model', job, () => ({ request, result }), Date.now() - started)
+
+  return result
+}
+
+/** A source file's text by its path from the repository root, or null when it cannot be read. */
+async function readSource($: EngineInterface, root: string, path: string): Promise<string | null> {
+  const started = Date.now()
+  let text: string | null = null
+  try {
+    text = await $.fs.read(`${root}/${path}`)
+  } catch {
+    // Gone, or not something that can be read.
+  }
+  trace($, 'fs', 'source', () => ({ path, chars: text === null ? null : text.length }), Date.now() - started)
+
+  return text
+}
+
+/** What one of the tutor's own tools answers, kept for the debug log with what it was asked. */
+function answered($: EngineInterface, input: { tool: string }, result: string): { result: string } {
+  trace($, 'tool', input.tool.replace('mcp__backseat-driver__', ''), () => ({ input, result }))
+
+  return { result }
+}
+
 async function loadTutor($: EngineInterface, chosen: Persona): Promise<void> {
   const root = $.plugin.root
   const file = (path: string): Promise<string> => $.fs.read(`${root}/${path}`)
@@ -356,6 +613,7 @@ async function readPersona($: EngineInterface, half: 'voice' | 'engineering', na
     return stripFrontmatter(await $.fs.read(`${$.plugin.root}/personas/${half}/${name}.md`))
   } catch {
     $.ui.log(`no ${half} persona called "${name}"`, { to: 'debug' })
+    trace($, 'error', 'no such persona', () => ({ half, name }))
 
     return ''
   }
@@ -382,30 +640,55 @@ async function resolveHome($: EngineInterface): Promise<void> {
 function diskOf($: EngineInterface): Disk {
   return {
     read: async path => {
+      const started = Date.now()
+      let text: string | null = null
       try {
-        return await $.fs.read(path)
+        text = await $.fs.read(path)
       } catch {
-        return null
+        // Not there.
       }
+      trace($, 'fs', 'read', () => ({ path, chars: text === null ? null : text.length }), Date.now() - started)
+
+      return text
     },
-    write: (path, text) => $.fs.write(path, text),
-    list: async path => {
+    write: async (path, text) => {
+      const started = Date.now()
       try {
-        return (await $.fs.list(path)).map(entry => entry.name)
-      } catch {
-        return []
+        await $.fs.write(path, text)
+      } catch (error) {
+        trace($, 'fs', 'write failed', () => ({ path, chars: text.length, error: String(error) }), Date.now() - started)
+        throw error
       }
+      trace($, 'fs', 'write', () => ({ path, chars: text.length }), Date.now() - started)
+    },
+    list: async path => {
+      const started = Date.now()
+      let names: string[] = []
+      try {
+        names = (await $.fs.list(path)).map(entry => entry.name)
+      } catch {
+        // No such folder.
+      }
+      trace($, 'fs', 'list', () => ({ path, names }), Date.now() - started)
+
+      return names
     },
     remove: async path => {
-      if (!isRemovable(dataRoot, path)) return false
-      try {
-        // The marker says the folder is the tutor's own. Without it nothing is deleted.
-        if (!(await $.fs.exists(`${dataRoot}/${MARKER}`))) return false
-
-        return (await $.process.run(['rm', '-rf', '--', path], { timeoutMs: 15_000 })).exitCode === 0
-      } catch {
-        return false
+      let isGone = false
+      let why = ''
+      if (!isRemovable(dataRoot, path)) why = 'not something the tutor may delete'
+      else {
+        try {
+          // The marker says the folder is the tutor's own. Without it nothing is deleted.
+          if (!(await $.fs.exists(`${dataRoot}/${MARKER}`))) why = 'the folder has no marker'
+          else isGone = (await $.process.run(['rm', '-rf', '--', path], { timeoutMs: 15_000 })).exitCode === 0
+        } catch (error) {
+          why = String(error)
+        }
       }
+      trace($, 'fs', isGone ? 'remove' : 'remove refused', () => ({ path, why }))
+
+      return isGone
     },
   }
 }
@@ -435,6 +718,7 @@ function stopAnimating(): void {
 /** Gives the animated persona a new line, which it says one word a tick. '' leaves it quiet. */
 async function say($: EngineInterface, text: string): Promise<void> {
   const line = speech(text)
+  if (text !== '') trace($, 'state', 'speech', () => text)
   await update($, speechAtom, () => line)
   stopTalking()
   // Switched off while the line was being written: nothing may keep running.
@@ -479,16 +763,19 @@ async function startAnimating($: EngineInterface, settings: Settings, isFresh: b
 
 /** Changes what the pane's status line says about the watcher. */
 async function setWatch($: EngineInterface, change: Partial<Watch>): Promise<void> {
+  trace($, 'state', 'watch', () => change)
   await update($, watchAtom, (watch): Watch => ({ ...watch, ...change }))
 }
 
 async function setReview($: EngineInterface, change: Partial<Review>): Promise<void> {
+  trace($, 'state', 'review', () => change)
   await update($, reviewAtom, (review): Review => ({ ...review, ...change }))
 }
 
 /** A file's size and modification time as one string, or '' when it is not there. */
 async function fileStamp($: EngineInterface, path: string): Promise<string> {
   if (path === '') return ''
+  quiet.stats += 1
   try {
     const stat = await $.fs.stat(path)
 
@@ -505,23 +792,37 @@ async function git(
   args: readonly string[],
   isNetwork = false,
 ): Promise<{ exitCode: number; stdout: string; stderr?: string }> {
+  const started = Date.now()
   try {
     // Over the network git must never ask for a password or a passphrase: there is nobody at its terminal.
     const env = isNetwork ? { GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes' } : undefined
-    return await $.process.run(['git', '--no-optional-locks', ...args], { cwd, timeoutMs: isNetwork ? 30_000 : 15_000, env })
-  } catch {
+    const result = await $.process.run(['git', '--no-optional-locks', ...args], { cwd, timeoutMs: isNetwork ? 30_000 : 15_000, env })
+    // The watcher asks for the status at every poll. An answer that is the same as the last one is counted, not logged.
+    const isQuietPoll = args[0] === 'status' && result.exitCode === 0 && result.stdout === lastStatus
+    if (args[0] === 'status') lastStatus = result.stdout
+    if (isQuietPoll) quiet.polls += 1
+    else trace($, 'git', args[0] ?? '', () => ({ args, cwd, exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr }), Date.now() - started)
+
+    return result
+  } catch (error) {
     // Git is missing, or took too long.
+    trace($, 'git', args[0] ?? '', () => ({ args, cwd, error: String(error) }), Date.now() - started)
+
     return { exitCode: 1, stdout: '' }
   }
 }
 
 /** `claude plugin ...`, for updating or removing an installed copy. Resolves to what it printed, or why it failed. */
 async function claudeCli($: EngineInterface, argv: readonly string[]): Promise<{ ok: boolean; output: string }> {
+  const started = Date.now()
   try {
     const result = await $.process.run(['claude', ...argv.slice(1)], { timeoutMs: 180_000 })
+    trace($, 'process', 'claude', () => ({ argv, exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr }), Date.now() - started)
 
     return { ok: result.exitCode === 0, output: `${result.stdout}${result.stderr}`.trim() }
   } catch (error) {
+    trace($, 'process', 'claude', () => ({ argv, error: String(error) }), Date.now() - started)
+
     return { ok: false, output: String(error) }
   }
 }
@@ -617,7 +918,7 @@ async function checkForUpdate($: EngineInterface, settings: Settings): Promise<v
     }
     await update($, updateAtom, () => updateNotice(version, parseVersion(latest)))
   } catch (error) {
-    $.ui.log(`update check failed: ${String(error)}`, { to: 'debug' })
+    fail($, 'update check failed', error)
   }
 }
 
@@ -747,6 +1048,7 @@ async function showWorking($: EngineInterface, now: number): Promise<void> {
   const text = JSON.stringify(working)
   if (text === workingShown) return
   workingShown = text
+  trace($, 'state', 'working', () => working)
   await update($, workingAtom, (): Working => working)
 }
 
@@ -755,7 +1057,7 @@ async function flushJournal($: EngineInterface, journal: Recorder, now: number, 
   try {
     await journal.flush(now, isForced)
   } catch (error) {
-    $.ui.log(`could not write the journal: ${String(error)}`, { to: 'debug' })
+    fail($, 'could not write the journal', error)
   }
 }
 
@@ -793,13 +1095,7 @@ async function startJournal($: EngineInterface, run: number, isFresh: boolean): 
     },
     file: dataRoot === '' ? '' : journalPath(dataRoot, root),
     root,
-    read: async path => {
-      try {
-        return await $.fs.read(`${root}/${path}`)
-      } catch {
-        return null
-      }
-    },
+    read: path => readSource($, root, path),
     head: async path => {
       const shown = await git($, root, ['show', `HEAD:${path}`])
 
@@ -873,7 +1169,7 @@ async function moveOutOfStore($: EngineInterface): Promise<void> {
       await $.store.delete(key)
     }
   } catch (error) {
-    $.ui.log(`could not move profiles out of the store: ${String(error)}`, { to: 'debug' })
+    fail($, 'could not move profiles out of the store', error)
   }
 }
 
@@ -884,10 +1180,12 @@ async function moveOutOfStore($: EngineInterface): Promise<void> {
  */
 async function registerReviewer($: EngineInterface, settings: Settings): Promise<void> {
   if (repoRoot === '') return
+  const prompt = reviewerSystem(reviewInstructions, [aboutPerson()], persona)
+  trace($, 'agent', 'register', () => ({ model: settings.deepReview.model, effort: settings.deepReview.thinking, prompt }))
   await $.agent.register({
     name: 'deep-reviewer',
     description: REVIEWER_DESCRIPTION,
-    prompt: reviewerSystem(reviewInstructions, [aboutPerson()], persona),
+    prompt,
     tools: ['Read', 'Grep', 'Glob'],
     model: settings.deepReview.model,
     effort: settings.deepReview.thinking,
@@ -1104,11 +1402,13 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
     const changes = await active.collect()
     if (changes.length === 0) {
       active.settle([])
+      trace($, 'look', 'nothing to look at', () => ({ isAsked }))
       if (isAsked) $.ui.toast('Nothing has changed since the last look.')
 
       return
     }
 
+    trace($, 'look', 'start', () => ({ isAsked, files: changes.map(change => change.path), failures, lastChangeAt, lastLookAt }))
     await setWatch($, { state: 'looking' })
     await bringIntoPlay(
       $,
@@ -1125,7 +1425,7 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
     // What the journal says they have been doing, so that the changes are read in the light of it.
     const doing = recorder?.glance(await $.clock.now()) ?? ''
     const { prompt, shown } = playByPlayPrompt(changes, await read($, notesAtom), await read($, dismissedAtom), bubble, brief, doing)
-    const result = await $.model.complete({
+    const result = await callModel($, 'play-by-play', {
       model: settings.playByPlay.model,
       effort: settings.playByPlay.thinking,
       system: reviewerSystem(
@@ -1152,6 +1452,7 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
     // What was shown has been looked at, whether or not the reply can be used.
     active.settle(shown)
     const parsed = parseReply(result.text)
+    if (parsed === null) trace($, 'look', 'reply not understood', () => ({ text: result.text }))
     if (parsed !== null) {
       // The reviewer is told what was hushed. This makes sure of it.
       const reply = {
@@ -1172,6 +1473,7 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
       for (const note of dealtWith) recorder?.add({ at: now, kind: 'fixed', path: note.file, line: note.line, text: note.topic })
       for (const note of added) recorder?.add({ at: now, kind: 'note', path: note.file, line: note.line, text: note.topic })
       recorder?.infer(reply.workingOn, paths, now)
+      trace($, 'look', 'done', () => ({ shown: paths, added, dealtWith, hushedOut: parsed.notes.length - reply.notes.length, say: reply.say, workingOn: reply.workingOn }))
       await showWorking($, now)
       const raised = new Map<string, string[]>()
       // A decision point or an insight is not a mistake, so it is no lesson that keeps coming back.
@@ -1192,7 +1494,7 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
     await setWatch($, { state: 'idle', lastLookAt: now, detail: '' })
   } catch (error) {
     failures += 1
-    $.ui.log(`look failed: ${String(error)}`, { to: 'debug' })
+    fail($, 'look failed', error)
     await setWatch($, { state: 'failed', detail: 'an error' })
   } finally {
     isLooking = false
@@ -1222,16 +1524,19 @@ async function startReview($: EngineInterface, scope: ReviewScope): Promise<void
   const subject = scopeSubject(scope)
   await setReview($, { state: 'running', subject, text: '', isUnseen: false, decisions: [], insights: [] })
   try {
+    const prompt = reviewRequest(
+      scope,
+      { overview: project === null ? '' : overviewLine(project), earlier: reviewDigest(reviews) },
+      recorder?.glance(await $.clock.now()) ?? '',
+    )
+    const started = Date.now()
     const spawned = await $.agent.spawn({
       subagentType: 'backseat-driver:deep-reviewer',
       description: `Deep review of ${subject}`,
-      prompt: reviewRequest(
-        scope,
-        { overview: project === null ? '' : overviewLine(project), earlier: reviewDigest(reviews) },
-        recorder?.glance(await $.clock.now()) ?? '',
-      ),
+      prompt,
     })
     const agentId = spawned.deny === undefined ? await startedReviewer($, spawned.agentId) : undefined
+    trace($, 'agent', 'spawn', () => ({ subject, kind: scope.kind, prompt, spawned, agentId }), Date.now() - started)
     if (agentId === undefined) {
       await setReview($, { state: 'failed', text: spawned.deny ?? 'the reviewer did not start' })
 
@@ -1240,7 +1545,7 @@ async function startReview($: EngineInterface, scope: ReviewScope): Promise<void
     reviewAgentId = agentId
     reviewScope = scope
   } catch (error) {
-    $.ui.log(`deep review did not start: ${String(error)}`, { to: 'debug' })
+    fail($, 'deep review did not start', error)
     await setReview($, { state: 'failed', text: 'the reviewer did not start' })
   }
 }
@@ -1308,7 +1613,7 @@ async function keepReview($: EngineInterface, scope: ReviewScope, answer: string
       await writeJson(disk, `${folder}/reviews.json`, reviews)
     }
   } catch (error) {
-    $.ui.log(`could not keep the deep review's notes: ${String(error)}`, { to: 'debug' })
+    fail($, "could not keep the deep review's notes", error)
   }
 
   return { text, notes }
@@ -1381,6 +1686,7 @@ async function checkHead($: EngineInterface, settings: Settings): Promise<void> 
 
   const entry = parseReflog((await git($, repoRoot, REFLOG_ARGS)).stdout)
   if (entry === null || entry.hash === lastHead) return
+  trace($, 'watch', 'head moved', () => ({ entry, isCommit: isCommit(entry), from: lastHead }))
   lastHead = entry.hash
   const movedAt = await $.clock.now()
   if (!isCommit(entry)) {
@@ -1428,6 +1734,7 @@ async function tick($: EngineInterface, settings: Settings): Promise<void> {
     const now = await $.clock.now()
     ticksToSkip = Math.min(MAX_SKIPPED_TICKS, Math.floor((now - started) / SLOW_POLL_MS))
     if (hasChanged) lastChangeAt = now
+    if (hasChanged) trace($, 'watch', 'saved', () => ({ files: active.changed(), dirty: active.dirty(), pollMs: now - started }))
 
     const hasPendingChange = active.hasPending()
     // Usage is only looked up when there is something to look at.
@@ -1457,8 +1764,9 @@ async function tick($: EngineInterface, settings: Settings): Promise<void> {
       else if ((await read($, watchAtom)).state !== 'held') await setWatch($, { state: 'held' })
     }
     await checkHead($, settings)
+    traceQuiet($)
   } catch (error) {
-    $.ui.log(`poll failed: ${String(error)}`, { to: 'debug' })
+    fail($, 'poll failed', error)
   } finally {
     isPolling = false
   }
@@ -1511,14 +1819,9 @@ async function startWatching($: EngineInterface, settings: Settings, run: number
 
   const started = createWatcher({
     git: args => git($, root, args),
-    read: async path => {
-      try {
-        return await $.fs.read(`${root}/${path}`)
-      } catch {
-        return null
-      }
-    },
+    read: path => readSource($, root, path),
     stat: async path => {
+      quiet.stats += 1
       try {
         const stat = await $.fs.stat(`${root}/${path}`)
 
@@ -1548,6 +1851,7 @@ async function startWatching($: EngineInterface, settings: Settings, run: number
   timer = $.clock.every(POLL_MS, () => {
     void tick($, settings)
   })
+  trace($, 'timer', 'watching started', () => ({ repoRoot: root, pollMs: POLL_MS, reviewEveryMs: settings.deepReview.everyMs, head: tip }))
   if (settings.deepReview.everyMs > 0) {
     reviewTimer = $.clock.every(settings.deepReview.everyMs, () => {
       void reviewSince($, false)
@@ -1581,7 +1885,7 @@ async function refreshView($: EngineInterface, isAsked = false): Promise<void> {
       await $.fs.write(`${dataRoot}/view.json`, viewFile(view, repoRoot, spot.source, await $.clock.now()))
     }
   } catch (error) {
-    $.ui.log(`explain failed: ${String(error)}`, { to: 'debug' })
+    fail($, 'explain failed', error)
   }
 }
 
@@ -1656,11 +1960,12 @@ async function fastPoll($: EngineInterface): Promise<void> {
     if (spot !== null && (await fileStamp($, `${repoRoot}/${spot.path}`)) !== viewedStamp) await refreshView($)
     await explainer?.tick()
     if (!(await isWatched($))) {
+      trace($, 'timer', 'nobody is watching the focus')
       focusTimer?.cancel()
       focusTimer = null
     }
   } catch (error) {
-    $.ui.log(`focus poll failed: ${String(error)}`, { to: 'debug' })
+    fail($, 'focus poll failed', error)
   } finally {
     isFastPolling = false
   }
@@ -1668,7 +1973,9 @@ async function fastPoll($: EngineInterface): Promise<void> {
 
 function watchClosely($: EngineInterface): void {
   if (explainer === null) return
-  focusTimer ??= $.clock.every(FOCUS_POLL_MS, () => {
+  if (focusTimer !== null) return
+  trace($, 'timer', 'watching the focus closely', () => ({ everyMs: FOCUS_POLL_MS, focus }))
+  focusTimer = $.clock.every(FOCUS_POLL_MS, () => {
     void fastPoll($)
   })
 }
@@ -1701,18 +2008,14 @@ async function startExplaining($: EngineInterface, settings: Settings, run: numb
   if (run !== engagement) return
 
   explainer = createExplainer({
-    read: async path => {
-      try {
-        return await $.fs.read(`${root}/${path}`)
-      } catch {
-        return null
-      }
-    },
+    read: path => readSource($, root, path),
     stamp: path => fileStamp($, `${root}/${path}`),
     disk: diskOf($),
     entryPath: path => fileEntryPath(dataRoot, root, path),
     complete: async (prompt, maxTokens, signal) => {
-      const result = await $.model.complete(
+      const result = await callModel(
+        $,
+        'explain',
         {
           model: settings.explain.model,
           effort: settings.explain.thinking,
@@ -1721,7 +2024,7 @@ async function startExplaining($: EngineInterface, settings: Settings, run: numb
           maxTokens,
           timeoutMs: 90_000,
         },
-        { signal },
+        signal,
       )
 
       return result.isAnswered ? result.text : null
@@ -1737,7 +2040,10 @@ async function startExplaining($: EngineInterface, settings: Settings, run: numb
     onChange: () => {
       void refreshView($)
     },
-    log: line => $.ui.log(line, { to: 'debug' }),
+    log: line => {
+      $.ui.log(line, { to: 'debug' })
+      trace($, 'explain', 'log', () => line)
+    },
   })
   // After a reload, the pane still holds the spot it was showing. The view is made again from the file as it is now.
   const shown = (await read($, explainAtom)).spot
@@ -1803,11 +2109,12 @@ function aboutPerson(): string {
 /** Runs one piece of progress work after the ones before it, so that two never write one record at once. */
 function queueProgress($: EngineInterface, work: () => Promise<void>): void {
   progressQueue = progressQueue.then(work).catch(error => {
-    $.ui.log(`progress failed: ${String(error)}`, { to: 'debug' })
+    fail($, 'progress failed', error)
   })
 }
 
 async function setProgress($: EngineInterface, change: Partial<ProgressView>): Promise<void> {
+  trace($, 'state', 'progress', () => change)
   await update($, progressAtom, (view): ProgressView => ({ ...view, ...change }))
 }
 
@@ -1863,7 +2170,7 @@ async function assess(
   const subject = fresh.length === 1 ? `commit ${fresh[0]?.short ?? ''}` : `${fresh.length} of your recent commits`
   await setProgress($, { busy: `Looking at ${subject} for your ${languageName(language)} progress.` })
   try {
-    const result = await $.model.complete({
+    const result = await callModel($, 'progress', {
       model: settings.deepReview.model,
       effort: settings.deepReview.thinking,
       system: progressInstructions,
@@ -1966,10 +2273,14 @@ async function placeFirst($: EngineInterface, settings: Settings, run: number): 
  */
 async function engage($: EngineInterface, settings: Settings, run: number, isFresh: boolean): Promise<void> {
   try {
+    const started = Date.now()
+    await startDebug($, settings)
+    trace($, 'start', 'engaging', () => ({ run, isFresh }))
     await startAnimating($, settings, isFresh)
     if (run !== engagement) return
     await startWatching($, settings, run)
     if (run !== engagement) return
+    tracer.inProject(repoRoot === '' ? '' : projectId(repoRoot))
     await startJournal($, run, isFresh)
     if (run !== engagement) return
     await moveOutOfStore($)
@@ -1979,13 +2290,14 @@ async function engage($: EngineInterface, settings: Settings, run: number, isFre
     await registerReviewer($, settings)
     await registerTools($)
     await startExplaining($, settings, run)
+    trace($, 'start', 'engaged', () => ({ run, repoRoot, languages: profiles.languages, main }), Date.now() - started)
     if (isFresh) void maybeSurvey($, settings, run)
     if (isFresh) queueProgress($, () => placeFirst($, settings, run))
     if (isFresh) void checkForUpdate($, settings)
     // Last, so that everything already works if the questions are dismissed.
     if (isFresh && run === engagement) await ask($, settings, unasked(main))
   } catch (error) {
-    $.ui.log(`could not finish starting: ${String(error)}`, { to: 'debug' })
+    fail($, 'could not finish starting', error)
   }
 }
 
@@ -1996,6 +2308,7 @@ async function switchTo($: EngineInterface, next: Mode, settings: Settings): Pro
   // Awaited, because the contract has to be in force from the first prompt after the command.
   if (isEngaged && contract === '') await loadTutor($, settings.persona)
 
+  trace($, 'state', 'mode', () => ({ from: mode, to: next }))
   mode = next
   await update($, modeAtom, () => next)
 
@@ -2025,6 +2338,7 @@ async function switchTo($: EngineInterface, next: Mode, settings: Settings): Pro
     profiles = NO_PROFILES
     await update($, profilesAtom, () => NO_PROFILES)
     await $.ui.close({ id: 'backseat-driver' })
+    await stopDebug($, 'the tutor was switched off')
   }
 }
 
@@ -2081,6 +2395,8 @@ async function forget($: EngineInterface, settings: Settings, named: Scope | nul
     if ((await choose($, confirmQuestion(scope, projectName), [KEEP, FORGET])) !== FORGET) return kept()
     if (scope.kind === 'everything' && !isPhrase((await choose($, PHRASE_QUESTION, PHRASE_OPTIONS)) ?? '')) return kept()
 
+    // The log would otherwise be written straight back into the folder that is about to go.
+    if (scope.kind === 'everything') await stopDebug($, 'everything was forgotten')
     const disk = diskOf($)
     const failed: string[] = []
     for (const path of scopePaths(dataRoot, root, scope)) {
@@ -2126,6 +2442,7 @@ export const register: Register = (on, options) => {
     // After a reload, `$.state` still holds the mode and the notes.
     mode = await read($, modeAtom)
     if (mode !== 'off') {
+      trace($, 'hook', 'session.start', () => ({ mode, cwd: e.cwd, isReload: true }))
       const open = await read($, notesAtom)
       nextNoteId = open.reduce((highest, note) => Math.max(highest, note.id), 0) + 1
       // A review that was running when the module reloaded can no longer be collected.
@@ -2141,19 +2458,19 @@ export const register: Register = (on, options) => {
     try {
       await $.command.register({ name: 'backseat-driver-update', description: 'Fetch the newest release of Backseat Driver', immediate: true })
     } catch (error) {
-      $.ui.log(`could not register /backseat-driver-update: ${String(error)}`, { to: 'debug' })
+      fail($, 'could not register /backseat-driver-update', error)
     }
     for (const name of COMMANDS) {
       try {
         await $.command.register({
           name,
           description: 'Turn the Backseat Driver tutor on. /bsd help lists the rest',
-          argumentHint: '[off | pause | resume | status | explain | questions | working | forget | update | uninstall | help]',
+          argumentHint: '[off | pause | resume | status | explain | questions | working | forget | update | uninstall | debug | help]',
           immediate: true,
         })
       } catch (error) {
         // A taken name throws. The other command still has to register.
-        $.ui.log(`could not register /${name}: ${String(error)}`, { to: 'debug' })
+        fail($, `could not register /${name}`, error)
       }
     }
 
@@ -2165,6 +2482,7 @@ export const register: Register = (on, options) => {
     await update($, modeAtom, () => mode)
     // The pane's "Working on" line was reset with the rest of the state. The journal behind it was not.
     if (mode !== 'off') {
+      trace($, 'hook', 'classic.SessionStart', () => ({ source: e.source }))
       workingShown = ''
       await showWorking($, await $.clock.now())
     }
@@ -2181,7 +2499,13 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: ['backseat-driver', 'bsd'] }, async ($, e) => {
     const { request, rest, unknown } = parseRequest(e.args)
+    trace($, 'cmd', request, () => ({ args: e.args, mode }))
     if (request === 'help') return { text: helpText(unknown) }
+    if (request === 'debug') {
+      const asked = parseDebugRequest(rest)
+
+      return { text: asked === null ? DEBUG_USAGE : await debugCommand($, settings, asked) }
+    }
     if (request === 'questions') {
       if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
       // Not awaited: the dialog stays open for as long as the person takes.
@@ -2250,15 +2574,23 @@ export const register: Register = (on, options) => {
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)
     if (mode === 'off' || contract === '') return composed
-
-    return {
-      sections: tutorSections(composed.sections, { contract, extras: [SESSION_NOTES, aboutPerson()], persona }),
+    const person = aboutPerson()
+    const sections = tutorSections(composed.sections, { contract, extras: [SESSION_NOTES, person], persona })
+    // The system prompt is put together again and again. What the tutor adds is logged when it changes.
+    const added = `${contract.length} ${persona.length} ${person}`
+    if (added === composedLast) quiet.composes += 1
+    else {
+      composedLast = added
+      trace($, 'hook', 'prompt.compose', () => ({ from: composed.sections.map(section => section.id), to: sections.map(section => section.id), person, contract, persona }))
     }
+
+    return { sections }
   })
 
   on('prompt.context', async ($, e, next) => {
     const context = await next(e)
     if (mode === 'off') return context
+    trace($, 'hook', 'prompt.context', () => ({ blocks: context.blocks.map(block => block.name) }))
 
     return {
       blocks: context.blocks.map(block =>
@@ -2279,6 +2611,7 @@ export const register: Register = (on, options) => {
       explainContext(await read($, explainAtom)),
       recorder?.brief(await $.clock.now()) ?? '',
     ].filter(part => part !== '')
+    trace($, 'hook', 'prompt.submit', () => ({ text: e.text, attached: shown }))
     if (shown.length === 0) return next(e)
 
     return next({ ...e, context: [...(e.context ?? []), ...shown] })
@@ -2290,6 +2623,7 @@ export const register: Register = (on, options) => {
     const scope = reviewScope
     reviewAgentId = null
     reviewScope = null
+    trace($, 'agent', 'finished', () => ({ agentId: e.agentId, reason: e.reason, subject: scope === null ? null : scopeSubject(scope), answer: e.reason === 'answer' ? e.answer : undefined }))
 
     if (e.reason === 'answer' && e.answer.trim() !== '' && scope !== null) {
       if (scope.kind !== 'survey') {
@@ -2326,6 +2660,21 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // The session is ending, or its conversation is being cleared: what is held in memory goes to disk.
+  // The whole chain of hooks has about a second and a half for this.
+  on('session.end', async ($, e, next) => {
+    if (mode !== 'off') {
+      trace($, 'hook', 'session.end', () => ({ reason: e.reason }))
+      const leaving = recorder
+      if (leaving !== null) await flushJournal($, leaving, await $.clock.now(), true)
+      // After /clear and /resume this process carries on, and so does its log.
+      if (e.reason === 'clear' || e.reason === 'resume') await flushDebug($)
+      else await stopDebug($, `the session ended (${e.reason})`)
+    }
+
+    return next(e)
+  })
+
   // The reviewer is only offered to the model while the tutor is on.
   on('agent.offer', { agent: 'backseat-driver:deep-reviewer' }, ($, e, next) =>
     mode === 'off' ? { isOffered: false } : next(e),
@@ -2333,7 +2682,7 @@ export const register: Register = (on, options) => {
 
   // The tutor's own tools. Answering here, without `next`, runs no other tool and raises no permission prompt.
   on('tool.call', { tool: 'mcp__backseat-driver__hush' }, async ($, e) => {
-    if (mode === 'off') return { result: 'Backseat Driver is off, so nothing was recorded.' }
+    if (mode === 'off') return answered($, e, 'Backseat Driver is off, so nothing was recorded.')
     // The model fills these in, so none of them is taken on trust. When it
     // names an open note, the note's own topic is used: that is the slug the
     // reviewer will use again, and the model's guess at it rarely matches.
@@ -2343,98 +2692,100 @@ export const register: Register = (on, options) => {
       noted === undefined
         ? String(e.language ?? GENERAL).trim().toLowerCase() || GENERAL
         : (languageOf(noted.file) ?? GENERAL)
-    if (topic === '') return { result: 'Nothing was recorded: give the topic as a short slug.' }
+    if (topic === '') return answered($, e, 'Nothing was recorded: give the topic as a short slug.')
     const removed = await hush($, settings, subject, { topic, text: String(e.what ?? topic).trim() || topic })
     const pane = removed === 0 ? 'No open note matched, so the pane is unchanged.' : `Removed from the pane: ${removed}.`
 
-    return {
-      result: `Recorded. "${topic}" will not be brought up again for ${subject}, in this project or any other. ${pane}`,
-    }
+    return answered($, e, `Recorded. "${topic}" will not be brought up again for ${subject}, in this project or any other. ${pane}`)
   })
 
   on('tool.call', { tool: 'mcp__backseat-driver__unhush' }, async ($, e) => {
-    if (mode === 'off') return { result: 'Backseat Driver is off, so nothing was changed.' }
+    if (mode === 'off') return answered($, e, 'Backseat Driver is off, so nothing was changed.')
     const topic = String(e.topic ?? '').trim()
     const subject = String(e.language ?? GENERAL).trim().toLowerCase() || GENERAL
     await saveSubject($, settings, subject, profile => withoutHush(profile, topic))
 
-    return { result: `Done. "${topic}" may be brought up again for ${subject}.` }
+    return answered($, e, `Done. "${topic}" may be brought up again for ${subject}.`)
   })
 
   on('tool.call', { tool: 'mcp__backseat-driver__record' }, async ($, e) => {
-    if (mode === 'off') return { result: 'Backseat Driver is off, so nothing was recorded.' }
+    if (mode === 'off') return answered($, e, 'Backseat Driver is off, so nothing was recorded.')
     const about = String(e.about ?? '').trim()
     const answer = String(e.answer ?? '').trim().slice(0, 200)
     const subject = answerSubject(about, String(e.language ?? '').trim().toLowerCase())
     if (subject === null || answer === '') {
-      return { result: 'Nothing was recorded: give `about` as level, goals, focus or knows, the language it is about, and the answer.' }
+      return answered($, e, 'Nothing was recorded: give `about` as level, goals, focus or knows, the language it is about, and the answer.')
     }
     await saveSubject($, settings, subject, profile => withAnswer(profile, about, answer))
     const where = subject === GENERAL ? '' : ` for ${languageName(subject)}`
 
-    return { result: `Recorded${where}: "${ANSWER_LABELS[about]}: ${answer}". It is kept across sessions and projects.` }
+    return answered($, e, `Recorded${where}: "${ANSWER_LABELS[about]}: ${answer}". It is kept across sessions and projects.`)
   })
 
   on('tool.call', { tool: 'mcp__backseat-driver__lookup' }, async ($, e) => {
-    if (mode === 'off' || explainer === null) return { result: 'Nothing is cached, because Explain is not running. Read the file instead.' }
+    if (mode === 'off' || explainer === null) return answered($, e, 'Nothing is cached, because Explain is not running. Read the file instead.')
     const path = relativeTo(repoRoot, String(e.file ?? ''))
-    if (path === null) return { result: 'That file is not in this project.' }
+    if (path === null) return answered($, e, 'That file is not in this project.')
     const line = Math.floor(Number(e.line ?? 1))
 
-    return { result: await lookUp($, { path, line: Number.isFinite(line) && line >= 1 ? line : 1 }) }
+    return answered($, e, await lookUp($, { path, line: Number.isFinite(line) && line >= 1 ? line : 1 }))
   })
 
   on('tool.call', { tool: 'mcp__backseat-driver__progress' }, async ($, e) => {
-    if (mode === 'off') return { result: 'Backseat Driver is off.' }
-    if (!settings.isProgressOn) return { result: 'The progress report is switched off in /config.' }
+    if (mode === 'off') return answered($, e, 'Backseat Driver is off.')
+    if (!settings.isProgressOn) return answered($, e, 'The progress report is switched off in /config.')
     const language = String(e.language ?? '').trim().toLowerCase()
     const record = records.get(language) ?? (await loadRecord($, language))
     const whose = identity.length === 0 ? 'Git has no user.email here, so no commit can be confirmed as theirs.' : `Only commits by ${identity.join(' or ')} count.`
 
-    return { result: record.observations.length === 0 ? `Nothing is on record for ${language} yet. ${whose}` : `${recordText(record)}\n\n${whose}` }
+    return answered($, e, record.observations.length === 0 ? `Nothing is on record for ${language} yet. ${whose}` : `${recordText(record)}\n\n${whose}`)
   })
 
   on('tool.call', { tool: 'mcp__backseat-driver__profile' }, async ($, e) => {
-    if (mode === 'off') return { result: 'Backseat Driver is off.' }
+    if (mode === 'off') return answered($, e, 'Backseat Driver is off.')
     const subject = String(e.language ?? GENERAL).trim().toLowerCase() || GENERAL
     const text = personText({ languages: [subject], subjects: { [subject]: await loadSubject($, subject) } })
 
-    return { result: text === '' ? `Nothing is on record for ${subject}.` : text }
+    return answered($, e, text === '' ? `Nothing is on record for ${subject}.` : text)
   })
 
   on('tool.call', { tool: 'mcp__backseat-driver__working' }, async ($, e) => {
-    if (mode === 'off' || recorder === null) return { result: 'No journal is being kept here, so nothing was recorded.' }
+    if (mode === 'off' || recorder === null) return answered($, e, 'No journal is being kept here, so nothing was recorded.')
     // Only an empty string takes their words back. A call that left `on` out, as one did in a live session, changes nothing.
     if (typeof e.on !== 'string') {
-      return { result: 'Nothing was recorded: give `on`, what they said in their words, or an empty string when they take it back.' }
+      return answered($, e, 'Nothing was recorded: give `on`, what they said in their words, or an empty string when they take it back.')
     }
     const said = tidy(e.on)
     await sayWorking($, said)
 
-    return {
-      result:
-        said === ''
-          ? 'Cleared. What they are working on is worked out from their activity again.'
-          : `Recorded: they are working on "${said}". The pane shows it, and the background reviewers are told.`,
-    }
+    return answered(
+      $,
+      e,
+      said === ''
+        ? 'Cleared. What they are working on is worked out from their activity again.'
+        : `Recorded: they are working on "${said}". The pane shows it, and the background reviewers are told.`,
+    )
   })
 
-  on('tool.call', { tool: 'mcp__backseat-driver__activity' }, async $ => {
-    if (mode === 'off' || recorder === null) return { result: NO_ACTIVITY }
+  on('tool.call', { tool: 'mcp__backseat-driver__activity' }, async ($, e) => {
+    if (mode === 'off' || recorder === null) return answered($, e, NO_ACTIVITY)
     const doing = recorder.activity(await $.clock.now())
 
-    return { result: doing === '' ? NO_ACTIVITY : doing }
+    return answered($, e, doing === '' ? NO_ACTIVITY : doing)
   })
 
   // The one rule that does not rest on the model: Claude cannot edit the user's files.
   on('tool.call', { tool: ['Edit', 'Write', 'NotebookEdit'] }, ($, e, next) => {
     if (mode === 'off') return next(e)
     const path = e.tool === 'NotebookEdit' ? e.notebook_path : e.file_path
+    const isDenied = isUsersFile(path, home)
+    trace($, 'guard', isDenied ? 'denied' : 'let through', () => ({ tool: e.tool, path }))
 
-    return isUsersFile(path, home) ? { deny: DENIAL } : next(e)
+    return isDenied ? { deny: DENIAL } : next(e)
   })
 
   on('ui.render', { component: 'Pane', requestId: 'backseat-driver' }, async ($, e) => {
+    quiet.renders += 1
     const view = {
       mode: await read($, modeAtom),
       tab: await read($, tabAtom),
@@ -2461,36 +2812,45 @@ export const register: Register = (on, options) => {
 
     return renderPane($.ui.resolve(e), view, {
       onTab: (tab: Tab) => {
+        trace($, 'ui', 'tab', () => tab)
         void update($, tabAtom, () => tab)
         if (tab === 'review') void setReview($, { isUnseen: false })
         if (tab === 'explain') watchClosely($)
       },
       onSelect: (id: number) => {
+        trace($, 'ui', 'select', () => id)
         void update($, selectedAtom, () => id)
       },
       onExplain: (note: Note) => {
+        trace($, 'ui', 'explain', () => note)
         // Not awaited: it resolves when the turn starts, which may be after the one now running.
         void $.prompt.submit({ text: explainRequest(note), asUser: true })
         // A decision point or an insight is about this one spot in their code, not an idea now explained to them.
         if (isProblem(note.kind)) void saveSubject($, settings, languageOf(note.file) ?? GENERAL, profile => withExplained(profile, note.topic))
       },
       onMute: (note: Note) => {
+        trace($, 'ui', 'mute', () => note)
         const entry = { topic: note.topic, text: note.topic.replaceAll('-', ' ') }
         void hush($, settings, languageOf(note.file) ?? GENERAL, entry)
       },
       onUnhush: (subject: string, topic: string) => {
+        trace($, 'ui', 'unhush', () => ({ subject, topic }))
         void saveSubject($, settings, subject, profile => withoutHush(profile, topic))
       },
       onQuestions: () => {
+        trace($, 'ui', 'questions')
         void ask($, settings, firstRunQuestions(profiles.languages, false))
       },
       onExplainMove: (step: 1 | -1) => {
+        trace($, 'ui', 'explain move', () => step)
         void moveFocus($, step)
       },
       onExplainFetch: () => {
+        trace($, 'ui', 'explain fetch')
         void refreshView($, true)
       },
       onExplainAsk: () => {
+        trace($, 'ui', 'explain ask')
         void read($, explainAtom).then(view => {
           const text = explainAsk(view)
           // A prompt the mod submits skips the mod's own `prompt.submit` hook. The text
@@ -2499,18 +2859,22 @@ export const register: Register = (on, options) => {
         })
       },
       onDismiss: (note: Note) => {
+        trace($, 'ui', 'dismiss', () => note)
         void update($, notesAtom, open => open.filter(other => other.id !== note.id))
         // Remembered, so that the next look does not bring the same point back.
         void update($, dismissedAtom, dismissed => withDismissed(dismissed, note))
         void $.clock.now().then(at => recorder?.add({ at, kind: 'dismissed', path: note.file, line: note.line, text: note.topic }))
       },
       onWorking: () => {
+        trace($, 'ui', 'working')
         void askWorking($)
       },
       onLook: () => {
+        trace($, 'ui', 'look now')
         if (mode === 'on') void look($, settings, true)
       },
       onReview: () => {
+        trace($, 'ui', 'review now')
         void reviewSince($, true)
       },
     })

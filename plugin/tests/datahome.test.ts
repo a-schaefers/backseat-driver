@@ -120,6 +120,8 @@ test('forget: what a word names, and what each scope deletes', async () => {
     '/d/focus.json',
     '/d/view.json',
     '/d/update.json',
+    '/d/debug',
+    '/d/debug.json',
   ])
 
   expect(knownLanguages(['python.json', 'general.json', 'rust.json', 'python.json', 'notes.txt'])).toEqual(['python', 'rust'])

@@ -38,6 +38,8 @@ export function typed(command: string, args = '') {
 export const SESSION = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
 
 export const HOME = '/home/me'
+/** The session's id, as `$.session.id()` answers it. */
+export const SESSION_ID = 'feedc0de-0000-4000-8000-000000000001'
 /** Where the tutor keeps its own files in a test. */
 export const DATA_HOME = `${HOME}/.local/share/backseat-driver`
 /** The fake repository's root. */
@@ -232,6 +234,14 @@ export function stubSession(on: On, options: StubOptions = {}) {
     answers: [] as string[],
     /** What the plugin wrote to the debug log: where a swallowed error shows up. */
     logs: [] as string[],
+    /** Every record in the tutor's own debug log, in order, across its chunks. Empty while that log is off. */
+    debugLog(): { k: string; n: string; s: string; p: string; seq: number; ms?: number; d?: unknown }[] {
+      return [...session.disk.entries()]
+        .filter(([path]) => path.startsWith(`${DATA_HOME}/debug/`) && path.endsWith('.jsonl'))
+        .sort(([a], [b]) => a.localeCompare(b))
+        .flatMap(([, text]) => text.split('\n').filter(line => line !== ''))
+        .map(line => JSON.parse(line) as { k: string; n: string; s: string; p: string; seq: number; ms?: number; d?: unknown })
+    },
     /** Commits the working tree, as `git commit -am` would, and returns the new commit's hash. */
     commit(message = 'Commit', commitOptions: CommitOptions = {}) {
       for (const path of Object.keys(head)) delete head[path]
@@ -296,6 +306,9 @@ export function stubSession(on: On, options: StubOptions = {}) {
   }
 
   on('session.start', () => ({ cwd: ROOT }))
+  on('session.end', () => ({ sessionId: SESSION_ID }))
+  on('session.id', () => ({ value: SESSION_ID }))
+  on('session.version', () => ({ value: { version: '2.1.289', base: '2.1.289', builtAt: '2026-10-03T19:21:39Z' } }))
   on('classic.SessionStart', () => ({}))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('env.get', ($, e) => ({ value: e.name === 'HOME' ? HOME : options.env?.[e.name] }))

@@ -7,6 +7,7 @@ import { shortHash } from './hash'
  *   progress/<language>.json   evidence, level, report
  *   projects/<name>-<hash>/    one project's journal and cache
  *   focus.json                 written by an editor: where the caret is
+ *   debug.json, debug/         the debug log's switch, and the log (debuglog.ts)
  */
 
 /** The folder's own name under the user's data directory. */
@@ -83,6 +84,16 @@ export function focusPath(root: string): string {
   return `${root}/focus.json`
 }
 
+/** The file that says whether the debug log is on, for every session. */
+export function debugSwitchPath(root: string): string {
+  return `${root}/debug.json`
+}
+
+/** The folder that holds every session's debug log. */
+export function debugRoot(root: string): string {
+  return `${root}/debug`
+}
+
 /** The file that holds what is known about one source file of a project. */
 export function fileEntryPath(root: string, repoRoot: string, path: string): string {
   return `${projectDir(root, repoRoot)}/files/${shortHash(path)}-${safeName(baseName(path))}.json`
@@ -97,7 +108,7 @@ export function isOwnFolder(names: readonly string[]): boolean {
 }
 
 /** What the tutor may delete: only these, directly under its own folder. */
-export const REMOVABLE = ['profiles', 'progress', 'projects', 'focus.json', 'view.json', 'update.json'] as const
+export const REMOVABLE = ['profiles', 'progress', 'projects', 'focus.json', 'view.json', 'update.json', 'debug', 'debug.json'] as const
 
 /**
  * Whether `path` is something the tutor may delete: inside one of its own

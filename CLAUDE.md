@@ -83,7 +83,7 @@ Every roadmap milestone is built and was seen working in short scripted real ses
   - Limits: files under 256 KiB, at most 512 files.
   - Directory installs load as `<name>@synced`.
 - Approved plan for part two: `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine (nine decisions, risks per milestone).
-- In progress: the event-driven plan, `~/.claude/plans/wild-jumping-clover.md` on the owner's machine (approved 2026-10-04). Milestones M0 probes, M1 debug log, M2 locked store, M3 kernel (events, deadlines, health, play-by-play machine, sensor), M4 deep review queue, M5 Explain and journal on deadlines, M6 one driver per project, M7 pane pass, M8 optional push sources, M9 PureScript kernel. Done so far: M0 (see "Probed live" under Mod API). Until M3 lands, the sections below describe the polling design.
+- In progress: the event-driven plan, `~/.claude/plans/wild-jumping-clover.md` on the owner's machine (approved 2026-10-04). Milestones M0 probes, M1 debug log, M2 locked store, M3 kernel (events, deadlines, health, play-by-play machine, sensor), M4 deep review queue, M5 Explain and journal on deadlines, M6 one driver per project, M7 pane pass, M8 optional push sources, M9 PureScript kernel. Done so far: M0 (see "Probed live" under Mod API) and M1 (see "Debug log"; it also added the `session.end` flush of the journal). Until M3 lands, the sections below describe the polling design.
 
 ## Repository
 
@@ -121,6 +121,7 @@ npm test                         # claude plugin test ./plugin
 npm run typecheck                # tsc -p plugin/tsconfig.json
 scripts/dev-session.sh           # live session in tmux (default session name bsd)
 scripts/release.sh minor --push  # patch|minor|major|X.Y.Z: bump plugin.json, check, commit, tag, push
+scripts/debug-tail.sh            # follow the tutor's debug log (see "Debug log")
 ```
 
 - `claude plugin test` takes only the plugin root. It can't run one test, and the kit has no `only` or filter.
@@ -137,7 +138,8 @@ scripts/release.sh minor --push  # patch|minor|major|X.Y.Z: bump plugin.json, ch
 
 - `scripts/dev-session.sh` starts tmux in a throwaway git repo with `BACKSEAT_DRIVER_HOME` pointed at a scratch folder (`BSD_DATA_DIR`).
 - With parallel sessions, set your own `BSD_SESSION`, `BSD_RIDE_DIR` and `BSD_DATA_DIR`, and use that session name in every tmux command. On the shared default name, two sessions killed and typed into each other's sessions.
-- Drive: `tmux send-keys -t bsd '/bsd'` then, separately, `tmux send-keys -t bsd Enter` (sent together, Enter is often swallowed). Check the prompt box is empty afterwards. Read with `tmux capture-pane -p -t bsd`, after a moment.
+- Drive: `tmux send-keys -t bsd '/bsd'` then, separately, `tmux send-keys -t bsd Enter` (sent together, Enter is often swallowed, and so it was 0.4 s after the text: wait a second). Check the prompt box is empty afterwards. Read with `tmux capture-pane -p -t bsd`, after a moment.
+- `BSD_DEBUG=1` switches the tutor's debug log on in that session's data folder and passes `--debug-file`, so Claude Code's own log lands beside it (`debug/claude-code.log`; Claude Code also makes a `latest` link there). Follow it with `scripts/debug-tail.sh -d "$BSD_DATA_DIR"`.
 - A new folder shows the trust prompt first: `Down`, `Enter`. Keys sent before startup finishes are lost.
 - Keep the throwaway repo path plain: with long dashed paths the model mistyped them and hit permission prompts.
 - `C-x Tab` focuses the pane (hotkeys work then), `Escape` unfocuses.
@@ -200,6 +202,7 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 | `working.ts` | "What are you working on right now?" and `/bsd working` |
 | `update.ts` | install kind, versions, release tags, update and uninstall commands |
 | `questions.ts` | first-run questions |
+| `debuglog.ts` | the debug log: records, chunks, the ring of latest records, the tracer, `/bsd debug` parsing |
 | `pane.tsx` | pane tree from plain data, handlers passed in |
 
 ### Mode
@@ -340,7 +343,7 @@ The tutor writes `view.json` in answer and whenever its knowledge of the spot ch
   - The definition name is resolved at the next tick, so one read per caret position.
   - `focus.json` from before switch-on is a baseline and earns no time until rewritten.
 - Sittings: an hour idle ends one. On every read or write, finished sittings roll up (`digest`: files, commit titles, statements); only the open sitting keeps entries. Keep the last 20. A sitting with no save, no commit and under 1 min of editor time leaves nothing.
-- Writes: at most every 30 s when something is new; at once on a working-on statement; at switch-off.
+- Writes: at most every 30 s when something is new; at once on a working-on statement; at switch-off; and when the session ends (`session.end`).
   - Every write re-reads and merges (`sync`). An unseen entry is another session's and is kept. A seen-but-gone entry was rolled up or merged, and is dropped.
   - For said and inferred working-on, later wins; ties go to this session.
   - Every entry passes `parseEntry` so JSON is canonical for comparison.
@@ -452,6 +455,8 @@ projects/<name>-<hash>/       journal.json, project.json, reviews.json, files/
 focus.json                    written by an editor
 view.json                     written by the tutor
 update.json                   last release check
+debug.json                    the debug log's switch: {"on": true}
+debug/<session>/              one session's debug log (see "Debug log")
 ```
 
 - Not `$.store`: it's capped at 4 MiB total, separate per install method, and cleared after `cleanupPeriodDays`. Editor plugins also need a findable path. `moveOutOfStore` migrates old `subject/<x>` keys at switch-on; a file wins over a key.
@@ -464,15 +469,47 @@ update.json                   last release check
   - Returns at once; the result is a `$.ui.log` line. Works while off.
 - Live timings: an outside write 8–16 ms, a read or listing 3 ms, a stat 1 ms, `rm` 5 ms. Migration, keep-on-Enter, delete, and forget-everything leaving only the marker were all seen.
 
+### Debug log
+
+For developing Backseat Driver, not for its users: everything the tutor does, in one place for every project (owner: "nothing to do with individual projects"). A developer tells Claude to follow it while they exercise the tutor.
+
+- Switch: `/bsd debug on | off | status | dump | clear` (no word = status). It works while the tutor is off. The switch is `debug.json`, so it holds across sessions and restarts; a session reads it when its tutor is switched on (and on a reload). Nothing reads it at session start.
+- Files, under `debug/<YYYYMMDD-HHMMSS>-<first 8 of the session id>/` (UTC; a session keeps its folder across reloads):
+  - `NNNNNN.jsonl`: the log. `$.fs.write` cannot append, so the chunk being filled is written again, whole, each time it grows (at most every `FLUSH_MS`, 200 ms). A chunk closes at `CHUNK_CHARS` (128 000) and is never touched again, until `MAX_CHUNKS` (64) newer ones exist and it is emptied (there is no delete). After a reload or an off and on, the log carries on in a new chunk.
+  - `state.json`: the tutor's whole state after the latest flush: `snapshot()` (module variables: watcher, look, review, timers, slowdown, focus) plus every pane atom.
+  - `debug/dump-<stamp>-<session>.json`: what `/bsd debug dump` writes: the state and the ring.
+- Record: `{ t, seq, s, p, k, n, ms?, d? }`. `t` is `Date.now()` (free; `$.clock.now()` would cost a dispatch per record, and in the kit the two differ). `s` session, `p` project id, `k` kind, `n` name, `ms` duration, `d` details. A string over `MAX_STRING_CHARS` (400 000) is cut.
+- Kinds:
+  - `meta`: log started, log stopped (with why)
+  - `cmd`: every `/bsd` request
+  - `hook`: `session.start`, `classic.SessionStart`, `session.end`, `prompt.compose` (when what it adds changes), `prompt.context`, `prompt.submit` (with what was attached)
+  - `git`: argv, exit code, output
+  - `fs`: `read`, `write`, `list`, `remove` in the data folder; `source` for a file of the repository, by size
+  - `model`: the whole request and result, by job (`play-by-play`, `explain`, `progress`)
+  - `agent`: `register`, `spawn`, `finished`, with prompts and answers
+  - `tool`: input and answer of the tutor's own tools. `guard`: an edit denied or let through
+  - `state`: `mode`, `watch`, `review`, `progress`, `working`, `speech`
+  - `watch`: `saved`, `head moved`. `look`: `start`, `done`, `nothing to look at`, `reply not understood`
+  - `start`: `engaging`, `engaged` (with how long). `timer`. `ui`: every pane key. `process`: `claude`. `explain`. `error`: with the stack
+- Counted, not logged one by one: a `git status` that answered what the last one did, every stat, every pane render, every unchanged `prompt.compose`. `poll / nothing new` sums them up every 30 s. (M3 removes most of these with the polling.)
+- `trace($, kind, name, detail?, ms?)` in `register.tsx` is the one entry. `detail` is a function, called only while the log is on, so with the log off a trace costs a few assignments. The tracer always keeps the latest `RING_SIZE` (300) records in memory without details, which is what a dump shows of the time before the log was on.
+- `fail($, what, error)` is for an error the tutor survives: Claude Code's debug log as before (same text, tests read it in `session.logs`), plus an `error` record.
+- Every answer of the tutor's own tools goes through `answered($, e, text)`.
+- `scripts/debug-tail.sh [-a] [-k kinds] [-s session] [-d folder] [-1]` prints each record as it is written. `tail -f` cannot follow chunks that are written again; the script reads whole lines, moves to the next chunk, and to a newer session when one starts. Under Claude Code's Monitor tool each record becomes an event.
+- Forgetting everything, and uninstalling with erase, remove `debug/` and `debug.json` (both are in `REMOVABLE`). `forget()` stops the log first, or the next flush would write it back.
+- Footprint: no new process. New calls: `$.session.id`, `$.session.version` (for the first record), and the hook `session.end`.
+- Live (Sonnet, low): `/bsd` with `BSD_DEBUG=1` logged its start (engaged in 1.8 s), every git call with its timing, the survey's whole prompt, a save 1.1 s after it was written, three Explain requests, the look's request and reply, the notes and the bubble's line. `off` and `on` carried on in chunk 1 of the same folder, `dump` wrote 84 records, `clear` left one new folder, and `/exit` ended the log with `the session ended (prompt_input_exit)` 5 ms after `session.end`. The follower printed each record as it came, across the chunk change.
+
 ## Invariants
 
-- Dormant until switched on. While off, every hook passes through with `next(e)`: no pane, model call, prompt change or denial. No reads or writes at session start. Only `/bsd forget`, `/bsd help` (and update or uninstall when asked) act while off.
+- Dormant until switched on. While off, every hook passes through with `next(e)`: no pane, model call, prompt change or denial. No reads or writes at session start. Only `/bsd forget`, `/bsd help`, `/bsd debug` (and update or uninstall when asked) act while off. The debug log itself is written only while the tutor is on.
 - Background reviews never become conversation turns. Only what the user does in chat or the pane does. Verified live for `$.model.complete` and `$.agent.spawn`.
 - Model and effort per job come from `userConfig`; no model id is pinned (aliases only). Defaults: play-by-play `sonnet`/`medium`, deep review `opus`/`high`, Explain `sonnet`/`low`. "Thinking level" = Claude Code effort (`low|medium|high|xhigh|max`).
 - Hard rules are hooks; teaching style is the contract. The edit guard covers only `Edit`, `Write` and `NotebookEdit`; a shell command could still write, which rests on the contract and Claude Code's permission prompts.
 - Footprint (the README's "What it is not" states it to users):
   - Runs `git`, reads the repo and its own plugin folder, calls models, writes only its data folder, draws a pane.
-  - Other processes only on request: `rm` inside the data folder (forget), `claude plugin` (update, uninstall).
+  - Other processes only on request: `rm` inside the data folder (forget, `/bsd debug clear`), `claude plugin` (update, uninstall).
+  - The debug log, when the user switches it on, holds their code and prompts. It stays in the data folder.
   - Network of its own: the release check (`git ls-remote`, at most every 6 h, opt-out) and `/bsd update`'s fetch.
   - No git hooks, never writes the working tree.
   - Any new kind of call in the validator's `calls:` (`http.fetch`, a write outside the data folder, another process) breaks this and needs the owner's decision plus a README update.
@@ -540,6 +577,7 @@ The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above mem
 - Explain in the kit: `session.lookups`, answered with `session.explain(reply, 'text the prompt contains')`. Order isn't guaranteed. With no answer, a file maps to no symbols. `session.editor(file, line, …, extra)` writes `focus.json`. Journal tests set `explain: 'off'` (a live editor triggers the 100 ms poll and slows minute-scale tests).
 - Progress: `session.assess(reply)`, `session.assessments`. Updates: `session.ran` (claude and network git commands in order). A clone's top is the plugin folder's parent; an installed copy's `installPath` is `/`.
 - `session.logs` = `$.ui.log` output (swallowed errors appear there).
+- The tutor's own debug log in the kit: seed `data: { 'debug.json': { on: true } }` (and the marker), or run `/bsd debug on`. `session.debugLog()` returns every record across chunks. Records are written `FLUSH_MS` after they are noted, so `await session.clock.advance(FLUSH_MS)` before reading. The kit stubs `session.id` (`SESSION_ID`), `session.version` and `session.end`.
 - Engines with ports are tested without the kit: `explain.test.ts` has `world()`, whose model is answered by hand with `w.answer(request, reply)`, which is how a test changes a file mid-call.
 - `sessionTest` (30 s limit) for anything that starts a session; plain `test` (5 s) for pure functions. All files run in parallel processes, and each test loads the whole mod, so a busy machine takes seconds before the first action.
 - A `$.clock.every` period is one dispatch with 10 s of real time. The 5-min deep-review timer spanning about 150 ticks can exceed it under load ("exceeded 10000ms budget"), failing when several sessions test at once. `await session.clock.settle()` before asserting on timer-started work.
