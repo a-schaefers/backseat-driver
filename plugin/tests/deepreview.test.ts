@@ -1,3 +1,4 @@
+import { clockTime } from '../hooks/status'
 import { expect, test } from 'claude-code/testing'
 
 import type { Review } from '../types'
@@ -102,7 +103,7 @@ sessionTest('a commit is reviewed by the registered reviewer, and the review lan
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-review' })
-  expect(await ui.find({ type: 'Text', text: 'Reviewing commit 0000000: Add mean.' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: `Reviewing commit 0000000: Add mean since ${clockTime(session.clock.now())}.` })).toBeDefined()
 
   await $.turn.complete(session.finish(1, 'Good change. `mean` fails on an empty list.'))
   expect(await ui.find({ type: 'Markdown', text: '`mean` fails on an empty list.' })).toBeDefined()

@@ -52,6 +52,16 @@ export type Watch = {
   lastLookAt: number | null
   /** The status line as a sentence: what it is doing, and when a wait ends (`status.ts`). */
   line: string
+  /** What keeps going wrong in the background, as a sentence for the dim row under the status line. Absent or '' when nothing does. */
+  health?: string
+}
+
+/** A deep review as it was written: what the tab shows of one. */
+export type ReviewText = {
+  subject: string
+  text: string
+  decisions: DecisionPoint[]
+  insights: string[]
 }
 
 /** The latest deep review, for the pane's Deep review tab. */
@@ -67,6 +77,12 @@ export type Review = {
   decisions: DecisionPoint[]
   /** What the review found worth knowing about the implementation choices and patterns of this codebase. */
   insights: string[]
+  /** When the review that is running started, in clock milliseconds. */
+  since?: number
+  /** How many commits are waiting for their review, the one being reviewed included. */
+  waiting?: number
+  /** The last review that finished, kept in the tab while a newer one runs, waits or has failed. */
+  last?: ReviewText | null
 }
 
 /** What the pane's animated character is saying. */

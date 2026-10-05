@@ -4,6 +4,7 @@ import type { Hunk } from './diff'
 import { describeSpot, viewText } from './focus'
 import { languageName, languageOf } from './languages'
 import { listDismissed, listNotes } from './notes'
+import { readableReview } from './review'
 
 /** One file's change since the previous look. */
 export type FileChange = {
@@ -142,11 +143,13 @@ export function paneContext(notes: readonly Note[], review: Review, said = ''): 
       `Backseat Driver: the animated character in the pane speaks for the play-by-play and the deep review. It last said: "${said}"`,
     )
   }
-  if (review.state === 'done') {
+  // The review in front of them: the latest, or the one before it while a newer one is still on its way.
+  const shown = readableReview(review)
+  if (shown !== null) {
     parts.push(
       [
-        `Backseat Driver: the pane also shows this deep review of ${review.subject}. The user has it in front of them and may ask about it or contest it.`,
-        review.text,
+        `Backseat Driver: the pane also shows this deep review of ${shown.subject}. The user has it in front of them and may ask about it or contest it.`,
+        shown.text,
       ].join('\n'),
     )
   }

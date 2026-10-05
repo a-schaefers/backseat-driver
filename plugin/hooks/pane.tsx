@@ -7,9 +7,9 @@ import { languageName } from './languages'
 import { isProblem, sortNotes } from './notes'
 import { ANSWER_LABELS, explained, GENERAL, recurring } from './profiles'
 import { lately, levelPhrase, skillStates } from './progress'
-import { SURVEY_SUBJECT } from './review'
+import { readableReview, SURVEY_SUBJECT } from './review'
 import { DEFAULT_PERSONA } from './settings'
-import { playLine } from './status'
+import { clockTime, playLine } from './status'
 import type { Persona } from './settings'
 
 /** The elements the pane is built from. Every surface that draws panes has them. */
@@ -78,19 +78,50 @@ const TABS: readonly { tab: Tab; label: string; short: string; hotkey: string }[
 ]
 
 const NEW = ' (new)'
+/** Something is under way behind the tab: a review, a lookup, an assessment. */
+const BUSY = ' (…)'
+/** Something behind the tab did not go to plan and waits to be looked at. */
+const TROUBLE = ' (!)'
+
+/**
+ * What a tab says about what is behind it, after its name: how many notes
+ * are open, that a review is new, running or stuck, that Explain or Progress
+ * is at work. '' when there is nothing to say.
+ */
+export function tabBadge(tab: Tab, view: Partial<Pick<PaneView, 'notes' | 'review' | 'explain' | 'progress'>>): string {
+  if (tab === 'play') return view.notes === undefined || view.notes.length === 0 ? '' : ` (${view.notes.length})`
+  if (tab === 'review') {
+    const review = view.review
+    if (review === undefined) return ''
+    if (review.isUnseen) return NEW
+
+    return review.state === 'running' ? BUSY : review.state === 'failed' ? TROUBLE : ''
+  }
+  if (tab === 'explain') return view.explain?.status === 'updating' ? BUSY : ''
+
+  return view.progress !== undefined && view.progress.busy !== '' ? BUSY : ''
+}
 
 /**
  * The tabs' labels and the gap between them. The full names are used when
  * the row fits the pane, and the short ones when it does not, so that the
- * tabs never wrap onto a second line.
+ * tabs never wrap onto a second line. What a tab says about itself is kept
+ * for as long as the row has room for it.
  */
-export function tabRow(view: Pick<PaneView, 'columns' | 'review'>): { labels: string[]; gap: number } {
-  const name = (tab: Tab, label: string): string => (tab === 'review' && view.review.isUnseen ? `${label}${NEW}` : label)
-  const full = TABS.map(({ tab, label }) => name(tab, label))
+export function tabRow(
+  view: Pick<PaneView, 'columns' | 'review'> & Partial<Pick<PaneView, 'notes' | 'explain' | 'progress'>>,
+): { labels: string[]; gap: number } {
   // A button draws as its key, a colon, a space and its label.
-  const width = full.reduce((sum, label) => sum + label.length + 3, 0) + 3 * (TABS.length - 1)
+  const fits = (labels: readonly string[], gap: number): boolean =>
+    labels.reduce((sum, label) => sum + label.length + 3, 0) + gap * (TABS.length - 1) <= view.columns
+  const full = TABS.map(({ tab, label }) => `${label}${tabBadge(tab, view)}`)
+  if (fits(full, 3)) return { labels: full, gap: 3 }
+  const short = TABS.map(({ tab, short: name }) => `${name}${tabBadge(tab, view)}`)
+  if (fits(short, 2)) return { labels: short, gap: 2 }
+  if (fits(short, 1)) return { labels: short, gap: 1 }
 
-  return width <= view.columns ? { labels: full, gap: 3 } : { labels: TABS.map(({ tab, short }) => name(tab, short)), gap: 2 }
+  // No room for everything: the review's badge is the one that asks for a look, so it stays.
+  return { labels: TABS.map(({ tab, short: name }) => (tab === 'review' ? `${name}${tabBadge(tab, view)}` : name)), gap: 2 }
 }
 
 /** Shown while the pane does not have the keyboard: its keys do nothing until it does. */
@@ -311,27 +342,48 @@ function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
   )
 }
 
+/** What the Deep review tab says above the review: that one is running and since when, or why one did not finish. '' otherwise. */
+export function reviewBanner(review: Review): string {
+  if (review.state === 'running') {
+    if (review.subject === SURVEY_SUBJECT) return 'Taking a first look around this project.'
+
+    return review.since === undefined || review.since === 0 ? `Reviewing ${review.subject}.` : `Reviewing ${review.subject} since ${clockTime(review.since)}.`
+  }
+  if (review.state === 'failed') return `The review of ${review.subject} did not finish: ${review.text}`
+
+  return ''
+}
+
+/** How many commits wait behind the one the banner is about, as a sentence, or ''. */
+export function waitingLine(review: Review): string {
+  const behind = (review.waiting ?? 0) - 1
+  if (behind <= 0) return ''
+
+  return behind === 1 ? 'One more commit is waiting for its review.' : `${behind} more commits are waiting for their reviews.`
+}
+
 function deepReview({ Box, Text, Button, Markdown }: Kit, view: PaneView, actions: PaneActions) {
   const { review } = view
+  const banner = reviewBanner(review)
+  const behind = waitingLine(review)
+  // What there is to read: the latest review, or the one before it while a newer one is on its way.
+  const shown = readableReview(review)
+  const isOlder = shown !== null && review.state !== 'done'
 
   return (
     <Box flexDirection="column">
       {review.state === 'none' && <Text dimColor>No deep review yet. One runs {view.reviewSchedule}.</Text>}
-      {review.state === 'running' && (
-        <Text dimColor>{review.subject === SURVEY_SUBJECT ? 'Taking a first look around this project.' : `Reviewing ${review.subject}.`}</Text>
-      )}
-      {review.state === 'failed' && (
-        <Text>
-          The review of {review.subject} did not finish: {review.text}
-        </Text>
-      )}
-      {review.state === 'done' && <Text bold>{review.subject}</Text>}
-      {review.state === 'done' && review.decisions.length > 0 && (
+      {banner !== '' && <Text dimColor={review.state === 'running'}>{banner}</Text>}
+      {behind !== '' && <Text dimColor>{behind}</Text>}
+      {isOlder && <Text> </Text>}
+      {isOlder && <Text dimColor>The review before it:</Text>}
+      {shown !== null && <Text bold>{shown.subject}</Text>}
+      {shown !== null && shown.decisions.length > 0 && (
         <Box flexDirection="column">
           <Text bold color="magenta">
             {DECISION_HEADING}
           </Text>
-          {review.decisions.map(decision => (
+          {shown.decisions.map(decision => (
             <Box flexDirection="column">
               <Text>{`${decision.line > 0 ? `${decision.file}:${decision.line}` : decision.file}  ${decision.choice}`}</Text>
               {decision.tradeoff !== '' && (
@@ -344,12 +396,12 @@ function deepReview({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
           <Text> </Text>
         </Box>
       )}
-      {review.state === 'done' && <Markdown key="review" text={review.text} />}
-      {review.state === 'done' && review.insights.length > 0 && (
+      {shown !== null && <Markdown key="review" text={shown.text} />}
+      {shown !== null && shown.insights.length > 0 && (
         <Box flexDirection="column">
           <Text> </Text>
           <Text color="cyan">{INSIGHT_HEADING}</Text>
-          {review.insights.map(insight => (
+          {shown.insights.map(insight => (
             <Text>{`- ${insight}`}</Text>
           ))}
         </Box>
@@ -559,6 +611,7 @@ export function renderPane(kit: Kit, view: PaneView, actions: PaneActions) {
         ))}
       </Box>
       <Text dimColor>{statusLine(view)}</Text>
+      {view.mode !== 'paused' && (view.watch.health ?? '') !== '' && <Text dimColor>{view.watch.health}</Text>}
       {view.update !== '' && <Text color="yellow">{view.update}</Text>}
       {/* Outside a repository there is no journal, so nothing to go on and nowhere to keep an answer. */}
       {view.watch.state !== 'no-git' && workingOn(kit, view, actions)}

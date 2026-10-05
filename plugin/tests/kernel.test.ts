@@ -6,7 +6,7 @@ import { isLookDue, playOf, wakeAt } from '../hooks/play'
 import type { PlayFacts } from '../hooks/play'
 import { createScheduler } from '../hooks/scheduler'
 import { FOCUS_SCAN_MS, focusGapMs, HOT_FOR_MS, HOT_SCAN_MS, IDLE_AFTER_MS, IDLE_SCAN_MS, LONGEST_FOCUS_GAP_MS, LONGEST_SCAN_GAP_MS, SCAN_MS, scanGapMs } from '../hooks/sensor'
-import { clockTime, playLine, watchOf } from '../hooks/status'
+import { clockTime, healthLine, playLine, watchOf } from '../hooks/status'
 
 /** The pure parts of the kernel: deadlines, whether Claude is answering, what the play-by-play is doing, how often to scan. */
 
@@ -394,6 +394,28 @@ test('the status line says what is happening, and when a wait ends', async () =>
   expect(watchOf({ at: 'watching' }, 5)).toEqual({ state: 'idle', lastLookAt: 5, line: 'On. Watching for your next save.' })
   expect(watchOf({ at: 'on-request' }, null).state).toBe('idle')
   expect(watchOf({ at: 'paused' }, null).state).toBe('idle')
+})
+
+test('the row under the status line says what keeps going wrong, and not what the line above already says', async () => {
+  const at = new Date(2026, 9, 4, 12, 7).getTime()
+  const quiet = { play: { at: 'watching' } as const, health: HEALTHY, pressure: NO_PRESSURE, lastScanMs: 20, failing: [] }
+  expect(healthLine(quiet)).toBe('')
+  const waiting: Health = { state: 'waiting', trouble: 'overloaded', detail: 'overloaded', until: at, failures: 2 }
+  expect(healthLine({ ...quiet, health: waiting })).toBe('Claude is overloaded. Background work waits until 12:07.')
+  // A look that is held back says so itself, in the status line.
+  expect(healthLine({ ...quiet, health: waiting, play: { at: 'waiting', until: at, why: { kind: 'trouble', trouble: 'overloaded', detail: 'overloaded' } } })).toBe('')
+  expect(healthLine({ ...quiet, health: { state: 'blocked', detail: 'billing error' } })).toBe(
+    'Claude is refusing this account (billing error). Nothing runs in the background until that is sorted out.',
+  )
+  expect(healthLine({ ...quiet, play: { at: 'on-request' }, pressure: { level: 'held', percent: 97, window: 'five_hour', resetsAt: at } })).toBe(
+    'You are close to your plan limit. Nothing runs in the background until 12:07 unless you ask.',
+  )
+  expect(healthLine({ ...quiet, lastScanMs: 3200 })).toBe('git is slow here: the last look at the working tree took 3.2 s.')
+  expect(healthLine({ ...quiet, failing: ['could not write the journal'] })).toBe('Keeps failing: could not write the journal. /bsd debug dump saves the details.')
+  // Paused, or with another session driving, there is nothing in the background to speak of.
+  expect(healthLine({ ...quiet, health: waiting, play: { at: 'paused' } })).toBe('')
+  expect(healthLine({ ...quiet, health: waiting, play: { at: 'following' } })).toBe('')
+  expect(watchOf({ at: 'watching' }, 5, 'git is slow here.')).toEqual({ state: 'idle', lastLookAt: 5, line: 'On. Watching for your next save.', health: 'git is slow here.' })
 })
 
 test('the working tree is scanned often after something happened, and seldom when nothing has for a while', async () => {

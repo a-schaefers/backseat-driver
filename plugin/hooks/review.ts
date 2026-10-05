@@ -1,3 +1,5 @@
+import type { Review, ReviewText } from '../types'
+
 /** The latest move of HEAD, as `git reflog -1 --format=%H%x00%gs` prints it. */
 export type ReflogEntry = {
   hash: string
@@ -156,3 +158,26 @@ export function fitReview(text: string): string {
 /** What the model reads about this agent type when deciding whether to delegate to it. */
 export const REVIEWER_DESCRIPTION =
   "Backseat Driver's deep reviewer: a read-only reviewer on the user's chosen deep review model. Use it for a second opinion when the user contests a point you made and you still think it stands. Give it the code in question, your point and the user's argument."
+
+/**
+ * The Deep review tab's state after a change. A review that finished is not
+ * thrown away when the next one starts: it stays, as `last`, until a newer
+ * one is done, so that there is always something to read.
+ */
+export function withReviewChange(review: Review, change: Partial<Review>): Review {
+  const isLeavingDone = review.state === 'done' && change.state !== undefined && change.state !== 'done'
+  const last: ReviewText | null = isLeavingDone
+    ? { subject: review.subject, text: review.text, decisions: review.decisions, insights: review.insights }
+    : change.state === 'done'
+      ? null
+      : (review.last ?? null)
+
+  return { ...review, ...change, last }
+}
+
+/** The review the person can read right now: the latest when it is done, else the last one that was. */
+export function readableReview(review: Review): ReviewText | null {
+  if (review.state === 'done') return { subject: review.subject, text: review.text, decisions: review.decisions, insights: review.insights }
+
+  return review.last ?? null
+}

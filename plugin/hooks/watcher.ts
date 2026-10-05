@@ -42,6 +42,22 @@ export function createWatcher(ports: WatcherPorts) {
   const looked = new Map<string, string>()
   /** What each changed file contained at the last look. A file not listed was clean then, so its baseline is HEAD. */
   const baseline = new Map<string, string>()
+  /**
+   * Files the last look saw changed that are clean again with other text
+   * than it saw: changed once more and committed, or put back, all between
+   * two polls. Git no longer lists them, and what the last look said about
+   * them may no longer hold, so they are still to be looked at.
+   */
+  const returned = new Set<string>()
+
+  /** Whether a file that is clean now reads differently from what the last look saw of it. */
+  async function hasMoved(path: string): Promise<boolean> {
+    const before = baseline.get(path)
+    const after = await ports.read(path)
+    if (before === undefined || after === null || after.length > MAX_FILE_CHARS || looksBinary(after)) return false
+
+    return before !== after && !isTrivialChange(before, after)
+  }
 
   async function fingerprints(): Promise<Map<string, string> | null> {
     const status = await ports.git(STATUS)
@@ -76,6 +92,7 @@ export function createWatcher(ports: WatcherPorts) {
       seen = prints
       looked.clear()
       baseline.clear()
+      returned.clear()
       for (const [path, print] of prints) {
         looked.set(path, print)
         const text = await ports.read(path)
@@ -92,6 +109,18 @@ export function createWatcher(ports: WatcherPorts) {
       const hasChanged = !sameMap(prints, seen)
       changed = [...prints].filter(([path, print]) => seen.get(path) !== print).map(([path]) => path)
       seen = prints
+      // What the last look saw changed and git no longer lists: read once, when it turns clean.
+      for (const path of [...looked.keys()]) {
+        if (seen.has(path)) returned.delete(path)
+        else if (!returned.has(path)) {
+          if (await hasMoved(path)) returned.add(path)
+          else {
+            // Committed as the last look saw it: HEAD is its baseline again.
+            looked.delete(path)
+            baseline.delete(path)
+          }
+        }
+      }
 
       return hasChanged
     },
@@ -103,6 +132,7 @@ export function createWatcher(ports: WatcherPorts) {
 
     /** Whether any file differs from what the previous look saw. */
     hasPending(): boolean {
+      if (returned.size > 0) return true
       for (const [path, print] of seen) {
         if (looked.get(path) !== print) return true
       }
@@ -138,6 +168,18 @@ export function createWatcher(ports: WatcherPorts) {
         }
         changes.push({ path, before, after, hunks: diffLines(before, after), print })
       }
+      for (const path of [...returned]) {
+        const before = baseline.get(path) ?? ''
+        const after = await ports.read(path)
+        // Changed back in the meantime, or gone: nothing is left to look at.
+        if (after === null || !(await hasMoved(path))) {
+          returned.delete(path)
+          looked.delete(path)
+          baseline.delete(path)
+          continue
+        }
+        changes.push({ path, before, after, hunks: diffLines(before, after), print: '' })
+      }
 
       return changes
     },
@@ -150,10 +192,12 @@ export function createWatcher(ports: WatcherPorts) {
       for (const change of changes) {
         baseline.set(change.path, change.after)
         looked.set(change.path, change.print)
+        returned.delete(change.path)
       }
-      // Files that are clean again (committed or reverted) go back to HEAD as their baseline.
+      // Files that are clean again (committed or reverted) go back to HEAD as their baseline,
+      // except one that still has a change no look has seen.
       for (const path of [...looked.keys()]) {
-        if (!seen.has(path)) {
+        if (!seen.has(path) && !returned.has(path)) {
           looked.delete(path)
           baseline.delete(path)
         }

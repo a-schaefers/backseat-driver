@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Register, Timer } from 'claude-code'
 
-import type { Hush, LevelChange, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, Spot, Tab, Watch, Working } from '../types'
+import type { ExplainView, Hush, LevelChange, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, Spot, Tab, Watch, Working } from '../types'
 import {
   avatarFor,
   BLINK_MS,
@@ -158,7 +158,7 @@ import type { Scheduler } from './scheduler'
 import { claimed, nextLeaseCheck, parseLease, released } from './lease'
 import type { Lease } from './lease'
 import { FOCUS_SCAN_MS, focusGapMs, scanGapMs } from './sensor'
-import { playLine, watchOf } from './status'
+import { healthLine, playLine, watchOf } from './status'
 import type { Recorder } from './recorder'
 import {
   commitTitle,
@@ -173,6 +173,7 @@ import {
   scopeSubject,
   shortHash,
   showCommitArgs,
+  withReviewChange,
 } from './review'
 import type { ReviewScope } from './review'
 import {
@@ -269,6 +270,26 @@ let lastLookAt: number | null = null
 let isLooking = false
 /** Looks in a row that got no answer, and why the last of them did not. */
 let failures = 0
+/**
+ * What went wrong lately and how often, by the words it was reported with.
+ * Something that fails twice within a few minutes is said in the pane.
+ */
+const failuresSeen = new Map<string, { count: number; at: number }>()
+const FAILING_FOR_MS = 300_000
+/** The pane's state as it was when the conversation was cleared, until it is put back (`carryPane`). */
+let carried: {
+  tab: Tab
+  notes: Note[]
+  dismissed: Note[]
+  selected: number | null
+  watch: Watch
+  review: Review
+  profiles: Profiles
+  explain: ExplainView
+  progress: ProgressView
+  update: string
+  working: Working
+} | null = null
 let lookFailure = ''
 
 /**
@@ -444,8 +465,19 @@ function trace($: EngineInterface, kind: string, name: string, detail?: () => un
 
 /** Something went wrong and the tutor carried on. It is said in Claude Code's debug log and in the tutor's own. */
 function fail($: EngineInterface, what: string, error: unknown): void {
+  // Counted, so that something that keeps going wrong is said in the pane and not only in a log nobody reads.
+  const at = Date.now()
+  const seen = failuresSeen.get(what)
+  failuresSeen.set(what, { count: seen !== undefined && at - seen.at < FAILING_FOR_MS ? seen.count + 1 : 1, at })
   $.ui.log(`${what}: ${String(error)}`, { to: 'debug' })
   trace($, 'error', what, () => ({ message: String(error), stack: error instanceof Error ? error.stack : undefined }))
+}
+
+/** What has gone wrong more than once in the last few minutes, in the words it was reported with. */
+function failingNow(): string[] {
+  const now = Date.now()
+
+  return [...failuresSeen].filter(([, seen]) => seen.count >= 2 && now - seen.at < FAILING_FOR_MS).map(([what]) => what)
 }
 
 /** Sums up the polls that found nothing new since the last summary. */
@@ -785,9 +817,9 @@ function playFacts(settings: Settings): PlayFacts {
 /** Tells the pane what the play-by-play is doing, when that is not what it already says. */
 async function showPlay($: EngineInterface, settings: Settings): Promise<Play> {
   const play = playOf(playFacts(settings))
-  const next = watchOf(play, lastLookAt)
+  const next = watchOf(play, lastLookAt, healthLine({ play, health, pressure, lastScanMs, failing: failingNow() }))
   const shown = await read($, watchAtom)
-  if (shown.state !== next.state || shown.line !== next.line || shown.lastLookAt !== next.lastLookAt) {
+  if (shown.state !== next.state || shown.line !== next.line || shown.lastLookAt !== next.lastLookAt || (shown.health ?? '') !== (next.health ?? '')) {
     trace($, 'state', 'watch', () => ({ ...next, play }))
     await update($, watchAtom, (): Watch => next)
   }
@@ -1103,7 +1135,7 @@ async function startAnimating($: EngineInterface, settings: Settings, isFresh: b
 
 async function setReview($: EngineInterface, change: Partial<Review>): Promise<void> {
   trace($, 'state', 'review', () => change)
-  await update($, reviewAtom, (review): Review => ({ ...review, ...change }))
+  await update($, reviewAtom, (review): Review => withReviewChange(review, change))
 }
 
 /** A file's size and modification time as one string, or '' when it is not there. */
@@ -1883,6 +1915,7 @@ async function startReview($: EngineInterface, settings: Settings, scope: Review
   // After a wait, this review is the request that finds out whether Claude is back.
   if (health.state === 'recovering') health = stepHealth(health, { type: 'probing' })
   let refusal = 'the reviewer did not start'
+  await setReview($, { since: await $.clock.now() })
   try {
     const prompt = reviewRequest(
       scope,
@@ -1915,6 +1948,57 @@ async function startReview($: EngineInterface, settings: Settings, scope: Review
   await reviewFailed($, settings, scope, refusal, 'own')
 
   return false
+}
+
+/**
+ * `/clear` and `/resume` empty `$.state`, and with it everything the pane
+ * shows, while this module and the tutor carry on. So the pane's state is
+ * read out when the conversation ends, and written back when the next one
+ * starts.
+ */
+async function carryPane($: EngineInterface): Promise<void> {
+  const [tab, notes, dismissed, selected, watch, review, shownProfiles, explain, progress, release, working] = await Promise.all([
+    read($, tabAtom),
+    read($, notesAtom),
+    read($, dismissedAtom),
+    read($, selectedAtom),
+    read($, watchAtom),
+    read($, reviewAtom),
+    read($, profilesAtom),
+    read($, explainAtom),
+    read($, progressAtom),
+    read($, updateAtom),
+    read($, workingAtom),
+  ])
+  carried = { tab, notes, dismissed, selected, watch, review, profiles: shownProfiles, explain, progress, update: release, working }
+}
+
+/** Puts back what `carryPane` read out. Without it, as after `/branch`, what this module can work out again is shown again. */
+async function restorePane($: EngineInterface, settings: Settings): Promise<void> {
+  const kept = carried
+  carried = null
+  if (kept === null) {
+    await update($, profilesAtom, () => profiles)
+    await showProgress($, settings)
+    await showPlay($, settings)
+    await refreshView($)
+
+    return
+  }
+  trace($, 'state', 'pane restored', () => ({ notes: kept.notes.length, review: kept.review.state, tab: kept.tab }))
+  await Promise.all([
+    update($, tabAtom, () => kept.tab),
+    update($, notesAtom, () => kept.notes),
+    update($, dismissedAtom, () => kept.dismissed),
+    update($, selectedAtom, () => kept.selected),
+    update($, watchAtom, (): Watch => kept.watch),
+    update($, reviewAtom, (): Review => kept.review),
+    update($, profilesAtom, () => kept.profiles),
+    update($, explainAtom, () => kept.explain),
+    update($, progressAtom, (): ProgressView => kept.progress),
+    update($, updateAtom, () => kept.update),
+    update($, workingAtom, (): Working => kept.working),
+  ])
 }
 
 /** What a session that does not drive says when it is asked for a look or a review. */
@@ -2082,6 +2166,9 @@ async function changeQueue($: EngineInterface, change: (queue: ReviewQueue) => R
     waiting = change(current(waiting, now))
     fail($, 'could not save the waiting commits', error)
   }
+  // The tab says how many are waiting for their review.
+  const count = waiting.commits.filter(commit => !commit.isReviewed).length
+  if (count !== ((await read($, reviewAtom)).waiting ?? 0)) await setReview($, { waiting: count })
 }
 
 /** Reviews one commit now. Resolves false when no review started. The caller holds the review slot. */
@@ -2547,7 +2634,7 @@ async function scan($: EngineInterface, settings: Settings): Promise<void> {
     // A look is a deadline, set from what this scan found.
     await planLook($, settings)
   } catch (error) {
-    fail($, 'poll failed', error)
+    fail($, 'looking at the working tree', error)
   } finally {
     isScanning = false
     if (now === 0) now = await $.clock.now()
@@ -2685,7 +2772,7 @@ async function refreshView($: EngineInterface, isAsked = false): Promise<void> {
       await $.fs.write(`${dataRoot}/view.json`, viewFile(view, repoRoot, spot.source, await $.clock.now()))
     }
   } catch (error) {
-    fail($, 'explain failed', error)
+    fail($, 'showing what Explain knows', error)
   }
 }
 
@@ -2765,7 +2852,7 @@ async function fastPoll($: EngineInterface): Promise<void> {
       isStillWatched = explainer !== null && (await isWatched($))
     }
   } catch (error) {
-    fail($, 'focus poll failed', error)
+    fail($, 'checking the spot in focus', error)
     isStillWatched = explainer !== null
   }
   // Switched off, or on again, while this check ran: whoever did that decides what runs now.
@@ -3373,6 +3460,8 @@ export const register: Register = (on, options) => {
     // The pane's "Working on" line was reset with the rest of the state. The journal behind it was not.
     if (mode !== 'off') {
       trace($, 'hook', 'classic.SessionStart', () => ({ source: e.source }))
+      // The notes, the review and the rest of the pane were emptied with the state. They come back.
+      await restorePane($, settings)
       workingShown = ''
       await showWorking($, await $.clock.now())
       // The session may go by another id now. The lease is renewed under it.
@@ -3625,9 +3714,11 @@ export const register: Register = (on, options) => {
   on('session.end', async ($, e, next) => {
     if (mode !== 'off') {
       trace($, 'hook', 'session.end', () => ({ reason: e.reason }))
+      // After /clear and /resume this process carries on, and so do its pane, its log and its lease.
+      // The pane first: the state it lives in is emptied next, and this hook has a second and a half in all.
+      if (e.reason === 'clear' || e.reason === 'resume') await carryPane($)
       const leaving = recorder
       if (leaving !== null) await flushJournal($, leaving, await $.clock.now(), true)
-      // After /clear and /resume this process carries on, and so do its log and its lease.
       if (e.reason === 'clear' || e.reason === 'resume') await flushDebug($)
       else {
         if (isDriver && repoRoot !== '' && dataRoot !== '') await giveLease($, leasePath(dataRoot, repoRoot), leaseHolder)
@@ -3749,26 +3840,39 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'Pane', requestId: 'backseat-driver' }, async ($, e) => {
     quiet.renders += 1
+    // One round for everything the pane shows, not a dozen in a row for every frame.
+    const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech] = await Promise.all([
+      read($, modeAtom),
+      read($, tabAtom),
+      read($, notesAtom),
+      read($, selectedAtom),
+      read($, watchAtom),
+      read($, reviewAtom),
+      read($, profilesAtom),
+      read($, explainAtom),
+      read($, workingAtom),
+      read($, progressAtom),
+      read($, updateAtom),
+      read($, speechAtom),
+    ])
     const view = {
-      mode: await read($, modeAtom),
-      tab: await read($, tabAtom),
+      mode: shownMode,
+      tab,
       persona: settings.persona,
-      notes: await read($, notesAtom),
-      selected: await read($, selectedAtom),
-      watch: await read($, watchAtom),
+      notes,
+      selected,
+      watch,
       isAutomatic: settings.playByPlay.isAutomatic,
-      review: await read($, reviewAtom),
+      review,
       reviewSchedule: reviewSchedule(settings.deepReview.isAfterCommit, settings.deepReview.everyMs),
-      profiles: await read($, profilesAtom),
-      explain: await read($, explainAtom),
-      working: await read($, workingAtom),
-      progress: await read($, progressAtom),
-      update: await read($, updateAtom),
+      profiles: shownProfiles,
+      explain,
+      working,
+      progress,
+      update: release,
       isFocused: e.props.isFocused,
       columns: e.props.bodyColumns,
-      character: settings.isAnimated
-        ? { avatar: avatarFor(settings.persona.voice), speech: await read($, speechAtom) }
-        : null,
+      character: settings.isAnimated ? { avatar: avatarFor(settings.persona.voice), speech } : null,
       // Above the prompt rows are scarce, and other surfaces may not draw text art in a fixed-width font.
       isCompact: e.props.placement === 'inline' || e.surface !== 'terminal',
     }

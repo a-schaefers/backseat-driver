@@ -211,6 +211,65 @@ test('a committed file goes back to HEAD as its baseline', async () => {
   expect(changes[0]?.before).toBe('one\ntwo\n')
 })
 
+test('a file fixed and committed between two polls is still looked at', async () => {
+  const { watcher, write, commit } = tree({ 'a.py': 'one\n' }, { 'a.py': 'one\n' })
+  await watcher.start()
+  write('a.py', 'one\nbug\n')
+  await watcher.poll()
+  watcher.settle(await watcher.collect())
+  expect(watcher.hasPending()).toBe(false)
+
+  // The fix is saved and committed before the next poll: git lists nothing, and a note about `bug` is still open.
+  write('a.py', 'one\nfixed\n')
+  commit('a.py')
+  expect(await watcher.poll()).toBe(true)
+  expect(watcher.hasPending()).toBe(true)
+  const changes = await watcher.collect()
+  expect(changes.map(change => [change.path, change.before, change.after])).toEqual([['a.py', 'one\nbug\n', 'one\nfixed\n']])
+
+  // A look that got no answer settles nothing, and the change is still there for the next.
+  expect(watcher.hasPending()).toBe(true)
+  expect((await watcher.collect()).length).toBe(1)
+  watcher.settle(changes)
+  expect(watcher.hasPending()).toBe(false)
+  expect(await watcher.collect()).toEqual([])
+  // From here the file is compared with HEAD again.
+  write('a.py', 'one\nfixed\nmore\n')
+  await watcher.poll()
+  expect((await watcher.collect())[0]?.before).toBe('one\nfixed\n')
+})
+
+test('a file committed as the last look saw it, or put back to that, is not looked at again', async () => {
+  const { watcher, write, commit } = tree({ 'a.py': 'one\n' }, { 'a.py': 'one\n' })
+  await watcher.start()
+  write('a.py', 'one\ntwo\n')
+  await watcher.poll()
+  watcher.settle(await watcher.collect())
+
+  commit('a.py')
+  await watcher.poll()
+  expect(watcher.hasPending()).toBe(false)
+  expect(await watcher.collect()).toEqual([])
+})
+
+test('a change that is thrown away after a look is a change too, and the look after it says so', async () => {
+  const { watcher, write } = tree({ 'a.py': 'one\n' }, { 'a.py': 'one\n' })
+  await watcher.start()
+  write('a.py', 'one\nexperiment\n')
+  await watcher.poll()
+  watcher.settle(await watcher.collect())
+
+  // `git checkout a.py`: the file is as committed again.
+  write('a.py', 'one\n')
+  await watcher.poll()
+  expect(watcher.hasPending()).toBe(true)
+  const changes = await watcher.collect()
+  expect(changes[0]?.before).toBe('one\nexperiment\n')
+  expect(changes[0]?.after).toBe('one\n')
+  watcher.settle(changes)
+  expect(watcher.hasPending()).toBe(false)
+})
+
 test('outside a git repository the watcher does not start', async () => {
   const watcher = createWatcher({
     git: async () => ({ exitCode: 128, stdout: '' }),
