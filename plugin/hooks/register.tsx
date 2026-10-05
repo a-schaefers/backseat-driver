@@ -168,7 +168,17 @@ import type { Insight, KeptInsight, ProjectKnowledge, ReviewNotes, ReviewRecord 
 import { explainAsk, explainContext, explainRequest, paneContext, reviewerSystem } from '../core/prompts'
 import { firstRunQuestions, groupAnswers } from '../core/questions'
 import type { Question } from '../core/questions'
-import { createRecorder } from '../core/recorder'
+import {
+  flushJournal as flushJournalOf,
+  freshJournalState,
+  journalDue as journalDueOf,
+  keepJournal as keepJournalOf,
+  NO_WORKING,
+  sayWorking as sayWorkingOf,
+  showWorking as showWorkingOf,
+  startJournal as startJournalOf,
+} from '../core/journaling'
+import type { JournalPorts, JournalState } from '../core/journaling'
 import { createScheduler } from '../core/scheduler'
 import type { Scheduler } from '../core/scheduler'
 import { claimed, nextLeaseCheck, parseLease, released } from '../core/lease'
@@ -267,7 +277,6 @@ const COMMANDS = ['backseat-driver', 'bsd'] as const
 const IDLE: Watch = { state: 'idle', lastLookAt: null, line: playLine({ at: 'watching' }) }
 const NO_REVIEW: Review = { state: 'none', subject: '', text: '', isUnseen: false, decisions: [], insights: [] }
 const NO_PROFILES: Profiles = { languages: [], subjects: {} }
-const NO_WORKING: Working = { said: '', saidAgo: '', inferred: '', where: '', share: '' }
 
 const modeAtom = atom({ plugin: 'backseat-driver', key: 'mode' } as const, 'off')
 const tabAtom = atom({ plugin: 'backseat-driver', key: 'tab' } as const, 'play')
@@ -490,9 +499,8 @@ let reviewedPrint = ''
 const reviewState: ReviewState = freshReviewState()
 
 /** The journal of what they are doing in this project. Null while the tutor is off, and outside a repository. */
-let recorder: Recorder | null = null
+const journalState: JournalState = freshJournalState()
 /** What the pane was last told they are working on, as JSON, so that it is told again only when that changes. */
-let workingShown = ''
 
 /**
  * The debug log. The tracer always keeps the latest records in memory, and
@@ -593,7 +601,7 @@ function snapshot(): Record<string, unknown> {
     timers: { talk: talkTimer !== null, blink: blinkTimer !== null },
     profiles: { languages: profiles.languages, subjects: Object.keys(profiles.subjects) },
     progress: { identity: progressState.identity, records: [...progressState.records.keys()], watchedPaths: [...progressState.watchedPaths] },
-    journal: recorder === null ? null : { working: workingShown },
+    journal: journalState.recorder === null ? null : { working: journalState.workingShown },
     project: project === null ? null : { isSurveyed: project.isSurveyed, insights: project.insights.length },
     quiet,
   }
@@ -1743,103 +1751,63 @@ async function runUninstall($: EngineInterface, settings: Settings): Promise<voi
 
 
 
-/** Tells the pane what they are working on, when that has changed since it was last told. */
-async function showWorking($: EngineInterface, now: number): Promise<void> {
-  const working = recorder === null ? NO_WORKING : recorder.working(now)
-  const text = JSON.stringify(working)
-  if (text === workingShown) return
-  workingShown = text
-  trace($, 'state', 'working', () => working)
-  await update($, workingAtom, (): Working => working)
+/** What keeping the journal needs from Claude Code. */
+function journalPortsOf($: EngineInterface): JournalPorts {
+  return {
+    now: async () => await $.clock.now(),
+    trace: (kind, name, detail) => trace($, kind, name, detail),
+    showWorking: async working => void (await update($, workingAtom, (): Working => working)),
+    isOn: () => mode !== 'off',
+    store: () => storeOf($),
+    file: root => (dataRoot === '' ? '' : journalPath(dataRoot, root)),
+    repoRoot: () => repoRoot,
+    read: (root, path) => readSource($, root, path),
+    git: (root, args) => git($, root, args),
+    readEditor: async () => {
+      await readFocus($)
+
+      return focusText
+    },
+    watcher: () => watcher,
+    engagement: () => engagement,
+    deadline: { set: (name, at, run) => schedulerOf($).set(name, at, run), cancel: name => void deadlines?.cancel(name) },
+    fail: (what, error) => fail($, what, error),
+  }
 }
 
 /** Writes the journal when it is due, or now when `isForced`. A write that fails is made again with the next one. */
 async function flushJournal($: EngineInterface, journal: Recorder, now: number, isForced: boolean): Promise<void> {
-  try {
-    await journal.flush(now, isForced)
-  } catch (error) {
-    fail($, 'could not write the journal', error)
-  }
+  await flushJournalOf(journalPortsOf($), journal, now, isForced)
 }
 
-/**
- * The journal's part of a scan: what was just saved and what it changed, and
- * the time the caret has spent where it is. No model is involved. Writing
- * the journal is not part of it: that has a deadline of its own.
- */
+/** Tells the pane what they are working on, when that has changed since it was last told. */
+async function showWorking($: EngineInterface, now: number): Promise<void> {
+  await showWorkingOf(journalPortsOf($), journalState, now)
+}
+
+/** The journal's part of a scan: what was just saved and what it changed, and the time the caret has spent where it is. */
 async function keepJournal($: EngineInterface, active: Watcher, now: number): Promise<void> {
-  const journal = recorder
-  if (journal === null) return
-  const saved = active.changed()
-  if (saved.length > 0) await journal.saved(saved, now)
-  journal.settle(active.dirty())
-  await journal.tick(now)
-  await showWorking($, now)
+  await keepJournalOf(journalPortsOf($), journalState, active, now)
 }
 
-/**
- * The journal's deadline came: a write is due, or the time the caret has
- * spent somewhere is worth an entry. The journal says when the next one is.
- */
+/** The journal's deadline came: a write is due, or the time the caret has spent somewhere is worth an entry. */
 async function journalDue($: EngineInterface): Promise<void> {
-  const journal = recorder
-  if (journal === null || mode === 'off') return
-  const now = await $.clock.now()
-  await journal.tick(now)
-  await showWorking($, now)
-  await flushJournal($, journal, now, false)
+  await journalDueOf(journalPortsOf($), journalState)
 }
 
-/**
- * Starts the journal of this project, once the watcher has read the tree.
- * `isFresh` is false when the tutor was already on and the module reloaded.
- */
+/** Starts the journal of this project, once the watcher has read the tree. */
 async function startJournal($: EngineInterface, run: number, isFresh: boolean): Promise<void> {
-  const root = repoRoot
-  if (root === '') return
-  const started = createRecorder({
-    store: storeOf($),
-    file: dataRoot === '' ? '' : journalPath(dataRoot, root),
-    root,
-    read: path => readSource($, root, path),
-    head: async path => {
-      const shown = await git($, root, ['show', `HEAD:${path}`])
-
-      return shown.exitCode === 0 ? shown.stdout : null
-    },
-    wakeAt: at => {
-      // Only the journal in use keeps the deadline: one that was replaced, or never taken up, has no say.
-      if (recorder !== null && recorder !== started) return
-      if (at === null) deadlines?.cancel('journal')
-      else schedulerOf($).set('journal', at, () => journalDue($))
-    },
-  })
-  const branch = (await git($, root, ['rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim()
-  const now = await $.clock.now()
-  await started.start(now, isFresh ? branch : null, watcher?.dirty() ?? [])
-  // Where the caret was left before the tutor was watching earns no time until the editor writes again.
-  await readFocus($)
-  started.editor(focusText, now, true)
-  // Switched off, or on again, in the meantime: this journal is no longer wanted.
-  if (run !== engagement) return
-
-  recorder = started
-  await showWorking($, now)
+  await startJournalOf(journalPortsOf($), journalState, run, isFresh)
 }
 
 /** Records what they said they are working on, or takes it back with ''. It is saved at once. */
 async function sayWorking($: EngineInterface, said: string): Promise<void> {
-  const journal = recorder
-  if (journal === null) return
-  const now = await $.clock.now()
-  journal.say(said, now)
-  await showWorking($, now)
-  await flushJournal($, journal, now, true)
+  await sayWorkingOf(journalPortsOf($), journalState, said)
 }
 
 /** Asks what they are working on. Dismissing the dialog leaves everything as it is. */
 async function askWorking($: EngineInterface): Promise<void> {
-  const journal = recorder
+  const journal = journalState.recorder
   if (journal === null) return
   const working = journal.working(await $.clock.now())
   let answer = ''
@@ -2110,7 +2078,7 @@ function lookPortsOf($: EngineInterface, settings: Settings): LookPorts {
     bringIntoPlay: languages => bringIntoPlay($, languages),
     currentInsights: files => currentInsights($, files),
     brief: (files, isCurrent) => (project === null ? '' : projectBrief(project, files, isCurrent)),
-    glance: async () => recorder?.glance(await $.clock.now()) ?? '',
+    glance: async () => journalState.recorder?.glance(await $.clock.now()) ?? '',
     system: bubble =>
       reviewerSystem(lookInstructions, [bubble === null ? '' : bubbleInstructions, aboutPerson()], persona),
     profiles: () => profiles,
@@ -2122,7 +2090,7 @@ function lookPortsOf($: EngineInterface, settings: Settings): LookPorts {
     notePrints,
     saveNotes: () => saveNotes($),
     saveSubject: (subject, change) => saveSubject($, settings, subject, change),
-    recorder: () => recorder,
+    recorder: () => journalState.recorder,
     showWorking: now => showWorking($, now),
     say: text => say($, text),
     fail: (what, error) => fail($, what, error),
@@ -2173,7 +2141,7 @@ async function startReview($: EngineInterface, settings: Settings, scope: Review
     const prompt = reviewRequest(
       scope,
       { overview: project === null ? '' : overviewLine(project), earlier: reviewDigest(reviews) },
-      recorder?.glance(await $.clock.now()) ?? '',
+      journalState.recorder?.glance(await $.clock.now()) ?? '',
     )
     const started = Date.now()
     const spawned = await $.agent.spawn({
@@ -2370,8 +2338,8 @@ async function stopDriving($: EngineInterface, settings: Settings): Promise<void
   const plan = schedulerOf($)
   for (const name of ['scan', 'look', 'review', 'assess', 'review-timer', 'journal']) plan.cancel(name)
   stopPushing()
-  const leaving = recorder
-  recorder = null
+  const leaving = journalState.recorder
+  journalState.recorder = null
   reviewState.waiting = EMPTY_QUEUE
   if (leaving !== null) await flushJournal($, leaving, await $.clock.now(), true)
   await showWorking($, await $.clock.now())
@@ -2780,12 +2748,12 @@ async function checkHead($: EngineInterface, settings: Settings): Promise<void> 
     // A checkout, pull, reset or rebase is not new work. Deep reviews start afresh from here.
     reviewedHead = entry.hash
     reviewedPrint = ''
-    recorder?.add({ at: movedAt, kind: 'head', hash: entry.hash, text: entry.subject })
-    recorder?.moved(movedAt)
+    journalState.recorder?.add({ at: movedAt, kind: 'head', hash: entry.hash, text: entry.subject })
+    journalState.recorder?.moved(movedAt)
 
     return
   }
-  recorder?.add({ at: movedAt, kind: 'commit', hash: entry.hash, text: commitTitle(entry) })
+  journalState.recorder?.add({ at: movedAt, kind: 'commit', hash: entry.hash, text: commitTitle(entry) })
   if (!settings.deepReview.isAfterCommit && !settings.isProgressOn) return
   // It waits, on disk, until it has been reviewed and looked at for the person's progress.
   // That happens at once when nothing stands in the way, and otherwise when Claude answers again or the plan allows.
@@ -3198,7 +3166,7 @@ async function pollFocus($: EngineInterface): Promise<void> {
   if (mode === 'off' || repoRoot === '' || !(await readFocus($))) return
   const now = await $.clock.now()
   activeAt = now
-  recorder?.editor(focusText, now, false)
+  journalState.recorder?.editor(focusText, now, false)
   await followEditor($, now)
 }
 
@@ -3567,8 +3535,8 @@ async function switchTo($: EngineInterface, next: Mode, settings: Settings): Pro
     stopAnimating()
     await update($, speechAtom, () => SILENT)
     // The journal is written one last time, with the attention added up so far. The command does not wait for it.
-    const leaving = recorder
-    recorder = null
+    const leaving = journalState.recorder
+    journalState.recorder = null
     const now = await $.clock.now()
     if (leaving !== null) void flushJournal($, leaving, now, true)
     await showWorking($, now)
@@ -3688,7 +3656,7 @@ async function forget($: EngineInterface, settings: Settings, named: Scope | nul
       await update($, selectedAtom, () => null)
       await update($, reviewAtom, () => NO_REVIEW)
       // Or the journal held in memory would be written straight back into the folder that was just deleted.
-      recorder?.reset()
+      journalState.recorder?.reset()
       await showWorking($, await $.clock.now())
     }
     if (scope.kind !== 'project' && mode !== 'off') {
@@ -3826,7 +3794,7 @@ async function drawTutor($: EngineInterface, settings: Settings, kit: Kit, where
         update($, notesAtom, open => open.filter(other => other.id !== note.id)),
         update($, dismissedAtom, dismissed => withDismissed(dismissed, note)),
       ]).then(() => saveNotes($))
-      void $.clock.now().then(at => recorder?.add({ at, kind: 'dismissed', path: note.file, line: note.line, text: note.topic }))
+      void $.clock.now().then(at => journalState.recorder?.add({ at, kind: 'dismissed', path: note.file, line: note.line, text: note.topic }))
     },
     onWorking: () => {
       touched($, settings, 'working')
@@ -3901,7 +3869,7 @@ export const register: Register = (on, options) => {
       trace($, 'hook', 'classic.SessionStart', () => ({ source: e.source }))
       // The notes, the review and the rest of the pane were emptied with the state. They come back.
       await restorePane($, settings)
-      workingShown = ''
+      journalState.workingShown = ''
       await showWorking($, await $.clock.now())
       await showLicense($)
       // The session may go by another id now. The lease is renewed under it.
@@ -3973,7 +3941,7 @@ export const register: Register = (on, options) => {
     }
     if (request === 'working') {
       if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
-      if (recorder === null) {
+      if (journalState.recorder === null) {
         return { text: 'There is no journal to put that in: the tutor is still getting ready, or this folder is not a git repository.' }
       }
       const said = parseWorking(rest)
@@ -4057,7 +4025,7 @@ export const register: Register = (on, options) => {
     const shown = [
       paneContext(await read($, notesAtom), await read($, reviewAtom), isHello ? '' : said),
       explainContext(await read($, explainAtom)),
-      recorder?.brief(await $.clock.now()) ?? '',
+      journalState.recorder?.brief(await $.clock.now()) ?? '',
     ].filter(part => part !== '')
     // Another session may have recorded something about the person since the last look at the files.
     await refreshShared($, settings)
@@ -4105,7 +4073,7 @@ export const register: Register = (on, options) => {
         const insights = insightLines(kept.notes)
         await setReview($, { state: 'done', text: fitReview(shown), isUnseen, decisions, insights })
         // A survey reviewed none of their work, so it is not part of the record of it.
-        if (scope.kind !== 'survey') recorder?.add({ at: await $.clock.now(), kind: 'review', text: scopeSubject(scope) })
+        if (scope.kind !== 'survey') journalState.recorder?.add({ at: await $.clock.now(), kind: 'review', text: scopeSubject(scope) })
         if (isUnseen) $.ui.toast(`Deep review ready: ${scopeSubject(scope)}`)
         // The review ends on the one thing most worth doing next, which is worth saying out loud.
         // Its last line as shown: the notes after it are not for the person.
@@ -4184,7 +4152,7 @@ export const register: Register = (on, options) => {
       // After /clear and /resume this process carries on, and so do its pane, its log and its lease.
       // The pane first: the state it lives in is emptied next, and this hook has a second and a half in all.
       if (e.reason === 'clear' || e.reason === 'resume') await carryPane($)
-      const leaving = recorder
+      const leaving = journalState.recorder
       if (leaving !== null) await flushJournal($, leaving, await $.clock.now(), true)
       if (e.reason === 'clear' || e.reason === 'resume') await flushDebug($)
       else {
@@ -4271,7 +4239,7 @@ export const register: Register = (on, options) => {
   })
 
   on('tool.call', { tool: 'mcp__backseat-driver__working' }, async ($, e) => {
-    if (mode === 'off' || recorder === null) return answered($, e, 'No journal is being kept here, so nothing was recorded.')
+    if (mode === 'off' || journalState.recorder === null) return answered($, e, 'No journal is being kept here, so nothing was recorded.')
     // Only an empty string takes their words back. A call that left `on` out, as one did in a live session, changes nothing.
     if (typeof e.on !== 'string') {
       return answered($, e, 'Nothing was recorded: give `on`, what they said in their words, or an empty string when they take it back.')
@@ -4289,8 +4257,8 @@ export const register: Register = (on, options) => {
   })
 
   on('tool.call', { tool: 'mcp__backseat-driver__activity' }, async ($, e) => {
-    if (mode === 'off' || recorder === null) return answered($, e, NO_ACTIVITY)
-    const doing = recorder.activity(await $.clock.now())
+    if (mode === 'off' || journalState.recorder === null) return answered($, e, NO_ACTIVITY)
+    const doing = journalState.recorder.activity(await $.clock.now())
 
     return answered($, e, doing === '' ? NO_ACTIVITY : doing)
   })
