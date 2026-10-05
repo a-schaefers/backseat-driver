@@ -706,7 +706,7 @@ function settingsTab({ Box, Text, Select }: Kit, view: PaneView, actions: PaneAc
         ) : (
           <Select
             key={`setting-${row.key}`}
-            label={`${row.label}: `}
+            label={row.label}
             options={row.options.map(option => ({ value: option }))}
             value={row.value}
             onSelect={value => {

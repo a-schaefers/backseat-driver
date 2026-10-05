@@ -165,3 +165,100 @@ export function configValue(row: Pick<SettingRow, 'kind'>, picked: string): bool
 export function withSetting(rows: readonly SettingRow[], key: string, value: string): SettingRow[] {
   return rows.map(row => (row.key === key ? { ...row, value } : row))
 }
+
+/**
+ * When a change to each `userConfig` field is felt. A change in /config, or
+ * a pick in the Settings tab, makes Claude Code load the mod again with the
+ * new values (`register` runs again, then `session.start`), and everything
+ * is read afresh from there. `now`: in effect from that reload. `next look`,
+ * `next review`, `next lookup`: a model and its thinking are given to each
+ * request as it is made, so one already under way finishes as it began.
+ *
+ * Every field of plugin.json's `userConfig` has an entry. A field without
+ * one is reported when the mod loads (`unclassified`), and a test fails.
+ */
+export const SETTING_EFFECTS = {
+  layout: 'now',
+  voice: 'now',
+  engineering: 'now',
+  animated_persona: 'now',
+  play_by_play: 'now',
+  quiet_time: 'now',
+  minimum_gap: 'now',
+  play_by_play_model: 'next look',
+  play_by_play_thinking: 'next look',
+  deep_review_after_commit: 'now',
+  deep_review_every: 'now',
+  deep_review_model: 'next review',
+  deep_review_thinking: 'next review',
+  explain: 'now',
+  explain_model: 'next lookup',
+  explain_thinking: 'next lookup',
+  progress_report: 'now',
+  update_check: 'now',
+} as const satisfies Record<string, SettingEffect>
+
+export type SettingEffect = 'now' | 'next look' | 'next review' | 'next lookup'
+
+export type SettingField = keyof typeof SETTING_EFFECTS
+
+/** The fields among `options` that `SETTING_EFFECTS` does not cover. Claude Code fills in every declared field, defaults included. */
+export function unclassified(options: Options): string[] {
+  return Object.keys(options).filter(field => !Object.hasOwn(SETTING_EFFECTS, field))
+}
+
+/** The fields whose value differs between two sets of options, in plugin.json's order. */
+export function changedFields(before: Options, after: Options): string[] {
+  const fields = [...new Set([...Object.keys(SETTING_EFFECTS), ...Object.keys(before), ...Object.keys(after)])]
+
+  return fields.filter(field => JSON.stringify(before[field] ?? null) !== JSON.stringify(after[field] ?? null))
+}
+
+/**
+ * What a reload with changed settings has to start by hand. Some work runs
+ * only when the tutor is switched on (the release check, the first placement
+ * of a level, the look around a new project), so a setting that switches it
+ * on would otherwise wait for the next `/bsd`.
+ */
+export function catchUp(before: Settings, after: Settings): { isUpdateCheck: boolean; isPlacement: boolean; isSurvey: boolean } {
+  const reviews = (settings: Settings): boolean => settings.deepReview.isAfterCommit || settings.deepReview.everyMs > 0
+
+  return {
+    isUpdateCheck: after.isUpdateCheckOn && !before.isUpdateCheckOn,
+    isPlacement: after.isProgressOn && !before.isProgressOn,
+    isSurvey: reviews(after) && !reviews(before),
+  }
+}
+
+/** A changed row as the line after a reload names it: its label in /config and the value it now has. */
+export type ChangedRow = { field: string; label: string; value: string }
+
+const EFFECT_WORDS: Record<SettingEffect, string> = {
+  now: 'in effect now',
+  'next look': 'from the next look',
+  'next review': 'from the next review',
+  'next lookup': 'from the next lookup',
+}
+
+/**
+ * The line that says the settings just changed are in effect, and from
+ * when. Said only while the tutor is on: off, it touches nothing, and the
+ * settings are read afresh at the next `/bsd` anyway.
+ */
+export function changedText(rows: readonly ChangedRow[]): string {
+  const parts = rows.map(row => {
+    const effect = (SETTING_EFFECTS as Record<string, SettingEffect | undefined>)[row.field] ?? 'now'
+
+    return `${row.label}: ${row.value}, ${EFFECT_WORDS[effect]}`
+  })
+
+  return parts.length === 0 ? '' : `${parts.join('. ')}.`
+}
+
+/** How long a pick in the Settings tab waits for Claude Code to load the mod again before saying it did not. */
+export const RELOAD_WAIT_MS = 5000
+
+/** Said when a pick was saved and no reload followed, so the running tutor still has the old value. */
+export function notReloadedText(label: string, value: string): string {
+  return `${label}: ${value} is saved, but Claude Code did not load Backseat Driver again, so it is not in effect yet. /reload-plugins applies it.`
+}

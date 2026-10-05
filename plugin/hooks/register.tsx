@@ -8,7 +8,7 @@
  * logic needs an effect, it is handed a closure written here.
  */
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Register, Timer, UiFocusResult } from 'claude-code'
+import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, PluginOptions, Register, Timer, UiFocusResult } from 'claude-code'
 
 import type { ExplainView, Hush, LevelChange, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, SettingRow, Speech, Spot, Tab, Watch, Working } from '../types'
 import {
@@ -206,8 +206,22 @@ import {
   withoutCommit,
 } from '../core/reviewqueue'
 import type { ReviewQueue, Waiting } from '../core/reviewqueue'
-import { configValue, DEFAULT_PERSONA, LAYOUTS, layoutOf, readSettings, settingRows, withSetting } from '../core/settings'
-import type { Layout, Persona, Settings } from '../core/settings'
+import {
+  catchUp,
+  changedFields,
+  changedText,
+  configValue,
+  DEFAULT_PERSONA,
+  LAYOUTS,
+  layoutOf,
+  notReloadedText,
+  readSettings,
+  RELOAD_WAIT_MS,
+  settingRows,
+  unclassified,
+  withSetting,
+} from '../core/settings'
+import type { ChangedRow, Layout, Persona, Settings } from '../core/settings'
 import { createLocks } from '../core/locks'
 import { memoryDisk } from '../core/storage'
 import type { Disk } from '../core/storage'
@@ -277,6 +291,7 @@ let bandId = ''
 /** The layout in force, from the settings this load of the module was given, or from `/bsd layout`. */
 let layout: Layout = 'unified'
 const settingsAtom = atom({ plugin: 'backseat-driver', key: 'settings' } as const, [])
+const appliedAtom = atom({ plugin: 'backseat-driver', key: 'applied' } as const, null)
 
 /**
  * The mode is kept twice, because each copy is lost by a different event.
@@ -435,6 +450,8 @@ const LOOKUP_WAIT_MS = 6000
 
 /** The animated persona's timers: one moves its mouth while it talks, the other makes it blink now and then. */
 let talkTimer: Timer | null = null
+/** Armed after a pick in the Settings tab, and cancelled by the reload that should follow it. */
+let reloadWatch: Timer | null = null
 let blinkTimer: Timer | null = null
 /** Looks in a row that gave it nothing to say. After enough of them, a look may give it a light remark. */
 let quietLooks = 0
@@ -1195,6 +1212,43 @@ async function showSettings($: EngineInterface): Promise<void> {
  * person would in `/config`. Claude Code then loads the mod again with the
  * new value, so the tab shows it at once and the rest follows the reload.
  */
+/**
+ * Keeps the settings this load of the module was given in `$.state`, which
+ * outlives a reload, and says which of them changed since the load before
+ * and from when they are in effect. Answers the settings as they were
+ * before, or null when none changed: a first load, or a reload for a change
+ * of code.
+ */
+async function noteSettings($: EngineInterface, options: PluginOptions): Promise<Settings | null> {
+  const before = await read($, appliedAtom)
+  await update($, appliedAtom, () => options)
+  const missing = unclassified(options)
+  if (missing.length > 0) fail($, 'settings without an entry in SETTING_EFFECTS', new Error(missing.join(', ')))
+  if (before === null) return null
+  const changed = changedFields(before, options)
+  if (changed.length === 0) return null
+  trace($, 'state', 'settings changed', () => ({ changed, settings: readSettings(options) }))
+  if (mode !== 'off') void sayChanged($, changed)
+
+  return readSettings(before)
+}
+
+/** One line in the transcript, while on: each changed setting as /config names it, its new value, and from when it counts. */
+async function sayChanged($: EngineInterface, fields: readonly string[]): Promise<void> {
+  try {
+    const rows = settingRows(await $.config.list(), $.plugin.name)
+    const named = fields.flatMap((field): ChangedRow[] => {
+      const row = rows.find(candidate => candidate.key.endsWith(`.${field}`))
+
+      return row === undefined ? [] : [{ field, label: row.label, value: row.value }]
+    })
+    const text = changedText(named)
+    if (text !== '') $.ui.log(text)
+  } catch (error) {
+    fail($, 'could not say which settings changed', error)
+  }
+}
+
 async function changeSetting($: EngineInterface, row: SettingRow, picked: string): Promise<void> {
   await update($, settingsAtom, rows => withSetting(rows, row.key, picked))
   try {
@@ -1203,7 +1257,16 @@ async function changeSetting($: EngineInterface, row: SettingRow, picked: string
     if (deny !== undefined) {
       await update($, settingsAtom, rows => withSetting(rows, row.key, row.value))
       $.ui.toast(`${row.label} stays ${row.value}: ${deny}`)
+
+      return
     }
+    // A reload cancels every timer of this module, so this one fires only when Claude Code did not load it again.
+    reloadWatch?.cancel()
+    reloadWatch = $.clock.after(RELOAD_WAIT_MS, () => {
+      reloadWatch = null
+      trace($, 'state', 'setting not reloaded', () => ({ key: row.key, value: picked }))
+      $.ui.log(notReloadedText(row.label, picked))
+    })
   } catch (error) {
     await update($, settingsAtom, rows => withSetting(rows, row.key, row.value))
     fail($, `could not change ${row.key}`, error)
@@ -3818,7 +3881,7 @@ async function placeFirst($: EngineInterface, settings: Settings, run: number): 
  * at once however slow git is. `isFresh` is false when the tutor was already
  * on and the module reloaded, in which case no questions are asked.
  */
-async function engage($: EngineInterface, settings: Settings, run: number, isFresh: boolean): Promise<void> {
+async function engage($: EngineInterface, settings: Settings, run: number, isFresh: boolean, before: Settings | null = null): Promise<void> {
   try {
     const started = Date.now()
     await startDebug($, settings)
@@ -3854,9 +3917,11 @@ async function engage($: EngineInterface, settings: Settings, run: number, isFre
     // Commits that were left waiting, by an outage or a closed session, are taken up now.
     if (run === engagement) await planReview($, settings)
     trace($, 'start', 'engaged', () => ({ run, repoRoot, languages: profiles.languages, main }), Date.now() - started)
-    if (isFresh) void maybeSurvey($, settings, run)
-    if (isFresh) queueProgress($, () => placeFirst($, settings, run))
-    if (isFresh) void checkForUpdate($, settings)
+    // Switched on, or switched on by a setting just changed: these run only at such moments.
+    const caught = before === null ? null : catchUp(before, settings)
+    if (isFresh || caught?.isSurvey === true) void maybeSurvey($, settings, run)
+    if (isFresh || caught?.isPlacement === true) queueProgress($, () => placeFirst($, settings, run))
+    if (isFresh || caught?.isUpdateCheck === true) void checkForUpdate($, settings)
     // Last, so that everything already works if the questions are dismissed.
     if (isFresh && run === engagement) await ask($, settings, unasked(main))
     // After the questions about their code: how they use the tutor, asked once ever, never in the way.
@@ -4197,6 +4262,8 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     // After a reload, `$.state` still holds the mode and the notes.
     mode = await read($, modeAtom)
+    // A change in /config, or in the Settings tab, is a reload with other options.
+    const before = await noteSettings($, options)
     if (mode !== 'off') {
       trace($, 'hook', 'session.start', () => ({ mode, cwd: e.cwd, isReload: true }))
       // A reload (a layout change, say) takes the keyboard back to the prompt.
@@ -4207,7 +4274,7 @@ export const register: Register = (on, options) => {
       // A change of layout in /config reloads the module: the pane opens or closes to suit it.
       await showLayout($)
       engagement += 1
-      await engage($, settings, engagement, false)
+      await engage($, settings, engagement, false, before)
     }
 
     try {
@@ -4235,6 +4302,8 @@ export const register: Register = (on, options) => {
   // /clear, /resume and /branch reset `$.state` and do not fire `session.start`.
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
     await update($, modeAtom, () => mode)
+    // So that the next change of a setting is still told apart from the settings in force.
+    await update($, appliedAtom, () => options)
     // The pane's "Working on" line was reset with the rest of the state. The journal behind it was not.
     if (mode !== 'off') {
       trace($, 'hook', 'classic.SessionStart', () => ({ source: e.source }))
