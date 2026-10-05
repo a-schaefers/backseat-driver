@@ -272,7 +272,7 @@ Preparation for a second client (`research/opencode.md`, owner, 2026-10-05: one 
   - `health.ts`, `Kernel.Health`: the error words are Claude Code's and Anthropic's API's; `pressureOf` reads Claude plan windows (`rateLimits`).
   - `Kernel.Status`, `Kernel.Queue`'s tab text, `Kernel.Play`'s comments: "Claude is not answering".
   - `mode.ts`: "Claude Code is back to normal", `/config` in `HELP` and `SETTINGS_OFF`.
-  - `settings.ts`: `Thinking` is Claude Code's effort scale; `settingRows` reads `/config` rows.
+  - `settings.ts`: `Thinking` is Claude Code's effort scale; `settingRows` reads `/config` rows; `SETTING_EFFECTS` assumes a host that loads the module again when the options change, and `notReloadedText` names `/reload-plugins`.
   - `guard.ts`: Claude Code's own paths (`~/.claude/`, `/tmp/claude-<uid>/`).
   - `update.ts`: `claude plugin`, `installed_plugins.json`, `plugins/synced/`, marketplace clones.
   - `avatar.ts`, `art/default.ts`: the `default` voice is Claude Code's mascot, which another client may not use.

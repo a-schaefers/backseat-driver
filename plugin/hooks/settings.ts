@@ -203,12 +203,12 @@ export type SettingEffect = 'now' | 'next look' | 'next review' | 'next lookup'
 export type SettingField = keyof typeof SETTING_EFFECTS
 
 /** The fields among `options` that `SETTING_EFFECTS` does not cover. Claude Code fills in every declared field, defaults included. */
-export function unclassified(options: PluginOptions): string[] {
+export function unclassified(options: Options): string[] {
   return Object.keys(options).filter(field => !Object.hasOwn(SETTING_EFFECTS, field))
 }
 
 /** The fields whose value differs between two sets of options, in plugin.json's order. */
-export function changedFields(before: PluginOptions, after: PluginOptions): string[] {
+export function changedFields(before: Options, after: Options): string[] {
   const fields = [...new Set([...Object.keys(SETTING_EFFECTS), ...Object.keys(before), ...Object.keys(after)])]
 
   return fields.filter(field => JSON.stringify(before[field] ?? null) !== JSON.stringify(after[field] ?? null))
