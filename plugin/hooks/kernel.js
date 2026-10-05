@@ -3103,8 +3103,10 @@ var max10 = /* @__PURE__ */ max(ordNumber);
 var slowScanWaitMs = 2e3;
 var slowScanStepMs = 250;
 var scanMs = 2e3;
+var pushedScanMs = 3e4;
 var longestScanGapMs = 32e3;
 var longestFocusGapMs = 2e3;
+var pushedFocusMs = longestFocusGapMs;
 var idleScanMs = 5e3;
 var idleAfterMs = 6e5;
 var hotScanMs = 1e3;
@@ -3112,6 +3114,10 @@ var hotForMs = 6e4;
 var scanGapMs = function(facts) {
   var slowness = floor(facts.lastScanMs / slowScanStepMs) * slowScanWaitMs;
   var base = (function() {
+    if (facts.isPushed) {
+      return pushedScanMs;
+    }
+    ;
     if (facts.activeAt instanceof Nothing) {
       return idleScanMs;
     }
@@ -3131,7 +3137,7 @@ var scanGapMs = function(facts) {
       ;
     }
     ;
-    throw new Error("Failed pattern match at Kernel.Sensor (line 85, column 10 - line 90, column 28): " + [facts.activeAt.constructor.name]);
+    throw new Error("Failed pattern match at Kernel.Sensor (line 100, column 10 - line 106, column 28): " + [facts.activeAt.constructor.name]);
   })();
   return min7(longestScanGapMs)(base + slowness);
 };
@@ -3145,12 +3151,21 @@ var scanGapMsWire = function(w) {
       ;
       return Nothing.value;
     })(),
-    lastScanMs: w.lastScanMs
+    lastScanMs: w.lastScanMs,
+    isPushed: w.isPushed
   });
 };
 var focusScanMs = 100;
-var focusGapMs = function(tookMs) {
-  return min7(longestFocusGapMs)(max10(focusScanMs)(tookMs * 4));
+var focusGapMs = function(facts) {
+  if (facts.isPushed) {
+    return pushedFocusMs;
+  }
+  ;
+  if (otherwise) {
+    return min7(longestFocusGapMs)(max10(focusScanMs)(facts.tookMs * 4));
+  }
+  ;
+  throw new Error("Failed pattern match at Kernel.Sensor (line 134, column 1 - line 134, column 35): " + [facts.constructor.name]);
 };
 
 // output/Data.Number.Format/foreign.js
@@ -3762,6 +3777,8 @@ export {
   planHeld,
   playLineWire,
   playOfWire,
+  pushedFocusMs,
+  pushedScanMs,
   readRetryMs,
   readTries,
   retryBaseMs,

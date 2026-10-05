@@ -63,6 +63,8 @@ import {
 import { createDebugLog, createTracer, DEBUG_USAGE, FLUSH_MS, parseDebugRequest, parseSwitch, sessionFolder } from './debuglog'
 import type { DebugRequest } from './debuglog'
 import { createExplainer, NO_VIEW } from './explainer'
+import { EDITORS_FOLDER, focusWatchArgv, ignoredFolders, isEstablished, lineSplitter, nudgesOf, treeWatchArgv, watcherComplaint } from './filewatch'
+import type { Nudge, WatchPlaces, WatchRole } from './filewatch'
 import type { Explainer, Intent } from './explainer'
 import { connectedHere, editorsLine, isConnected, parseEditorFile, speaker } from './editors'
 import type { EditorSeen } from './editors'
@@ -336,6 +338,20 @@ let lastScanMs = 0
 /** When something last happened: a save, a commit, a caret move, a prompt, a key in the pane. */
 let activeAt: number | null = null
 
+/**
+ * File watchers that push changes instead of waiting for the scan to find
+ * them (`filewatch.ts`): inotifywait, where it is on the person's PATH. One
+ * child per role. `isLive` once every watch is in place: only then is the
+ * scan a safety net. Nothing runs where no watcher is found, and the scan
+ * does it all.
+ */
+type Pusher = { role: WatchRole; isLive: boolean; stop: () => void }
+let pushers: Pusher[] = []
+/** True once this watching run has tried to start its watchers. */
+let isPushTried = false
+/** Counts the times the watchers were stopped, so that a child's loop from before lets go. */
+let pushRun = 0
+
 /** What has to be done at a known time. One timer serves all of it. Null until the tutor is first switched on. */
 let deadlines: Scheduler | null = null
 
@@ -435,6 +451,8 @@ let reviews: ReviewRecord[] = []
 
 /** The deep review's working state. */
 let repoRoot = ''
+/** The repository's git folder. Empty outside a repository. */
+let gitDir = ''
 /** The reflog file, whose fingerprint changes whenever HEAD moves. Empty outside a repository. */
 let headLog = ''
 let headLogStamp = ''
@@ -540,6 +558,7 @@ function snapshot(): Record<string, unknown> {
     watcher: watcher === null ? null : { dirty: watcher.dirty(), changed: watcher.changed(), hasPending: watcher.hasPending() },
     look: { isWatchReady, isLooking, lastChangeAt, lastLookAt, failures, lookFailure, quietLooks },
     scan: { isScanning, isScanWanted, lastScanMs, activeAt },
+    pushers: pushers.map(pusher => ({ role: pusher.role, isLive: pusher.isLive })),
     deadlines: deadlines?.all() ?? {},
     health,
     jobBlocks: Object.fromEntries(jobBlocks),
@@ -2328,6 +2347,7 @@ async function startDriving($: EngineInterface, settings: Settings, run: number)
 async function stopDriving($: EngineInterface, settings: Settings): Promise<void> {
   const plan = schedulerOf($)
   for (const name of ['scan', 'look', 'review', 'assess', 'review-timer', 'journal']) plan.cancel(name)
+  stopPushing()
   const leaving = recorder
   recorder = null
   waiting = EMPTY_QUEUE
@@ -2928,7 +2948,132 @@ async function checkHead($: EngineInterface, settings: Settings): Promise<void> 
 /** Plans the next scan of the working tree, as soon after the last as `sensor.ts` says. */
 function planScan($: EngineInterface, settings: Settings, now: number): void {
   if (mode !== 'on' || watcher === null || !isDriver) return
-  schedulerOf($).set('scan', now + scanGapMs({ now, activeAt, lastScanMs }), () => scan($, settings))
+  schedulerOf($).set('scan', now + scanGapMs({ now, activeAt, lastScanMs, isPushed: isPushed('tree') }), () => scan($, settings))
+}
+
+/** True while a watcher pushes the changes of `role`. The focus file's changes count only with the tree's: the file in focus is in the tree. */
+function isPushed(role: WatchRole): boolean {
+  const live = (of: WatchRole) => pushers.some(pusher => pusher.role === of && pusher.isLive)
+
+  return role === 'tree' ? live('tree') : live('tree') && live('focus')
+}
+
+/** Stops every watcher child. */
+function stopPushing(): void {
+  pushRun += 1
+  isPushTried = false
+  const leaving = pushers
+  pushers = []
+  for (const pusher of leaving) pusher.stop()
+}
+
+/**
+ * Starts the file watchers, where one is on PATH: one over the working tree
+ * and HEAD's log, one over the data folder for the editor's focus file. A
+ * watcher that cannot start, or stops, changes nothing but how often the
+ * scan runs: it is back to its own pace.
+ */
+async function startPushing($: EngineInterface, settings: Settings): Promise<void> {
+  const run = pushRun
+  const root = repoRoot
+  if (root === '' || gitDir === '') return
+  const places: WatchPlaces = { root, gitDir, dataRoot }
+  const ignored = ignoredFolders((await git($, root, ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory'])).stdout)
+  let gitFolders: string[] = []
+  try {
+    gitFolders = (await $.fs.list(gitDir)).filter(entry => entry.kind === 'dir').map(entry => entry.name)
+  } catch {
+    // Not listed: all of it is watched, and its events are left out by the pattern.
+  }
+  const isGitOutside = gitDir !== `${root}/.git`
+  const hasOutsideLogs = isGitOutside && (await $.fs.exists(`${gitDir}/logs`).catch(() => false))
+  const hasDataRoot = dataRoot !== '' && (await $.fs.exists(dataRoot).catch(() => false))
+  if (run !== pushRun) return
+  // The editors' watcher is started once the tree's runs: where there is no inotifywait, it is looked for once.
+  // Their folder is made first, so that it can be watched before any editor has written to it.
+  const watchFocus = () => {
+    if (!hasDataRoot) return
+    void (async () => {
+      const folder = `${dataRoot}/${EDITORS_FOLDER}`
+      try {
+        if (!(await $.fs.exists(folder))) {
+          await markHome($)
+          await $.fs.write(`${folder}/.keep`, '')
+        }
+      } catch (error) {
+        fail($, 'making the editors folder', error)
+
+        return
+      }
+      if (run === pushRun) runPusher($, settings, 'focus', focusWatchArgv(places), places, run)
+    })()
+  }
+  runPusher($, settings, 'tree', treeWatchArgv(places, ignored, gitFolders, hasOutsideLogs), places, run, watchFocus)
+}
+
+/** Runs one watcher child for as long as it lives, and acts on what it reports. */
+function runPusher(
+  $: EngineInterface,
+  settings: Settings,
+  role: WatchRole,
+  argv: string[],
+  places: WatchPlaces,
+  run: number,
+  whenLive?: () => void,
+): void {
+  const pusher: Pusher = { role, isLive: false, stop: () => {} }
+  void (async () => {
+    const started = Date.now()
+    let stderr = ''
+    let hasStarted = false
+    try {
+      const child = $.process.spawn({ argv, cwd: places.root })
+      // Leaving the loop is what ends the child. A stop between pieces leaves it at the next one at the latest.
+      pusher.stop = () => void child.return({ code: null, signal: null }).catch(() => {})
+      pushers.push(pusher)
+      const lines = lineSplitter()
+      for await (const piece of child) {
+        hasStarted = true
+        if (run !== pushRun) break
+        if (piece.stream === 'stderr') {
+          stderr = (stderr + piece.text).slice(-4000)
+          if (!pusher.isLive && isEstablished(stderr)) {
+            pusher.isLive = true
+            trace($, 'push', 'watching', () => ({ role, argv }), Date.now() - started)
+            whenLive?.()
+            // What changed while the watches were being set up is found by a scan now. From here on, changes are pushed.
+            await kick($, settings, `the ${role} watcher is ready`)
+          }
+          continue
+        }
+        for (const nudge of nudgesOf(lines(piece.text), places)) await nudged($, settings, nudge)
+      }
+      if (run === pushRun) trace($, 'push', 'stopped', () => ({ role, complaint: watcherComplaint(stderr) }))
+    } catch (error) {
+      // It never started: there is no watcher on PATH. Otherwise it died, and says why on stderr.
+      trace($, 'push', hasStarted ? 'stopped' : 'no watcher', () => ({ role, error: String(error), complaint: watcherComplaint(stderr) }))
+    } finally {
+      const wasLive = pusher.isLive
+      pusher.isLive = false
+      pushers = pushers.filter(other => other !== pusher)
+      // Back to the scan's own pace.
+      if (wasLive && run === pushRun) planScan($, settings, await $.clock.now())
+    }
+  })()
+}
+
+/**
+ * Something pushed a change: a watcher today, an editor plugin later. The
+ * scan still works out what changed. A nudge only says to look now.
+ */
+async function nudged($: EngineInterface, settings: Settings, nudge: Nudge): Promise<void> {
+  if (mode !== 'on' || watcher === null || !isDriver) return
+  trace($, 'push', nudge.kind, () => nudge)
+  const spot = focus
+  const isSpotChanged = nudge.kind === 'focus' || (nudge.kind === 'tree' && spot !== null && nudge.paths.includes(spot.path))
+  // While someone watches the spot in focus, its check runs now. The scan leaves the focus file to it.
+  if (isWatchingClosely && isSpotChanged) schedulerOf($).set('focus', await $.clock.now(), () => fastPoll($))
+  if (nudge.kind !== 'focus' || !isWatchingClosely) await kick($, settings, `pushed: ${nudge.kind}`)
 }
 
 /**
@@ -2968,6 +3113,11 @@ async function scan($: EngineInterface, settings: Settings): Promise<void> {
     await checkHead($, settings)
     // Another session may have changed what is on record about the person.
     if (now - sharedCheckedAt >= SHARED_CHECK_MS) await refreshShared($, settings)
+    // Where a file watcher is on PATH, it pushes what the next scans would have to find.
+    if (!isPushTried) {
+      isPushTried = true
+      void startPushing($, settings)
+    }
     traceQuiet($)
     // A look is a deadline, set from what this scan found.
     await planLook($, settings)
@@ -2983,6 +3133,7 @@ async function scan($: EngineInterface, settings: Settings): Promise<void> {
 }
 
 function stopWatching(): void {
+  stopPushing()
   deadlines?.clear()
   isScanning = false
   isScanWanted = false
@@ -3036,6 +3187,7 @@ async function startWatching($: EngineInterface, settings: Settings, run: number
   const root = top.stdout.trim()
   if (top.exitCode !== 0 || root === '') {
     repoRoot = ''
+    gitDir = ''
     headLog = ''
     isWatchReady = true
     await showPlay($, settings)
@@ -3058,8 +3210,8 @@ async function startWatching($: EngineInterface, settings: Settings, run: number
     },
   })
   await started.start()
-  const gitDir = (await git($, root, ['rev-parse', '--absolute-git-dir'])).stdout.trim()
-  const log = gitDir === '' ? '' : `${gitDir}/logs/HEAD`
+  const folder = (await git($, root, ['rev-parse', '--absolute-git-dir'])).stdout.trim()
+  const log = folder === '' ? '' : `${folder}/logs/HEAD`
   const stamp = await fileStamp($, log)
   const tip = (await git($, root, ['rev-parse', '--verify', '--quiet', 'HEAD'])).stdout.trim()
   // Switched off, or on again, while git was answering: this start is no longer wanted.
@@ -3068,6 +3220,7 @@ async function startWatching($: EngineInterface, settings: Settings, run: number
   watcher = started
   isWatchReady = true
   repoRoot = root
+  gitDir = folder
   headLog = log
   headLogStamp = stamp
   lastHead = tip
@@ -3238,7 +3391,7 @@ async function fastPoll($: EngineInterface): Promise<void> {
     return
   }
   const now = await $.clock.now()
-  schedulerOf($).set('focus', now + focusGapMs(now - started), () => fastPoll($))
+  schedulerOf($).set('focus', now + focusGapMs({ tookMs: now - started, isPushed: isPushed('focus') }), () => fastPoll($))
 }
 
 function watchClosely($: EngineInterface): void {

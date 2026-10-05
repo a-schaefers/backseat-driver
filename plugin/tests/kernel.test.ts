@@ -11,7 +11,7 @@ import type { ReviewQueue } from '../hooks/reviewqueue'
 import { createScheduler } from '../hooks/scheduler'
 import { afterRead, afterWrite, arming, changeStep, delayMs, dueNow, keepsBackup } from '../hooks/core'
 import { READ_RETRY_MS, READ_TRIES, WRITE_TRIES } from '../hooks/store'
-import { FOCUS_SCAN_MS, focusGapMs, HOT_FOR_MS, HOT_SCAN_MS, IDLE_AFTER_MS, IDLE_SCAN_MS, LONGEST_FOCUS_GAP_MS, LONGEST_SCAN_GAP_MS, SCAN_MS, scanGapMs } from '../hooks/sensor'
+import { FOCUS_SCAN_MS, focusGapMs, HOT_FOR_MS, HOT_SCAN_MS, IDLE_AFTER_MS, IDLE_SCAN_MS, LONGEST_FOCUS_GAP_MS, LONGEST_SCAN_GAP_MS, PUSHED_FOCUS_MS, PUSHED_SCAN_MS, SCAN_MS, scanGapMs } from '../hooks/sensor'
 import { clockTime, healthLine, playLine, watchOf } from '../hooks/status'
 
 /** The pure parts of the kernel: deadlines, whether Claude is answering, what the play-by-play is doing, how often to scan. */
@@ -506,7 +506,8 @@ test('the row under the status line says what keeps going wrong, and not what th
 })
 
 test('the working tree is scanned often after something happened, and seldom when nothing has for a while', async () => {
-  const at = (quietFor: number | null, lastScanMs = 5): number => scanGapMs({ now: 1_000_000, activeAt: quietFor === null ? null : 1_000_000 - quietFor, lastScanMs })
+  const at = (quietFor: number | null, lastScanMs = 5, isPushed = false): number =>
+    scanGapMs({ now: 1_000_000, activeAt: quietFor === null ? null : 1_000_000 - quietFor, lastScanMs, isPushed })
   expect(at(0)).toBe(HOT_SCAN_MS)
   expect(at(HOT_FOR_MS - 1)).toBe(HOT_SCAN_MS)
   expect(at(HOT_FOR_MS)).toBe(SCAN_MS)
@@ -519,14 +520,25 @@ test('the working tree is scanned often after something happened, and seldom whe
   expect(at(0, 250)).toBe(HOT_SCAN_MS + 2000)
   expect(at(HOT_FOR_MS, 1000)).toBe(SCAN_MS + 8000)
   expect(at(0, 60_000)).toBe(LONGEST_SCAN_GAP_MS)
+
+  // While a file watcher pushes the changes, the scan is a safety net, whatever happened lately.
+  expect(at(0, 5, true)).toBe(PUSHED_SCAN_MS)
+  expect(at(null, 5, true)).toBe(PUSHED_SCAN_MS)
+  expect(at(IDLE_AFTER_MS, 5, true)).toBe(PUSHED_SCAN_MS)
+  expect(at(0, 60_000, true)).toBe(LONGEST_SCAN_GAP_MS)
+  expect(PUSHED_SCAN_MS).toBeGreaterThan(IDLE_SCAN_MS)
 })
 
 test('the spot in focus is checked ten times a second while it is watched, and less often when a check is slow', async () => {
-  expect(focusGapMs(0)).toBe(FOCUS_SCAN_MS)
-  expect(focusGapMs(25)).toBe(FOCUS_SCAN_MS)
+  const gap = (tookMs: number, isPushed = false): number => focusGapMs({ tookMs, isPushed })
+  expect(gap(0)).toBe(FOCUS_SCAN_MS)
+  expect(gap(25)).toBe(FOCUS_SCAN_MS)
   // A check that took a while is not run back to back: the wait is four times what it took.
-  expect(focusGapMs(100)).toBe(400)
-  expect(focusGapMs(60_000)).toBe(LONGEST_FOCUS_GAP_MS)
+  expect(gap(100)).toBe(400)
+  expect(gap(60_000)).toBe(LONGEST_FOCUS_GAP_MS)
+  // While a file watcher pushes the changes to the spot and the editor's focus file, the check is a safety net.
+  expect(gap(0, true)).toBe(PUSHED_FOCUS_MS)
+  expect(gap(60_000, true)).toBe(PUSHED_FOCUS_MS)
 })
 
 test('whatever the facts, no look starts by itself when it must not, and one that is held back says until when it can', { timeoutMs: 60_000 }, async () => {

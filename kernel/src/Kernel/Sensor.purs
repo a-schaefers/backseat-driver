@@ -17,10 +17,18 @@
 -- | it: the file the Explain view is about, and the file an editor writes its
 -- | caret to. Two stats, ten times a second (`focusGapMs`), because an
 -- | explanation of code that was just edited must not stay on screen.
+-- |
+-- | Where a file watcher runs (inotifywait on the person's PATH), the changes
+-- | are pushed: each one makes the mod look at once, and the scan and the
+-- | check of the spot in focus are only a safety net, far apart. Where none
+-- | runs, nothing here changes.
 module Kernel.Sensor
   ( ScanFacts
   , scanGapMs
+  , FocusFacts
   , focusGapMs
+  , pushedScanMs
+  , pushedFocusMs
   , hotScanMs
   , scanMs
   , idleScanMs
@@ -50,6 +58,11 @@ scanMs = 2000.0
 idleScanMs :: Number
 idleScanMs = 5000.0
 
+-- | Between scans while a watcher pushes the working tree's changes: a
+-- | safety net, for a change the watcher could not see.
+pushedScanMs :: Number
+pushedScanMs = 30000.0
+
 -- | How long after something happened the scans stay close together.
 hotForMs :: Number
 hotForMs = 60000.0
@@ -76,6 +89,8 @@ type ScanFacts =
   , activeAt :: Maybe Number
   -- | How long the scan that just finished took.
   , lastScanMs :: Number
+  -- | True while a watcher pushes the working tree's changes.
+  , isPushed :: Boolean
   }
 
 -- | How long to wait before the next scan.
@@ -83,6 +98,7 @@ scanGapMs :: ScanFacts -> Number
 scanGapMs facts = min longestScanGapMs (base + slowness)
   where
   base = case facts.activeAt of
+    _ | facts.isPushed -> pushedScanMs
     Nothing -> idleScanMs
     Just at
       | facts.now - at < hotForMs -> hotScanMs
@@ -101,12 +117,26 @@ focusScanMs = 100.0
 longestFocusGapMs :: Number
 longestFocusGapMs = 2000.0
 
+-- | Between checks of the spot in focus while a watcher pushes the changes
+-- | to it and to the editor's focus file.
+pushedFocusMs :: Number
+pushedFocusMs = longestFocusGapMs
+
+type FocusFacts =
+  { -- | How long the check that just finished took.
+    tookMs :: Number
+  -- | True while a watcher pushes the changes to the file in focus and to the editor's focus file.
+  , isPushed :: Boolean
+  }
+
 -- | How long to wait before the next check of the spot in focus. A check
 -- | that was slow is not run back to back.
-focusGapMs :: Number -> Number
-focusGapMs tookMs = min longestFocusGapMs (max focusScanMs (tookMs * 4.0))
+focusGapMs :: FocusFacts -> Number
+focusGapMs facts
+  | facts.isPushed = pushedFocusMs
+  | otherwise = min longestFocusGapMs (max focusScanMs (facts.tookMs * 4.0))
 
-type ScanFactsWire = { now :: Number, hasActiveAt :: Boolean, activeAt :: Number, lastScanMs :: Number }
+type ScanFactsWire = { now :: Number, hasActiveAt :: Boolean, activeAt :: Number, lastScanMs :: Number, isPushed :: Boolean }
 
 scanGapMsWire :: ScanFactsWire -> Number
-scanGapMsWire w = scanGapMs { now: w.now, activeAt: if w.hasActiveAt then Just w.activeAt else Nothing, lastScanMs: w.lastScanMs }
+scanGapMsWire w = scanGapMs { now: w.now, activeAt: if w.hasActiveAt then Just w.activeAt else Nothing, lastScanMs: w.lastScanMs, isPushed: w.isPushed }

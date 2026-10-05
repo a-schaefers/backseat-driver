@@ -34,9 +34,11 @@ export const gapFactor: (percent: number) => number
 export const isHeldAt: (percent: number) => boolean
 
 // The scan
-export type ScanFactsWire = { now: number; hasActiveAt: boolean; activeAt: number; lastScanMs: number }
+export type ScanFactsWire = { now: number; hasActiveAt: boolean; activeAt: number; lastScanMs: number; isPushed: boolean }
 export const scanGapMsWire: (facts: ScanFactsWire) => number
-export const focusGapMs: (tookMs: number) => number
+export const focusGapMs: (facts: { tookMs: number; isPushed: boolean }) => number
+export const pushedScanMs: number
+export const pushedFocusMs: number
 export const hotScanMs: number
 export const scanMs: number
 export const idleScanMs: number

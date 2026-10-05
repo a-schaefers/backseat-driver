@@ -33,7 +33,7 @@ import Kernel.Queue (currentQueueWire, failedTextWire, heldTextWire, isSpentWire
 import Kernel.Store (afterReadWire, afterWriteWire, keepsBackupWire, readRetryMs, readTries, stepOfWire, writeTries)
 import Kernel.Status (healthLineWire, playLineWire, slowScanMs, watchStateWire)
 import Kernel.Schedule (armingWire, delayMsWire, dueNowWire)
-import Kernel.Sensor (focusGapMs, focusScanMs, hotForMs, hotScanMs, idleAfterMs, idleScanMs, longestFocusGapMs, longestScanGapMs, scanGapMsWire, scanMs)
+import Kernel.Sensor (focusGapMs, focusScanMs, hotForMs, hotScanMs, idleAfterMs, idleScanMs, longestFocusGapMs, longestScanGapMs, pushedFocusMs, pushedScanMs, scanGapMsWire, scanMs)
 
 leaseIsHeld :: Lease -> Number -> Boolean
 leaseIsHeld = Lease.isHeld

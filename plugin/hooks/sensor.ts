@@ -18,6 +18,9 @@
  * caret to. Two stats, ten times a second (`focusGapMs`), because an
  * explanation of code that was just edited must not stay on screen.
  *
+ * Where a file watcher runs (`filewatch.ts`), the changes are pushed: each
+ * makes the mod look at once, and both of these are only a safety net.
+ *
  * The numbers and the arithmetic are the kernel's (kernel/src/Kernel/Sensor.purs),
  * through core.ts.
  */
@@ -31,6 +34,8 @@ export {
   IDLE_SCAN_MS,
   LONGEST_FOCUS_GAP_MS,
   LONGEST_SCAN_GAP_MS,
+  PUSHED_FOCUS_MS,
+  PUSHED_SCAN_MS,
   SCAN_MS,
   scanGapMs,
 } from './core'
@@ -41,4 +46,13 @@ export type ScanFacts = {
   activeAt: number | null
   /** How long the scan that just finished took. */
   lastScanMs: number
+  /** True while a watcher pushes the working tree's changes. */
+  isPushed: boolean
+}
+
+export type FocusFacts = {
+  /** How long the check that just finished took. */
+  tookMs: number
+  /** True while a watcher pushes the changes to the file in focus and to the editor's focus file. */
+  isPushed: boolean
 }

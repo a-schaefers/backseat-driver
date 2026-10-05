@@ -129,6 +129,21 @@ export type StubOptions = {
   isCloneDirty?: boolean
   /** True when the clone already has everything upstream has, so a pull changes nothing. */
   isCloneCurrent?: boolean
+  /** True when inotifywait is on PATH: the tutor's watchers run, and `session.watchers` drives them. Left out, it is not there. */
+  hasInotify?: boolean
+  /** Folders git ignores in the fake repository, as `git ls-files --ignored --directory` lists them. */
+  ignored?: string[]
+}
+
+/** A file watcher the tutor started, as a test drives it. */
+export type FakeWatcher = {
+  argv: readonly string[]
+  /** Reports changes to these absolute paths, one line each, in one piece of output. */
+  report: (...paths: string[]) => void
+  /** Ends the child, as inotifywait does when it gives up, with this on stderr. */
+  end: (complaint?: string) => void
+  /** True once the tutor ended the child. */
+  isStopped: boolean
 }
 
 /** Who wrote a commit in the fake repository, and anything its message says besides its title. */
@@ -272,6 +287,10 @@ export function stubSession(on: On, options: StubOptions = {}) {
     limits: [] as { kind: string; percentUsed: number; resetsAt?: string }[],
     /** How many times the plugin has asked git for the working tree's status: once per scan. */
     scans: 0,
+    /** The file watchers the tutor started, oldest first. Only with `hasInotify`. */
+    watchers: [] as FakeWatcher[],
+    /** Every command the tutor tried to start as a long-running child, found or not. */
+    spawnedProcesses: [] as string[][],
     /** What `$.turn.complete` is fired with when a turn of the conversation itself ends with an answer. */
     turnEnded(answer = 'Done.') {
       return { turnId: 'turn-main', answer, durationMs: 1000, isAborted: false, reason: 'answer' } as const
@@ -475,6 +494,46 @@ export function stubSession(on: On, options: StubOptions = {}) {
     return { value: { kind: 'file', size: text.length, mtimeMs, isLink: false } }
   })
 
+  // inotifywait, when the test says it is on PATH. Anything else, and inotifywait without it, cannot be started.
+  on('process.spawn', async function* ($, e) {
+    session.spawnedProcesses.push([...e.argv])
+    if (e.argv[0] !== 'inotifywait' || options.hasInotify !== true) return { deny: `spawn ${String(e.argv[0])} ENOENT` }
+    const pieces: { stream: 'stdout' | 'stderr'; text: string }[] = [{ stream: 'stderr', text: 'Setting up watches.\nWatches established.\n' }]
+    let isEnded = false
+    let wake: () => void = () => {}
+    const fake: FakeWatcher = {
+      argv: [...e.argv],
+      report: (...paths) => {
+        pieces.push({ stream: 'stdout', text: paths.map(path => `${path}\n`).join('') })
+        wake()
+      },
+      end: complaint => {
+        if (complaint !== undefined) pieces.push({ stream: 'stderr', text: `${complaint}\n` })
+        isEnded = true
+        wake()
+      },
+      isStopped: false,
+    }
+    session.watchers.push(fake)
+    try {
+      for (;;) {
+        const piece = pieces.shift()
+        if (piece !== undefined) {
+          yield piece
+          continue
+        }
+        if (isEnded) break
+        await new Promise<void>(resolve => {
+          wake = resolve
+        })
+      }
+    } finally {
+      fake.isStopped = true
+    }
+
+    return { value: { code: 1, signal: null } }
+  })
+
   on('process.run', ($, e) => {
     const ok = (stdout: string) => ({
       value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
@@ -602,6 +661,7 @@ export function stubSession(on: On, options: StubOptions = {}) {
           .join('\n'),
       )
     }
+    if (args[0] === 'ls-files' && args.includes('--ignored')) return ok((options.ignored ?? []).map(folder => `${folder}/\n`).join(''))
     if (args[0] === 'ls-files') return ok(Object.keys(head).map(path => `${path}\0`).join(''))
     if (args[0] === 'log') {
       if (args[1] === '-1') return ok(`${tip().hash}\0commit: ${tip().message}\n`)
