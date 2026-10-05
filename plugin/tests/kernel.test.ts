@@ -5,8 +5,12 @@ import { claimed, isHeld, LEASE_BEAT_MS, LEASE_TTL_MS, nextLeaseCheck, NO_LEASE,
 import type { Lease } from '../hooks/lease'
 import type { Health, HealthEvent, Pressure, Trouble } from '../hooks/health'
 import { isLookDue, playOf, wakeAt } from '../hooks/play'
-import type { PlayFacts } from '../hooks/play'
+import type { Play, PlayFacts, Why } from '../hooks/play'
+import { current, isSpent, MAX_ATTEMPTS, MAX_WAIT_MS, MAX_WAITING, nextToAssess, nextToReview, reviewed, settledIn, withAttempt, withCommit, withoutCommit } from '../hooks/reviewqueue'
+import type { ReviewQueue } from '../hooks/reviewqueue'
 import { createScheduler } from '../hooks/scheduler'
+import { afterRead, afterWrite, arming, changeStep, delayMs, dueNow, keepsBackup } from '../hooks/core'
+import { READ_RETRY_MS, READ_TRIES, WRITE_TRIES } from '../hooks/store'
 import { FOCUS_SCAN_MS, focusGapMs, HOT_FOR_MS, HOT_SCAN_MS, IDLE_AFTER_MS, IDLE_SCAN_MS, LONGEST_FOCUS_GAP_MS, LONGEST_SCAN_GAP_MS, SCAN_MS, scanGapMs } from '../hooks/sensor'
 import { clockTime, healthLine, playLine, watchOf } from '../hooks/status'
 
@@ -612,5 +616,183 @@ test('whoever asks and whenever, a lease that is held is never taken from its ho
     // The next look at it is in the future, and never further off than one beat.
     const next = nextLeaseCheck(lease, me, now, random())
     if (next <= now || next > now + LEASE_BEAT_MS) throw new Error(`turn ${turn}: the next check is at ${next - now} ms`)
+  }
+})
+
+test('whatever commits come and whatever happens to them, the queue keeps its rules', async () => {
+  for (let seed = 1; seed <= 300; seed += 1) {
+    const random = seeded(seed)
+    const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T
+    const hashes = ['a1b2c3d', 'b2c3d4e', 'c3d4e5f', 'd4e5f60', 'e5f6071']
+    let queue: ReviewQueue = { v: 1, commits: [] }
+    let now = 1_790_000_000_000
+    for (let turn = 0; turn < 60; turn += 1) {
+      now += pick([0, 1000, 3_600_000, MAX_WAIT_MS])
+      const hash = pick(hashes)
+      const before = queue
+      const kind = pick(['commit', 'commit', 'without', 'reviewed', 'attempt', 'attempt', 'current'] as const)
+      const where = `seed ${seed}, turn ${turn}: ${kind} ${hash} on ${JSON.stringify(before)}`
+      const known = before.commits.find(commit => commit.hash === hash)
+      if (kind === 'commit') {
+        queue = withCommit(queue, { hash, title: 'x' }, now)
+        // A commit already waiting stays as it is, and nothing is written.
+        if (known !== undefined && queue !== before) throw new Error(`a waiting commit was added again. ${where}`)
+        // A new one is the newest, at the start of its review.
+        const last = queue.commits.at(-1)
+        if (known === undefined && (last?.hash !== hash || last.isReviewed || last.attempts !== 0)) throw new Error(`a new commit is not last. ${where}`)
+      } else if (kind === 'without') {
+        queue = withoutCommit(queue, hash)
+      } else if (kind === 'reviewed') {
+        queue = reviewed(queue, hash)
+        // Moving on to the look at progress starts its count again.
+        const after = queue.commits.find(commit => commit.hash === hash)
+        if (known !== undefined && (after?.isReviewed !== true || after.attempts !== 0)) throw new Error(`reviewed did not move it on. ${where}`)
+      } else if (kind === 'attempt') {
+        queue = withAttempt(queue, hash)
+      } else {
+        queue = current(queue, now)
+        if (queue.commits.some(commit => now - commit.at >= MAX_WAIT_MS)) throw new Error(`a commit waited too long. ${where}`)
+      }
+      // At most a few, each once, oldest first.
+      if (queue.commits.length > MAX_WAITING) throw new Error(`too many wait. ${where}`)
+      if (new Set(queue.commits.map(commit => commit.hash)).size !== queue.commits.length) throw new Error(`a commit waits twice. ${where}`)
+      if (queue.commits.some((commit, at) => at > 0 && commit.at < (queue.commits[at - 1]?.at ?? 0))) throw new Error(`out of order. ${where}`)
+      for (const commit of queue.commits) {
+        if (isSpent(queue, commit.hash) !== commit.attempts >= MAX_ATTEMPTS) throw new Error(`isSpent disagrees with the count. ${where}`)
+      }
+      // The next review is of the oldest commit still without one, and only one that wants it. The look at progress never comes before its review.
+      const wanted = { wantsReview: true, wantsAssessment: true }
+      if (nextToReview(queue, wanted)?.hash !== queue.commits.find(commit => !commit.isReviewed)?.hash) throw new Error(`not the oldest. ${where}`)
+      if (nextToAssess(queue, wanted)?.isReviewed === false) throw new Error(`assessed before its review. ${where}`)
+      if (nextToReview(queue, { wantsReview: false, wantsAssessment: true }) !== null) throw new Error(`reviewed though not wanted. ${where}`)
+      // Kept progress never lets a commit go before its look.
+      if (settledIn(queue, wanted).length > 0) throw new Error(`settled while progress is kept. ${where}`)
+    }
+  }
+})
+
+test('the store reads a broken file a few times, writes a few times, and always comes to an end', async () => {
+  // A file that is there and parses, or is not there at all, is settled at the first read.
+  expect(afterRead(1, 'parsed')).toEqual({ next: 'sound' })
+  expect(afterRead(1, 'missing')).toEqual({ next: 'absent' })
+  // One that is empty or broken is read again a moment later, and is broken after the last try.
+  for (let attempt = 1; attempt < READ_TRIES; attempt += 1) expect(afterRead(attempt, 'unreadable')).toEqual({ next: 'again', waitMs: READ_RETRY_MS })
+  expect(afterRead(READ_TRIES, 'unreadable')).toEqual({ next: 'broken' })
+
+  for (const hasLock of [true, false]) {
+    for (const isSound of [true, false]) {
+      for (const isSame of [true, false]) {
+        for (let attempt = 1; attempt <= WRITE_TRIES; attempt += 1) {
+          const step = changeStep(attempt, { hasLock, isSound, isSame })
+          // A change that changes nothing in a sound file is never written.
+          if (isSound && isSame) expect(step).toBe('unchanged')
+          // Without the lock it checks first, except on the last try, which writes regardless.
+          else if (!hasLock && attempt < WRITE_TRIES) expect(step).toBe('check')
+          else expect(step).toBe('write')
+        }
+      }
+    }
+  }
+
+  // A write that is read back is done. One that is not is tried again, a little later each time, and then given up on.
+  let waited = 0
+  for (let attempt = 1; attempt <= WRITE_TRIES; attempt += 1) {
+    expect(afterWrite(attempt, true)).toEqual({ next: 'done' })
+    const after = afterWrite(attempt, false)
+    if (attempt === WRITE_TRIES) expect(after).toEqual({ next: 'unconfirmed' })
+    else {
+      if (after.next !== 'again' || after.waitMs <= waited) throw new Error(`try ${attempt}: ${JSON.stringify(after)}`)
+      waited = after.waitMs
+    }
+  }
+
+  // The file as it was is kept only when it was asked for, was sound, and was there.
+  expect(keepsBackup({ wantsBackup: true, isSound: true, exists: true })).toBe(true)
+  expect(keepsBackup({ wantsBackup: false, isSound: true, exists: true })).toBe(false)
+  expect(keepsBackup({ wantsBackup: true, isSound: false, exists: true })).toBe(false)
+  expect(keepsBackup({ wantsBackup: true, isSound: true, exists: false })).toBe(false)
+})
+
+test('whatever the play-by-play is doing, a wait names when it ends, and the row under it never says what the line says', async () => {
+  const TROUBLES: Trouble[] = ['rate-limit', 'overloaded', 'server', 'offline', 'timeout', 'account', 'job', 'reply']
+  const random = seeded(41)
+  const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T
+  const lines = new Set<string>()
+  const rows = new Set<string>()
+  for (let turn = 0; turn < 20_000; turn += 1) {
+    const now = 1_790_000_000_000 + Math.floor(random() * 86_400_000)
+    const trouble = pick(TROUBLES)
+    const until = pick([null, now + Math.floor(random() * 900_000)])
+    const why: Why = pick<Why>([
+      { kind: 'failed', detail: pick(['no connection', 'empty reply']) },
+      { kind: 'trouble', trouble, detail: 'overloaded' },
+      { kind: 'plan', percent: 96, window: 'five_hour' },
+      { kind: 'account', detail: 'billing error' },
+      { kind: 'job', detail: 'model not found' },
+    ])
+    const play: Play = pick<Play>([
+      { at: 'starting' },
+      { at: 'no-git' },
+      { at: 'following' },
+      { at: 'paused' },
+      { at: 'watching' },
+      { at: 'on-request' },
+      { at: 'looking' },
+      { at: 'settling', dueAt: now + 10_000, isSpacing: random() < 0.5 },
+      { at: 'waiting', until, why },
+    ])
+    const health: Health = pick<Health>([
+      { state: 'ok' },
+      { state: 'waiting', trouble, detail: 'x', until: now + Math.floor(random() * 600_000), failures: 2 },
+      { state: 'recovering', trouble, detail: 'x', failures: 2 },
+      { state: 'probing', trouble, detail: 'x', failures: 3 },
+      { state: 'blocked', detail: 'billing error' },
+    ])
+    const pressure: Pressure = {
+      level: pick(['none', 'slowed', 'held'] as const),
+      percent: Math.floor(random() * 100),
+      window: 'five_hour',
+      resetsAt: pick([null, now + 3_600_000]),
+    }
+    const facts = { play, health, pressure, lastScanMs: pick([0, 40, 1499, 1500, 2345, 31_999.5, random() * 5000]), failing: pick([[], ['a scan'], ['a scan', 'a lookup']]) }
+    const line = playLine(play)
+    const row = healthLine(facts)
+    // A wait for a retry, the service or the plan names the time it ends, as the clock shows it.
+    if (play.at === 'waiting' && play.until !== null && (play.why.kind === 'failed' || play.why.kind === 'trouble' || play.why.kind === 'plan')) {
+      if (!line.includes(clockTime(play.until))) throw new Error(`turn ${turn}: "${line}" does not say ${clockTime(play.until)}`)
+    }
+    // A look that is held back already says why, so the row leaves the service and the plan out.
+    if (play.at === 'waiting' && (row.includes('Claude') || row.includes('plan limit'))) throw new Error(`turn ${turn}: the row repeats the line: "${row}"`)
+    // Nothing is said about the background while it is not this session's, or not running.
+    if ((play.at === 'paused' || play.at === 'following' || play.at === 'starting' || play.at === 'no-git') && row !== '') throw new Error(`turn ${turn}: "${row}"`)
+    if (watchOf(play, null, row).line !== line) throw new Error(`turn ${turn}: watchOf says another line`)
+  }
+})
+
+test('whatever deadlines there are, the timer is armed for the first of them, and due ones run earliest first', async () => {
+  const random = seeded(51)
+  const names = ['scan', 'look', 'health', 'review', 'lease', 'journal']
+  for (let turn = 0; turn < 20_000; turn += 1) {
+    const now = 1_790_000_000_000
+    const deadlines = names.filter(() => random() < 0.5).map(name => ({ name, at: now + Math.floor(random() * 5) * 1000 - 2000 }))
+    const first = deadlines.length === 0 ? null : Math.min(...deadlines.map(deadline => deadline.at))
+    const armedFor = [null, first, now][Math.floor(random() * 3)] ?? null
+    const arm = arming(armedFor, deadlines)
+    const where = `turn ${turn}: armed for ${armedFor}, ${JSON.stringify(deadlines)} gave ${JSON.stringify(arm)}`
+    // Left alone when it is right already, never armed with nothing to do, and otherwise armed for the first.
+    if (armedFor === first && arm.next !== 'keep') throw new Error(`a timer that was right was touched. ${where}`)
+    if (armedFor !== first && first === null && arm.next !== 'disarm') throw new Error(`a timer is kept with nothing to do. ${where}`)
+    if (armedFor !== first && first !== null && (arm.next !== 'arm' || arm.at !== first)) throw new Error(`not armed for the first. ${where}`)
+    if (first !== null && delayMs(first, now) !== Math.max(0, first - now)) throw new Error(`the delay is wrong. ${where}`)
+    // Every due deadline runs, none that is not, the earliest first, and in the order given among equals.
+    const due = dueNow(deadlines, now)
+    const expected = deadlines.filter(deadline => deadline.at <= now)
+    if (due.length !== expected.length || !expected.every(deadline => due.includes(deadline.name))) throw new Error(`not what is due. ${where} ${JSON.stringify(due)}`)
+    const at = (name: string) => deadlines.findIndex(deadline => deadline.name === name)
+    for (let index = 1; index < due.length; index += 1) {
+      const a = deadlines[at(due[index - 1] as string)]
+      const b = deadlines[at(due[index] as string)]
+      if (a === undefined || b === undefined || a.at > b.at || (a.at === b.at && at(a.name) > at(b.name))) throw new Error(`out of order. ${where} ${JSON.stringify(due)}`)
+    }
   }
 })

@@ -14,15 +14,15 @@
 module Kernel.Play
   ( Why(..)
   , Play(..)
-  , Pressure
   , Facts
   , playOf
   , wakeAt
   , isLookDue
-  , PressureWire
   , FactsWire
   , PlayWire
   , playOfWire
+  , playToWire
+  , playFromWire
   , wakeAtWire
   , isLookDueWire
   ) where
@@ -30,9 +30,9 @@ module Kernel.Play
 import Prelude
 
 import Data.Maybe (Maybe(..))
-import Kernel.Health (Health, HealthWire, Trouble, healthFromWire, mayAsk, troubleTag)
+import Kernel.Health (Health, HealthWire, Trouble, healthFromWire, mayAsk, troubleFromTag, troubleTag)
 import Kernel.Health as Health
-import Kernel.Pace (backoffMs, gapFactor, slowedGapMs)
+import Kernel.Pace (Pressure, PressureWire, backoffMs, gapFactor, pressureFromWire, slowedGapMs)
 
 -- | Why a look that is wanted is not happening yet.
 data Why
@@ -65,9 +65,6 @@ data Play
   -- | A look is wanted and held back. `until` is when it is tried again, or
   -- | `Nothing` when something else has to happen first.
   | Waiting { until :: Maybe Number, why :: Why }
-
--- | How close the plan's usage limit is, from the tightest window still open.
-type Pressure = { isHeld :: Boolean, percent :: Number, window :: String, resetsAt :: Maybe Number }
 
 type Facts =
   { isPaused :: Boolean
@@ -162,8 +159,6 @@ isLookDue facts now = case playOf facts of
 
 -- The same, as the plain records the shell holds.
 
-type PressureWire = { level :: String, percent :: Number, window :: String, hasResetsAt :: Boolean, resetsAt :: Number }
-
 type FactsWire =
   { isPaused :: Boolean
   , isReady :: Boolean
@@ -217,12 +212,7 @@ factsFromWire w =
   , quietMs: w.quietMs
   , minGapMs: w.minGapMs
   , health: healthFromWire w.health
-  , pressure:
-      { isHeld: w.pressure.level == "held"
-      , percent: w.pressure.percent
-      , window: w.pressure.window
-      , resetsAt: if w.pressure.hasResetsAt then Just w.pressure.resetsAt else Nothing
-      }
+  , pressure: pressureFromWire w.pressure
   , jobBlock: w.jobBlock
   }
 
@@ -250,6 +240,27 @@ playToWire = case _ of
     PlanSpent percent window -> wire { why = "plan", percent = percent, window = window }
     AccountRefused detail -> wire { why = "account", detail = detail }
     JobRefused detail -> wire { why = "job", detail = detail }
+
+-- | A state nobody knows is `Starting`, which promises nothing. A reason
+-- | nobody knows is a failed look, which is tried again.
+playFromWire :: PlayWire -> Play
+playFromWire w = case w.at of
+  "no-git" -> NoGit
+  "following" -> Following
+  "paused" -> Paused
+  "watching" -> Watching
+  "on-request" -> OnRequest
+  "looking" -> Looking
+  "settling" -> Settling { dueAt: w.dueAt, isSpacing: w.isSpacing }
+  "waiting" -> Waiting { until: if w.hasUntil then Just w.until else Nothing, why }
+  _ -> Starting
+  where
+  why = case w.why of
+    "trouble" -> InTrouble (troubleFromTag w.trouble) w.detail
+    "plan" -> PlanSpent w.percent w.window
+    "account" -> AccountRefused w.detail
+    "job" -> JobRefused w.detail
+    _ -> LookFailed w.detail
 
 playOfWire :: FactsWire -> PlayWire
 playOfWire = playToWire <<< playOf <<< factsFromWire

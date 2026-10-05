@@ -147,7 +147,7 @@ sessionTest("one read of the editor's focus file moves Explain and tells the con
 
   session.editor(`${ROOT}/stats.py`, 2, undefined, EDITOR_REPORT)
   await session.clock.advance(4000)
-  expect(session.diskReads.filter(path => path.endsWith('/focus.json')).length).toBe(1)
+  expect(session.diskReads.filter(path => path.includes('/editors/')).length).toBe(1)
 
   await $.prompt.submit({ text: 'why does this fail?', wait: false, origin: { kind: 'composer' } })
   const context = session.contexts[0] ?? []
