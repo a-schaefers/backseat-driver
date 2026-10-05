@@ -67,7 +67,7 @@ export const HELP = [
   '  /bsd help        this list',
   '',
   'In the tutor. Ctrl+X Tab or a click gives it the keyboard, and Esc gives it back:',
-  '  1 to 5    switch tabs: 5 is Settings, where a pick and Enter changes one',
+  '  1 to 6    switch tabs: 4 Growth, 5 Lessons, 6 Settings, where a pick and Enter changes one',
   '            Unified: a tab opens above the prompt; again, or x, folds it',
   '  j k       next note, previous note',
   '  e d m     explain, dismiss or mute the selected note',
@@ -76,12 +76,13 @@ export const HELP = [
   '  n p e     in Explain: next symbol, previous symbol, ask about this one',
   '  w         say what you are working on',
   '  q         answer the questions again',
+  '  s c b     in Lessons: start the next step, mark it done yourself, back to the list',
   '',
   'The layout, models, thinking levels, pacing, the voice and the engineering persona are in the Settings tab, and in /config: search for "backseat".',
 ].join('\n')
 
 /** What `/bsd settings` says while the tutor is off, when there is no pane to show them in. */
-export const SETTINGS_OFF = 'Backseat Driver is off. Its settings are in /config (search for "backseat"), or run /bsd and press 5 in the tutor.'
+export const SETTINGS_OFF = 'Backseat Driver is off. Its settings are in /config (search for "backseat"), or run /bsd and press 6 in the tutor.'
 
 /** What `/bsd help` prints, with a first line about a word that is not a command. */
 export function helpText(unknown?: string): string {

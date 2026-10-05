@@ -17,7 +17,7 @@ import { languageOf } from './languages'
 import { applyReply, isProblem, parseReply } from './notes'
 import type { Bubble } from './prompts'
 import { playByPlayPrompt } from './prompts'
-import { GENERAL, isHushed, withFlagged } from './profiles'
+import { GENERAL, isHushed, withFlagged, withLooked } from './profiles'
 import type { KeptInsight } from './project'
 import type { Recorder } from './recorder'
 import type { Settings } from './settings'
@@ -188,8 +188,12 @@ export async function runLook(ports: LookPorts, state: LookState, isAsked: boole
         const subject = languageOf(note.file) ?? GENERAL
         raised.set(subject, [...(raised.get(subject) ?? []), note.topic])
       }
+      // Each language this look saw counts the look, so that a topic that stops coming back shows as a habit improved.
+      for (const subject of new Set(paths.map(path => languageOf(path)).filter(language => language !== null))) {
+        if (!raised.has(subject)) raised.set(subject, [])
+      }
       for (const [subject, topics] of raised) {
-        await ports.saveSubject(subject, profile => withFlagged(profile, topics))
+        await ports.saveSubject(subject, profile => withFlagged(withLooked(profile), topics))
       }
 
       // The persona's line is about this look, so a quiet look leaves it quiet.

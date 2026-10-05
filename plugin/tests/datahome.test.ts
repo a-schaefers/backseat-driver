@@ -120,10 +120,12 @@ test('forget: what a word names, and what each scope deletes', async () => {
     '/d/progress/python.json',
     '/d/progress/python.json.bak',
     '/d/progress/python.json.broken',
+    '/d/lessons/python',
   ])
   expect(scopePaths('/d', '/work', { kind: 'everything' })).toEqual([
     '/d/profiles',
     '/d/progress',
+    '/d/lessons',
     '/d/projects',
     '/d/editors',
     '/d/focus.json',

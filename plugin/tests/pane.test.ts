@@ -144,16 +144,19 @@ test('a tab says what is going on behind it', async () => {
 
 test('the tab row keeps what the tabs say for as long as there is room, and never wraps', async () => {
   const busy = { ...VIEW, notes: [note(1), note(2)], review: { ...DONE, isUnseen: true }, explain: { ...NO_VIEW, status: 'updating' as const } }
-  expect(tabRow({ ...busy, columns: 90 })).toEqual({ labels: ['Play-by-play (2)', 'Deep review (new)', 'Explain (…)', 'Progress', 'Settings'], gap: 3 })
+  expect(tabRow({ ...busy, columns: 98 })).toEqual({ labels: ['Play-by-play (2)', 'Deep review (new)', 'Explain (…)', 'Growth', 'Lessons', 'Settings'], gap: 3 })
   // Too narrow for the full names: the short ones, still saying it.
-  expect(tabRow({ ...busy, columns: 70 })).toEqual({ labels: ['Play (2)', 'Review (new)', 'Explain (…)', 'Progress', 'Settings'], gap: 2 })
-  expect(tabRow({ ...busy, columns: 66 })).toEqual({ labels: ['Play (2)', 'Review (new)', 'Explain (…)', 'Progress', 'Settings'], gap: 1 })
+  expect(tabRow({ ...busy, columns: 80 })).toEqual({ labels: ['Play (2)', 'Review (new)', 'Explain (…)', 'Growth', 'Lessons', 'Settings'], gap: 2 })
+  expect(tabRow({ ...busy, columns: 75 })).toEqual({ labels: ['Play (2)', 'Review (new)', 'Explain (…)', 'Growth', 'Lessons', 'Settings'], gap: 1 })
   // Narrower still: the review's word is the one that asks for a look, so it is the one kept.
-  expect(tabRow({ ...busy, columns: 60 })).toEqual({ labels: ['Play', 'Review (new)', 'Explain', 'Progress', 'Settings'], gap: 2 })
+  expect(tabRow({ ...busy, columns: 72 })).toEqual({ labels: ['Play', 'Review (new)', 'Explain', 'Growth', 'Lessons', 'Settings'], gap: 2 })
+  expect(tabRow({ ...busy, columns: 67 })).toEqual({ labels: ['Play', 'Review (new)', 'Explain', 'Growth', 'Lessons', 'Settings'], gap: 1 })
+  // A docked pane: the longest names give way.
+  expect(tabRow({ ...busy, columns: 64 })).toEqual({ labels: ['Play', 'Review (new)', 'Expl', 'Growth', 'Lessons', 'Set'], gap: 1 })
   // Every row fits its pane.
-  for (const columns of [90, 70, 66]) {
+  for (const columns of [98, 80, 75, 72, 67, 64]) {
     const row = tabRow({ ...busy, columns })
-    expect(row.labels.reduce((sum, label) => sum + label.length + 3, 0) + row.gap * 4 <= columns).toBe(true)
+    expect(row.labels.reduce((sum, label) => sum + label.length + 3, 0) + row.gap * 5 <= columns).toBe(true)
   }
 })
 

@@ -187,3 +187,28 @@ export type LicenseFactsWire = {
 }
 export const licenseStandingWire: (facts: LicenseFactsWire) => string
 export const licenseNextCheckWire: (facts: LicenseFactsWire) => number
+
+// Growth
+export type GrowthItemWire = { kind: string; what: string; count: number; total: number }
+export type GrowthFactsWire = {
+  seen: { commit: string; skill: string; rank: number; isShown: boolean; weight: number }[]
+  lessons: { id: string; title: string; rank: number; steps: number; done: number; checked: number; helped: number; isCounted: boolean; skills: string[] }[]
+  topics: { topic: string; flagged: number; explained: number; sinceLooks: number }[]
+}
+/** `rank` 0 to 3 is beginner to senior, -1 none. `encouragement` holds at most one item. */
+export type GrowthWire = {
+  rank: number
+  score: number
+  toNext: number
+  shown: number
+  missed: number
+  lessonSteps: number
+  habitsImproved: number
+  stillComing: number
+  workOn: GrowthItemWire[]
+  neededHelp: GrowthItemWire[]
+  improved: GrowthItemWire[]
+  toRaise: GrowthItemWire[]
+  encouragement: GrowthItemWire[]
+}
+export const growthWire: (facts: GrowthFactsWire) => GrowthWire

@@ -60,7 +60,8 @@ test('parseProfile trusts nothing it reads from the store', async () => {
     answers: { level: 'None yet' },
     isAsked: true,
     hushed: [{ topic: 'type-hints', text: 'type hints' }],
-    topics: { 'empty-input': { flagged: 4, explained: 1 }, negative: { flagged: 0, explained: 0 } },
+    topics: { 'empty-input': { flagged: 4, explained: 1, lastLook: 0 }, negative: { flagged: 0, explained: 0, lastLook: 0 } },
+    looks: 0,
   })
 })
 
@@ -83,7 +84,7 @@ test('lesson memory counts what was raised and what was explained', async () => 
   profile = withFlagged(profile, ['empty-input'])
   profile = withExplained(profile, 'empty-input')
 
-  expect(profile.topics['empty-input']).toEqual({ flagged: 4, explained: 1 })
+  expect(profile.topics['empty-input']).toEqual({ flagged: 4, explained: 1, lastLook: 0 })
   expect(recurring(profile)).toEqual([
     { topic: 'empty-input', times: 4 },
     { topic: 'naming', times: 3 },
@@ -99,7 +100,8 @@ test('personText is empty until something is on record', async () => {
     answers: { level: 'A little: tutorials and small scripts', goals: 'Write idiomatic code without looking things up' },
     isAsked: true,
     hushed: [{ topic: 'type-hints', text: 'missing type hints' }],
-    topics: { 'empty-input': { flagged: 3, explained: 1 } },
+    topics: { 'empty-input': { flagged: 3, explained: 1, lastLook: 0 } },
+    looks: 0,
   }
   const text = personText({
     languages: ['python'],
@@ -159,6 +161,7 @@ sessionTest('the first time in a project, the questions are asked and the answer
     isAsked: true,
     hushed: [],
     topics: {},
+    looks: 0,
   })
   expect(parseProfile(session.data('profiles/python.json')).answers.level).toBe('A little: tutorials and small scripts')
 
@@ -218,7 +221,7 @@ sessionTest('the hush tool stops a topic at once, for good, and removes its note
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
   await session.clock.settle()
-  expect(session.tools.map(tool => tool.name)).toEqual(['hush', 'unhush', 'record', 'lookup', 'progress', 'profile', 'working', 'activity'])
+  expect(session.tools.map(tool => tool.name)).toEqual(['hush', 'unhush', 'record', 'lookup', 'progress', 'lesson', 'profile', 'working', 'activity'])
 
   session.write('stats.py', `${MEAN}\ndef total(xs):\n    return sum(xs)\n`)
   await session.clock.advance(14_000)
@@ -300,13 +303,13 @@ sessionTest('what the play-by-play raises and what gets explained goes into the 
   await session.clock.settle()
   session.write('stats.py', `${MEAN}# more\n`)
   await session.clock.advance(14_000)
-  expect(parseProfile(session.data('profiles/python.json')).topics).toEqual({ 'empty-input': { flagged: 1, explained: 0 } })
+  expect(parseProfile(session.data('profiles/python.json')).topics).toEqual({ 'empty-input': { flagged: 1, explained: 0, lastLook: 1 } })
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'explain' })
-  expect(parseProfile(session.data('profiles/python.json')).topics).toEqual({ 'empty-input': { flagged: 1, explained: 1 } })
+  expect(parseProfile(session.data('profiles/python.json')).topics).toEqual({ 'empty-input': { flagged: 1, explained: 1, lastLook: 1 } })
   await ui.press({ key: 'tab-profile' })
-  expect(await ui.find({ type: 'Text', text: 'Explained so far: empty-input' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '- empty input: you asked for it to be explained once' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -372,7 +375,7 @@ sessionTest('a note the reviewer repeats while it is still open is counted once 
   await session.clock.advance(80_000)
 
   expect(session.requests.length).toBe(2)
-  expect(parseProfile(session.data('profiles/python.json')).topics).toEqual({ 'empty-input': { flagged: 1, explained: 0 } })
+  expect(parseProfile(session.data('profiles/python.json')).topics).toEqual({ 'empty-input': { flagged: 1, explained: 0, lastLook: 1 } })
 })
 
 sessionTest('the record tool keeps what the user says about themselves', async ($, on) => {

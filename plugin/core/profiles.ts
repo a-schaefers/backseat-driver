@@ -18,7 +18,7 @@ export function storedSubject(key: string): string | null {
 }
 
 export function emptyProfile(): Profile {
-  return { answers: {}, isAsked: false, hushed: [], topics: {} }
+  return { answers: {}, isAsked: false, hushed: [], topics: {}, looks: 0 }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -56,10 +56,14 @@ export function parseProfile(value: unknown): Profile {
   const topics: Record<string, TopicStats> = {}
   for (const [topic, stats] of Object.entries(asRecord(stored.topics) ?? {})) {
     const record = asRecord(stats)
-    if (record !== null) topics[topic] = { flagged: count(record.flagged), explained: count(record.explained) }
+    if (record !== null) topics[topic] = { flagged: count(record.flagged), explained: count(record.explained), lastLook: count(record.lastLook) }
   }
+  const looks = count(stored.looks)
 
-  return { answers, isAsked: stored.isAsked === true, hushed, topics }
+  // A topic raised before looks were counted is taken as raised at the latest look: nothing is called improved on no evidence.
+  for (const stats of Object.values(topics)) if (stats.lastLook === 0 && stats.flagged > 0) stats.lastLook = looks
+
+  return { answers, isAsked: stored.isAsked === true, hushed, topics, looks }
 }
 
 /** The first-run questions were answered, or skipped when `answers` is empty. */
@@ -86,12 +90,12 @@ export function withoutHush(profile: Profile, topic: string): Profile {
 /** The lesson memory holds this many topics. Past that, the ones that came up least are forgotten. */
 const MAX_TOPICS = 150
 
-function bump(profile: Profile, topics: readonly string[], field: keyof TopicStats): Profile {
+function bump(profile: Profile, topics: readonly string[], field: 'flagged' | 'explained'): Profile {
   if (topics.length === 0) return profile
   const next: Record<string, TopicStats> = { ...profile.topics }
   for (const topic of topics) {
-    const stats = next[topic] ?? { flagged: 0, explained: 0 }
-    next[topic] = { ...stats, [field]: stats[field] + 1 }
+    const stats = next[topic] ?? { flagged: 0, explained: 0, lastLook: profile.looks }
+    next[topic] = { ...stats, [field]: stats[field] + 1, ...(field === 'flagged' ? { lastLook: profile.looks } : {}) }
   }
   const kept = Object.entries(next)
     // On a tie, what just came up stays: otherwise a full memory would forget every new topic at once.
@@ -99,6 +103,11 @@ function bump(profile: Profile, topics: readonly string[], field: keyof TopicSta
     .slice(0, MAX_TOPICS)
 
   return { ...profile, topics: Object.fromEntries(kept) }
+}
+
+/** A look of the play-by-play saw their code in this subject. Counted, so that a topic that stopped coming back can be told from one that was never looked for. */
+export function withLooked(profile: Profile): Profile {
+  return { ...profile, looks: profile.looks + 1 }
 }
 
 /** The play-by-play raised these ideas. */

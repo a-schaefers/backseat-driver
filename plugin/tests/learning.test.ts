@@ -112,7 +112,7 @@ sessionTest('decision points and insights each get their own section in the play
   await ui.unmount()
 
   // Only the bug is a lesson that can keep coming back.
-  expect(parseProfile(session.data('profiles/python.json')).topics).toEqual({ 'division-by-zero': { flagged: 1, explained: 0 } })
+  expect(parseProfile(session.data('profiles/python.json')).topics).toEqual({ 'division-by-zero': { flagged: 1, explained: 0, lastLook: 1 } })
   expect(subjectKey('python')).toBe('subject/python')
 })
 
