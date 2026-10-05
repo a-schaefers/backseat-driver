@@ -1,0 +1,6 @@
+{
+  "name": "backseat-driver-license-server",
+  "private": true,
+  "type": "module",
+  "description": "A reference license server for Backseat Driver commercial keys. Not deployed. Run its checks with npm run server from the repository root."
+}

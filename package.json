@@ -1,18 +1,20 @@
 {
   "name": "backseat-driver-dev",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "private": true,
-  "description": "Development tooling for the Backseat Driver plugin. Nothing here ships to users: the plugin is the plugin/ folder. TypeScript checks the types. spago and esbuild build the PureScript kernel into plugin/hooks/kernel.js, and the compiler itself comes by pinned hash (scripts/toolchain.py).",
+  "description": "Development tooling for the Backseat Driver plugin. Nothing here ships to users: the plugin is the plugin/ folder. TypeScript checks the types. license-server/ is a reference license server, also never shipped. spago and esbuild build the PureScript kernel into plugin/hooks/kernel.js, and the compiler itself comes by pinned hash (scripts/toolchain.py).",
   "scripts": {
     "build:kernel": "scripts/build-kernel.sh",
     "kernel": "scripts/build-kernel.sh --check",
     "validate": "claude plugin validate . --strict && claude plugin validate ./plugin --strict",
     "test": "claude plugin test ./plugin",
     "typecheck": "tsc -p plugin/tsconfig.json",
-    "licenses": "cmp LICENSE plugin/LICENSE && cmp THIRD_PARTY_NOTICES.md plugin/THIRD_PARTY_NOTICES.md",
-    "check": "npm run kernel && npm run validate && npm run licenses && npm run test && npm run typecheck"
+    "server": "tsc -p license-server/tsconfig.json && node --test license-server/test/*.test.ts",
+    "licenses": "cmp LICENSE plugin/LICENSE && cmp COMMERCIAL-LICENSE.md plugin/COMMERCIAL-LICENSE.md && cmp THIRD_PARTY_NOTICES.md plugin/THIRD_PARTY_NOTICES.md",
+    "check": "npm run kernel && npm run validate && npm run licenses && npm run test && npm run typecheck && npm run server"
   },
   "devDependencies": {
+    "@types/node": "24.19.1",
     "esbuild": "0.28.2",
     "spago": "1.0.4",
     "typescript": "^7.0.2"

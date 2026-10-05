@@ -38,6 +38,9 @@ export function typed(command: string, args = '') {
 export const SESSION = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
 
 export const HOME = '/home/me'
+
+/** A person who said long ago how they use the tutor, so that the license question is not among the questions a test counts. */
+export const LICENSE_ANSWERED = { 'license.json': { v: 1, use: 'personal', isAsked: true } }
 /** The session's id, as `$.session.id()` answers it. */
 export const SESSION_ID = 'feedc0de-0000-4000-8000-000000000001'
 /** Where the tutor keeps its own files in a test. */

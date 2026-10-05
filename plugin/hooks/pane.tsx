@@ -36,6 +36,8 @@ export type PaneView = {
   progress: ProgressView
   /** What to say about a newer release, or ''. */
   update: string
+  /** What to say about the license, or ''. Optional: most of the time there is nothing. */
+  license?: string
   /** True while the pane has the keyboard, which is when its keys work. */
   isFocused: boolean
   /** How wide the pane's body is, in columns. */
@@ -653,6 +655,7 @@ export function renderPane(kit: Kit, view: PaneView, actions: PaneActions) {
       {view.mode !== 'paused' && (view.watch.health ?? '') !== '' && <Text dimColor>{view.watch.health}</Text>}
       {view.mode !== 'paused' && (view.watch.editors ?? '') !== '' && <Text dimColor>{view.watch.editors}</Text>}
       {view.update !== '' && <Text color="yellow">{view.update}</Text>}
+      {(view.license ?? '') !== '' && <Text dimColor>{view.license}</Text>}
       {/* Outside a repository there is no journal, so nothing to go on and nowhere to keep an answer. */}
       {view.watch.state !== 'no-git' && workingOn(kit, view, actions)}
       <Text> </Text>
