@@ -1,9 +1,11 @@
 import type { Throttle } from './gate'
 import type { Health, HealthEvent, ModelResult, Outcome, Pressure, Trouble } from './health'
 import * as K from './kernel.js'
-import type { HealthWire, PlayFactsWire } from './kernel.js'
+import type { HealthWire, PlayFactsWire, WaitingWire } from './kernel.js'
 import type { Lease } from './lease'
 import type { Play, PlayFacts, Why } from './play'
+import type { ReviewQueue, Waiting, Wanted } from './reviewqueue'
+import { clockTime } from './clock'
 import type { ScanFacts } from './sensor'
 
 /**
@@ -279,4 +281,114 @@ export function wakeAt(facts: PlayFacts): number | null {
 /** Whether a look may start by itself at `now`. */
 export function isLookDue(facts: PlayFacts, now: number): boolean {
   return K.isLookDueWire(factsToWire(facts))(now)
+}
+
+// --- The review queue (Kernel.Queue)
+
+/** How many commits wait at most. A newer one pushes the oldest out. */
+export const MAX_WAITING: number = K.maxWaiting
+/** A commit that has waited this long is let go. */
+export const MAX_WAIT_MS: number = K.maxWaitMs
+/** How often one stage of one commit is tried before it is given up on. */
+export const MAX_ATTEMPTS: number = K.maxAttempts
+/** After a try that got no answer, the next one waits this long, doubling. */
+export const RETRY_MS: number = K.retryBaseMs
+/** A review that has not reported back after this long is looked for. */
+export const WATCHDOG_MS: number = K.watchdogMs
+/** One that is still running then gets until this long after it started, and no longer. */
+export const WATCHDOG_LIMIT_MS: number = K.watchdogLimitMs
+/** How long a review that ended in "error" waits to be told which error. */
+export const VERDICT_MS: number = K.verdictMs
+/** What the Deep review tab says about a commit whose review is held back by the plan's limit. */
+export const PLAN_HELD: string = K.planHeld
+
+function commitsToWire(queue: ReviewQueue): WaitingWire[] {
+  return queue.commits.map(commit => ({ ...commit, attempts: Math.trunc(commit.attempts) }))
+}
+
+function queueFromWire(commits: WaitingWire[]): ReviewQueue {
+  return { v: 1, commits: commits.map(commit => ({ hash: commit.hash, title: commit.title, at: commit.at, isReviewed: commit.isReviewed, attempts: commit.attempts })) }
+}
+
+/** Whether two lists of commits are the same commits at the same stages. */
+function isSameQueue(queue: ReviewQueue, commits: WaitingWire[]): boolean {
+  return (
+    queue.commits.length === commits.length &&
+    queue.commits.every((commit, at) => {
+      const other = commits[at]
+
+      return other !== undefined && commit.hash === other.hash && commit.isReviewed === other.isReviewed && commit.attempts === other.attempts
+    })
+  )
+}
+
+/** The queue without what has waited too long. Nothing let go, the same object comes back. */
+export function current(queue: ReviewQueue, now: number): ReviewQueue {
+  const next = K.currentQueueWire(commitsToWire(queue))(now)
+
+  return isSameQueue(queue, next) ? queue : queueFromWire(next)
+}
+
+/** A commit that was just seen joins the end. One already waiting stays as it is, and the same object comes back. */
+export function withCommit(queue: ReviewQueue, commit: { hash: string; title: string }, at: number): ReviewQueue {
+  const next = K.withCommitWire(commitsToWire(queue))(commit.hash)(commit.title)(at)
+
+  return isSameQueue(queue, next) ? queue : queueFromWire(next)
+}
+
+export function withoutCommit(queue: ReviewQueue, hash: string): ReviewQueue {
+  return queueFromWire(K.withoutCommitWire(commitsToWire(queue))(hash))
+}
+
+/** The commit's review is done, or given up on: what is left is the look at the person's progress. */
+export function reviewed(queue: ReviewQueue, hash: string): ReviewQueue {
+  return queueFromWire(K.reviewedWire(commitsToWire(queue))(hash))
+}
+
+/** One more try at the commit's present stage got no answer. */
+export function withAttempt(queue: ReviewQueue, hash: string): ReviewQueue {
+  return queueFromWire(K.withAttemptWire(commitsToWire(queue))(hash))
+}
+
+/** Whether the commit's present stage has been tried as often as it will be. */
+export function isSpent(queue: ReviewQueue, hash: string): boolean {
+  return K.isSpentWire(commitsToWire(queue))(hash)
+}
+
+/** How long to wait after the nth try in a row that got no answer. */
+export function retryMs(attempts: number): number {
+  return K.retryMs(Math.trunc(attempts))
+}
+
+function nextFromWire(next: K.NextWire): Waiting | null {
+  return next.has ? queueFromWire([next.commit]).commits[0] ?? null : null
+}
+
+/** The oldest commit that still needs its review. */
+export function nextToReview(queue: ReviewQueue, wanted: Wanted): Waiting | null {
+  return nextFromWire(K.nextToReviewWire(commitsToWire(queue))(wanted))
+}
+
+/** The oldest commit whose review is done with and which still needs the look at the person's progress. */
+export function nextToAssess(queue: ReviewQueue, wanted: Wanted): Waiting | null {
+  return nextFromWire(K.nextToAssessWire(commitsToWire(queue))(wanted))
+}
+
+/** The commits that need nothing more under these settings, to be taken out. */
+export function settledIn(queue: ReviewQueue, wanted: Wanted): string[] {
+  return K.settledInWire(commitsToWire(queue))(wanted)
+}
+
+/**
+ * Why a waiting review is not running, as the tab says it. '' when nothing
+ * holds it back. `retryAt` is the review's own next try, when it has one
+ * planned: the time named is the later of the two.
+ */
+export function heldText(health: Health, pressure: Pressure, jobBlock: string | undefined, retryAt: number | null): string {
+  return K.heldTextWire(clockTime)(healthToWire(health))(pressureToWire(pressure))(jobBlock ?? '')(retryAt !== null)(retryAt ?? 0)
+}
+
+/** What the tab says after a try that got no answer: when the next one is, or that there will be none. */
+export function failedText(detail: string, retryAt: number | null): string {
+  return K.failedTextWire(clockTime)(detail)(retryAt !== null)(retryAt ?? 0)
 }

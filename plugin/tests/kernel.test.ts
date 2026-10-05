@@ -6,6 +6,8 @@ import type { Lease } from '../hooks/lease'
 import type { Health, HealthEvent, Pressure, Trouble } from '../hooks/health'
 import { isLookDue, playOf, wakeAt } from '../hooks/play'
 import type { PlayFacts } from '../hooks/play'
+import { current, isSpent, MAX_ATTEMPTS, MAX_WAIT_MS, MAX_WAITING, nextToAssess, nextToReview, reviewed, settledIn, withAttempt, withCommit, withoutCommit } from '../hooks/reviewqueue'
+import type { ReviewQueue } from '../hooks/reviewqueue'
 import { createScheduler } from '../hooks/scheduler'
 import { FOCUS_SCAN_MS, focusGapMs, HOT_FOR_MS, HOT_SCAN_MS, IDLE_AFTER_MS, IDLE_SCAN_MS, LONGEST_FOCUS_GAP_MS, LONGEST_SCAN_GAP_MS, SCAN_MS, scanGapMs } from '../hooks/sensor'
 import { clockTime, healthLine, playLine, watchOf } from '../hooks/status'
@@ -612,5 +614,57 @@ test('whoever asks and whenever, a lease that is held is never taken from its ho
     // The next look at it is in the future, and never further off than one beat.
     const next = nextLeaseCheck(lease, me, now, random())
     if (next <= now || next > now + LEASE_BEAT_MS) throw new Error(`turn ${turn}: the next check is at ${next - now} ms`)
+  }
+})
+
+test('whatever commits come and whatever happens to them, the queue keeps its rules', async () => {
+  for (let seed = 1; seed <= 300; seed += 1) {
+    const random = seeded(seed)
+    const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T
+    const hashes = ['a1b2c3d', 'b2c3d4e', 'c3d4e5f', 'd4e5f60', 'e5f6071']
+    let queue: ReviewQueue = { v: 1, commits: [] }
+    let now = 1_790_000_000_000
+    for (let turn = 0; turn < 60; turn += 1) {
+      now += pick([0, 1000, 3_600_000, MAX_WAIT_MS])
+      const hash = pick(hashes)
+      const before = queue
+      const kind = pick(['commit', 'commit', 'without', 'reviewed', 'attempt', 'attempt', 'current'] as const)
+      const where = `seed ${seed}, turn ${turn}: ${kind} ${hash} on ${JSON.stringify(before)}`
+      const known = before.commits.find(commit => commit.hash === hash)
+      if (kind === 'commit') {
+        queue = withCommit(queue, { hash, title: 'x' }, now)
+        // A commit already waiting stays as it is, and nothing is written.
+        if (known !== undefined && queue !== before) throw new Error(`a waiting commit was added again. ${where}`)
+        // A new one is the newest, at the start of its review.
+        const last = queue.commits.at(-1)
+        if (known === undefined && (last?.hash !== hash || last.isReviewed || last.attempts !== 0)) throw new Error(`a new commit is not last. ${where}`)
+      } else if (kind === 'without') {
+        queue = withoutCommit(queue, hash)
+      } else if (kind === 'reviewed') {
+        queue = reviewed(queue, hash)
+        // Moving on to the look at progress starts its count again.
+        const after = queue.commits.find(commit => commit.hash === hash)
+        if (known !== undefined && (after?.isReviewed !== true || after.attempts !== 0)) throw new Error(`reviewed did not move it on. ${where}`)
+      } else if (kind === 'attempt') {
+        queue = withAttempt(queue, hash)
+      } else {
+        queue = current(queue, now)
+        if (queue.commits.some(commit => now - commit.at >= MAX_WAIT_MS)) throw new Error(`a commit waited too long. ${where}`)
+      }
+      // At most a few, each once, oldest first.
+      if (queue.commits.length > MAX_WAITING) throw new Error(`too many wait. ${where}`)
+      if (new Set(queue.commits.map(commit => commit.hash)).size !== queue.commits.length) throw new Error(`a commit waits twice. ${where}`)
+      if (queue.commits.some((commit, at) => at > 0 && commit.at < (queue.commits[at - 1]?.at ?? 0))) throw new Error(`out of order. ${where}`)
+      for (const commit of queue.commits) {
+        if (isSpent(queue, commit.hash) !== commit.attempts >= MAX_ATTEMPTS) throw new Error(`isSpent disagrees with the count. ${where}`)
+      }
+      // The next review is of the oldest commit still without one, and only one that wants it. The look at progress never comes before its review.
+      const wanted = { wantsReview: true, wantsAssessment: true }
+      if (nextToReview(queue, wanted)?.hash !== queue.commits.find(commit => !commit.isReviewed)?.hash) throw new Error(`not the oldest. ${where}`)
+      if (nextToAssess(queue, wanted)?.isReviewed === false) throw new Error(`assessed before its review. ${where}`)
+      if (nextToReview(queue, { wantsReview: false, wantsAssessment: true }) !== null) throw new Error(`reviewed though not wanted. ${where}`)
+      // Kept progress never lets a commit go before its look.
+      if (settledIn(queue, wanted).length > 0) throw new Error(`settled while progress is kept. ${where}`)
+    }
   }
 })

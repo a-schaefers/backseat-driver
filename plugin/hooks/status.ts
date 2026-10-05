@@ -1,6 +1,7 @@
 import type { Watch } from '../types'
 import type { Health, Pressure } from './health'
 import type { Play } from './play'
+import { clockTime } from './clock'
 
 /**
  * The pane's status line: what the play-by-play is doing, said so that it is
@@ -9,12 +10,7 @@ import type { Play } from './play'
  * second to stay right.
  */
 
-/** A time of day as the person's clock shows it: 09:05. */
-export function clockTime(ms: number): string {
-  const date = new Date(ms)
-
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
-}
+export { clockTime } from './clock'
 
 const TROUBLES: Record<string, string> = {
   'rate-limit': 'Claude is rate limited',

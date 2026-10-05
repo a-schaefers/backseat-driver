@@ -94,3 +94,33 @@ export type PlayWire = {
 export const playOfWire: (facts: PlayFactsWire) => PlayWire
 export const wakeAtWire: (facts: PlayFactsWire) => { has: boolean; at: number }
 export const isLookDueWire: (facts: PlayFactsWire) => (now: number) => boolean
+
+// The review queue
+/** `isReviewed` is the stage: true once the review is done with. `attempts` is a whole number. */
+export type WaitingWire = { hash: string; title: string; at: number; isReviewed: boolean; attempts: number }
+export type WantedWire = { wantsReview: boolean; wantsAssessment: boolean }
+/** `has` is false when there is no such commit, and `commit` is then empty. */
+export type NextWire = { has: boolean; commit: WaitingWire }
+export const currentQueueWire: (commits: WaitingWire[]) => (now: number) => WaitingWire[]
+export const withCommitWire: (commits: WaitingWire[]) => (hash: string) => (title: string) => (at: number) => WaitingWire[]
+export const withoutCommitWire: (commits: WaitingWire[]) => (hash: string) => WaitingWire[]
+export const reviewedWire: (commits: WaitingWire[]) => (hash: string) => WaitingWire[]
+export const withAttemptWire: (commits: WaitingWire[]) => (hash: string) => WaitingWire[]
+export const isSpentWire: (commits: WaitingWire[]) => (hash: string) => boolean
+export const nextToReviewWire: (commits: WaitingWire[]) => (wanted: WantedWire) => NextWire
+export const nextToAssessWire: (commits: WaitingWire[]) => (wanted: WantedWire) => NextWire
+export const settledInWire: (commits: WaitingWire[]) => (wanted: WantedWire) => string[]
+export const retryMs: (attempts: number) => number
+/** `jobBlock` is '' when the job's request is not refused. */
+export const heldTextWire: (
+  clock: (ms: number) => string,
+) => (health: HealthWire) => (pressure: PressureWire) => (jobBlock: string) => (hasRetryAt: boolean) => (retryAt: number) => string
+export const failedTextWire: (clock: (ms: number) => string) => (detail: string) => (hasRetryAt: boolean) => (retryAt: number) => string
+export const planHeld: string
+export const maxWaiting: number
+export const maxWaitMs: number
+export const maxAttempts: number
+export const retryBaseMs: number
+export const watchdogMs: number
+export const watchdogLimitMs: number
+export const verdictMs: number

@@ -17,11 +17,66 @@ var replicatePolyfill = function(count, value) {
   return result;
 };
 var replicateImpl = typeof Array.prototype.fill === "function" ? replicateFill : replicatePolyfill;
+var length = function(xs) {
+  return xs.length;
+};
 var findIndexImpl = function(just, nothing, f, xs) {
   for (var i = 0, l = xs.length; i < l; i++) {
     if (f(xs[i])) return just(i);
   }
   return nothing;
+};
+var filterImpl = function(f, xs) {
+  return xs.filter(f);
+};
+var sliceImpl = function(s, e, l) {
+  return l.slice(s, e);
+};
+var anyImpl = function(p, xs) {
+  var len = xs.length;
+  for (var i = 0; i < len; i++) {
+    if (p(xs[i])) return true;
+  }
+  return false;
+};
+var unsafeIndexImpl = function(xs, n) {
+  return xs[n];
+};
+
+// output/Data.Functor/foreign.js
+var arrayMap = function(f) {
+  return function(arr) {
+    var l = arr.length;
+    var result = new Array(l);
+    for (var i = 0; i < l; i++) {
+      result[i] = f(arr[i]);
+    }
+    return result;
+  };
+};
+
+// output/Control.Semigroupoid/index.js
+var semigroupoidFn = {
+  compose: function(f) {
+    return function(g) {
+      return function(x) {
+        return f(g(x));
+      };
+    };
+  }
+};
+
+// output/Control.Category/index.js
+var identity = function(dict) {
+  return dict.identity;
+};
+var categoryFn = {
+  identity: function(x) {
+    return x;
+  },
+  Semigroupoid0: function() {
+    return semigroupoidFn;
+  }
 };
 
 // output/Data.Boolean/index.js
@@ -31,6 +86,41 @@ var otherwise = true;
 var $$const = function(a) {
   return function(v) {
     return a;
+  };
+};
+
+// output/Data.Unit/foreign.js
+var unit = void 0;
+
+// output/Data.Functor/index.js
+var map = function(dict) {
+  return dict.map;
+};
+var $$void = function(dictFunctor) {
+  return map(dictFunctor)($$const(unit));
+};
+var functorArray = {
+  map: arrayMap
+};
+
+// output/Control.Applicative/index.js
+var pure = function(dict) {
+  return dict.pure;
+};
+var when = function(dictApplicative) {
+  var pure1 = pure(dictApplicative);
+  return function(v) {
+    return function(v1) {
+      if (v) {
+        return v1;
+      }
+      ;
+      if (!v) {
+        return pure1(unit);
+      }
+      ;
+      throw new Error("Failed pattern match at Control.Applicative (line 63, column 1 - line 63, column 63): " + [v.constructor.name, v1.constructor.name]);
+    };
   };
 };
 
@@ -51,6 +141,26 @@ var arrayBind = typeof Array.prototype.flatMap === "function" ? function(arr) {
       }
     }
     return result;
+  };
+};
+
+// output/Control.Bind/index.js
+var bind = function(dict) {
+  return dict.bind;
+};
+
+// output/Control.Monad/index.js
+var ap = function(dictMonad) {
+  var bind2 = bind(dictMonad.Bind1());
+  var pure2 = pure(dictMonad.Applicative0());
+  return function(f) {
+    return function(a) {
+      return bind2(f)(function(f$prime) {
+        return bind2(a)(function(a$prime) {
+          return pure2(f$prime(a$prime));
+        });
+      });
+    };
   };
 };
 
@@ -199,6 +309,7 @@ var show = function(dict) {
 };
 
 // output/Data.Maybe/index.js
+var identity2 = /* @__PURE__ */ identity(categoryFn);
 var Nothing = /* @__PURE__ */ (function() {
   function Nothing2() {
   }
@@ -232,8 +343,161 @@ var maybe = function(v) {
   };
 };
 var isJust = /* @__PURE__ */ maybe(false)(/* @__PURE__ */ $$const(true));
+var functorMaybe = {
+  map: function(v) {
+    return function(v1) {
+      if (v1 instanceof Just) {
+        return new Just(v(v1.value0));
+      }
+      ;
+      return Nothing.value;
+    };
+  }
+};
+var fromMaybe = function(a) {
+  return maybe(a)(identity2);
+};
+
+// output/Control.Monad.ST.Internal/foreign.js
+var map_ = function(f) {
+  return function(a) {
+    return function() {
+      return f(a());
+    };
+  };
+};
+var pure_ = function(a) {
+  return function() {
+    return a;
+  };
+};
+var bind_ = function(a) {
+  return function(f) {
+    return function() {
+      return f(a())();
+    };
+  };
+};
+var foreach = function(as) {
+  return function(f) {
+    return function() {
+      for (var i = 0, l = as.length; i < l; i++) {
+        f(as[i])();
+      }
+    };
+  };
+};
+
+// output/Control.Monad.ST.Internal/index.js
+var $runtime_lazy = function(name, moduleName, init) {
+  var state = 0;
+  var val;
+  return function(lineNumber) {
+    if (state === 2) return val;
+    if (state === 1) throw new ReferenceError(name + " was needed before it finished initializing (module " + moduleName + ", line " + lineNumber + ")", moduleName, lineNumber);
+    state = 1;
+    val = init();
+    state = 2;
+    return val;
+  };
+};
+var functorST = {
+  map: map_
+};
+var monadST = {
+  Applicative0: function() {
+    return applicativeST;
+  },
+  Bind1: function() {
+    return bindST;
+  }
+};
+var bindST = {
+  bind: bind_,
+  Apply0: function() {
+    return $lazy_applyST(0);
+  }
+};
+var applicativeST = {
+  pure: pure_,
+  Apply0: function() {
+    return $lazy_applyST(0);
+  }
+};
+var $lazy_applyST = /* @__PURE__ */ $runtime_lazy("applyST", "Control.Monad.ST.Internal", function() {
+  return {
+    apply: ap(monadST),
+    Functor0: function() {
+      return functorST;
+    }
+  };
+});
+
+// output/Data.Array.ST/foreign.js
+function newSTArray() {
+  return [];
+}
+function unsafeFreezeThawImpl(xs) {
+  return xs;
+}
+var unsafeFreezeImpl = unsafeFreezeThawImpl;
+function copyImpl(xs) {
+  return xs.slice();
+}
+var thawImpl = copyImpl;
+var pushImpl = function(a, xs) {
+  return xs.push(a);
+};
+
+// output/Control.Monad.ST.Uncurried/foreign.js
+var runSTFn1 = function runSTFn12(fn) {
+  return function(a) {
+    return function() {
+      return fn(a);
+    };
+  };
+};
+var runSTFn2 = function runSTFn22(fn) {
+  return function(a) {
+    return function(b) {
+      return function() {
+        return fn(a, b);
+      };
+    };
+  };
+};
+
+// output/Data.Array.ST/index.js
+var unsafeFreeze = /* @__PURE__ */ runSTFn1(unsafeFreezeImpl);
+var thaw = /* @__PURE__ */ runSTFn1(thawImpl);
+var withArray = function(f) {
+  return function(xs) {
+    return function __do() {
+      var result = thaw(xs)();
+      f(result)();
+      return unsafeFreeze(result)();
+    };
+  };
+};
+var push = /* @__PURE__ */ runSTFn2(pushImpl);
 
 // output/Data.Function.Uncurried/foreign.js
+var runFn2 = function(fn) {
+  return function(a) {
+    return function(b) {
+      return fn(a, b);
+    };
+  };
+};
+var runFn3 = function(fn) {
+  return function(a) {
+    return function(b) {
+      return function(c) {
+        return fn(a, b, c);
+      };
+    };
+  };
+};
 var runFn4 = function(fn) {
   return function(a) {
     return function(b) {
@@ -247,9 +511,29 @@ var runFn4 = function(fn) {
 };
 
 // output/Data.Array/index.js
+var $$void2 = /* @__PURE__ */ $$void(functorST);
+var map2 = /* @__PURE__ */ map(functorMaybe);
+var map22 = /* @__PURE__ */ map(functorST);
+var when2 = /* @__PURE__ */ when(applicativeST);
+var unsafeIndex = function() {
+  return runFn2(unsafeIndexImpl);
+};
+var unsafeIndex1 = /* @__PURE__ */ unsafeIndex();
+var snoc = function(xs) {
+  return function(x) {
+    return withArray(push(x))(xs)();
+  };
+};
+var slice = /* @__PURE__ */ runFn3(sliceImpl);
 var findIndex = /* @__PURE__ */ (function() {
   return runFn4(findIndexImpl)(Just.create)(Nothing.value);
 })();
+var find2 = function(f) {
+  return function(xs) {
+    return map2(unsafeIndex1(xs))(findIndex(f)(xs));
+  };
+};
+var filter = /* @__PURE__ */ runFn2(filterImpl);
 var elemIndex = function(dictEq) {
   var eq2 = eq(dictEq);
   return function(x) {
@@ -264,6 +548,43 @@ var elem2 = function(dictEq) {
     return function(arr) {
       return isJust(elemIndex1(a)(arr));
     };
+  };
+};
+var drop = function(n) {
+  return function(xs) {
+    var $173 = n < 1;
+    if ($173) {
+      return xs;
+    }
+    ;
+    return slice(n)(length(xs))(xs);
+  };
+};
+var takeEnd = function(n) {
+  return function(xs) {
+    return drop(length(xs) - n | 0)(xs);
+  };
+};
+var any2 = /* @__PURE__ */ runFn2(anyImpl);
+var nubByEq = function(eq2) {
+  return function(xs) {
+    return (function __do() {
+      var arr = newSTArray();
+      foreach(xs)(function(x) {
+        return function __do2() {
+          var e = map22((function() {
+            var $194 = any2(function(v) {
+              return eq2(v)(x);
+            });
+            return function($195) {
+              return !$194($195);
+            };
+          })())(unsafeFreeze(arr))();
+          return when2(e)($$void2(push(x)(arr)))();
+        };
+      })();
+      return unsafeFreeze(arr)();
+    })();
   };
 };
 
@@ -1006,10 +1327,24 @@ var slowedGapMs = function(minGapMs) {
       return max5(minGapMs)(6e4) * factor;
     }
     ;
-    throw new Error("Failed pattern match at Kernel.Pace (line 40, column 1 - line 40, column 42): " + [minGapMs.constructor.name, factor.constructor.name]);
+    throw new Error("Failed pattern match at Kernel.Pace (line 59, column 1 - line 59, column 42): " + [minGapMs.constructor.name, factor.constructor.name]);
   };
 };
 var slowFromPercent = 80;
+var pressureFromWire = function(w) {
+  return {
+    isHeld: w.level === "held",
+    percent: w.percent,
+    window: w.window,
+    resetsAt: (function() {
+      if (w.hasResetsAt) {
+        return new Just(w.resetsAt);
+      }
+      ;
+      return Nothing.value;
+    })()
+  };
+};
 var holdFromPercent = 95;
 var isHeldAt = function(percent) {
   return percent >= holdFromPercent;
@@ -1027,7 +1362,7 @@ var gapFactor = function(percent) {
     return 1;
   }
   ;
-  throw new Error("Failed pattern match at Kernel.Pace (line 32, column 1 - line 32, column 30): " + [percent.constructor.name]);
+  throw new Error("Failed pattern match at Kernel.Pace (line 51, column 1 - line 51, column 30): " + [percent.constructor.name]);
 };
 var backoffMs = function(failures) {
   if (failures <= 0) {
@@ -1038,7 +1373,7 @@ var backoffMs = function(failures) {
     return min5(6e5)(3e4 * pow(2)(toNumber(failures - 1 | 0)));
   }
   ;
-  throw new Error("Failed pattern match at Kernel.Pace (line 47, column 1 - line 47, column 27): " + [failures.constructor.name]);
+  throw new Error("Failed pattern match at Kernel.Pace (line 66, column 1 - line 66, column 27): " + [failures.constructor.name]);
 };
 
 // output/Kernel.Play/index.js
@@ -1260,7 +1595,7 @@ var playToWire = /* @__PURE__ */ (function() {
         };
       }
       ;
-      throw new Error("Failed pattern match at Kernel.Play (line 247, column 22 - line 252, column 63): " + [why.constructor.name]);
+      throw new Error("Failed pattern match at Kernel.Play (line 235, column 22 - line 240, column 63): " + [why.constructor.name]);
     };
   };
   var withUntil = function(until) {
@@ -1284,7 +1619,7 @@ var playToWire = /* @__PURE__ */ (function() {
         return wire;
       }
       ;
-      throw new Error("Failed pattern match at Kernel.Play (line 244, column 26 - line 246, column 20): " + [until.constructor.name]);
+      throw new Error("Failed pattern match at Kernel.Play (line 232, column 26 - line 234, column 20): " + [until.constructor.name]);
     };
   };
   return function(v) {
@@ -1336,7 +1671,7 @@ var playToWire = /* @__PURE__ */ (function() {
       return withUntil(v.value0.until)(withWhy(v.value0.why)(plain("waiting")));
     }
     ;
-    throw new Error("Failed pattern match at Kernel.Play (line 233, column 14 - line 242, column 67): " + [v.constructor.name]);
+    throw new Error("Failed pattern match at Kernel.Play (line 221, column 14 - line 230, column 67): " + [v.constructor.name]);
   };
 })();
 var paced = function(facts) {
@@ -1350,7 +1685,7 @@ var paced = function(facts) {
         return max6(facts.lastChangeAt.value0 + facts.quietMs)(facts.lastLookAt.value0 + slowedGapMs(facts.minGapMs)(gapFactor(facts.pressure.percent)) + backoffMs(facts.failures));
       }
       ;
-      throw new Error("Failed pattern match at Kernel.Play (line 101, column 7 - line 104, column 110): " + [facts.lastLookAt.constructor.name]);
+      throw new Error("Failed pattern match at Kernel.Play (line 96, column 7 - line 99, column 110): " + [facts.lastLookAt.constructor.name]);
     })());
   }
   ;
@@ -1391,11 +1726,11 @@ var playOf = function(facts) {
         return false;
       }
       ;
-      throw new Error("Failed pattern match at Kernel.Play (line 135, column 18 - line 137, column 21): " + [facts.lastChangeAt.constructor.name]);
+      throw new Error("Failed pattern match at Kernel.Play (line 130, column 18 - line 132, column 21): " + [facts.lastChangeAt.constructor.name]);
     };
     var failed = (function() {
-      var $45 = facts.failures > 0;
-      if ($45) {
+      var $44 = facts.failures > 0;
+      if ($44) {
         return new Just(new LookFailed(facts.failure));
       }
       ;
@@ -1411,7 +1746,7 @@ var playOf = function(facts) {
           return new InTrouble(trouble, detail);
         }
         ;
-        throw new Error("Failed pattern match at Kernel.Play (line 132, column 30 - line 134, column 40): " + [failed.constructor.name]);
+        throw new Error("Failed pattern match at Kernel.Play (line 127, column 30 - line 129, column 40): " + [failed.constructor.name]);
       };
     };
     var held = function(dueAt) {
@@ -1465,10 +1800,10 @@ var playOf = function(facts) {
           });
         }
         ;
-        throw new Error("Failed pattern match at Kernel.Play (line 129, column 14 - line 131, column 65): " + [failed.constructor.name]);
+        throw new Error("Failed pattern match at Kernel.Play (line 124, column 14 - line 126, column 65): " + [failed.constructor.name]);
       }
       ;
-      throw new Error("Failed pattern match at Kernel.Play (line 121, column 3 - line 131, column 65): " + [dueAt.constructor.name]);
+      throw new Error("Failed pattern match at Kernel.Play (line 116, column 3 - line 126, column 65): " + [dueAt.constructor.name]);
     };
     var v = paced(facts);
     if (v instanceof Nothing) {
@@ -1479,10 +1814,10 @@ var playOf = function(facts) {
       return held(v.value0);
     }
     ;
-    throw new Error("Failed pattern match at Kernel.Play (line 116, column 17 - line 118, column 31): " + [v.constructor.name]);
+    throw new Error("Failed pattern match at Kernel.Play (line 111, column 17 - line 113, column 31): " + [v.constructor.name]);
   }
   ;
-  throw new Error("Failed pattern match at Kernel.Play (line 108, column 1 - line 108, column 24): " + [facts.constructor.name]);
+  throw new Error("Failed pattern match at Kernel.Play (line 103, column 1 - line 103, column 24): " + [facts.constructor.name]);
 };
 var wakeAt = function(facts) {
   var v = playOf(facts);
@@ -1556,26 +1891,15 @@ var factsFromWire = function(w) {
     quietMs: w.quietMs,
     minGapMs: w.minGapMs,
     health: healthFromWire(w.health),
-    pressure: {
-      isHeld: w.pressure.level === "held",
-      percent: w.pressure.percent,
-      window: w.pressure.window,
-      resetsAt: (function() {
-        if (w.pressure.hasResetsAt) {
-          return new Just(w.pressure.resetsAt);
-        }
-        ;
-        return Nothing.value;
-      })()
-    },
+    pressure: pressureFromWire(w.pressure),
     jobBlock: w.jobBlock
   };
 };
-var isLookDueWire = function($77) {
-  return isLookDue(factsFromWire($77));
+var isLookDueWire = function($75) {
+  return isLookDue(factsFromWire($75));
 };
-var playOfWire = function($78) {
-  return playToWire(playOf(factsFromWire($78)));
+var playOfWire = function($76) {
+  return playToWire(playOf(factsFromWire($76)));
 };
 var wakeAtWire = function(facts) {
   var v = wakeAt(factsFromWire(facts));
@@ -1593,12 +1917,437 @@ var wakeAtWire = function(facts) {
     };
   }
   ;
-  throw new Error("Failed pattern match at Kernel.Play (line 259, column 20 - line 261, column 37): " + [v.constructor.name]);
+  throw new Error("Failed pattern match at Kernel.Play (line 247, column 20 - line 249, column 37): " + [v.constructor.name]);
+};
+
+// output/Kernel.Queue/index.js
+var max7 = /* @__PURE__ */ max(ordInt);
+var map3 = /* @__PURE__ */ map(functorMaybe);
+var max12 = /* @__PURE__ */ max(ordNumber);
+var map1 = /* @__PURE__ */ map(functorArray);
+var ToReview = /* @__PURE__ */ (function() {
+  function ToReview2() {
+  }
+  ;
+  ToReview2.value = new ToReview2();
+  return ToReview2;
+})();
+var ToAssess = /* @__PURE__ */ (function() {
+  function ToAssess2() {
+  }
+  ;
+  ToAssess2.value = new ToAssess2();
+  return ToAssess2;
+})();
+var Queue = function(x) {
+  return x;
+};
+var withoutCommit = function(hash) {
+  return function(v) {
+    return filter(function(commit) {
+      return commit.hash !== hash;
+    })(v);
+  };
+};
+var watchdogMs = /* @__PURE__ */ (function() {
+  return 15 * 60 * 1e3;
+})();
+var watchdogLimitMs = /* @__PURE__ */ (function() {
+  return 45 * 60 * 1e3;
+})();
+var waitingFromWire = function(w) {
+  return {
+    hash: w.hash,
+    title: w.title,
+    at: w.at,
+    stage: (function() {
+      if (w.isReviewed) {
+        return ToAssess.value;
+      }
+      ;
+      return ToReview.value;
+    })(),
+    attempts: w.attempts
+  };
+};
+var verdictMs = 2e3;
+var toCommits = function(v) {
+  return v;
+};
+var retryBaseMs = 6e4;
+var retryMs = function(attempts) {
+  return retryBaseMs * pow(2)(toNumber(max7(0)(attempts - 1 | 0)));
+};
+var planHeld = "you are close to your plan limit. Press r to run it anyway.";
+var maxWaiting = 3;
+var withCommit = function(commit) {
+  return function(at) {
+    return function(v) {
+      if (any2(function(known) {
+        return known.hash === commit.hash;
+      })(v)) {
+        return v;
+      }
+      ;
+      if (otherwise) {
+        return takeEnd(maxWaiting)(snoc(v)({
+          hash: commit.hash,
+          title: commit.title,
+          at,
+          stage: ToReview.value,
+          attempts: 0
+        }));
+      }
+      ;
+      throw new Error("Failed pattern match at Kernel.Queue (line 132, column 1 - line 132, column 78): " + [commit.constructor.name, at.constructor.name, v.constructor.name]);
+    };
+  };
+};
+var maxWaitMs = /* @__PURE__ */ (function() {
+  return 24 * 60 * 60 * 1e3;
+})();
+var maxAttempts = 3;
+var isSpent = function(hash) {
+  return function(v) {
+    return fromMaybe(0)(map3(function(v1) {
+      return v1.attempts;
+    })(find2(function(commit) {
+      return commit.hash === hash;
+    })(v))) >= maxAttempts;
+  };
+};
+var heldText = function(clock) {
+  return function(health) {
+    return function(pressure) {
+      return function(jobBlock) {
+        return function(retryAt) {
+          var notAnswering = function(detail) {
+            return function(when3) {
+              return "Claude is not answering (" + (detail + ("). It is tried again " + (when3 + ", or press r.")));
+            };
+          };
+          var maybe$prime2 = function(none) {
+            return function(some) {
+              return function(v) {
+                if (v instanceof Just) {
+                  return some(v.value0);
+                }
+                ;
+                if (v instanceof Nothing) {
+                  return none;
+                }
+                ;
+                throw new Error("Failed pattern match at Kernel.Queue (line 209, column 22 - line 211, column 20): " + [v.constructor.name]);
+              };
+            };
+          };
+          if (jobBlock instanceof Just) {
+            return "the deep review cannot run (" + (jobBlock.value0 + "). Its model is set in /config.");
+          }
+          ;
+          if (health instanceof Blocked) {
+            return "Claude is refusing this account (" + (health.value0.detail + "). It is reviewed once that is sorted out.");
+          }
+          ;
+          if (pressure.isHeld) {
+            return planHeld;
+          }
+          ;
+          if (health instanceof Waiting) {
+            return notAnswering(health.value0.detail)("at " + clock(max12(health.value0.until)(fromMaybe(0)(retryAt))));
+          }
+          ;
+          if (health instanceof Probing) {
+            return notAnswering(health.value0.detail)(maybe$prime2("shortly")(function(at) {
+              return "at " + clock(at);
+            })(retryAt));
+          }
+          ;
+          return "";
+        };
+      };
+    };
+  };
+};
+var heldTextWire = function(clock) {
+  return function(health) {
+    return function(pressure) {
+      return function(jobBlock) {
+        return function(hasRetryAt) {
+          return function(retryAt) {
+            return heldText(clock)(healthFromWire(health))(pressureFromWire(pressure))((function() {
+              var $52 = jobBlock === "";
+              if ($52) {
+                return Nothing.value;
+              }
+              ;
+              return new Just(jobBlock);
+            })())((function() {
+              if (hasRetryAt) {
+                return new Just(retryAt);
+              }
+              ;
+              return Nothing.value;
+            })());
+          };
+        };
+      };
+    };
+  };
+};
+var fromCommits = /* @__PURE__ */ (function() {
+  var $73 = takeEnd(maxWaiting);
+  var $74 = nubByEq(function(a) {
+    return function(b) {
+      return a.hash === b.hash;
+    };
+  });
+  return function($75) {
+    return Queue($73($74($75)));
+  };
+})();
+var fromWire = /* @__PURE__ */ (function() {
+  var $76 = map1(waitingFromWire);
+  return function($77) {
+    return fromCommits($76($77));
+  };
+})();
+var isSpentWire = function(commits) {
+  return function(hash) {
+    return isSpent(hash)(fromWire(commits));
+  };
+};
+var failedText = function(clock) {
+  return function(detail) {
+    return function(v) {
+      if (v instanceof Nothing) {
+        return detail + ". Press r to run it again.";
+      }
+      ;
+      if (v instanceof Just) {
+        return detail + (". It is tried again at " + (clock(v.value0) + ", or press r."));
+      }
+      ;
+      throw new Error("Failed pattern match at Kernel.Queue (line 216, column 27 - line 218, column 80): " + [v.constructor.name]);
+    };
+  };
+};
+var failedTextWire = function(clock) {
+  return function(detail) {
+    return function(hasRetryAt) {
+      return function(retryAt) {
+        return failedText(clock)(detail)((function() {
+          if (hasRetryAt) {
+            return new Just(retryAt);
+          }
+          ;
+          return Nothing.value;
+        })());
+      };
+    };
+  };
+};
+var eqStage = {
+  eq: function(x) {
+    return function(y) {
+      if (x instanceof ToReview && y instanceof ToReview) {
+        return true;
+      }
+      ;
+      if (x instanceof ToAssess && y instanceof ToAssess) {
+        return true;
+      }
+      ;
+      return false;
+    };
+  }
+};
+var eq12 = /* @__PURE__ */ eq(eqStage);
+var isPastReview = function(wanted) {
+  return function(commit) {
+    return eq12(commit.stage)(ToAssess.value) || !wanted.wantsReview;
+  };
+};
+var nextToAssess = function(wanted) {
+  return function(v) {
+    if (wanted.wantsAssessment) {
+      return find2(isPastReview(wanted))(v);
+    }
+    ;
+    if (otherwise) {
+      return Nothing.value;
+    }
+    ;
+    throw new Error("Failed pattern match at Kernel.Queue (line 180, column 1 - line 180, column 49): " + [wanted.constructor.name, v.constructor.name]);
+  };
+};
+var settledIn = function(wanted) {
+  return function(v) {
+    if (wanted.wantsAssessment) {
+      return [];
+    }
+    ;
+    if (otherwise) {
+      return map1(function(v1) {
+        return v1.hash;
+      })(filter(isPastReview(wanted))(v));
+    }
+    ;
+    throw new Error("Failed pattern match at Kernel.Queue (line 186, column 1 - line 186, column 45): " + [wanted.constructor.name, v.constructor.name]);
+  };
+};
+var settledInWire = function(commits) {
+  return function(wanted) {
+    return settledIn(wanted)(fromWire(commits));
+  };
+};
+var nextToReview = function(wanted) {
+  return function(v) {
+    if (wanted.wantsReview) {
+      return find2(function(commit) {
+        return eq12(commit.stage)(ToReview.value);
+      })(v);
+    }
+    ;
+    if (otherwise) {
+      return Nothing.value;
+    }
+    ;
+    throw new Error("Failed pattern match at Kernel.Queue (line 173, column 1 - line 173, column 49): " + [wanted.constructor.name, v.constructor.name]);
+  };
+};
+var waitingToWire = function(w) {
+  return {
+    hash: w.hash,
+    title: w.title,
+    at: w.at,
+    isReviewed: eq12(w.stage)(ToAssess.value),
+    attempts: w.attempts
+  };
+};
+var nextToWire = function(v) {
+  if (v instanceof Just) {
+    return {
+      has: true,
+      commit: waitingToWire(v.value0)
+    };
+  }
+  ;
+  if (v instanceof Nothing) {
+    return {
+      has: false,
+      commit: {
+        hash: "",
+        title: "",
+        at: 0,
+        isReviewed: false,
+        attempts: 0
+      }
+    };
+  }
+  ;
+  throw new Error("Failed pattern match at Kernel.Queue (line 246, column 14 - line 248, column 102): " + [v.constructor.name]);
+};
+var nextToAssessWire = function(commits) {
+  return function(wanted) {
+    return nextToWire(nextToAssess(wanted)(fromWire(commits)));
+  };
+};
+var nextToReviewWire = function(commits) {
+  return function(wanted) {
+    return nextToWire(nextToReview(wanted)(fromWire(commits)));
+  };
+};
+var toWire = /* @__PURE__ */ (function() {
+  var $78 = map1(waitingToWire);
+  return function($79) {
+    return $78(toCommits($79));
+  };
+})();
+var through = function(change) {
+  return function($80) {
+    return toWire(change(fromWire($80)));
+  };
+};
+var withCommitWire = function(commits) {
+  return function(hash) {
+    return function(title) {
+      return function(at) {
+        return through(withCommit({
+          hash,
+          title
+        })(at))(commits);
+      };
+    };
+  };
+};
+var withoutCommitWire = function(commits) {
+  return function(hash) {
+    return through(withoutCommit(hash))(commits);
+  };
+};
+var current = function(now) {
+  return function(v) {
+    return filter(function(commit) {
+      return now - commit.at < maxWaitMs;
+    })(v);
+  };
+};
+var currentQueueWire = function(commits) {
+  return function(now) {
+    return through(current(now))(commits);
+  };
+};
+var changed = function(hash) {
+  return function(change) {
+    return function(v) {
+      return map1(function(commit) {
+        var $72 = commit.hash === hash;
+        if ($72) {
+          return change(commit);
+        }
+        ;
+        return commit;
+      })(v);
+    };
+  };
+};
+var reviewed = function(hash) {
+  return changed(hash)(function(v) {
+    return {
+      hash: v.hash,
+      title: v.title,
+      at: v.at,
+      stage: ToAssess.value,
+      attempts: 0
+    };
+  });
+};
+var reviewedWire = function(commits) {
+  return function(hash) {
+    return through(reviewed(hash))(commits);
+  };
+};
+var withAttempt = function(hash) {
+  return changed(hash)(function(commit) {
+    return {
+      hash: commit.hash,
+      title: commit.title,
+      at: commit.at,
+      stage: commit.stage,
+      attempts: commit.attempts + 1 | 0
+    };
+  });
+};
+var withAttemptWire = function(commits) {
+  return function(hash) {
+    return through(withAttempt(hash))(commits);
+  };
 };
 
 // output/Kernel.Sensor/index.js
 var min6 = /* @__PURE__ */ min(ordNumber);
-var max7 = /* @__PURE__ */ max(ordNumber);
+var max8 = /* @__PURE__ */ max(ordNumber);
 var slowScanWaitMs = 2e3;
 var slowScanStepMs = 250;
 var scanMs = 2e3;
@@ -1649,7 +2398,7 @@ var scanGapMsWire = function(w) {
 };
 var focusScanMs = 100;
 var focusGapMs = function(tookMs) {
-  return min6(longestFocusGapMs)(max7(focusScanMs)(tookMs * 4));
+  return min6(longestFocusGapMs)(max8(focusScanMs)(tookMs * 4));
 };
 
 // output/Kernel.Main/index.js
@@ -1662,15 +2411,19 @@ var leaseClaimed = claimed;
 var leaseBeatMs = beatMs;
 export {
   backoffMs,
+  currentQueueWire,
+  failedTextWire,
   focusGapMs,
   focusScanMs,
   gapFactor,
+  heldTextWire,
   hotForMs,
   hotScanMs,
   idleAfterMs,
   idleScanMs,
   isHeldAt,
   isLookDueWire,
+  isSpentWire,
   leaseBeatMs,
   leaseClaimed,
   leaseIsHeld,
@@ -1680,15 +2433,31 @@ export {
   leaseTtlMs,
   longestFocusGapMs,
   longestScanGapMs,
+  maxAttempts,
+  maxWaitMs,
+  maxWaiting,
   mayAskWire,
+  nextToAssessWire,
+  nextToReviewWire,
   outcomeOfErrorWire,
   outcomeOfWire,
+  planHeld,
   playOfWire,
+  retryBaseMs,
   retryDelayMsWire,
+  retryMs,
+  reviewedWire,
   scanGapMsWire,
   scanMs,
+  settledInWire,
   slowedGapMs,
   stepWire,
   troubleOfWire,
-  wakeAtWire
+  verdictMs,
+  wakeAtWire,
+  watchdogLimitMs,
+  watchdogMs,
+  withAttemptWire,
+  withCommitWire,
+  withoutCommitWire
 };

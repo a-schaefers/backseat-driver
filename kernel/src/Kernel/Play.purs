@@ -14,12 +14,10 @@
 module Kernel.Play
   ( Why(..)
   , Play(..)
-  , Pressure
   , Facts
   , playOf
   , wakeAt
   , isLookDue
-  , PressureWire
   , FactsWire
   , PlayWire
   , playOfWire
@@ -32,7 +30,7 @@ import Prelude
 import Data.Maybe (Maybe(..))
 import Kernel.Health (Health, HealthWire, Trouble, healthFromWire, mayAsk, troubleTag)
 import Kernel.Health as Health
-import Kernel.Pace (backoffMs, gapFactor, slowedGapMs)
+import Kernel.Pace (Pressure, PressureWire, backoffMs, gapFactor, pressureFromWire, slowedGapMs)
 
 -- | Why a look that is wanted is not happening yet.
 data Why
@@ -65,9 +63,6 @@ data Play
   -- | A look is wanted and held back. `until` is when it is tried again, or
   -- | `Nothing` when something else has to happen first.
   | Waiting { until :: Maybe Number, why :: Why }
-
--- | How close the plan's usage limit is, from the tightest window still open.
-type Pressure = { isHeld :: Boolean, percent :: Number, window :: String, resetsAt :: Maybe Number }
 
 type Facts =
   { isPaused :: Boolean
@@ -162,8 +157,6 @@ isLookDue facts now = case playOf facts of
 
 -- The same, as the plain records the shell holds.
 
-type PressureWire = { level :: String, percent :: Number, window :: String, hasResetsAt :: Boolean, resetsAt :: Number }
-
 type FactsWire =
   { isPaused :: Boolean
   , isReady :: Boolean
@@ -217,12 +210,7 @@ factsFromWire w =
   , quietMs: w.quietMs
   , minGapMs: w.minGapMs
   , health: healthFromWire w.health
-  , pressure:
-      { isHeld: w.pressure.level == "held"
-      , percent: w.pressure.percent
-      , window: w.pressure.window
-      , resetsAt: if w.pressure.hasResetsAt then Just w.pressure.resetsAt else Nothing
-      }
+  , pressure: pressureFromWire w.pressure
   , jobBlock: w.jobBlock
   }
 

@@ -7,12 +7,31 @@ module Kernel.Pace
   , isHeldAt
   , slowFromPercent
   , holdFromPercent
+  , Pressure
+  , PressureWire
+  , pressureFromWire
   ) where
 
 import Prelude
 
 import Data.Int (toNumber)
+import Data.Maybe (Maybe(..))
 import Data.Number (pow)
+
+-- | How close the plan's usage limit is, from the tightest window still open.
+-- | `resetsAt` is when that window reopens, when Claude Code says.
+type Pressure = { isHeld :: Boolean, percent :: Number, window :: String, resetsAt :: Maybe Number }
+
+-- | The same, as the shell holds it. `level` is `none`, `slowed` or `held`.
+type PressureWire = { level :: String, percent :: Number, window :: String, hasResetsAt :: Boolean, resetsAt :: Number }
+
+pressureFromWire :: PressureWire -> Pressure
+pressureFromWire w =
+  { isHeld: w.level == "held"
+  , percent: w.percent
+  , window: w.window
+  , resetsAt: if w.hasResetsAt then Just w.resetsAt else Nothing
+  }
 
 -- | From this much of a usage window, looks are spaced further apart.
 slowFromPercent :: Number
