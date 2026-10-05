@@ -12,7 +12,9 @@
 
 </div>
 
-A [Claude Code](https://claude.com/claude-code) plugin that makes Claude your tutor, not your ghostwriter. You write the code. It watches, comments and answers.
+**A coding tutor that lives inside [Claude Code](https://claude.com/claude-code) and never writes your code.**
+
+You write every line. It reads over your shoulder, comments on what you just saved, reviews every commit, explains the code you point at, and tells you honestly how good you're getting. Claude stays in the passenger seat.
 
 Inspired by the ideas discussed in the [Enchant Games Journal](https://enchant.games/?slug=journal).
 
@@ -24,26 +26,41 @@ Inspired by the ideas discussed in the [Enchant Games Journal](https://enchant.g
 
 Backseat Driver reverses course.
 
+Hand your work to an agent and the skill fades. People who did report losing it within months. You think you're in the driver's seat. The machine is doing the thinking.
+
 It's not about speed. If it takes me longer but I grok it, I win. **It's about owning your understanding.**
 
-Backseat Driver puts the machine where it belongs: in the back seat. You drive. It watches the road and speaks up when it matters.
+So the machine goes where it belongs: the back seat. You drive. It watches the road and speaks up when it matters.
 
 ## What it is
 
-- **Play-by-play.** Save, pause, and a fast model reads what changed. If it's worth saying, a short note lands in the pane: a bug, a risky pattern, a better idiom. A hint, never a fix. Fix the code and the note goes away.
-- **Decision points and insights.** When your code reaches a real choice, like how to handle errors or which data structure to use, the pane marks it as **your call** and lays out what each way costs. Then it gets out of the way. It also points out ★ insights about how your codebase does things.
-- **Deep review.** Commit, and a stronger model reviews it in context, decision points first.
-- **Explain.** What the code under your cursor does, how and why. Edit the code and the old explanation is gone.
-- **Progress.** An honest level per language, beginner to senior, judged only on commits you wrote. It follows you across projects, and it can go down.
-- **Conversation.** Ask anything. Push back, and a contested point gets a second opinion. Tell it to drop a topic, and it's dropped for good. You have the last word.
+Type `/bsd`. A pane opens beside the conversation with four tabs.
+
+**1. Play-by-play.** Live commentary on your code as you write it. Save, pause for a few seconds, and a fast model reads what changed. Worth saying? A short note lands in the pane: a bug, a risky pattern, a better idiom for that language. One idea per note. A hint, never a fix. Fix the code and the note goes away on its own. Nothing worth saying, it says nothing.
+
+- **Your call.** When your code hits a real design choice (how errors are handled, which data structure, what the user sees), the note says so, lays out what each way costs, and leaves the choice to you.
+- **★ Insight.** Now and then, something about how *this* codebase does things. Never a lecture you could read anywhere.
+
+**2. Deep review.** Commit, and a stronger model reviews the commit in the context of the whole project: design, correctness, what to do next. In the pane, not in your chat. Commits made while Claude is down or you're at your plan limit get reviewed when it's back.
+
+**3. Explain.** Point at a line (`/bsd explain src/app.py:42`), or just save, and it tells you what that code does, how, why it's there, what to watch out for and what it relies on. Step through a file symbol by symbol with `n` and `p`. Change the code and the old explanation disappears before it can lie to you.
+
+**4. Progress.** An honest level per language, from beginner to senior: where you are, why, and what the next level takes. Judged only on commits you wrote yourself, not imports, not generated code, not anything co-written with an AI. It follows you across projects. It can go down.
+
+**And the conversation.** Claude is still there in chat, as a tutor. Ask it anything. Ask it to write your code and you get a nudge, then the concept, then a small example somewhere else, one step at a time. Questions about the language get straight answers. Push back and it weighs your argument; a point you contest goes to the deep reviewer for a second opinion. Tell it to drop a topic and it stays dropped, in every project in that language. You have the last word.
+
+It knows what you're working on without being asked: which files, which functions, what you said you're up to. It learns your level from your code and explains new ideas in terms of a language you already know.
+
+Pick who's riding along. A voice sets how it talks: `default`, `torvalds`, `knuth`, `primeagen`, or `eli5-tldr-kiss-terse`. An engineering persona sets what it cares about in code, chosen separately. A little ASCII character speaks for the voice. Square glasses, round glasses, headphones, a penguin in a top hat. Hard on the code, never on you.
 
 While it's on, a hook blocks Claude's editing tools, so your code stays yours no matter what the model decides. It installs no git hooks and never writes to your working tree. What it remembers stays in `~/.local/share/backseat-driver/`. Its only network request of its own is a check for a newer release, at most every six hours.
 
 ## Who it's for
 
 - **Anyone who writes their own code** and wants to get better at it.
-- **Learners.** It's a great time to learn the art of programming. It works out your level in each language from your own code, and explains new ideas in terms of a language you already know.
+- **Learners.** It's a great time to learn the art of programming. Your own project is the lesson.
 - **Seniors** who want a sparring partner, not a robot-babysitting job.
+- **Teams.** Juniors get a reviewer on every save and every commit, without pulling a senior off their own work. Everyone keeps the skills you hired them for. Your code goes only to the Claude your company already uses, and everything the tutor remembers stays on each developer's machine. Models and thinking levels are set per job, so you decide what each review costs.
 
 Want the machine to write it for you? That's fine. Be you. `/bsd off` gives you Claude Code back.
 
@@ -56,17 +73,20 @@ claude plugin marketplace add a-schaefers/backseat-driver
 claude plugin install backseat-driver@backseat-driver
 ```
 
-Type `/bsd` in Claude Code. The first time you work in a language, it asks a few one-keypress questions, and Esc skips them.
+Type `/bsd` in Claude Code. The first time you work in a language, it asks a few one-keypress questions: your level, your goals, what to focus on. Esc skips them. Every setting has a default.
 
 | Command | |
 | --- | --- |
 | `/bsd`, `/bsd pause`, `/bsd off` | Switch it on, quiet it, or switch it off |
 | `/bsd explain src/app.py:42` | Explain a spot in the code |
-| `/bsd forget` | Erase what it remembers |
+| `/bsd working on the parser` | Tell it what you're working on |
+| `/bsd forget` | Erase what it remembers: one project, one language, or everything |
 | `/bsd update`, `/bsd uninstall` | Fetch a newer release when the pane announces one, or remove the plugin |
 | `/bsd help` | Every command and key |
 
-`Ctrl+X Tab` focuses the pane, and `Esc` leaves it. `1` to `4` switch tabs. The pane draws in the terminal and in the desktop app's Code tab. Models, pacing and persona (`torvalds`, `knuth`, `primeagen`, `eli5-tldr-kiss-terse`) are set in `/config`.
+`Ctrl+X Tab` focuses the pane, and `Esc` leaves it. `1` to `4` switch tabs. On a note, `e` explains it, `d` dismisses it, `m` mutes that topic for good. `l` looks at your changes now, `r` reviews now. The pane draws in the terminal and in the desktop app's Code tab.
+
+Models, thinking levels, pacing and personas are in `/config`: search for "backseat".
 
 ## License
 

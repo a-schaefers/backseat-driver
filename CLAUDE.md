@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-AI-only reference for this repository. Terse by design. `README.md` is the only human document; this file is everything else. There is no separate design spec.
+AI-only reference for this repository. Terse by design. `README.md` is the only human document (plus `plugin/README.md`, its short summary for the plugin directory); this file is everything else. There is no separate design spec.
 
 ## Rules (owner's standing instructions)
 
@@ -16,6 +16,8 @@ AI-only reference for this repository. Terse by design. `README.md` is the only 
   - Never apologize for the project or hedge it ("trying to", "I see the irony"). State what it does with confidence.
   - Never suggest autosave to make it closer to live: editor plugins are the answer.
   - Never link to this file or to design detail. A new feature gets a line at most.
+  - Every feature name says what it does to a newcomer (owner, 2026-10-05: "play-by-play" alone says nothing; it is play-by-play commentary). Teams get a bullet in "Who it's for".
+  - `plugin/README.md` is the same story in one paragraph; keep it in step.
   - It carries facts that must stay true: install commands, minimum Claude Code version (text and badge), the `/bsd` command table, the footprint paragraph at the end of "What it is".
 - Pronouns: the owner's are not stated. Use "the owner" or they/them.
 
@@ -82,7 +84,7 @@ Every roadmap milestone is built and was seen working in short scripted real ses
 - Directory facts (checked 2026-10-04):
   - It lists mods, for Claude Code only.
   - Submit at claude.ai/directory/manage. It tracks a branch or tag, and the plugin path can be `plugin`.
-  - Blocking: no README of 40+ words inside `plugin/`. (A LICENSE was the other blocker; `plugin/LICENSE` and `"license": "MIT"` now settle it.)
+  - A README of 40+ words inside `plugin/` and a LICENSE were required. `plugin/README.md`, `plugin/LICENSE` and `"license": "MIT"` settle both.
   - Limits: files under 256 KiB, at most 512 files.
   - Directory installs load as `<name>@synced`.
 - Approved plan for part two: `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine (nine decisions, risks per milestone).
