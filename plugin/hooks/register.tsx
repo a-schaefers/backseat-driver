@@ -4139,6 +4139,8 @@ async function drawTutor($: EngineInterface, settings: Settings, kit: Kit, where
     },
     onExplainFetch: () => {
       touched($, settings, 'explain fetch')
+      // The press says something even when the file maps to nothing, so it never looks like a dead key.
+      $.ui.toast('Looking this file up…')
       void refreshView($, true)
     },
     onExplainAsk: () => {
@@ -4152,6 +4154,9 @@ async function drawTutor($: EngineInterface, settings: Settings, kit: Kit, where
     },
     onDismiss: (note: Note) => {
       touched($, settings, 'dismiss', () => note)
+      // The keys carry on with the next note in the order drawn, not the first.
+      const after = steppedNote(view, 1)
+      void update($, selectedAtom, () => (after === undefined || after.id === note.id ? null : after.id))
       // Remembered, so that the next look does not bring the same point back.
       void Promise.all([
         update($, notesAtom, open => open.filter(other => other.id !== note.id)),
