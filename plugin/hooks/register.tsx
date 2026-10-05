@@ -193,8 +193,8 @@ import {
 import type { JournalPorts, JournalState } from '../core/journaling'
 import { createScheduler } from '../core/scheduler'
 import type { Scheduler } from '../core/scheduler'
-import { claimed, nextLeaseCheck, parseLease, released } from '../core/lease'
-import type { Lease } from '../core/lease'
+import { freshLeaseState, giveLease as giveLeaseOf, keepLease as keepLeaseOf } from '../core/leasing'
+import type { LeasePorts, LeaseState } from '../core/leasing'
 import { scanGapMs } from '../core/sensor'
 import { healthLine, playLine, watchOf } from '../core/status'
 import type { Recorder } from '../core/recorder'
@@ -426,9 +426,7 @@ let areToolsRegistered = false
  * conversation only. True where there is no lease to hold: outside a
  * repository, or with no data folder.
  */
-let isDriver = true
-/** The id this session holds the lease under. `/clear` gives a session another id, and the lease is still its own. */
-let leaseHolder = ''
+const leaseState: LeaseState = freshLeaseState()
 /**
  * The files that hold what is on record about the person, as last seen:
  * names, sizes and times in one string. Another session may change them.
@@ -571,7 +569,7 @@ function snapshot(): Record<string, unknown> {
     health,
     jobBlocks: Object.fromEntries(jobBlocks),
     pressure,
-    lease: { isDriver, holder: leaseHolder },
+    lease: { isDriver: leaseState.isDriver, holder: leaseState.holder },
     review: {
       agentId: reviewState.reviewAgentId,
       scope: reviewState.reviewScope === null ? null : scopeSubject(reviewState.reviewScope),
@@ -878,7 +876,7 @@ function playFacts(settings: Settings): PlayFacts {
     mode: mode === 'paused' ? 'paused' : 'on',
     isReady: isWatchReady,
     hasRepo: repoRoot !== '',
-    isFollowing: !isDriver,
+    isFollowing: !leaseState.isDriver,
     isAutomatic: settings.playByPlay.isAutomatic,
     hasPending: watcher?.hasPending() ?? false,
     lastChangeAt,
@@ -2044,7 +2042,7 @@ async function registerTools($: EngineInterface): Promise<void> {
  * "look now".
  */
 async function look($: EngineInterface, settings: Settings, isAsked: boolean): Promise<void> {
-  if (!isDriver) {
+  if (!leaseState.isDriver) {
     if (isAsked) $.ui.toast(FOLLOWING)
 
     return
@@ -2260,49 +2258,29 @@ const FOLLOWING = 'Another session is driving Backseat Driver in this project. A
  * another id.
  */
 async function keepLease($: EngineInterface, settings: Settings, run: number): Promise<void> {
-  if (run !== engagement || mode === 'off') return
-  if (repoRoot === '' || dataRoot === '') {
-    // No lease to hold: nothing else can be driving.
-    isDriver = true
-
-    return
-  }
-  const path = leasePath(dataRoot, repoRoot)
-  const me = await $.session.id()
-  const now = await $.clock.now()
-  let lease: Lease
-  try {
-    // A session that is waiting reads first: it changes nothing while the lease is held, and so takes no lock.
-    // The one that drives is here to renew, and goes straight to the change.
-    const seen = isDriver && leaseHolder === me ? null : parseLease(await storeOf($).read(path))
-    lease =
-      seen !== null && claimed(seen, me, now, leaseHolder) === seen
-        ? seen
-        : await updateJson(storeOf($), path, parseLease, stored => claimed(stored, me, now, leaseHolder))
-  } catch (error) {
-    // With no lease to go by, this session carries on as it was.
-    fail($, 'could not read the lease', error)
-    lease = { v: 1, session: isDriver ? me : '', at: now }
-  }
-  // Switched off, or on again, while the lease was being read: whoever did that decides who drives.
-  if (run !== engagement) return
-  const wasDriver = isDriver
-  isDriver = lease.session === me
-  if (isDriver) leaseHolder = me
-  schedulerOf($).set('lease', nextLeaseCheck(lease, me, now, Math.random()), () => keepLease($, settings, engagement))
-  if (isDriver === wasDriver) return
-  trace($, 'state', 'lease', () => ({ isDriver, lease, me }))
-  if (isDriver) await startDriving($, settings, run)
-  else await stopDriving($, settings)
+  await keepLeaseOf(leasePortsOf($, settings), leaseState, run)
 }
 
 /** Gives the lease back, so that a session waiting for it does not have to wait for it to run out. */
 async function giveLease($: EngineInterface, path: string, holder: string): Promise<void> {
-  if (holder === '') return
-  try {
-    await updateJson(storeOf($), path, parseLease, stored => released(stored, holder))
-  } catch (error) {
-    fail($, 'could not give the lease back', error)
+  await giveLeaseOf({ store: () => storeOf($), fail: (what, error) => fail($, what, error) }, path, holder)
+}
+
+/** What holding the lease needs from Claude Code. */
+function leasePortsOf($: EngineInterface, settings: Settings): LeasePorts {
+  return {
+    now: async () => await $.clock.now(),
+    trace: (kind, name, detail) => trace($, kind, name, detail),
+    fail: (what, error) => fail($, what, error),
+    isOn: () => mode !== 'off',
+    engagement: () => engagement,
+    repoRoot: () => repoRoot,
+    dataRoot: () => dataRoot,
+    sessionId: async () => await $.session.id(),
+    store: () => storeOf($),
+    deadline: { set: (name, at, run) => schedulerOf($).set(name, at, run) },
+    startDriving: run => startDriving($, settings, run),
+    stopDriving: () => stopDriving($, settings),
   }
 }
 
@@ -2313,7 +2291,7 @@ async function giveLease($: EngineInterface, path: string, holder: string): Prom
  */
 async function startDriving($: EngineInterface, settings: Settings, run: number): Promise<void> {
   await startWatching($, settings, run)
-  if (run !== engagement || !isDriver) return
+  if (run !== engagement || !leaseState.isDriver) return
   await startJournal($, run, false)
   await loadQueue($)
   await planReview($, settings)
@@ -2409,7 +2387,7 @@ function notesPath(): string {
  */
 async function saveNotes($: EngineInterface): Promise<void> {
   const path = notesPath()
-  if (path === '' || !isDriver || mode === 'off') return
+  if (path === '' || !leaseState.isDriver || mode === 'off') return
   try {
     const [notes, dismissed] = await Promise.all([read($, notesAtom), read($, dismissedAtom)])
     const kept = keepNotes(notes, dismissed, notePrints)
@@ -2540,7 +2518,7 @@ function reviewPortsOf($: EngineInterface, settings: Settings): ReviewPorts {
     jobBlock: job => jobBlocks.get(job),
     readPressure: () => readPressure($),
     probeEnded: () => probeEnded($, settings),
-    isActive: () => mode === 'on' && repoRoot !== '' && isDriver,
+    isActive: () => mode === 'on' && repoRoot !== '' && leaseState.isDriver,
     agents: async () => await $.agent.list(),
     startReview: scope => startReview($, settings, scope),
     engagement: () => engagement,
@@ -2643,7 +2621,7 @@ async function keepReview($: EngineInterface, scope: ReviewScope, answer: string
  * review model, so that the faster models start from the big picture.
  */
 async function maybeSurvey($: EngineInterface, settings: Settings, run: number): Promise<void> {
-  if (project === null || project.isSurveyed || !isDriver || !isReviewFree()) return
+  if (project === null || project.isSurveyed || !leaseState.isDriver || !isReviewFree()) return
   // With both triggers off, the deep review model runs only when asked, and that goes for this too.
   if (!settings.deepReview.isAfterCommit && settings.deepReview.everyMs === 0) return
   await withReviewSlot($, settings, async () => {
@@ -2660,7 +2638,7 @@ async function maybeSurvey($: EngineInterface, settings: Settings, run: number):
  */
 async function reviewSince($: EngineInterface, settings: Settings, isAsked: boolean): Promise<void> {
   if (mode === 'off' || (mode === 'paused' && !isAsked)) return
-  if (!isDriver) {
+  if (!leaseState.isDriver) {
     if (isAsked) $.ui.toast(FOLLOWING)
 
     return
@@ -2712,7 +2690,7 @@ async function startSince($: EngineInterface, settings: Settings, isAsked: boole
 
 /** Sets the timer for the next timed deep review. */
 function planTimedReview($: EngineInterface, settings: Settings, now: number): void {
-  if (settings.deepReview.everyMs <= 0 || mode === 'off' || repoRoot === '' || !isDriver) return
+  if (settings.deepReview.everyMs <= 0 || mode === 'off' || repoRoot === '' || !leaseState.isDriver) return
   schedulerOf($).set('review-timer', now + settings.deepReview.everyMs, () => timedReview($, settings))
 }
 
@@ -2754,7 +2732,7 @@ async function checkHead($: EngineInterface, settings: Settings): Promise<void> 
 
 /** Plans the next scan of the working tree, as soon after the last as `sensor.ts` says. */
 function planScan($: EngineInterface, settings: Settings, now: number): void {
-  if (mode !== 'on' || watcher === null || !isDriver) return
+  if (mode !== 'on' || watcher === null || !leaseState.isDriver) return
   schedulerOf($).set('scan', now + scanGapMs({ now, activeAt, lastScanMs, isPushed: isPushed('tree') }), () => scan($, settings))
 }
 
@@ -2874,7 +2852,7 @@ function runPusher(
  * scan still works out what changed. A nudge only says to look now.
  */
 async function nudged($: EngineInterface, settings: Settings, nudge: Nudge): Promise<void> {
-  if (mode !== 'on' || watcher === null || !isDriver) return
+  if (mode !== 'on' || watcher === null || !leaseState.isDriver) return
   trace($, 'push', nudge.kind, () => nudge)
   const spot = followState.focus
   const isSpotChanged = nudge.kind === 'focus' || (nudge.kind === 'tree' && spot !== null && nudge.paths.includes(spot.path))
@@ -2890,7 +2868,7 @@ async function nudged($: EngineInterface, settings: Settings, nudge: Nudge): Pro
  */
 async function scan($: EngineInterface, settings: Settings): Promise<void> {
   const active = watcher
-  if (mode !== 'on' || active === null || !isDriver) return
+  if (mode !== 'on' || active === null || !leaseState.isDriver) return
   if (isScanning) {
     isScanWanted = true
 
@@ -2950,8 +2928,8 @@ function stopWatching(): void {
   reviewState.reviewFailure = ''
   reviewState.reviewFailureNoted = null
   followState.isWatchingClosely = false
-  isDriver = true
-  leaseHolder = ''
+  leaseState.isDriver = true
+  leaseState.holder = ''
   sharedStamp = null
   sharedCheckedAt = 0
   followState.explainer?.stop()
@@ -3052,7 +3030,7 @@ function followPortsOf($: EngineInterface): FollowPorts {
     repoRoot: () => repoRoot,
     dataRoot: () => dataRoot,
     isOn: () => mode !== 'off',
-    isDriver: () => isDriver,
+    isDriver: () => leaseState.isDriver,
     engagement: () => engagement,
     stamp: path => fileStamp($, path),
     list: async path => await $.fs.list(path),
@@ -3167,7 +3145,7 @@ async function startExplaining($: EngineInterface, settings: Settings, run: numb
           insights: (path, name, symbolPrint, filePrint) =>
             project === null ? [] : insightsFor(project, path, name, symbolPrint, filePrint).map(insightLine),
           // Paused, or with another session driving this project, nothing is fetched unless it is asked for.
-          mode: () => (mode === 'off' ? 'off' : mode === 'paused' || !isDriver ? 'on request' : settings.explain.mode),
+          mode: () => (mode === 'off' ? 'off' : mode === 'paused' || !leaseState.isDriver ? 'on request' : settings.explain.mode),
           // While Claude is not answering, or refuses this job's model, only what the person asks for is tried.
           pressure: () => (!mayAsk(health) || jobBlocks.has('explain') ? 'held' : pressure.level),
           model: settings.explain.model,
@@ -3223,7 +3201,7 @@ function progressPortsOf($: EngineInterface, settings: Settings): ProgressPorts 
     dataRoot: () => dataRoot,
     projectName: () => projectId(repoRoot).replace(/-[0-9a-f]{8}$/, ''),
     isOn: () => mode !== 'off',
-    isDriver: () => isDriver,
+    isDriver: () => leaseState.isDriver,
     engagement: () => engagement,
     profiles: () => profiles,
     instructions: () => progressInstructions,
@@ -3284,13 +3262,13 @@ async function engage($: EngineInterface, settings: Settings, run: number, isFre
     // Who drives this project is settled before anything that only the driver does.
     await keepLease($, settings, run)
     if (run !== engagement) return
-    if (isDriver) await startJournal($, run, isFresh)
+    if (leaseState.isDriver) await startJournal($, run, isFresh)
     if (run !== engagement) return
     await moveOutOfStore($)
     const main = await setUpProfiles($)
     await loadProject($)
     // What the pane showed when the tutor was last on here: notes still true, and the last review.
-    if (isDriver) await restorePaneFromDisk($, isFresh)
+    if (leaseState.isDriver) await restorePaneFromDisk($, isFresh)
     await setUpProgress($, settings)
     await registerReviewer($, settings)
     // Not waited for. Claude Code connects each tool before it answers, which took eight seconds a tool
@@ -3299,7 +3277,7 @@ async function engage($: EngineInterface, settings: Settings, run: number, isFre
     // The files as they are now are what was just loaded. A change from here on is another session's, or this one's own.
     sharedStamp = null
     await refreshShared($, settings)
-    if (isDriver) {
+    if (leaseState.isDriver) {
       await loadQueue($)
       await adoptReview($, settings)
     }
@@ -3360,7 +3338,7 @@ async function switchTo($: EngineInterface, next: Mode, settings: Settings): Pro
     void engage($, settings, engagement, true)
   } else {
     // The lease goes back at once, so that a session waiting for it takes over without waiting for it to run out.
-    if (isDriver && repoRoot !== '' && dataRoot !== '') void giveLease($, leasePath(dataRoot, repoRoot), leaseHolder)
+    if (leaseState.isDriver && repoRoot !== '' && dataRoot !== '') void giveLease($, leasePath(dataRoot, repoRoot), leaseState.holder)
     stopWatching()
     stopAnimating()
     await update($, speechAtom, () => SILENT)
@@ -3986,7 +3964,7 @@ export const register: Register = (on, options) => {
       if (leaving !== null) await flushJournal($, leaving, await $.clock.now(), true)
       if (e.reason === 'clear' || e.reason === 'resume') await flushDebug($)
       else {
-        if (isDriver && repoRoot !== '' && dataRoot !== '') await giveLease($, leasePath(dataRoot, repoRoot), leaseHolder)
+        if (leaseState.isDriver && repoRoot !== '' && dataRoot !== '') await giveLease($, leasePath(dataRoot, repoRoot), leaseState.holder)
         await stopDebug($, `the session ended (${e.reason})`)
       }
     }
