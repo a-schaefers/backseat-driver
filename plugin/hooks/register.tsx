@@ -24,6 +24,8 @@ import {
   speech,
   TALK_MS,
 } from './avatar'
+import { backdropOf } from './sprite'
+import type { Backdrop } from './sprite'
 import { personaPrompt, reframeInstructions, SESSION_NOTES, stripComments, stripFrontmatter, tutorSections } from './contract'
 import {
   addedLines,
@@ -1191,6 +1193,15 @@ function stopAnimating(): void {
 }
 
 /** Gives the animated persona a new line, which it says one word a tick. '' leaves it quiet. */
+/** Whether the terminal's background is dark or light, by the theme in `/config`. Dark when it cannot be told. */
+async function themeBackdrop($: EngineInterface): Promise<Backdrop> {
+  try {
+    return backdropOf((await $.config.list()).find(row => row.key === 'theme')?.value)
+  } catch {
+    return 'dark'
+  }
+}
+
 async function say($: EngineInterface, text: string): Promise<void> {
   const line = speech(text)
   if (text !== '') trace($, 'state', 'speech', () => text)
@@ -4375,7 +4386,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: 'backseat-driver' }, async ($, e) => {
     quiet.renders += 1
     // One round for everything the pane shows, not a dozen in a row for every frame.
-    const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, shownSettings, licensing] = await Promise.all([
+    const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, shownSettings, licensing, backdrop] = await Promise.all([
       read($, modeAtom),
       read($, tabAtom),
       read($, notesAtom),
@@ -4390,6 +4401,8 @@ export const register: Register = (on, options) => {
       read($, speechAtom),
       read($, settingsAtom),
       read($, licenseAtom),
+      // The character's pixels are dimmed toward the terminal's background, which only the theme tells.
+      settings.isAnimated ? themeBackdrop($) : ('dark' as const),
     ])
     const view = {
       mode: shownMode,
@@ -4409,7 +4422,7 @@ export const register: Register = (on, options) => {
       license: licensing,
       isFocused: e.props.isFocused,
       columns: e.props.bodyColumns,
-      character: settings.isAnimated ? { avatar: avatarFor(settings.persona.voice), speech } : null,
+      character: settings.isAnimated ? { avatar: avatarFor(settings.persona.voice), speech, backdrop } : null,
       // Above the prompt rows are scarce, and other surfaces may not draw text art in a fixed-width font.
       isCompact: e.props.placement === 'inline' || e.surface !== 'terminal',
       settings: shownSettings,
