@@ -39,17 +39,19 @@ export type Note = {
   text: string
 }
 
-/** What the watcher is doing, for the pane's status line. */
+/** What the play-by-play is doing, for the pane's status line and the animated character's pose. */
 export type Watch = {
   /**
    * `starting`: just switched on, and the working tree has not been read yet.
-   * `held`: nothing looks by itself, because a usage limit of the plan is nearly spent.
+   * `settling`: a save was seen, and a look is on its way.
+   * `waiting`: a look is wanted and held back: a request failed, Claude is not answering, or the plan's limit is close.
+   * `idle`: none of these.
    */
-  state: 'starting' | 'idle' | 'looking' | 'no-git' | 'failed' | 'held'
+  state: 'starting' | 'idle' | 'settling' | 'looking' | 'no-git' | 'waiting'
   /** When the last look finished, in clock milliseconds; null before the first one. */
   lastLookAt: number | null
-  /** Why the last look failed, or what it found, in a few words. */
-  detail: string
+  /** The status line as a sentence: what it is doing, and when a wait ends (`status.ts`). */
+  line: string
 }
 
 /** The latest deep review, for the pane's Deep review tab. */

@@ -238,7 +238,20 @@ export function stubSession(on: On, options: StubOptions = {}) {
       return text === undefined ? undefined : (JSON.parse(text) as unknown)
     },
     /** The plan's usage windows as Claude Code reports them. Empty means no reading. */
-    limits: [] as { kind: string; percentUsed: number }[],
+    limits: [] as { kind: string; percentUsed: number; resetsAt?: string }[],
+    /** How many times the plugin has asked git for the working tree's status: once per scan. */
+    scans: 0,
+    /** What `$.turn.complete` is fired with when a turn of the conversation itself ends with an answer. */
+    turnEnded(answer = 'Done.') {
+      return { turnId: 'turn-main', answer, durationMs: 1000, isAborted: false, reason: 'answer' } as const
+    },
+    /**
+     * How the next requests to a model go wrong, in order: one of Claude Code's words for an
+     * API error (`overloaded`, `rate_limit`, `server_error`, `authentication_failed`,
+     * `model_not_found`), or `offline`, `timeout` or `empty`. As it stands it is for whichever
+     * job asks next. `look:overloaded`, `explain:...` or `progress:...` is for that job's next request.
+     */
+    failing: [] as string[],
     /** Every key the plugin read from its store, in order. */
     storeReads: [] as string[],
     /** Every file the plugin read outside the repository and its own folder, in order. */
@@ -326,6 +339,8 @@ export function stubSession(on: On, options: StubOptions = {}) {
   on('session.id', () => ({ value: SESSION_ID }))
   on('session.version', () => ({ value: { version: '2.1.289', base: '2.1.289', builtAt: '2026-10-03T19:21:39Z' } }))
   on('classic.SessionStart', () => ({}))
+  on('classic.StopFailure', () => ({}))
+  on('session.measure', ($, e) => ({ changed: e.changed }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('env.get', ($, e) => ({ value: e.name === 'HOME' ? HOME : options.env?.[e.name] }))
   on('ui.log', ($, e) => {
@@ -560,6 +575,7 @@ export function stubSession(on: On, options: StubOptions = {}) {
       return commit === undefined ? failed : ok(`commit ${commit.hash}\n\n${commit.message}\n\n+patch of ${commit.message}`)
     }
     if (args[0] === 'status') {
+      session.scans += 1
       const changed = Object.keys(files).filter(path => files[path] !== head[path])
       const gone = Object.keys(head).filter(path => !(path in files))
 
@@ -580,14 +596,27 @@ export function stubSession(on: On, options: StubOptions = {}) {
   })
 
   on('model.complete', ($, e) => {
+    const refused = (failure: string) => {
+      const none = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+      if (failure === 'timeout') return { value: { isAnswered: false as const, reason: 'aborted' as const, usage: none } }
+      if (failure === 'empty') return { value: { isAnswered: false as const, reason: 'empty-reply' as const, usage: USAGE } }
+      const status = failure === 'offline' ? null : failure === 'rate_limit' ? 429 : failure === 'overloaded' ? 529 : failure === 'model_not_found' ? 404 : 500
+
+      return { value: { isAnswered: false as const, reason: 'api-error' as const, status, error: (failure === 'offline' ? 'unknown' : failure) as never, usage: none } }
+    }
+    const job = e.system?.startsWith('PROGRESS INSTRUCTIONS') === true ? 'progress' : e.system?.startsWith('EXPLAIN INSTRUCTIONS') === true ? 'explain' : 'look'
+    const queued = session.failing.findIndex(entry => !entry.includes(':') || entry.startsWith(`${job}:`))
+    const failure = queued === -1 ? undefined : session.failing.splice(queued, 1)[0]?.replace(/^[a-z]+:/, '')
     if (e.system?.startsWith('PROGRESS INSTRUCTIONS') === true) {
       session.assessments.push(e)
+      if (failure !== undefined) return refused(failure)
       const text = session.assessmentReplies.shift() ?? '{"observations": [], "level": null}'
 
       return { value: { isAnswered: true, text, usage: USAGE } }
     }
     if (e.system?.startsWith('EXPLAIN INSTRUCTIONS') === true) {
       session.lookups.push(e)
+      if (failure !== undefined) return refused(failure)
       const text =
         session.lookupAnswers.find(answer => e.prompt.includes(answer.when))?.reply ??
         session.lookupReplies.shift() ??
@@ -596,6 +625,7 @@ export function stubSession(on: On, options: StubOptions = {}) {
       return { value: { isAnswered: true, text, usage: USAGE } }
     }
     session.requests.push(e)
+    if (failure !== undefined) return refused(failure)
 
     return { value: { isAnswered: true, text: session.replies.shift() ?? '{"resolved": [], "notes": []}', usage: USAGE } }
   })

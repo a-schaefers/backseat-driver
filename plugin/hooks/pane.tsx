@@ -9,6 +9,7 @@ import { ANSWER_LABELS, explained, GENERAL, recurring } from './profiles'
 import { lately, levelPhrase, skillStates } from './progress'
 import { SURVEY_SUBJECT } from './review'
 import { DEFAULT_PERSONA } from './settings'
+import { playLine } from './status'
 import type { Persona } from './settings'
 
 /** The elements the pane is built from. Every surface that draws panes has them. */
@@ -95,22 +96,10 @@ export function tabRow(view: Pick<PaneView, 'columns' | 'review'>): { labels: st
 /** Shown while the pane does not have the keyboard: its keys do nothing until it does. */
 export const KEYBOARD_HINT = 'Ctrl+X Tab or a click to use these keys. Esc to go back.'
 
+/** What the play-by-play is doing. The sentence is worked out where its state is (`status.ts`). */
 function watching(view: PaneView): string {
-  if (view.mode === 'paused') return 'Paused. /bsd resume to continue.'
-  switch (view.watch.state) {
-    case 'starting':
-      return 'On. Getting ready.'
-    case 'no-git':
-      return 'On. This folder is not a git repository, so there is no play-by-play.'
-    case 'looking':
-      return 'On. Looking at your changes.'
-    case 'failed':
-      return `On. The last look failed (${view.watch.detail}). It will try again.`
-    case 'held':
-      return 'On. Holding back, because you are close to your plan limit. It still looks when you ask.'
-    case 'idle':
-      return view.isAutomatic ? 'On. Watching for your next save.' : 'On. Looking only when you ask.'
-  }
+  // The mode reaches the pane a moment before the line that goes with it.
+  return view.mode === 'paused' ? playLine({ at: 'paused' }) : view.watch.line
 }
 
 /** The persona in a few words, leaving out a half that is the default. '' when both are. */

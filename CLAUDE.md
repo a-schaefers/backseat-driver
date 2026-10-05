@@ -83,7 +83,7 @@ Every roadmap milestone is built and was seen working in short scripted real ses
   - Limits: files under 256 KiB, at most 512 files.
   - Directory installs load as `<name>@synced`.
 - Approved plan for part two: `~/.claude/plans/dynamic-wandering-micali.md` on the owner's machine (nine decisions, risks per milestone).
-- In progress: the event-driven plan, `~/.claude/plans/wild-jumping-clover.md` on the owner's machine (approved 2026-10-04). Milestones M0 probes, M1 debug log, M2 locked store, M3 kernel (events, deadlines, health, play-by-play machine, sensor), M4 deep review queue, M5 Explain and journal on deadlines, M6 one driver per project, M7 pane pass, M8 optional push sources, M9 PureScript kernel. Done so far: M0 (see "Probed live" under Mod API), M1 (see "Debug log"; it also added the `session.end` flush of the journal) and M2 (the store and the locks, under "Data folder"). Until M3 lands, the sections below describe the polling design.
+- In progress: the event-driven plan, `~/.claude/plans/wild-jumping-clover.md` on the owner's machine (approved 2026-10-04). Milestones M0 probes, M1 debug log, M2 locked store, M3 kernel (events, deadlines, health, play-by-play machine, sensor), M4 deep review queue, M5 Explain and journal on deadlines, M6 one driver per project, M7 pane pass, M8 optional push sources, M9 PureScript kernel. Done so far: M0 (see "Probed live" under Mod API), M1 (see "Debug log"; it also added the `session.end` flush of the journal) and M2 (the store and the locks, under "Data folder"). M3 (the kernel: deadlines, the scan, health, the play-by-play's state and status line; under "Play-by-play and watcher") is done too. Deep review (M4), Explain and the journal (M5) still run on their own timers, described below as they are.
 
 ## Repository
 
@@ -178,7 +178,12 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 | `guard.ts` | which paths are the user's |
 | `git.ts`, `noise.ts`, `diff.ts` | `git status` parsing, files and edits never worth a look, line diff |
 | `watcher.ts` | change since the last look (ports; tests use an in-memory tree) |
-| `gate.ts` | whether a look is due |
+| `gate.ts` | the pacing arithmetic: backoff after failed looks, the gap near the plan limit |
+| `scheduler.ts` | deadlines: named things to do at a known time, one timer for the earliest |
+| `sensor.ts` | how often the working tree is scanned |
+| `health.ts` | whether Claude is answering: what went wrong with a request, the shared wait after failures, the plan's pressure |
+| `play.ts` | what the play-by-play is doing and when it looks next, worked out from the facts |
+| `status.ts` | the pane's status line as a sentence, with a clock time for every wait |
 | `notes.ts`, `prompts.ts` | reviewer reply → notes; reviewer and conversation prompt text |
 | `review.ts` | deep review scope: reflog, what counts as a commit, the request |
 | `languages.ts` | extension → language; a project's main languages |
@@ -224,34 +229,54 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 
 ### Play-by-play and watcher
 
-- The watcher polls git and never calls a model. Interval about 2 s, stretched when `git status` is slow; not a setting.
+- Events and deadlines drive the mod, not a tick (owner, 2026-10-04). Nothing compares the clock against a condition over and over:
+  - `scheduler.ts` holds named deadlines (`scan`, `look`, `health`) and keeps one `$.clock.after` armed for the earliest. Setting a name again moves it. Work that is due is started, not awaited.
+  - A look is the deadline `look`, set by `planLook` whenever a fact it rests on changes (a save, the end of a look, a failure, the plan's limit). It fires at the moment the quiet time ends: live, 10.0 s after the save was seen.
+  - `play.ts` works the state out from the facts each time (`playOf`): `starting`, `no-git`, `paused`, `watching`, `on-request`, `settling(dueAt)`, `looking`, `waiting(until, why)`. Nothing is remembered that could disagree with the facts. `wakeAt` is when to come back, `isLookDue` whether a look may start then.
+  - `showPlay` writes the `watch` atom (`{ state, lastLookAt, line }`) only when it changed. `status.ts` makes `line`. A wait says why and until when as a clock time (`Next try 12:07`), so nothing redraws every second.
+- The one thing the mod polls is the working tree, because nothing tells it about the person's own saves, their commits in their own terminal, or their editor's caret (see "Probed live": no watch in `$.fs`, `FileChanged` only for paths named at session start, no watcher installed). `scan` in `register.tsx` is that poll, one at a time, the next planned when it finishes:
+  - `sensor.ts`: 1 s apart for a minute after something happened (`activeAt`: a save, a caret move, a prompt, a key in the pane, switch-on), 2 s otherwise, 5 s once nothing has happened for ten minutes. Each quarter second a scan took adds 2 s, up to 32 s.
+  - `kick` scans at once: on `prompt.submit`, when a turn of the conversation ends, on a key in the pane, on resume.
+  - Paused, nothing scans and no look is due.
+  - A scan never calls a model. It feeds the journal and Explain, checks HEAD, and calls `planLook`.
+- Failures (owner: told apart, retried with delayed backoff, nothing pending lost). `health.ts`:
+  - `outcomeOf` reads a `$.model.complete` result, `outcomeOfError` one of Claude Code's error words. Troubles: `rate-limit`, `overloaded`, `server`, `offline` (no HTTP status at all), `timeout`, `account` (login, billing, account on hold), `job` (`model_not_found`, `invalid_request`), `reply` (empty).
+  - `callModel` reports every outcome to `noteOutcome`. So does `classic.StopFailure` (the conversation's turn or a subagent died on an API error) and a conversation turn that ended with an answer.
+  - The shared wait: a `rate-limit`, `overloaded`, `server`, `offline` or `timeout` makes every background job wait (`waiting(until)`), 30 s doubling to 10 min (15 s first for `offline` and `timeout`), somewhere in the upper half so sessions do not come back together. At `until` the state is `recovering`: the next job that asks is the probe (`probing`), and the others wait for its answer. Any answer, a background job's or the conversation's, ends it at once (`ok`).
+  - A `rate-limit` while the plan says a window is 99% spent waits until that window's `resetsAt`, plus up to 30 s.
+  - `account` blocks every job until something is answered again. `job` blocks that job only (`jobBlocks`), until it is asked for by hand and answered, or the mod reloads with other settings. `reply` is the look's own business.
+  - The look keeps its own pacing after a failed look on top of that: the minimum gap plus 30 s doubling (`backoffMs`), which is never shorter than the shared wait.
+  - Nothing pending is dropped: the watcher keeps the change, and the same diff is sent again.
+  - `l`, `r` and `f` always try, and an answer to one ends the wait.
+- Plan limits (`Pressure`): `session.measure` pushes them (it fires around conversation turns), and `readPressure` reads them, free, when a save is seen and right before a look. A window whose `resetsAt` has passed is left out: its figure is from before it reopened and no newer one arrives until something is asked.
+  - At 80% of the tightest window: the gap is ×4, minimum 4 min.
+  - At 95%: no automatic look, lookup or deep review, and no request is spent to find that out. The pane says "Holding back until 13:40". The look goes when the window reopens. Look now and review now still work.
 - Every background git command is `git --no-optional-locks …`; a plain `git status` takes the index lock and breaks the user's git. `register.tsx` has one literal `$.process.run` call so readers and the validator see git is the process.
-- Polling is deliberate. `FileChanged` watches named files only (literal matchers or `watchPaths`), not a tree. inotify-tools, fswatch and Watchman are extra installs, absent on the owner's machine. Anthropic's `diff` mod also polls.
 - A look needs all of:
-  - the tree still for the quiet time (default 10 s)
+  - the tree still for the quiet time (default 10 s), counted from the scan that saw the save
   - the minimum gap since the last look (default 1 min)
   - a real change (not whitespace-only; not only ignored, binary, generated or lock files)
   - no look in flight
+  - Claude answering, the plan not at its limit, and the play-by-play's own model accepted
 - A look sends the net change since the last look. Work already uncommitted at switch-on is the baseline, not reviewed.
 - `watcher.ts` fingerprints (size, mtime) every changed file at the last poll and at the last look; what differs is pending. It keeps each file's text at the last look as the next diff base. A file never seen dirty diffs against `git show HEAD:path`.
 - `collect()` returns real changes. `settle()` records what a look saw, using collection-time fingerprints, so a file changed during the model call stays pending.
-- A failed look settles nothing; backoff is 30 s, doubling, up to 10 min. An unparseable reply is settled and dropped, never retried or shown. Files beyond the prompt size limit stay unsettled for the next look. After a reload the watcher restarts from the current tree; notes survive in state.
+- A failed look settles nothing. An unparseable reply is settled and dropped, never retried or shown. Files beyond the prompt size limit stay unsettled for the next look. After a reload the watcher restarts from the current tree; notes survive in state.
 - The play-by-play is one `$.model.complete`, no tools, no history. It is given the open notes and the dismissed notes for the files shown. `applyReply` drops a note with the same file and topic slug as either. Dismissed notes live in state until switch-off. Lesson memory counts only notes that reached the pane.
 - The prompt says one idea per note, under 40 words (the first live note bundled three).
 - Note kinds, in sort order: `bug`, `risk`, `decision`, `idiom`, `tip`, `insight`. `decision` marks a meaningful choice (just made, or ahead in a stub or TODO: the one exception to "no notes on unfinished code"), framed as theirs with its trade-offs. `insight` is an implementation choice or a codebase pattern. Priority, in the prompt only: a bug or a risk before a decision, a decision before anything else, never more than one insight (a cap of one decision was dropped: a live save with two real open choices got both, which was right). The pane draws decisions first under `◆ Your call` (magenta), the problems by file, then insights under `★ Insight` (cyan) (`DECISION_HEADING`, `INSIGHT_HEADING`). `isProblem` is false for both: they never count in the lesson memory (`flagged` or `explained`). `e` on a decision asks the conversation to lay out the options and leave the choice to the user; on an insight, where else it shows up.
 - Live (decision points): a TODO for the even-count median got `◆ Your call` with the trade-off (the textbook median versus keeping the input's type) and no choice made, beside a separate `risk` for an unclosed file. An uncommented tie rule in `mode()` was flagged as an open decision, and adding a comment that made it deliberate resolved the note at the next look. `e` on a decision got six options with their costs and the questions that decide between them, then "tell me which way you're leaning". "Which would you pick?" got a question back about what they weighed. No play-by-play `insight` has been seen live yet: the model has preferred decisions.
 - `d` dismisses (the same point isn't raised about that file again until switch-off). `m` hushes the topic. `e` asks the conversation for the concept, then an example on request, never a patch. `l` looks now.
-- Plan limits: `tick` reads `$.session.usage().rateLimits` (free) at most twice a minute, and only when something is pending.
-  - At 80% of the tightest window: the gap is ×4, minimum 4 min.
-  - At 95%: no automatic look or deep review; the pane says "Holding back". Look now and review now still work.
 - Live: a planted bug got its note 14 s after the save, nothing appeared in the conversation, `e` sent the explain request, and saving the fix cleared the note.
+- Live with the kernel (Sonnet, low, through a local proxy that was switched off and on): the pane said "Saw your save. Looking when you pause." a second after a save, and the look started 10.0 s after the save was seen. With the proxy down the look failed with no HTTP status, the pane said "The last look failed (no connection). Next try 18:19", and it was tried again 30, 60 and 120 s later. With the proxy back, the next try was answered and the change that had waited four minutes got its note. Scans were 1 s apart after each save and 2 s apart otherwise.
+- Not seen live: a wrong model (the `/config` picker only offers real ones), a refused account, the plan limit by `session.measure`. Tests cover them (`resilience.test.ts`).
 
 ### Deep review
 
 - A read-only subagent (`Read`, `Grep`, `Glob`) registered with `$.agent.register({ model, effort, tools })`, not a file in `plugin/agents/`. A spawned subagent skips the mod's own `turn.step` hooks, so registration is the only way to give it the user's effort level.
 - Instructions in `prompts/deep-review.md`. Registered at switch-on; `agent.offer` withholds it from the model while off. Re-registered whenever the person text changes, because a spawn can't take parameters.
 - Triggers, independent: after each commit (default on), and every N minutes (default off). With both off, only on request (`r`).
-- Commit detection: each tick compares `.git/logs/HEAD` size and mtime. Only on change does it run `git reflog -1`.
+- Commit detection: each scan compares `.git/logs/HEAD` size and mtime. Only on change does it run `git reflog -1`.
   - `commit`, `commit (amend)`, `commit (merge)`, `commit (initial)` → review that commit.
   - Any other HEAD move (checkout, pull, reset, rebase) → reset the "since last review" base.
   - No git hooks (they would write into the user's repo).
@@ -259,7 +284,7 @@ A hooks module may not pass `$` to an imported function. Every `on(...)` and `$.
 - `$.agent.spawn` resolves at start, with `agentId`. The answer arrives as a `turn.complete` carrying that id and goes to state, never the conversation. One review at a time; a commit made meanwhile is queued (latest only). Done → short notice, and the tab is marked new.
 - The notes block also carries `decisions` (file, line, choice, tradeoff; at most `MAX_DECISIONS` = 3). The review's `decisions` and `insights` go into the `Review` state; the tab draws the decisions before the review text and the insights after it, so the text should not repeat them. `insights` must describe choices and patterns, not defects. With the first wording, a live review's insights were defects. With "an insight is never a problem", a fresh session's were choices (`Counter`'s insertion order giving first-seen ties, `sorted()` leaving the caller's list alone) while the defects went to decisions and the review: one run each.
 - A contested point is the one review that lands in chat: the tutor delegates it to the same reviewer and reports the verdict.
-- Live: commit noticed within one tick, footer showed a background agent, review in the tab 12 s later. No conversation row, notification or attachment, then or on the next turn. Contested point verdict in chat after 32 s. The 5-min timer with after-commit off reviewed uncommitted work at 5 min.
+- Live: commit noticed within one scan, footer showed a background agent, review in the tab 12 s later. No conversation row, notification or attachment, then or on the next turn. Contested point verdict in chat after 32 s. The 5-min timer with after-commit off reviewed uncommitted work at 5 min.
 
 ### Profiles
 
@@ -334,15 +359,15 @@ The tutor writes `view.json` in answer and whenever its knowledge of the spot ch
 
 ### Journal
 
-- `projects/<id>/journal.json`; engine `recorder.ts` (disk and repo as ports). `register.tsx` starts it in `engage` (`startJournal`), feeds it each tick (`keepJournal`) and from `pollFocus`, and drops it at switch-off. It holds paths, line numbers, definition names, commit titles and user statements, never code.
-- Saves: each tick's changed files are diffed against the last save's text, else HEAD for clean files, else switch-on text for files already dirty (so pre-existing work isn't a save).
+- `projects/<id>/journal.json`; engine `recorder.ts` (disk and repo as ports). `register.tsx` starts it in `engage` (`startJournal`), feeds it each scan (`keepJournal`) and from `pollFocus`, and drops it at switch-off. It holds paths, line numbers, definition names, commit titles and user statements, never code.
+- Saves: each scan's changed files are diffed against the last save's text, else HEAD for clean files, else switch-on text for files already dirty (so pre-existing work isn't a save).
   - A `save` entry holds added and removed counts, merged line runs and touched definitions (`enclosing.ts`).
   - Saves of one file under 2 min apart form one run, until a commit or HEAD move.
   - Other entries: commits, HEAD moves, notes raised, notes fixed, dismissals, deep reviews, switch-on, working-on statements.
   - The last 3 files' diffs stay in memory for the `activity` tool.
 - Attention: `attention.ts` credits each poll's time (max 10 s, so sleep adds nothing) to the caret line and to `visible` files, while the editor wrote within `LINGER_MS` (2 min) and isn't `active: false`.
   - Every `SLICE_MS` (2 min) → `focus` entries: up to 3 regions per file plus the remainder. A region is lines within 20 of each other inside one definition, named for the line held longest. Visible files get `screen` entries.
-  - The definition name is resolved at the next tick, so one read per caret position.
+  - The definition name is resolved at the next scan, so one read per caret position.
   - `focus.json` from before switch-on is a baseline and earns no time until rewritten.
 - Sittings: an hour idle ends one. On every read or write, finished sittings roll up (`digest`: files, commit titles, statements); only the open sitting keeps entries. Keep the last 20. A sitting with no save, no commit and under 1 min of editor time leaves nothing.
 - Writes: at most every 30 s when something is new; at once on a working-on statement; at switch-off; and when the session ends (`session.end`).
@@ -379,7 +404,7 @@ The tutor writes `view.json` in answer and whenever its knowledge of the spot ch
   - At most 600 added lines and 25 files (otherwise import, vendored or generated).
   - At least `MIN_LINES` (3) non-blank added lines in one language.
   - Only added lines are read (`git show --unified=0`); lock files and generated folders never are. The tab's status line says why the last commit didn't count.
-- Weight 1 if the watcher saw at least half the commit's files change before it was made (`watchedPaths`, filled by `tick`, emptied as commits are assessed), else 0.5. First-placement commits are always 0.5.
+- Weight 1 if the watcher saw at least half the commit's files change before it was made (`watchedPaths`, filled by `scan`, emptied as commits are assessed), else 0.5. First-placement commits are always 0.5.
 - When:
   - `assessCommit` runs from `turn.complete` after a commit's deep review (with its text, or without on failure), or from `checkHead` when after-commit reviews are off. Not near the plan limit.
   - `placeFirst` runs on a fresh switch-on for the first 2 languages in play without a level: up to 5 of the user's commits among the last 30, in one request.
@@ -596,6 +621,8 @@ The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above mem
 - Explain in the kit: `session.lookups`, answered with `session.explain(reply, 'text the prompt contains')`. Order isn't guaranteed. With no answer, a file maps to no symbols. `session.editor(file, line, …, extra)` writes `focus.json`. Journal tests set `explain: 'off'` (a live editor triggers the 100 ms poll and slows minute-scale tests).
 - Progress: `session.assess(reply)`, `session.assessments`. Updates: `session.ran` (claude and network git commands in order). A clone's top is the plugin folder's parent; an installed copy's `installPath` is `/`.
 - `session.logs` = `$.ui.log` output (swallowed errors appear there).
+- Failures in the kit: `session.failing.push('overloaded')` makes the next model request fail that way, whichever job makes it; `'look:overloaded'`, `'explain:…'`, `'progress:…'` name the job. Words: Claude Code's API errors, or `offline`, `timeout`, `empty`. Explain asks 2.5 s after a save, before the look, so name the job or set `explain: 'off'`. `$.classic.StopFailure({ error })` is a turn that died, `$.turn.complete(session.turnEnded())` a conversation turn that answered, `$.session.measure({ context, rateLimits, changed: ['rateLimits'] })` the plan's limits arriving (set `session.limits` too: the tutor reads them again before a look). `session.scans` counts `git status` calls.
+- Time in the kit starts at 0 and the first scan is 1 s after switch-on. A look is due exactly `quietMs` after the scan that saw the save: `advance(9999)` no request, `advance(1)` one. The health wait is jittered with `Math.random`, so assert on the look's own pacing (deterministic) or on bounds.
 - Several sessions in the kit: the fake git keeps the lock repository in `session.disk` (`locks.git/HEAD`, one file per held ref). `session.locking` lists `take`, `steal`, `give` and `refused` with the ref (`lockRef(path)` names it). `session.lockedElsewhere(ref, agoMs)` is another session's lock. `session.halfWritten.set(path, n)` makes the next n reads of a file find it empty. A wait in the store or for a lock is a `$.clock.sleep`, so the test has to move the clock for the call to finish: start the call, `await session.clock.advance(...)`, then await it.
 - The tutor's own debug log in the kit: seed `data: { 'debug.json': { on: true } }` (and the marker), or run `/bsd debug on`. `session.debugLog()` returns every record across chunks. Records are written `FLUSH_MS` after they are noted, so `await session.clock.advance(FLUSH_MS)` before reading. The kit stubs `session.id` (`SESSION_ID`), `session.version` and `session.end`.
 - Engines with ports are tested without the kit: `explain.test.ts` has `world()`, whose model is answered by hand with `w.answer(request, reply)`, which is how a test changes a file mid-call.

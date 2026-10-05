@@ -80,8 +80,8 @@ import {
   scopePaths,
 } from './forget'
 import type { Scope } from './forget'
-import { backoffMs, shouldLook, slowedGapMs, throttle, usagePressure } from './gate'
-import type { Throttle } from './gate'
+import { HEALTHY, mayAsk, NO_PRESSURE, outcomeOf, outcomeOfError, pressureOf, stepHealth } from './health'
+import type { Health, Outcome, Pressure } from './health'
 import { parseStatus } from './git'
 import { NO_ACTIVITY } from './glance'
 import { DENIAL, isUsersFile } from './guard'
@@ -112,6 +112,8 @@ import { assessmentRequest, emptyRecord, parseAssessment, parseRecord, progressT
 import type { AssessedCommit, CommitForAssessment } from './progress'
 import { helpText, isModeRequest, parseRequest, transition } from './mode'
 import { isNoiseFile } from './noise'
+import { isLookDue, playOf, wakeAt } from './play'
+import type { Play, PlayFacts } from './play'
 import { applyReply, isProblem, parseReply, withDismissed } from './notes'
 import { renderPane, reviewSchedule } from './pane'
 import {
@@ -149,6 +151,10 @@ import type { Bubble } from './prompts'
 import { firstRunQuestions, groupAnswers } from './questions'
 import type { Question } from './questions'
 import { createRecorder } from './recorder'
+import { createScheduler } from './scheduler'
+import type { Scheduler } from './scheduler'
+import { scanGapMs } from './sensor'
+import { playLine, watchOf } from './status'
 import type { Recorder } from './recorder'
 import {
   commitTitle,
@@ -178,14 +184,7 @@ import { chosen, parseWorking, tidy, WORKING_HEADER, WORKING_QUESTION, workingCh
 
 const COMMANDS = ['backseat-driver', 'bsd'] as const
 
-/** How often the watcher asks git what changed. A slow answer stretches this by skipping ticks. */
-const POLL_MS = 2000
-/** Each quarter second a poll takes skips one tick, up to this many. */
-const SLOW_POLL_MS = 250
-const MAX_SKIPPED_TICKS = 15
-
-const IDLE: Watch = { state: 'idle', lastLookAt: null, detail: '' }
-const STARTING: Watch = { state: 'starting', lastLookAt: null, detail: '' }
+const IDLE: Watch = { state: 'idle', lastLookAt: null, line: playLine({ at: 'watching' }) }
 const NO_REVIEW: Review = { state: 'none', subject: '', text: '', isUnseen: false, decisions: [], insights: [] }
 const NO_PROFILES: Profiles = { languages: [], subjects: {} }
 const NO_WORKING: Working = { said: '', saidAgo: '', inferred: '', where: '', share: '' }
@@ -237,14 +236,36 @@ let isHomeMarked = false
 
 /** The play-by-play's working state. None of it outlives a reload: the watcher starts again from the tree as it is. */
 let watcher: Watcher | null = null
-let timer: Timer | null = null
+/** False from the moment the tutor is switched on until the working tree has been read, or found not to be a repository. */
+let isWatchReady = false
 let nextNoteId = 1
 let lastChangeAt: number | null = null
 let lastLookAt: number | null = null
 let isLooking = false
-let isPolling = false
-let ticksToSkip = 0
+/** Looks in a row that got no answer, and why the last of them did not. */
 let failures = 0
+let lookFailure = ''
+
+/**
+ * The scan of the working tree: the one thing the mod has to go and look at,
+ * because nothing tells it. One runs at a time, and the next is planned when
+ * it has finished (`sensor.ts` says how soon).
+ */
+let isScanning = false
+/** True when something asked for a scan while one was running: another follows at once. */
+let isScanWanted = false
+let lastScanMs = 0
+/** When something last happened: a save, a commit, a caret move, a prompt, a key in the pane. */
+let activeAt: number | null = null
+
+/** What has to be done at a known time. One timer serves all of it. Null until the tutor is first switched on. */
+let deadlines: Scheduler | null = null
+
+/** Whether Claude is answering, as every background job reports it, and which jobs have a setting of their own that is refused. */
+let health: Health = HEALTHY
+const jobBlocks = new Map<string, string>()
+/** Why the running deep review's subagent died, when an API error ended it. '' otherwise. */
+let reviewFailure = ''
 
 /**
  * The profiles in play, as last read from the store. Kept here as well as in
@@ -287,10 +308,8 @@ let blinkTimer: Timer | null = null
 /** Looks in a row that gave it nothing to say. After enough of them, a look may give it a light remark. */
 let quietLooks = 0
 
-/** How close the plan's usage limit is, read at most twice a minute. */
-let slowdown: Throttle = { gapFactor: 1, isHeld: false }
-let slowdownReadAt = 0
-const USAGE_READ_MS = 30_000
+/** How close the plan's usage limit is: pushed by Claude Code when it measures the session, and read before anything is spent. */
+let pressure: Pressure = NO_PRESSURE
 
 /**
  * What is known about this project as a whole, which the deep review writes
@@ -385,8 +404,12 @@ function snapshot(): Record<string, unknown> {
     repoRoot,
     dataRoot,
     watcher: watcher === null ? null : { dirty: watcher.dirty(), changed: watcher.changed(), hasPending: watcher.hasPending() },
-    look: { isLooking, isPolling, lastChangeAt, lastLookAt, failures, ticksToSkip, quietLooks },
-    slowdown: { ...slowdown, readAt: slowdownReadAt },
+    look: { isWatchReady, isLooking, lastChangeAt, lastLookAt, failures, lookFailure, quietLooks },
+    scan: { isScanning, isScanWanted, lastScanMs, activeAt },
+    deadlines: deadlines?.all() ?? {},
+    health,
+    jobBlocks: Object.fromEntries(jobBlocks),
+    pressure,
     review: {
       agentId: reviewAgentId,
       scope: reviewScope === null ? null : scopeSubject(reviewScope),
@@ -397,7 +420,7 @@ function snapshot(): Record<string, unknown> {
       headLog,
     },
     explain: { isOn: explainer !== null, waiting: explainer?.pending() ?? 0, focus, editorFocusAt, isFastPolling },
-    timers: { poll: timer !== null, focus: focusTimer !== null, review: reviewTimer !== null, talk: talkTimer !== null, blink: blinkTimer !== null },
+    timers: { focus: focusTimer !== null, review: reviewTimer !== null, talk: talkTimer !== null, blink: blinkTimer !== null },
     profiles: { languages: profiles.languages, subjects: Object.keys(profiles.subjects) },
     progress: { identity, records: [...records.keys()], watchedPaths: [...watchedPaths] },
     journal: recorder === null ? null : { working: workingShown },
@@ -555,13 +578,172 @@ async function debugCommand($: EngineInterface, settings: Settings, request: Deb
   return wasOn ? `Deleted every debug log in ${root}. This session carries on in a new one.` : `Deleted every debug log in ${root}.`
 }
 
-/** One request to a model, with what was asked and what came back kept for the debug log. */
-async function callModel($: EngineInterface, job: string, request: ModelCompleteRequest, signal?: AbortSignal): Promise<ModelCompleteResult> {
+/**
+ * One request to a model. What was asked and what came back are kept for the
+ * debug log, and how it went is told to everything that waits on Claude
+ * answering.
+ */
+async function callModel(
+  $: EngineInterface,
+  settings: Settings,
+  job: string,
+  request: ModelCompleteRequest,
+  signal?: AbortSignal,
+): Promise<ModelCompleteResult> {
+  // The first request after a wait is the one that finds out whether Claude is back.
+  if (health.state === 'waiting' && (await $.clock.now()) >= health.until) health = stepHealth(health, { type: 'due' })
+  if (health.state === 'recovering') health = stepHealth(health, { type: 'probing' })
   const started = Date.now()
   const result = signal === undefined ? await $.model.complete(request) : await $.model.complete(request, { signal })
   trace($, 'model', job, () => ({ request, result }), Date.now() - started)
+  // Cut short by the tutor itself, as a lookup is when its file is saved again: that says nothing about Claude.
+  if (signal?.aborted !== true) await noteOutcome($, settings, job, outcomeOf(result))
 
   return result
+}
+
+/** The one scheduler, made the first time something has to be done later. */
+function schedulerOf($: EngineInterface): Scheduler {
+  deadlines ??= createScheduler({
+    now: () => $.clock.now(),
+    after: (ms, fn) => $.clock.after(ms, fn),
+    fail: (name, error) => fail($, `the ${name} deadline failed`, error),
+  })
+
+  return deadlines
+}
+
+/** Reads how close the plan's usage limit is. The call is free. */
+async function readPressure($: EngineInterface): Promise<Pressure> {
+  try {
+    pressure = pressureOf((await $.session.usage()).rateLimits, await $.clock.now())
+  } catch {
+    // No reading is no reason to hold back.
+    pressure = NO_PRESSURE
+  }
+
+  return pressure
+}
+
+/**
+ * How a request went: a model's, a subagent's, or the conversation's own.
+ * A failure that is the service's makes every background job wait, longer
+ * after each one in a row. An answer ends the wait for all of them.
+ */
+async function noteOutcome($: EngineInterface, settings: Settings, job: string, outcome: Outcome): Promise<void> {
+  const before = health
+  const wasBlocked = jobBlocks.has(job)
+  if (outcome.ok) {
+    health = stepHealth(health, { type: 'answered' })
+    jobBlocks.delete(job)
+  } else if (outcome.trouble === 'job') {
+    // This job's own setting is refused, such as a model that does not exist. The others carry on.
+    if (job !== 'conversation') jobBlocks.set(job, outcome.detail)
+  } else {
+    // A rate limit is the plan's window when the plan says one is spent: the wait is then until it reopens.
+    const spent = outcome.trouble === 'rate-limit' ? await readPressure($) : null
+    health = stepHealth(health, {
+      type: 'failed',
+      trouble: outcome.trouble,
+      detail: outcome.detail,
+      at: await $.clock.now(),
+      random: Math.random(),
+      resetsAt: spent !== null && spent.percent >= 99 ? spent.resetsAt : null,
+    })
+  }
+  if (health === before && wasBlocked === jobBlocks.has(job)) return
+
+  trace($, 'state', 'health', () => ({ health, job, outcome, blocked: Object.fromEntries(jobBlocks) }))
+  const plan = schedulerOf($)
+  if (health.state === 'waiting') plan.set('health', health.until, () => healthDue($, settings))
+  else plan.cancel('health')
+  await wake($, settings)
+}
+
+/** The wait after a failure is over: the next job that wants to ask may, and finds out for the rest. */
+async function healthDue($: EngineInterface, settings: Settings): Promise<void> {
+  health = stepHealth(health, { type: 'due' })
+  trace($, 'state', 'health', () => ({ health }))
+  await wake($, settings)
+}
+
+/** Something that held work back has changed. Everything that was waiting looks again at whether it can go. */
+async function wake($: EngineInterface, settings: Settings): Promise<void> {
+  if (mode === 'off') return
+  await planLook($, settings)
+  await explainer?.tick()
+  void refreshView($)
+}
+
+/** The facts the play-by-play's state is worked out from. */
+function playFacts(settings: Settings): PlayFacts {
+  return {
+    mode: mode === 'paused' ? 'paused' : 'on',
+    isReady: isWatchReady,
+    hasRepo: repoRoot !== '',
+    isAutomatic: settings.playByPlay.isAutomatic,
+    hasPending: watcher?.hasPending() ?? false,
+    lastChangeAt,
+    lastLookAt,
+    isLooking,
+    failures,
+    failure: lookFailure,
+    quietMs: settings.playByPlay.quietMs,
+    minGapMs: settings.playByPlay.minGapMs,
+    health,
+    pressure,
+    jobBlock: jobBlocks.get('play-by-play') ?? '',
+  }
+}
+
+/** Tells the pane what the play-by-play is doing, when that is not what it already says. */
+async function showPlay($: EngineInterface, settings: Settings): Promise<Play> {
+  const play = playOf(playFacts(settings))
+  const next = watchOf(play, lastLookAt)
+  const shown = await read($, watchAtom)
+  if (shown.state !== next.state || shown.line !== next.line || shown.lastLookAt !== next.lastLookAt) {
+    trace($, 'state', 'watch', () => ({ ...next, play }))
+    await update($, watchAtom, (): Watch => next)
+  }
+
+  return play
+}
+
+/**
+ * Works out when a look is next due and sets the deadline for it. Called
+ * whenever a fact that rests on has changed: a save, a look that ended, a
+ * failure, the plan's limit. `notBefore` keeps a deadline that has just
+ * fired without a look from firing again at once.
+ */
+async function planLook($: EngineInterface, settings: Settings, notBefore = 0): Promise<void> {
+  const at = mode === 'on' ? wakeAt(playFacts(settings)) : null
+  const plan = schedulerOf($)
+  if (at === null) plan.cancel('look')
+  else if (plan.at('look') !== Math.max(at, notBefore)) plan.set('look', Math.max(at, notBefore), () => lookIfDue($, settings))
+  await showPlay($, settings)
+}
+
+/** The look's deadline: starts the look when it is due by the facts as they are now, and plans again when it is not. */
+async function lookIfDue($: EngineInterface, settings: Settings): Promise<void> {
+  if (mode !== 'on' || watcher === null) return
+  // Free, and right before anything is spent: how close the plan's limit is.
+  await readPressure($)
+  const now = await $.clock.now()
+  if (isLookDue(playFacts(settings), now)) await look($, settings, false)
+  else await planLook($, settings, now + 1000)
+}
+
+/**
+ * Something happened that Claude Code told the mod about (a prompt, the end
+ * of a turn, a key in the pane), so the working tree is looked at now and
+ * not at the next scan.
+ */
+async function kick($: EngineInterface, settings: Settings, why: string): Promise<void> {
+  if (mode !== 'on' || watcher === null) return
+  const now = await $.clock.now()
+  activeAt = now
+  trace($, 'scan', 'asked for', () => why)
+  schedulerOf($).set('scan', now, () => scan($, settings))
 }
 
 /** A source file's text by its path from the repository root, or null when it cannot be read. */
@@ -576,6 +758,12 @@ async function readSource($: EngineInterface, root: string, path: string): Promi
   trace($, 'fs', 'source', () => ({ path, chars: text === null ? null : text.length }), Date.now() - started)
 
   return text
+}
+
+/** A key in the pane: recorded, and a reason to look at the working tree now. */
+function touched($: EngineInterface, settings: Settings, name: string, detail?: () => unknown): void {
+  trace($, 'ui', name, detail)
+  void kick($, settings, 'a key in the pane')
 }
 
 /** What one of the tutor's own tools answers, kept for the debug log with what it was asked. */
@@ -825,12 +1013,6 @@ async function startAnimating($: EngineInterface, settings: Settings, isFresh: b
   })
   if (isFresh) await say($, avatarFor(settings.persona.voice).hello)
   else await update($, speechAtom, finished)
-}
-
-/** Changes what the pane's status line says about the watcher. */
-async function setWatch($: EngineInterface, change: Partial<Watch>): Promise<void> {
-  trace($, 'state', 'watch', () => change)
-  await update($, watchAtom, (watch): Watch => ({ ...watch, ...change }))
 }
 
 async function setReview($: EngineInterface, change: Partial<Review>): Promise<void> {
@@ -1427,26 +1609,6 @@ async function registerTools($: EngineInterface): Promise<void> {
   })
 }
 
-function describeFailure(result: Exclude<ModelCompleteResult, { isAnswered: true }>): string {
-  if (result.reason === 'api-error') return String(result.error).replaceAll('_', ' ')
-
-  return result.reason === 'aborted' ? 'timed out' : 'empty reply'
-}
-
-/** Reads how much of the plan's usage is spent. The call is free, and its answer is kept for half a minute. */
-async function readSlowdown($: EngineInterface, now: number): Promise<Throttle> {
-  if (slowdownReadAt !== 0 && now - slowdownReadAt < USAGE_READ_MS) return slowdown
-  slowdownReadAt = now
-  try {
-    slowdown = throttle(usagePressure((await $.session.usage()).rateLimits))
-  } catch {
-    // No reading is no reason to hold back.
-    slowdown = { gapFactor: 1, isHeld: false }
-  }
-
-  return slowdown
-}
-
 /**
  * One look: the pending changes go to the play-by-play model, and its reply
  * becomes notes. `isAsked` is true when the user pressed "look now".
@@ -1455,7 +1617,10 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
   const active = watcher
   if (isLooking || active === null) return
   isLooking = true
+  schedulerOf($).cancel('look')
   try {
+    // Said before anything is read, so that a press of "look now" is answered at once.
+    await showPlay($, settings)
     const changes = await active.collect()
     if (changes.length === 0) {
       active.settle([])
@@ -1466,7 +1631,6 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
     }
 
     trace($, 'look', 'start', () => ({ isAsked, files: changes.map(change => change.path), failures, lastChangeAt, lastLookAt }))
-    await setWatch($, { state: 'looking' })
     await bringIntoPlay(
       $,
       changes.map(change => languageOf(change.path)).filter(language => language !== null),
@@ -1482,7 +1646,7 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
     // What the journal says they have been doing, so that the changes are read in the light of it.
     const doing = recorder?.glance(await $.clock.now()) ?? ''
     const { prompt, shown } = playByPlayPrompt(changes, await read($, notesAtom), await read($, dismissedAtom), bubble, brief, doing)
-    const result = await callModel($, 'play-by-play', {
+    const result = await callModel($, settings, 'play-by-play', {
       model: settings.playByPlay.model,
       effort: settings.playByPlay.thinking,
       system: reviewerSystem(
@@ -1497,15 +1661,17 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
     const now = await $.clock.now()
     lastLookAt = now
 
-    if (!result.isAnswered) {
+    const outcome = outcomeOf(result)
+    if (!outcome.ok || !result.isAnswered) {
       // Nothing is settled, so the same changes are tried again after the back-off.
       failures += 1
-      await setWatch($, { state: 'failed', lastLookAt: now, detail: describeFailure(result) })
+      lookFailure = outcome.ok ? 'no answer' : outcome.detail
 
       return
     }
 
     failures = 0
+    lookFailure = ''
     // What was shown has been looked at, whether or not the reply can be used.
     active.settle(shown)
     const parsed = parseReply(result.text)
@@ -1548,13 +1714,14 @@ async function look($: EngineInterface, settings: Settings, isAsked: boolean): P
         await say($, reply.say)
       }
     }
-    await setWatch($, { state: 'idle', lastLookAt: now, detail: '' })
   } catch (error) {
     failures += 1
+    lookFailure = 'an error'
     fail($, 'look failed', error)
-    await setWatch($, { state: 'failed', detail: 'an error' })
   } finally {
     isLooking = false
+    // The pane's line and the next look both follow from how this one went.
+    await planLook($, settings)
   }
 }
 
@@ -1690,8 +1857,8 @@ async function maybeSurvey($: EngineInterface, settings: Settings, run: number):
   if (project === null || project.isSurveyed || reviewAgentId !== null) return
   // With both triggers off, the deep review model runs only when asked, and that goes for this too.
   if (!settings.deepReview.isAfterCommit && settings.deepReview.everyMs === 0) return
-  const held = await readSlowdown($, await $.clock.now())
-  if (held.isHeld || held.gapFactor !== 1 || run !== engagement || mode !== 'on') return
+  const held = await readPressure($)
+  if (held.level !== 'none' || !mayAsk(health) || run !== engagement || mode !== 'on') return
   await startReview($, { kind: 'survey' })
 }
 
@@ -1713,7 +1880,7 @@ async function reviewCommit($: EngineInterface, entry: ReflogEntry): Promise<voi
 async function reviewSince($: EngineInterface, isAsked: boolean): Promise<void> {
   if (mode === 'off' || (mode === 'paused' && !isAsked)) return
   // The timer holds back near the plan limit. A review asked for by hand does not.
-  if (!isAsked && (await readSlowdown($, await $.clock.now())).isHeld) return
+  if (!isAsked && (await readPressure($)).level === 'held') return
   if (reviewAgentId !== null) {
     if (isAsked) $.ui.toast('A deep review is already running.')
 
@@ -1763,11 +1930,11 @@ async function checkHead($: EngineInterface, settings: Settings): Promise<void> 
   }
   recorder?.add({ at: movedAt, kind: 'commit', hash: entry.hash, text: commitTitle(entry) })
   if (!settings.deepReview.isAfterCommit) {
-    if (!(await readSlowdown($, await $.clock.now())).isHeld) queueProgress($, () => assessCommit($, settings, entry.hash, ''))
+    if ((await readPressure($)).level !== 'held') queueProgress($, () => assessCommit($, settings, entry.hash, ''))
 
     return
   }
-  if ((await readSlowdown($, await $.clock.now())).isHeld) {
+  if ((await readPressure($)).level === 'held') {
     await setReview($, {
       state: 'failed',
       subject: `commit ${entry.hash.slice(0, 7)}: ${commitTitle(entry)}`,
@@ -1780,30 +1947,40 @@ async function checkHead($: EngineInterface, settings: Settings): Promise<void> 
   await reviewCommit($, entry)
 }
 
-/** One poll of the working tree. A poll never calls a model: it only decides whether a look is due. */
-async function tick($: EngineInterface, settings: Settings): Promise<void> {
+/** Plans the next scan of the working tree, as soon after the last as `sensor.ts` says. */
+function planScan($: EngineInterface, settings: Settings, now: number): void {
+  if (mode !== 'on' || watcher === null) return
+  schedulerOf($).set('scan', now + scanGapMs({ now, activeAt, lastScanMs }), () => scan($, settings))
+}
+
+/**
+ * One scan of the working tree: what was saved, whether HEAD moved, where
+ * the editor's caret is. A scan never calls a model. It tells the journal and
+ * Explain what it found, and plans the look that a save makes due.
+ */
+async function scan($: EngineInterface, settings: Settings): Promise<void> {
   const active = watcher
-  if (isPolling || mode !== 'on' || active === null) return
-  if (ticksToSkip > 0) {
-    ticksToSkip -= 1
+  if (mode !== 'on' || active === null) return
+  if (isScanning) {
+    isScanWanted = true
 
     return
   }
 
-  isPolling = true
+  isScanning = true
+  isScanWanted = false
+  let now = 0
   try {
     const started = await $.clock.now()
     const hasChanged = await active.poll()
-    const now = await $.clock.now()
-    ticksToSkip = Math.min(MAX_SKIPPED_TICKS, Math.floor((now - started) / SLOW_POLL_MS))
-    if (hasChanged) lastChangeAt = now
-    if (hasChanged) trace($, 'watch', 'saved', () => ({ files: active.changed(), dirty: active.dirty(), pollMs: now - started }))
-
-    const hasPendingChange = active.hasPending()
-    // Usage is only looked up when there is something to look at.
-    // Read before a save is followed, so that what the save sets going knows how close the limit is.
-    const held = hasPendingChange || hasChanged || (explainer?.pending() ?? 0) > 0 ? await readSlowdown($, now) : slowdown
+    now = await $.clock.now()
+    lastScanMs = now - started
     if (hasChanged) {
+      lastChangeAt = now
+      activeAt = now
+      trace($, 'watch', 'saved', () => ({ files: active.changed(), dirty: active.dirty(), scanMs: now - started }))
+      // Read before the save is followed, so that what it sets going knows how close the limit is.
+      await readPressure($)
       for (const path of active.changed()) watchedPaths.add(path)
       await followSaves($, active.changed(), now)
     }
@@ -1811,33 +1988,29 @@ async function tick($: EngineInterface, settings: Settings): Promise<void> {
     // Until an editor has written its focus file, looking for it this often is enough.
     if (focusTimer === null) await pollFocus($)
     await keepJournal($, active, now)
-    const isDue = shouldLook({
-      now,
-      lastChangeAt,
-      lastLookAt,
-      hasPendingChange,
-      isLookRunning: isLooking,
-      quietMs: settings.playByPlay.quietMs,
-      minGapMs: slowedGapMs(settings.playByPlay.minGapMs, held.gapFactor),
-      backoffMs: backoffMs(failures),
-    })
-    if (settings.playByPlay.isAutomatic && isDue) {
-      if (!held.isHeld) void look($, settings, false)
-      // Said once, not on every tick that a look stays due.
-      else if ((await read($, watchAtom)).state !== 'held') await setWatch($, { state: 'held' })
-    }
     await checkHead($, settings)
     traceQuiet($)
+    // A look is a deadline, set from what this scan found.
+    await planLook($, settings)
   } catch (error) {
     fail($, 'poll failed', error)
   } finally {
-    isPolling = false
+    isScanning = false
+    if (now === 0) now = await $.clock.now()
+    // Asked for again while this one ran: at once. Otherwise as soon as the cadence says.
+    if (isScanWanted) schedulerOf($).set('scan', now, () => scan($, settings))
+    else planScan($, settings, now)
   }
 }
 
 function stopWatching(): void {
-  timer?.cancel()
-  timer = null
+  deadlines?.clear()
+  isScanning = false
+  isScanWanted = false
+  isWatchReady = false
+  health = HEALTHY
+  jobBlocks.clear()
+  reviewFailure = ''
   focusTimer?.cancel()
   focusTimer = null
   explainer?.stop()
@@ -1865,9 +2038,9 @@ async function startWatching($: EngineInterface, settings: Settings, run: number
   lastChangeAt = null
   lastLookAt = null
   failures = 0
-  ticksToSkip = 0
-  slowdown = { gapFactor: 1, isHeld: false }
-  slowdownReadAt = 0
+  lookFailure = ''
+  lastScanMs = 0
+  pressure = NO_PRESSURE
 
   const top = await git($, undefined, ['rev-parse', '--show-toplevel'])
   if (run !== engagement) return
@@ -1875,7 +2048,8 @@ async function startWatching($: EngineInterface, settings: Settings, run: number
   if (top.exitCode !== 0 || root === '') {
     repoRoot = ''
     headLog = ''
-    await setWatch($, { state: 'no-git', lastLookAt: null, detail: '' })
+    isWatchReady = true
+    await showPlay($, settings)
 
     return
   }
@@ -1903,7 +2077,7 @@ async function startWatching($: EngineInterface, settings: Settings, run: number
   if (run !== engagement) return
 
   watcher = started
-  await setWatch($, IDLE)
+  isWatchReady = true
   repoRoot = root
   headLog = log
   headLogStamp = stamp
@@ -1911,10 +2085,12 @@ async function startWatching($: EngineInterface, settings: Settings, run: number
   // Deep reviews cover what happens from now on, not the history so far.
   reviewedHead = lastHead
   reviewedPrint = ''
-  timer = $.clock.every(POLL_MS, () => {
-    void tick($, settings)
-  })
-  trace($, 'timer', 'watching started', () => ({ repoRoot: root, pollMs: POLL_MS, reviewEveryMs: settings.deepReview.everyMs, head: tip }))
+  await showPlay($, settings)
+  // Being switched on is something happening: the first scans come close together.
+  const now = await $.clock.now()
+  activeAt = now
+  planScan($, settings, now)
+  trace($, 'timer', 'watching started', () => ({ repoRoot: root, reviewEveryMs: settings.deepReview.everyMs, head: tip }))
   if (settings.deepReview.everyMs > 0) {
     reviewTimer = $.clock.every(settings.deepReview.everyMs, () => {
       void reviewSince($, false)
@@ -1997,6 +2173,7 @@ async function followEditor($: EngineInterface, now: number): Promise<void> {
 async function pollFocus($: EngineInterface): Promise<void> {
   if (mode === 'off' || repoRoot === '' || !(await readFocus($))) return
   const now = await $.clock.now()
+  activeAt = now
   recorder?.editor(focusText, now, false)
   await followEditor($, now)
 }
@@ -2078,6 +2255,7 @@ async function startExplaining($: EngineInterface, settings: Settings, run: numb
     complete: async (prompt, maxTokens, signal) => {
       const result = await callModel(
         $,
+        settings,
         'explain',
         {
           model: settings.explain.model,
@@ -2098,7 +2276,8 @@ async function startExplaining($: EngineInterface, settings: Settings, run: numb
       project === null ? [] : insightsFor(project, path, name, symbolPrint, filePrint).map(insightLine),
     // Paused, nothing is fetched unless it is asked for.
     mode: () => (mode === 'off' ? 'off' : mode === 'paused' ? 'on request' : settings.explain.mode),
-    pressure: () => (slowdown.isHeld ? 'held' : slowdown.gapFactor === 1 ? 'none' : 'slowed'),
+    // While Claude is not answering, or refuses this job's model, only what the person asks for is tried.
+    pressure: () => (!mayAsk(health) || jobBlocks.has('explain') ? 'held' : pressure.level),
     model: settings.explain.model,
     onChange: () => {
       void refreshView($)
@@ -2233,7 +2412,7 @@ async function assess(
   const subject = fresh.length === 1 ? `commit ${fresh[0]?.short ?? ''}` : `${fresh.length} of your recent commits`
   await setProgress($, { busy: `Looking at ${subject} for your ${languageName(language)} progress.` })
   try {
-    const result = await callModel($, 'progress', {
+    const result = await callModel($, settings, 'progress', {
       model: settings.deepReview.model,
       effort: settings.deepReview.thinking,
       system: progressInstructions,
@@ -2314,8 +2493,8 @@ const PLACEMENT_COMMITS = 5
  */
 async function placeFirst($: EngineInterface, settings: Settings, run: number): Promise<void> {
   if (!settings.isProgressOn || identity.length === 0 || repoRoot === '' || dataRoot === '') return
-  const held = await readSlowdown($, await $.clock.now())
-  if (held.isHeld || held.gapFactor !== 1) return
+  const held = await readPressure($)
+  if (held.level !== 'none' || !mayAsk(health)) return
   const mine = parseRecent((await git($, repoRoot, [...RECENT_COMMITS_ARGS])).stdout)
     .filter(commit => identity.includes(commit.email))
     .slice(0, PLACEMENT_SCAN)
@@ -2387,12 +2566,27 @@ async function switchTo($: EngineInterface, next: Mode, settings: Settings): Pro
   mode = next
   await update($, modeAtom, () => next)
 
-  if (wasEngaged === isEngaged) return
+  if (wasEngaged === isEngaged) {
+    if (isEngaged) {
+      // Paused, nothing is scanned and no look is due. Resumed, the tree is looked at straight away.
+      if (next === 'paused') {
+        deadlines?.cancel('scan')
+        deadlines?.cancel('look')
+        await showPlay($, settings)
+      } else {
+        await kick($, settings, 'resumed')
+        await planLook($, settings)
+      }
+    }
+
+    return
+  }
   engagement += 1
   // The instruction files are framed differently while the tutor is on.
   $.ui.invalidate('prompt.context')
   if (isEngaged) {
-    await setWatch($, STARTING)
+    isWatchReady = false
+    await showPlay($, settings)
     await openPane($)
     void engage($, settings, engagement, true)
   } else {
@@ -2687,6 +2881,8 @@ export const register: Register = (on, options) => {
       recorder?.brief(await $.clock.now()) ?? '',
     ].filter(part => part !== '')
     trace($, 'hook', 'prompt.submit', () => ({ text: e.text, attached: shown }))
+    // They are at the keyboard, here: what they saved a moment ago should not wait for the next scan.
+    void kick($, settings, 'a prompt')
     if (shown.length === 0) return next(e)
 
     return next({ ...e, context: [...(e.context ?? []), ...shown] })
@@ -2694,10 +2890,18 @@ export const register: Register = (on, options) => {
 
   // The deep reviewer's answer. It goes to the pane, never into the conversation.
   on('turn.complete', async ($, e, next) => {
+    if (e.agentId === undefined && mode !== 'off') {
+      // The conversation's own turn ended. An answer means Claude is answering, which ends any wait.
+      if (e.reason === 'answer') await noteOutcome($, settings, 'conversation', { ok: true })
+      // Whatever Claude's tools did to the working tree during the turn is looked at now.
+      void kick($, settings, 'a turn ended')
+    }
     if (e.agentId === undefined || e.agentId !== reviewAgentId) return next(e)
     const scope = reviewScope
+    const failure = reviewFailure
     reviewAgentId = null
     reviewScope = null
+    reviewFailure = ''
     trace($, 'agent', 'finished', () => ({ agentId: e.agentId, reason: e.reason, subject: scope === null ? null : scopeSubject(scope), answer: e.reason === 'answer' ? e.answer : undefined }))
 
     if (e.reason === 'answer' && e.answer.trim() !== '' && scope !== null) {
@@ -2724,13 +2928,39 @@ export const register: Register = (on, options) => {
       // A commit's review is also when the person's progress is brought up to date, with the review for context.
       if (scope.kind === 'commit') queueProgress($, () => assessCommit($, settings, scope.hash, shown))
     } else {
-      await setReview($, { state: 'failed', text: e.reason === 'answer' ? 'the reviewer said nothing' : e.reason })
+      await setReview($, { state: 'failed', text: e.reason === 'answer' ? 'the reviewer said nothing' : failure !== '' ? failure : e.reason })
       if (scope !== null && scope.kind === 'commit') queueProgress($, () => assessCommit($, settings, scope.hash, ''))
     }
 
     const queued = queuedCommit
     queuedCommit = null
     if (queued !== null && mode === 'on') await reviewCommit($, queued)
+
+    return next(e)
+  })
+
+  // An API error ended a turn: the conversation's, or a subagent's. Either way Claude is not answering.
+  on('classic.StopFailure', async ($, e, next) => {
+    if (mode !== 'off') {
+      trace($, 'hook', 'classic.StopFailure', () => ({ error: e.error, details: e.error_details, agent: e.agent_id, type: e.agent_type }))
+      const outcome = outcomeOfError(e.error)
+      const isReviewer = e.agent_id !== undefined && e.agent_id === reviewAgentId
+      // The review's own end, `turn.complete`, says only "error". This says which.
+      if (isReviewer && !outcome.ok) reviewFailure = outcome.detail
+      await noteOutcome($, settings, e.agent_id === undefined ? 'conversation' : 'deep-review', outcome)
+    }
+
+    return next(e)
+  })
+
+  // Claude Code measured the session: how close the plan's limit is arrives here, without being asked for.
+  on('session.measure', async ($, e, next) => {
+    if (mode !== 'off' && e.changed.includes('rateLimits')) {
+      const before = pressure.level
+      pressure = pressureOf(e.rateLimits, await $.clock.now())
+      trace($, 'hook', 'session.measure', () => ({ pressure, rateLimits: e.rateLimits }))
+      if (pressure.level !== before) await wake($, settings)
+    }
 
     return next(e)
   })
@@ -2887,45 +3117,45 @@ export const register: Register = (on, options) => {
 
     return renderPane($.ui.resolve(e), view, {
       onTab: (tab: Tab) => {
-        trace($, 'ui', 'tab', () => tab)
+        touched($, settings, 'tab', () => tab)
         void update($, tabAtom, () => tab)
         if (tab === 'review') void setReview($, { isUnseen: false })
         if (tab === 'explain') watchClosely($)
       },
       onSelect: (id: number) => {
-        trace($, 'ui', 'select', () => id)
+        touched($, settings, 'select', () => id)
         void update($, selectedAtom, () => id)
       },
       onExplain: (note: Note) => {
-        trace($, 'ui', 'explain', () => note)
+        touched($, settings, 'explain', () => note)
         // Not awaited: it resolves when the turn starts, which may be after the one now running.
         void $.prompt.submit({ text: explainRequest(note), asUser: true })
         // A decision point or an insight is about this one spot in their code, not an idea now explained to them.
         if (isProblem(note.kind)) void saveSubject($, settings, languageOf(note.file) ?? GENERAL, profile => withExplained(profile, note.topic))
       },
       onMute: (note: Note) => {
-        trace($, 'ui', 'mute', () => note)
+        touched($, settings, 'mute', () => note)
         const entry = { topic: note.topic, text: note.topic.replaceAll('-', ' ') }
         void hush($, settings, languageOf(note.file) ?? GENERAL, entry)
       },
       onUnhush: (subject: string, topic: string) => {
-        trace($, 'ui', 'unhush', () => ({ subject, topic }))
+        touched($, settings, 'unhush', () => ({ subject, topic }))
         void saveSubject($, settings, subject, profile => withoutHush(profile, topic))
       },
       onQuestions: () => {
-        trace($, 'ui', 'questions')
+        touched($, settings, 'questions')
         void ask($, settings, firstRunQuestions(profiles.languages, false))
       },
       onExplainMove: (step: 1 | -1) => {
-        trace($, 'ui', 'explain move', () => step)
+        touched($, settings, 'explain move', () => step)
         void moveFocus($, step)
       },
       onExplainFetch: () => {
-        trace($, 'ui', 'explain fetch')
+        touched($, settings, 'explain fetch')
         void refreshView($, true)
       },
       onExplainAsk: () => {
-        trace($, 'ui', 'explain ask')
+        touched($, settings, 'explain ask')
         void read($, explainAtom).then(view => {
           const text = explainAsk(view)
           // A prompt the mod submits skips the mod's own `prompt.submit` hook. The text
@@ -2934,22 +3164,22 @@ export const register: Register = (on, options) => {
         })
       },
       onDismiss: (note: Note) => {
-        trace($, 'ui', 'dismiss', () => note)
+        touched($, settings, 'dismiss', () => note)
         void update($, notesAtom, open => open.filter(other => other.id !== note.id))
         // Remembered, so that the next look does not bring the same point back.
         void update($, dismissedAtom, dismissed => withDismissed(dismissed, note))
         void $.clock.now().then(at => recorder?.add({ at, kind: 'dismissed', path: note.file, line: note.line, text: note.topic }))
       },
       onWorking: () => {
-        trace($, 'ui', 'working')
+        touched($, settings, 'working')
         void askWorking($)
       },
       onLook: () => {
-        trace($, 'ui', 'look now')
+        touched($, settings, 'look now')
         if (mode === 'on') void look($, settings, true)
       },
       onReview: () => {
-        trace($, 'ui', 'review now')
+        touched($, settings, 'review now')
         void reviewSince($, true)
       },
     })

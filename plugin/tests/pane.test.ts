@@ -4,6 +4,7 @@ import type { Note } from '../types'
 import { NO_VIEW } from '../hooks/explainer'
 import { currentNote, detailMarkdown, explainNotice, KEYBOARD_HINT, personaLine, statusLine } from '../hooks/pane'
 import type { PaneView } from '../hooks/pane'
+import { watchOf } from '../hooks/status'
 import { PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const VIEW: PaneView = {
@@ -14,7 +15,7 @@ const VIEW: PaneView = {
   persona: { voice: 'default', engineering: 'default' },
   notes: [],
   selected: null,
-  watch: { state: 'idle', lastLookAt: null, detail: '' },
+  watch: { state: 'idle', lastLookAt: null, line: 'On. Watching for your next save.' },
   isAutomatic: true,
   review: { state: 'none', subject: '', text: '', isUnseen: false, decisions: [], insights: [] },
   reviewSchedule: 'after each commit',
@@ -42,13 +43,11 @@ test('statusLine says what the watcher is doing, in what voice and with whose ju
   expect(statusLine({ ...VIEW, persona: { voice: 'eli5-tldr-kiss-terse', engineering: 'knuth' } })).toBe(
     'On. Watching for your next save. Voice: eli5-tldr-kiss-terse. Engineering: knuth.',
   )
-  expect(statusLine({ ...VIEW, isAutomatic: false })).toBe('On. Looking only when you ask.')
-  expect(statusLine({ ...VIEW, mode: 'paused' })).toBe('Paused. /bsd resume to continue.')
-  expect(statusLine({ ...VIEW, watch: { ...VIEW.watch, state: 'looking' } })).toBe('On. Looking at your changes.')
-  expect(statusLine({ ...VIEW, watch: { ...VIEW.watch, state: 'no-git' } })).toMatch('not a git repository')
-  expect(statusLine({ ...VIEW, watch: { state: 'failed', lastLookAt: 1, detail: 'rate limit' } })).toBe(
-    'On. The last look failed (rate limit). It will try again.',
+  // The sentence is the play-by-play's own (status.test.ts). The pane prints it, and knows about being paused by itself.
+  expect(statusLine({ ...VIEW, watch: { state: 'waiting', lastLookAt: 1, line: 'On. Claude is overloaded. Next try 12:07.' } })).toBe(
+    'On. Claude is overloaded. Next try 12:07.',
   )
+  expect(statusLine({ ...VIEW, mode: 'paused' })).toBe('Paused. /bsd resume to continue.')
 })
 
 test('personaLine leaves out a half that is the default, and names a persona chosen for both once', async () => {
@@ -118,5 +117,5 @@ sessionTest('the pane says how to give it the keyboard, until it has it', async 
 })
 
 test('just switched on, the pane says it is getting ready', async () => {
-  expect(statusLine({ ...VIEW, watch: { state: 'starting', lastLookAt: null, detail: '' } })).toBe('On. Getting ready.')
+  expect(statusLine({ ...VIEW, watch: watchOf({ at: 'starting' }, null) })).toBe('On. Getting ready.')
 })
