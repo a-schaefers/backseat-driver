@@ -23,10 +23,7 @@ export type SettingRow = {
 /**
  * `bug` will break, `risk` may, `idiom` and `tip` teach. `decision` marks a
  * meaningful choice in their code, which stays theirs to make, and `insight`
- * points out an implementation choice or a pattern of their codebase. The last
- * two follow the Learning and Explanatory modes of Anthropic's
- * learning-output-style plugin (Apache-2.0), turned read-only: see
- * THIRD_PARTY_NOTICES.md.
+ * points out an implementation choice or a pattern of their codebase.
  */
 export type NoteKind = 'bug' | 'risk' | 'decision' | 'idiom' | 'tip' | 'insight'
 
