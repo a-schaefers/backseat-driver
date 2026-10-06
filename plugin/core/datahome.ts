@@ -19,7 +19,7 @@ const FOLDER = 'backseat-driver'
 export const MARKER = '.backseat-driver'
 
 export const MARKER_TEXT =
-  'Backseat Driver keeps what it knows about you and your projects in this folder.\nDelete the folder to forget all of it, or run /bsd forget.\n'
+  'Backseat Driver keeps what it knows about you and your projects in this folder.\nDelete the folder to forget all of it, or run /backseat forget.\n'
 
 export type HomeEnv = {
   /** `BACKSEAT_DRIVER_HOME`, which points the tutor at another folder. */

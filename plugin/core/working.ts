@@ -4,7 +4,7 @@ import type { Working } from '../types'
  * "What are you working on right now?" The tutor works the answer out from
  * the person's activity, because being asked is a chore. This is the one
  * question it has for when they want to say it themselves, and the ways they
- * can: the pane's `w` key, `/bsd working`, or telling the tutor in chat.
+ * can: the pane's `w` key, `/backseat working`, or telling the tutor in chat.
  */
 
 export const WORKING_QUESTION = 'What are you working on right now?'
@@ -66,9 +66,9 @@ export function chosen(answer: string, working: Working): string | null {
 }
 
 /**
- * What `/bsd working <rest>` asks for: something to record, '' to take back
+ * What `/backseat working <rest>` asks for: something to record, '' to take back
  * what was said, or null when nothing follows and the question is asked.
- * "/bsd working on the parser" reads naturally, so a leading "on" is dropped.
+ * "/backseat working on the parser" reads naturally, so a leading "on" is dropped.
  */
 export function parseWorking(rest: string): string | null {
   const text = tidy(rest.replace(/^on\b\s*/i, ''))

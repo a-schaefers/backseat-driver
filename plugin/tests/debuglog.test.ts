@@ -238,7 +238,7 @@ test('the tracer always keeps the latest records, and works out details only whi
   expect(tracer.isOn()).toBe(false)
 })
 
-test('what /bsd debug is asked', async () => {
+test('what /backseat debug is asked', async () => {
   expect(parseDebugRequest('')).toBe('status')
   expect(parseDebugRequest(' ON ')).toBe('on')
   expect(parseDebugRequest('off')).toBe('off')

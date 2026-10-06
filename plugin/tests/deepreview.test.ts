@@ -81,7 +81,7 @@ test('paneContext tells the conversation about a finished review', async () => {
 sessionTest('a commit is reviewed by the registered reviewer, and the review lands in the pane', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   // Registered with the default deep review model and thinking level, and read-only tools.
@@ -117,7 +117,7 @@ sessionTest('a commit is reviewed by the registered reviewer, and the review lan
 sessionTest('a finished review is announced when the tab is not open', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', MEAN)
   session.commit('Add mean')
@@ -139,7 +139,7 @@ sessionTest('the chosen model and thinking level are what the reviewer is regist
     pluginFiles: { '/personas/voice/torvalds.md': '# Voice: torvalds\n', '/personas/engineering/knuth.md': '# Engineering: knuth\n' },
   })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   const reviewer = session.agents[session.agents.length - 1]
@@ -151,7 +151,7 @@ sessionTest('the chosen model and thinking level are what the reviewer is regist
 sessionTest('a checkout is not a commit, and deep reviews start afresh after it', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.checkout()
@@ -162,7 +162,7 @@ sessionTest('a checkout is not a commit, and deep reviews start afresh after it'
 sessionTest('with "after each commit" off, a commit is not reviewed', { options: { deep_review_after_commit: false } }, async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', MEAN)
@@ -181,7 +181,7 @@ sessionTest('with "after each commit" off, a commit is not reviewed', { options:
 sessionTest('the timer reviews everything since the previous review, and skips when nothing changed', { options: { deep_review_after_commit: false, deep_review_every: '5 minutes', play_by_play: 'on request', animated_persona: false } }, async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   // Nothing has changed: the first tick of the timer does nothing.
@@ -207,7 +207,7 @@ sessionTest('the timer reviews everything since the previous review, and skips w
 sessionTest('"review now" works without waiting for a commit or the timer', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -229,7 +229,7 @@ sessionTest('"review now" works without waiting for a commit or the timer', asyn
 sessionTest('a commit made while a review runs is reviewed next', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', MEAN)
@@ -251,7 +251,7 @@ sessionTest('the tab walks back to earlier reviews, and a place a review names i
   // is one of uncommitted work, by hand, which is kept apart.
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', MEAN)
   await session.clock.advance(2000)
@@ -298,7 +298,7 @@ sessionTest('the tab walks back to earlier reviews, and a place a review names i
 sessionTest('a review that fails says so in the pane', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', MEAN)
   session.commit('Add mean')
@@ -314,7 +314,7 @@ sessionTest('a review that fails says so in the pane', async ($, on) => {
 sessionTest("another subagent's answer is left alone", async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   expect(await $.turn.complete(finished('someone-else', 'unrelated'))).toEqual({ text: '' })
@@ -332,7 +332,7 @@ sessionTest('the reviewer is offered to the model only while the tutor is on', a
   } as const
 
   expect(await $.agent.offer(offer)).toEqual({ isOffered: false })
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(await $.agent.offer(offer)).toEqual({ isOffered: true })
 })
@@ -341,7 +341,7 @@ sessionTest('at the plan limit, a commit is not reviewed until the user asks', a
   const session = stubSession(on)
   session.limits.push({ kind: 'five_hour', percentUsed: 96 })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', MEAN)

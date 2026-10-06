@@ -17,9 +17,9 @@ test('parseRequest: no argument means on, an unknown word means help', async () 
 })
 
 test('helpText lists every command, and names a word that is not one', async () => {
-  for (const word of ['off', 'pause', 'resume', 'status', 'questions', 'help']) expect(HELP).toMatch(`/bsd ${word}`)
+  for (const word of ['off', 'pause', 'resume', 'status', 'questions', 'help']) expect(HELP).toMatch(`/backseat ${word}`)
   expect(helpText()).toBe(HELP)
-  expect(helpText('faster')).toMatch('There is no /bsd faster.')
+  expect(helpText('faster')).toMatch('There is no /backseat faster.')
 })
 
 test('transition: pause and resume do nothing while the tutor is off', async () => {
@@ -35,25 +35,25 @@ test('transition: status never changes the mode', async () => {
   expect(transition('paused', 'status')).toEqual({ to: 'paused', text: 'Backseat Driver is paused.' })
 })
 
-sessionTest('/bsd and /backseat-driver switch the same tutor', async ($, on) => {
+sessionTest('/backseat switches the tutor on, pauses it and switches it off', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
 
-  const started = await $.command.run(typed('bsd'))
+  const started = await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(started.text).toMatch(/^Backseat Driver is on. You drive./)
 
-  const again = await $.command.run(typed('backseat-driver'))
+  const again = await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(again.text).toBe('Backseat Driver is already on.')
 
-  const paused = await $.command.run(typed('bsd', 'pause'))
+  const paused = await $.command.run(typed('backseat', 'pause'))
   expect(paused.text).toMatch('paused')
 
-  const status = await $.command.run(typed('backseat-driver', 'status'))
+  const status = await $.command.run(typed('backseat', 'status'))
   expect(status.text).toBe('Backseat Driver is paused. Voice: default. Engineering: default.')
 
-  const stopped = await $.command.run(typed('bsd', 'off'))
+  const stopped = await $.command.run(typed('backseat', 'off'))
   expect(stopped.text).toBe('Backseat Driver is off. Claude Code is back to normal.')
 })
 
@@ -62,40 +62,40 @@ sessionTest('the pane opens with the tutor, closes with it, and stays through a 
   await $.session.start(SESSION)
   expect(calls.opened).toEqual([])
 
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await calls.clock.settle()
   expect(calls.opened).toEqual(['backseat-driver'])
 
-  await $.command.run(typed('bsd', 'pause'))
-  await $.command.run(typed('bsd', 'resume'))
+  await $.command.run(typed('backseat', 'pause'))
+  await $.command.run(typed('backseat', 'resume'))
   expect(calls.opened).toEqual(['backseat-driver'])
   expect(calls.closed).toEqual([])
 
   // Asking for "on" again brings back a pane the user closed by hand.
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await calls.clock.settle()
   expect(calls.opened).toEqual(['backseat-driver', 'backseat-driver'])
 
-  await $.command.run(typed('bsd', 'off'))
+  await $.command.run(typed('backseat', 'off'))
   expect(calls.closed).toEqual(['backseat-driver'])
 })
 
 sessionTest('the tutor is still on after /clear', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   await $.classic.SessionStart({ source: 'clear' })
 
-  const status = await $.command.run(typed('bsd', 'status'))
+  const status = await $.command.run(typed('backseat', 'status'))
   expect(status.text).toBe('Backseat Driver is on. Voice: default. Engineering: default.')
 })
 
-sessionTest('/bsd answers before its setup has finished', async ($, on) => {
+sessionTest('/backseat answers before its setup has finished', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': 'x = 1\n' }, data: LICENSE_ANSWERED })
   await $.session.start(SESSION)
 
-  const started = await $.command.run(typed('bsd'))
+  const started = await $.command.run(typed('backseat'))
   expect(started.text).toMatch(/^Backseat Driver is on. You drive./)
   // The pane is up and the contract is in force. The questions have not been asked yet.
   expect(session.opened).toEqual(['backseat-driver'])
@@ -110,8 +110,8 @@ sessionTest('switching off while the tutor is still starting leaves nothing runn
   const session = stubSession(on)
   await $.session.start(SESSION)
 
-  await $.command.run(typed('bsd'))
-  await $.command.run(typed('bsd', 'off'))
+  await $.command.run(typed('backseat'))
+  await $.command.run(typed('backseat', 'off'))
   await session.clock.settle()
 
   session.write('stats.py', 'def mean(xs):\n    return sum(xs) / len(xs)\n')
@@ -120,27 +120,27 @@ sessionTest('switching off while the tutor is still starting leaves nothing runn
   expect(session.asked).toEqual([])
 })
 
-sessionTest('/bsd help and an unknown word print the commands, and change nothing', async ($, on) => {
+sessionTest('/backseat help and an unknown word print the commands, and change nothing', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
 
-  expect((await $.command.run(typed('bsd', 'help'))).text).toMatch('/bsd questions')
-  expect((await $.command.run(typed('bsd', 'faster'))).text).toMatch('There is no /bsd faster.')
+  expect((await $.command.run(typed('backseat', 'help'))).text).toMatch('/backseat questions')
+  expect((await $.command.run(typed('backseat', 'faster'))).text).toMatch('There is no /backseat faster.')
   expect(session.opened).toEqual([])
 })
 
-sessionTest('/bsd questions asks again, about everything in play', async ($, on) => {
+sessionTest('/backseat questions asks again, about everything in play', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': 'x = 1\n' }, data: LICENSE_ANSWERED })
-  expect((await $.command.run(typed('bsd', 'questions'))).text).toBe('Backseat Driver is off. Run /bsd to start it.')
+  expect((await $.command.run(typed('backseat', 'questions'))).text).toBe('Backseat Driver is off. Run /backseat to start it.')
 
   await $.session.start(SESSION)
   session.answers.push('Python', 'None yet', 'Understand what happens underneath', 'Idioms and style')
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(session.asked.length).toBe(4)
 
   session.answers.push('C, C++ or Rust', 'Regularly: I build real things in it')
-  const again = await $.command.run(typed('bsd', 'questions'))
+  const again = await $.command.run(typed('backseat', 'questions'))
   expect(again.text).toMatch('Here are the questions again.')
   await session.clock.settle()
 

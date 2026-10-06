@@ -84,7 +84,7 @@ sessionTest('decision points and insights each get their own section in the play
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   session.reply(LOOK)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', `${MEAN}# more\n`)
   await session.clock.advance(14_000)
@@ -115,7 +115,7 @@ sessionTest('decision points and insights each get their own section in the play
 sessionTest("a deep review's decision points come first in its tab, and its insights after it", async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', `${MEAN}\ndef median(xs):\n    pass  # TODO: what for an even count?\n`)
   session.commit('Start median')

@@ -31,7 +31,7 @@ DOCKED = """\
 ▝▜██████▀  Haiku 4.5 · Claude Pro                   │On. Watching for your next save.
  ▝▝   ▝▝   /tmp/ride                                │● No editor is connected.
                                                     │w: Working on adding a median function
-❯ /bsd                                              │
+❯ /backseat                                              │
   ⎿  backseat-driver: Backseat Driver is on.        │stats.py
 ● The idea behind note 1 is the difference between  │❯ 1  ✘ bug · line 6
   an odd and an even count: with four numbers there │    For even-length lists, median should average
@@ -175,7 +175,7 @@ class Screen(unittest.TestCase):
         parts = jack.sides(DOCKED)
         self.assertEqual(sorted(parts), ["conversation", "pane"])
         self.assertIn("On. Watching for your next save.", parts["pane"])
-        self.assertIn("❯ /bsd", parts["conversation"])
+        self.assertIn("❯ /backseat", parts["conversation"])
         self.assertEqual(sorted(jack.sides(["one screen"])), ["screen"])
 
     def test_what_the_tutor_says_it_drew_is_found_where_it_is(self):

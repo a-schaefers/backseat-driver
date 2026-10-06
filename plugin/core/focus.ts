@@ -57,7 +57,7 @@ export function parseFocusFile(text: string, repoRoot: string): Spot | null {
   return endLine !== null && endLine > line ? { path, line, endLine } : { path, line }
 }
 
-/** What `/bsd explain <target>` names: `path`, `path:12` or `path:12-20`. Null when it names nothing. */
+/** What `/backseat explain <target>` names: `path`, `path:12` or `path:12-20`. Null when it names nothing. */
 export function parseTarget(rest: string, repoRoot: string): Spot | null {
   const match = /^(.+?)(?::(\d+)(?:-(\d+))?)?$/.exec(rest.trim())
   if (match === null) return null

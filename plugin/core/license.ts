@@ -120,7 +120,7 @@ export const USE_CHOICES: readonly string[] = [PERSONAL_CHOICE, COMMERCIAL_CHOIC
 
 export const KEY_QUESTION = 'Paste your commercial license key, or pick an answer.'
 export const KEY_HEADER = 'License key'
-export const LATER_CHOICE = 'Add it later with /bsd license <key>'
+export const LATER_CHOICE = 'Add it later with /backseat license <key>'
 export const KEY_CHOICES: readonly string[] = [LATER_CHOICE]
 
 /** An answer to the use question as a use, or null for anything else. */
@@ -131,7 +131,7 @@ export function useOfAnswer(answer: string): Use | null {
   return null
 }
 
-/** What `/bsd license <words>` asks for. */
+/** What `/backseat license <words>` asks for. */
 export type LicenseRequest = { kind: 'status' } | { kind: 'use'; use: Use } | { kind: 'key'; key: string } | { kind: 'clear-key' }
 
 export function parseLicenseRequest(rest: string): LicenseRequest {
@@ -155,13 +155,13 @@ const BUY = BUY_URL === '' ? '' : ` ${BUY_URL}`
 export function licenseLine(standing: Standing, check: KeyCheck | null, record: LicenseRecord): string {
   switch (standing) {
     case 'needs-key':
-      return `Commercial use: add your license key with /bsd license <key>.${BUY}`
+      return `Commercial use: add your license key with /backseat license <key>.${BUY}`
     case 'bad-key':
-      return 'That license key does not check out. /bsd license <key> tries another.'
+      return 'That license key does not check out. /backseat license <key> tries another.'
     case 'expired':
       return check !== null && check.state !== 'malformed' ? `Your commercial license ended on ${day(check.payload.exp)}. Renewing it keeps the lights on.${BUY}` : ''
     case 'withdrawn':
-      return 'This license key has been withdrawn. /bsd license <key> adds another.'
+      return 'This license key has been withdrawn. /backseat license <key> adds another.'
     case 'unchecked':
       return `The license server has not answered since ${day(Math.max(record.answeredAt, record.keySince))}. Nothing changes; it keeps trying.`
     case 'unchosen':
@@ -171,20 +171,20 @@ export function licenseLine(standing: Standing, check: KeyCheck | null, record: 
   }
 }
 
-/** What `/bsd license` says about where the person stands. */
+/** What `/backseat license` says about where the person stands. */
 export function licenseStatus(standing: Standing, check: KeyCheck | null): string {
   const holder = check !== null && check.state !== 'malformed' ? ` for ${check.payload.to}, ${check.payload.seats} seat${check.payload.seats === 1 ? '' : 's'}` : ''
   switch (standing) {
     case 'unchosen':
-      return 'Not chosen yet. /bsd license personal or /bsd license commercial.'
+      return 'Not chosen yet. /backseat license personal or /backseat license commercial.'
     case 'personal':
-      return 'Personal use: free. /bsd license commercial if that changes.'
+      return 'Personal use: free. /backseat license commercial if that changes.'
     case 'licensed':
       return `Commercial use, licensed${holder}. Thank you.`
     case 'needs-key':
-      return `Commercial use, no key yet. /bsd license <key> adds one.${BUY}`
+      return `Commercial use, no key yet. /backseat license <key> adds one.${BUY}`
     case 'bad-key':
-      return 'Commercial use, and the key does not check out. /bsd license <key> tries another.'
+      return 'Commercial use, and the key does not check out. /backseat license <key> tries another.'
     case 'expired':
       return `Commercial use, and the key${holder} has run out.${BUY}`
     case 'withdrawn':

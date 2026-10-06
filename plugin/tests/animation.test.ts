@@ -22,7 +22,7 @@ async function drawnAs(ui: Mounted<'terminal', 'Pane'>, voice: keyof typeof AVAT
 sessionTest('switched on, the character says hello one word at a time', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   const talking = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -42,7 +42,7 @@ sessionTest('switched on, the character says hello one word at a time', async ($
 sessionTest("the character is the voice persona's", { options: { voice: 'torvalds' } }, async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.advance(SAY_ALL)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -54,7 +54,7 @@ sessionTest("the character is the voice persona's", { options: { voice: 'torvald
 sessionTest('the keep-it-simple voice gets the KISS penguin in its top hat', { options: { voice: 'eli5-tldr-kiss-terse' } }, async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.advance(SAY_ALL)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -69,7 +69,7 @@ sessionTest('a look gives the character its line, and a quiet look leaves it qui
   const session = stubSession(on)
   session.reply({ resolved: [], notes: [], say: 'Count the fence posts.' })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', MEAN)
@@ -98,7 +98,7 @@ sessionTest('a look gives the character its line, and a quiet look leaves it qui
 sessionTest('after four quiet looks in a row, a look may give the character a light remark', { options: FAST }, async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   for (let look = 1; look <= 5; look += 1) {
@@ -113,7 +113,7 @@ sessionTest('after four quiet looks in a row, a look may give the character a li
 sessionTest("a finished deep review gives the character the review's closing line", async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', MEAN)
@@ -130,9 +130,9 @@ sessionTest("a finished deep review gives the character the review's closing lin
 sessionTest('paused, the character sleeps', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.advance(SAY_ALL)
-  await $.command.run(typed('bsd', 'pause'))
+  await $.command.run(typed('backseat', 'pause'))
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: ASLEEP })).toBeDefined()
@@ -143,7 +143,7 @@ sessionTest('paused, the character sleeps', async ($, on) => {
 sessionTest('above the prompt, where rows are scarce, the character takes one line', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.advance(SAY_ALL)
 
   const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, placement: 'inline' }, surface: 'terminal' })
@@ -156,7 +156,7 @@ sessionTest('above the prompt, where rows are scarce, the character takes one li
 sessionTest('a fullscreen terminal narrowed until the pane sits above the prompt still gets the whole pane, not another look', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.advance(SAY_ALL)
 
   // Under 110 columns Claude Code seats the pane above the prompt. The tutor draws it as it did at the side.
@@ -169,7 +169,7 @@ sessionTest('a fullscreen terminal narrowed until the pane sits above the prompt
 sessionTest('now and then a resting character blinks', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.advance(SAY_ALL)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -186,7 +186,7 @@ sessionTest('now and then a resting character blinks', async ($, on) => {
 sessionTest('with the animation off, there is no character and the reviewer is not asked for its line', { options: { ...FAST, animated_persona: false } }, async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', MEAN)
@@ -203,11 +203,11 @@ sessionTest('with the animation off, there is no character and the reviewer is n
 sessionTest('switching off silences the character, and switching on again starts it afresh', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.advance(SAY_ALL)
-  await $.command.run(typed('bsd', 'off'))
+  await $.command.run(typed('backseat', 'off'))
   await session.clock.advance(SAY_ALL)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -218,7 +218,7 @@ sessionTest('switching off silences the character, and switching on again starts
 sessionTest('the character stands on the play-by-play tab only', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.advance(SAY_ALL)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -236,7 +236,7 @@ sessionTest('the character stands on the play-by-play tab only', async ($, on) =
 sessionTest("the character never reads out the notes a deep review leaves for the tutor's memory", async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', MEAN)

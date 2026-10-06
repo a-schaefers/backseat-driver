@@ -1,6 +1,6 @@
 /**
  * Running the debug log: noting what the tutor does, writing it out a moment
- * later, starting and stopping this session's log, and the `/bsd debug`
+ * later, starting and stopping this session's log, and the `/backseat debug`
  * command. The log's own parts (records, chunks, the ring, the tracer) are
  * `debuglog.ts`. This is the engine around them; the host gives it
  * `DebuggingPorts`, and what it remembers is
@@ -151,7 +151,7 @@ export async function stopDebug(ports: DebuggingPorts, state: DebuggingState, wh
 
 /**
  * Starts or stops this session's log when the switch was changed elsewhere:
- * by `/bsd debug` in another session, or from outside every session
+ * by `/backseat debug` in another session, or from outside every session
  * (`scripts/jack.py`), which is how a developer listens in on a session that
  * is already running. Nothing tells a session that the switch changed, so it
  * is looked at now and then.
@@ -164,7 +164,7 @@ export async function followSwitch(ports: DebuggingPorts, state: DebuggingState)
   else await stopDebug(ports, state, 'switched off elsewhere')
 }
 
-/** `/bsd debug`: switches the debug log, says where it is, writes down what just happened, or deletes the logs. */
+/** `/backseat debug`: switches the debug log, says where it is, writes down what just happened, or deletes the logs. */
 export async function debugCommand(ports: DebuggingPorts, state: DebuggingState, request: DebugRequest): Promise<string> {
   await ports.resolveHome()
   if (ports.dataRoot() === '') return 'There is no home directory, so there is nowhere to keep a debug log.'
@@ -176,7 +176,7 @@ export async function debugCommand(ports: DebuggingPorts, state: DebuggingState,
     if (request === 'off') {
       await stopDebug(ports, state, 'switched off')
 
-      return `The debug log is off. What was logged is kept in ${root}, and /bsd debug clear deletes it.`
+      return `The debug log is off. What was logged is kept in ${root}, and /backseat debug clear deletes it.`
     }
     if (ports.mode() !== 'off') await startDebug(ports, state)
     const where = state.tracer.log()?.dir()

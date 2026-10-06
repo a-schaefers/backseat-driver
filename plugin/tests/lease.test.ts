@@ -67,7 +67,7 @@ const QUIET = { options: { play_by_play: 'on request', explain: 'off', animated_
 
 async function start($: Engine, session: Session): Promise<void> {
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 }
 
@@ -94,7 +94,7 @@ sessionTest('the session that is first in a project drives it, says so every twe
   expect(leaseIn(session).at).toBe(first + LEASE_BEAT_MS)
   expect(session.scans > 0).toBe(true)
 
-  await $.command.run(typed('bsd', 'off'))
+  await $.command.run(typed('backseat', 'off'))
   await session.clock.settle()
   expect(leaseIn(session)).toEqual(NO_LEASE)
 })

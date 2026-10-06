@@ -151,7 +151,7 @@ sessionTest('the first time in a project, the questions are asked and the answer
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: LICENSE_ANSWERED })
   session.answers.push('JavaScript or TypeScript', 'A little: tutorials and small scripts', 'Write idiomatic code without looking things up', 'Bugs and risky code')
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   expect(session.asked.length).toBe(4)
@@ -174,15 +174,15 @@ sessionTest('the first time in a project, the questions are asked and the answer
 sessionTest('dismissing the questions skips them for good, and the tutor works without them', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: LICENSE_ANSWERED })
   await $.session.start(SESSION)
-  const started = await $.command.run(typed('bsd'))
+  const started = await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   expect(started.text).toMatch(/^Backseat Driver is on. You drive./)
   expect(session.asked.length).toBe(1)
   expect(parseProfile(session.data('profiles/python.json'))).toEqual({ ...emptyProfile(), isAsked: true })
 
-  await $.command.run(typed('bsd', 'off'))
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat', 'off'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(session.asked.length).toBe(1)
 })
@@ -194,7 +194,7 @@ sessionTest('a language already on record is not asked about again, in any proje
     data: { ...LICENSE_ANSWERED, 'profiles/python.json': known, 'profiles/general.json': withAnswers(emptyProfile(), { knows: 'Python' }) },
   })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   expect(session.asked).toEqual([])
@@ -219,7 +219,7 @@ sessionTest('the hush tool stops a topic at once, for good, and removes its note
   session.reply({ resolved: [], notes: [{ file: 'stats.py', line: 1, kind: 'idiom', topic: 'type-hints', note: 'No type hints.' }] })
   session.reply({ resolved: [], notes: [{ file: 'stats.py', line: 1, kind: 'idiom', topic: 'type-hints', note: 'Still no type hints.' }] })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(session.tools.map(tool => tool.name)).toEqual(['hush', 'unhush', 'record', 'lookup', 'progress', 'lesson', 'profile', 'working', 'activity'])
 
@@ -251,7 +251,7 @@ sessionTest('a hush that names a note uses the note\'s own topic, whatever the m
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   session.reply({ resolved: [], notes: [{ file: 'stats.py', line: 5, kind: 'tip', topic: 'builtin-sum', note: 'A built-in does this.' }] })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', `${MEAN}# more\n`)
   await session.clock.advance(14_000)
@@ -279,7 +279,7 @@ sessionTest('"m" on a note hushes its topic, and the Profile tab can undo it', a
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   session.reply({ resolved: [], notes: [{ file: 'stats.py', line: 1, kind: 'idiom', topic: 'type-hints', note: 'No type hints.' }] })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', `${MEAN}# more\n`)
   await session.clock.advance(14_000)
@@ -299,7 +299,7 @@ sessionTest('what the play-by-play raises and what gets explained goes into the 
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   session.reply({ resolved: [], notes: [{ file: 'stats.py', line: 2, kind: 'bug', topic: 'empty-input', note: 'Empty list?' }] })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', `${MEAN}# more\n`)
   await session.clock.advance(14_000)
@@ -316,7 +316,7 @@ sessionTest('what the play-by-play raises and what gets explained goes into the 
 sessionTest('a language first met mid-session comes into play without questions', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   const askedAtStart = session.asked.length
 
@@ -338,7 +338,7 @@ sessionTest('the profile tool reads a language that is not in play', async ($, o
   const rust = withHush(withAnswers(emptyProfile(), { level: 'None yet' }), { topic: 'lifetimes', text: 'lifetime elision' })
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { 'profiles/rust.json': rust } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   const known = await $.tool.call({ tool: 'mcp__backseat-driver__profile', language: 'rust' })
@@ -351,9 +351,9 @@ sessionTest('the profile tool reads a language that is not in play', async ($, o
 sessionTest('while the tutor is off, its tools change nothing', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
-  await $.command.run(typed('bsd', 'off'))
+  await $.command.run(typed('backseat', 'off'))
 
   const answer = await $.tool.call({ tool: 'mcp__backseat-driver__hush', topic: 'x', language: 'python', what: 'x' })
   expect(answer).toEqual({ result: 'Backseat Driver is off, so nothing was recorded.' })
@@ -366,7 +366,7 @@ sessionTest('a note the reviewer repeats while it is still open is counted once 
   session.reply(sameNote)
   session.reply(sameNote)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', `${MEAN}# more\n`)
@@ -381,7 +381,7 @@ sessionTest('a note the reviewer repeats while it is still open is counted once 
 sessionTest('the record tool keeps what the user says about themselves', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   const level = await $.tool.call({ tool: 'mcp__backseat-driver__record', about: 'level', language: 'Python', answer: 'For years, mostly data work' })
@@ -404,7 +404,7 @@ sessionTest('the record tool keeps what the user says about themselves', async (
 sessionTest('the record tool does not count as the first-run questions, and refuses what it cannot file', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   // Rust is not in this project. Its questions are still asked when it first is.
@@ -428,7 +428,7 @@ sessionTest('the questions can be answered again from the Profile tab', async ($
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: LICENSE_ANSWERED })
   session.answers.push('Python', 'None yet', 'Understand what happens underneath', 'Idioms and style')
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(parseProfile(session.data('profiles/python.json')).answers.level).toBe('None yet')
 

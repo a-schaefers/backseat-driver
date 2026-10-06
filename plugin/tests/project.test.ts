@@ -135,7 +135,7 @@ test('what the other two jobs are told: a brief for the play-by-play, a digest f
 sessionTest('a deep review leaves notes in the project cache, and the pane never shows them', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': STATS } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', `${STATS}\n# a comment\n`)
@@ -172,10 +172,10 @@ sessionTest('the play-by-play, the next review and Explain all read what the dee
   session.explain({ what: 'Spread of the values.', how: '', why: '', watch: '', uses: [] }, 'Explain variance')
   session.explain({ what: 'The average.', how: '', why: '', watch: '', uses: [] }, 'Explain mean')
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   // The file is mapped first, so that the insight can be tied to the function it is about.
-  await $.command.run(typed('bsd', 'explain stats.py:6'))
+  await $.command.run(typed('backseat', 'explain stats.py:6'))
   await session.clock.settle()
 
   session.write('notes.txt', 'release notes\n')
@@ -198,7 +198,7 @@ sessionTest('the play-by-play, the next review and Explain all read what the dee
   // The Explain tab followed the save to the new function.
   expect((session.data('view.json') as { spot: { line: number } }).spot.line).toBe(9)
   // Back on variance, which did not change: what the deep review said about it still shows.
-  await $.command.run(typed('bsd', 'explain stats.py:6'))
+  await $.command.run(typed('backseat', 'explain stats.py:6'))
   await session.clock.settle()
   expect(await ui.find({ type: 'Text', text: INSIGHT })).toBeDefined()
 
@@ -223,7 +223,7 @@ sessionTest('the play-by-play, the next review and Explain all read what the dee
 sessionTest('a project the tutor has not seen is surveyed once', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': STATS }, isNewProject: true })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   expect(session.spawned.length).toBe(1)
@@ -246,8 +246,8 @@ sessionTest('a project the tutor has not seen is surveyed once', async ($, on) =
   expect(session.data(`projects/${projectId(ROOT)}/reviews.json`)).toBeUndefined()
 
   // Switched off and on again: no second survey.
-  await $.command.run(typed('bsd', 'off'))
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat', 'off'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(session.spawned.length).toBe(1)
 })
@@ -255,7 +255,7 @@ sessionTest('a project the tutor has not seen is surveyed once', async ($, on) =
 sessionTest('no survey when deep reviews only run on request', { options: { deep_review_after_commit: false } }, async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': STATS }, isNewProject: true })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(session.spawned).toEqual([])
 })
@@ -264,7 +264,7 @@ sessionTest('no survey close to the plan limit', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': STATS }, isNewProject: true })
   session.limits.push({ kind: 'five_hour', percentUsed: 82 })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(session.spawned).toEqual([])
 })

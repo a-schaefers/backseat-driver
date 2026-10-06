@@ -207,7 +207,7 @@ export function changedFields(before: Options, after: Options): string[] {
  * What a reload with changed settings has to start by hand. Some work runs
  * only when the tutor is switched on (the release check, the first placement
  * of a level, the look around a new project), so a setting that switches it
- * on would otherwise wait for the next `/bsd`.
+ * on would otherwise wait for the next `/backseat`.
  */
 export function catchUp(before: Settings, after: Settings): { isUpdateCheck: boolean; isPlacement: boolean; isSurvey: boolean } {
   const reviews = (settings: Settings): boolean => settings.deepReview.isAfterCommit || settings.deepReview.everyMs > 0
@@ -232,7 +232,7 @@ const EFFECT_WORDS: Record<SettingEffect, string> = {
 /**
  * The line that says the settings just changed are in effect, and from
  * when. Said only while the tutor is on: off, it touches nothing, and the
- * settings are read afresh at the next `/bsd` anyway.
+ * settings are read afresh at the next `/backseat` anyway.
  */
 export function changedText(rows: readonly ChangedRow[]): string {
   const parts = rows.map(row => {

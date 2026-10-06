@@ -17,7 +17,7 @@ sessionTest('the debug log is off until it is asked for, and then nothing is wri
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   session.reply(NOTE)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', `${MEAN}# more\n`)
   await session.clock.advance(14_000)
@@ -25,18 +25,18 @@ sessionTest('the debug log is off until it is asked for, and then nothing is wri
   expect(session.requests.length).toBe(1)
   expect(logFiles(session)).toEqual([])
   expect(session.data('debug.json')).toBe(undefined)
-  expect((await $.command.run(typed('bsd', 'debug'))).text).toBe(`The debug log is off. Logs are kept in ${DEBUG}.`)
-  expect((await $.command.run(typed('bsd', 'debug loud'))).text).toBe(DEBUG_USAGE)
+  expect((await $.command.run(typed('backseat', 'debug'))).text).toBe(`The debug log is off. Logs are kept in ${DEBUG}.`)
+  expect((await $.command.run(typed('backseat', 'debug loud'))).text).toBe(DEBUG_USAGE)
 })
 
-sessionTest('/bsd debug on records everything the tutor does from then on', async ($, on) => {
+sessionTest('/backseat debug on records everything the tutor does from then on', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   session.reply(NOTE)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
-  const answer = (await $.command.run(typed('bsd', 'debug on'))).text ?? ''
+  const answer = (await $.command.run(typed('backseat', 'debug on'))).text ?? ''
   expect(answer.startsWith(`The debug log is on. It records everything the tutor does, your code and prompts included, in ${DEBUG}.`)).toBe(true)
   expect(answer.includes(`This session writes ${DEBUG}/`)).toBe(true)
   expect((session.data('debug.json') as { on: boolean }).on).toBe(true)
@@ -78,7 +78,7 @@ sessionTest('/bsd debug on records everything the tutor does from then on', asyn
   expect(state.repoRoot).toBe(ROOT)
   expect(state.pane.notes.map(note => note.topic)).toEqual(['empty-input'])
 
-  const status = (await $.command.run(typed('bsd', 'debug status'))).text ?? ''
+  const status = (await $.command.run(typed('backseat', 'debug status'))).text ?? ''
   expect(status.startsWith('The debug log is on. This session is writing ')).toBe(true)
 })
 
@@ -86,12 +86,12 @@ sessionTest('switched on while the tutor is off, the log starts when the tutor d
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
 
-  const answer = (await $.command.run(typed('bsd', 'debug on'))).text ?? ''
+  const answer = (await $.command.run(typed('backseat', 'debug on'))).text ?? ''
   expect(answer.endsWith('It starts when the tutor is switched on.')).toBe(true)
   expect(logFiles(session)).toEqual([])
-  expect((await $.command.run(typed('bsd', 'debug status'))).text).toBe(`The debug log is on. It starts when the tutor is switched on. Logs are kept in ${DEBUG}.`)
+  expect((await $.command.run(typed('backseat', 'debug status'))).text).toBe(`The debug log is on. It starts when the tutor is switched on. Logs are kept in ${DEBUG}.`)
 
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   await session.clock.advance(FLUSH_MS)
   const log = session.debugLog()
@@ -99,24 +99,24 @@ sessionTest('switched on while the tutor is off, the log starts when the tutor d
   expect(log.some(record => record.k === 'start' && record.n === 'engaged')).toBe(true)
 
   // Switching the tutor off ends the log, and says why.
-  await $.command.run(typed('bsd', 'off'))
+  await $.command.run(typed('backseat', 'off'))
   await session.clock.settle()
   const last = session.debugLog().pop()
   expect(last?.n).toBe('log stopped')
   expect(last?.d).toEqual({ why: 'the tutor was switched off' })
 })
 
-sessionTest('/bsd debug off stops the log and keeps what was written', async ($, on) => {
+sessionTest('/backseat debug off stops the log and keeps what was written', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { 'debug.json': { on: true } } })
   session.disk.set(`${DATA_HOME}/${MARKER}`, 'marker')
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   await session.clock.advance(FLUSH_MS)
   expect(session.debugLog().length > 0).toBe(true)
 
-  const answer = await $.command.run(typed('bsd', 'debug off'))
-  expect(answer.text).toBe(`The debug log is off. What was logged is kept in ${DEBUG}, and /bsd debug clear deletes it.`)
+  const answer = await $.command.run(typed('backseat', 'debug off'))
+  expect(answer.text).toBe(`The debug log is off. What was logged is kept in ${DEBUG}, and /backseat debug clear deletes it.`)
   expect((session.data('debug.json') as { on: boolean }).on).toBe(false)
   const written = session.debugLog().length
   expect(session.debugLog().pop()?.d).toEqual({ why: 'switched off' })
@@ -126,15 +126,15 @@ sessionTest('/bsd debug off stops the log and keeps what was written', async ($,
   expect(session.debugLog().length).toBe(written)
 })
 
-sessionTest('/bsd debug dump writes down what just happened, with the log off', async ($, on) => {
+sessionTest('/backseat debug dump writes down what just happened, with the log off', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', `${MEAN}# more\n`)
   await session.clock.advance(4000)
 
-  const answer = (await $.command.run(typed('bsd', 'debug dump'))).text ?? ''
+  const answer = (await $.command.run(typed('backseat', 'debug dump'))).text ?? ''
   const path = answer.slice(answer.indexOf(DEBUG), -1)
   expect(path.startsWith(`${DEBUG}/dump-`)).toBe(true)
   const dump = JSON.parse(session.disk.get(path) ?? '{}') as { state: { mode: string; watcher: { dirty: string[] } }; latest: { k: string; n: string }[] }
@@ -146,15 +146,15 @@ sessionTest('/bsd debug dump writes down what just happened, with the log off', 
   expect(logFiles(session)).toEqual([path])
 })
 
-sessionTest('/bsd debug clear deletes the logs, and a session that is logging carries on in a new one', async ($, on) => {
+sessionTest('/backseat debug clear deletes the logs, and a session that is logging carries on in a new one', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { 'debug.json': { on: true }, 'debug/20260101-000000-0ld5e551/000000.jsonl': 'old' } })
   session.disk.set(`${DATA_HOME}/${MARKER}`, 'marker')
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   await session.clock.advance(FLUSH_MS)
 
-  const answer = await $.command.run(typed('bsd', 'debug clear'))
+  const answer = await $.command.run(typed('backseat', 'debug clear'))
   expect(answer.text).toBe(`Deleted every debug log in ${DEBUG}. This session carries on in a new one.`)
   expect(session.removed).toEqual([DEBUG])
   await session.clock.advance(FLUSH_MS)
@@ -163,9 +163,9 @@ sessionTest('/bsd debug clear deletes the logs, and a session that is logging ca
   expect((session.data('debug.json') as { on: boolean }).on).toBe(true)
 
   // With nothing there, it says so and deletes nothing.
-  await $.command.run(typed('bsd', 'debug off'))
-  await $.command.run(typed('bsd', 'debug clear'))
-  expect((await $.command.run(typed('bsd', 'debug clear'))).text).toBe(`There are no debug logs in ${DEBUG}.`)
+  await $.command.run(typed('backseat', 'debug off'))
+  await $.command.run(typed('backseat', 'debug clear'))
+  expect((await $.command.run(typed('backseat', 'debug clear'))).text).toBe(`There are no debug logs in ${DEBUG}.`)
   expect(session.removed).toEqual([DEBUG, DEBUG])
 })
 
@@ -173,13 +173,13 @@ sessionTest('forgetting everything takes the debug log and its switch with it', 
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { 'debug.json': { on: true } } })
   session.disk.set(`${DATA_HOME}/${MARKER}`, 'marker')
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   await session.clock.advance(FLUSH_MS)
   expect(session.debugLog().length > 0).toBe(true)
 
   session.answers.push(SCOPE_EVERYTHING, FORGET, PHRASE)
-  await $.command.run(typed('bsd', 'forget'))
+  await $.command.run(typed('backseat', 'forget'))
   await session.clock.settle()
   await session.clock.advance(FLUSH_MS)
 
@@ -193,7 +193,7 @@ sessionTest('when the session ends, the journal and the log are written', async 
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { 'debug.json': { on: true } } })
   session.disk.set(`${DATA_HOME}/${MARKER}`, 'marker')
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', `${MEAN}# more\n`)
   // The save is seen, and the journal's next write is not due for half a minute.
@@ -212,7 +212,7 @@ sessionTest('a /clear ends the conversation but not the log', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { 'debug.json': { on: true } } })
   session.disk.set(`${DATA_HOME}/${MARKER}`, 'marker')
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   await $.session.end({ reason: 'clear', sessionId: SESSION_ID, resume: { id: SESSION_ID } })
@@ -228,12 +228,12 @@ sessionTest('a /clear ends the conversation but not the log', async ($, on) => {
 sessionTest('a switch flipped from outside the session starts its log within its next look at itself, with what came before', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   await session.clock.advance(3000)
   expect(session.debugLog()).toEqual([])
 
-  // `scripts/jack.py in`, or `/bsd debug on` in another session: nothing tells this one.
+  // `scripts/jack.py in`, or `/backseat debug on` in another session: nothing tells this one.
   session.disk.set(`${DATA_HOME}/debug.json`, JSON.stringify({ on: true, by: 'jack' }))
   await session.clock.advance(SELF_CHECK_MS)
   await session.clock.advance(FLUSH_MS)
@@ -256,7 +256,7 @@ sessionTest('with the log on, the tutor writes down what it says it is showing a
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { 'debug.json': { on: true } } })
   session.disk.set(`${DATA_HOME}/${MARKER}`, 'x')
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await session.clock.advance(2000)
@@ -290,16 +290,16 @@ sessionTest('with the log on, what the person is told outside the pane is writte
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { 'debug.json': { on: true } } })
   session.disk.set(`${DATA_HOME}/${MARKER}`, 'x')
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   // A lock file is changed too: never looked at, and still something git lists.
   session.write('stats.py', `${MEAN}# more\n`)
   session.write('package-lock.json', '{}\n')
   await session.clock.advance(2000)
 
-  await $.command.run(typed('bsd', 'status'))
+  await $.command.run(typed('backseat', 'status'))
   // A question the person dismisses, and the line that says nothing was done.
-  await $.command.run(typed('bsd', 'forget project'))
+  await $.command.run(typed('backseat', 'forget project'))
   await session.clock.settle()
   await session.clock.advance(FLUSH_MS)
 

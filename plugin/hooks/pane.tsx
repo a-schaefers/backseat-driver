@@ -473,7 +473,7 @@ export function detailMarkdown(detail: NonNullable<ExplainView['detail']>): stri
 }
 
 /** What the Explain tab says about a file it knows nothing about yet. */
-export const NOTHING_EXPLAINED = 'Nothing explained here yet: either this file has not been looked up, or it has no functions or classes to explain. f looks it up again, or run /bsd explain with a file and a line.'
+export const NOTHING_EXPLAINED = 'Nothing explained here yet: either this file has not been looked up, or it has no functions or classes to explain. f looks it up again, or run /backseat explain with a file and a line.'
 
 /** The widest a symbol's name is drawn in the outline: longer names are cut, so that the summaries line up in a column. */
 const NAME_COLUMNS = 24
@@ -527,7 +527,7 @@ function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
     return (
       <Box flexDirection="column">
         <Text dimColor>Nothing in focus yet.</Text>
-        <Text dimColor>Save a file, or run /bsd explain with a file and a line.</Text>
+        <Text dimColor>Save a file, or run /backseat explain with a file and a line.</Text>
       </Box>
     )
   }
@@ -1188,7 +1188,7 @@ export const STRIP_HINT = 'minimized · click a name, or Ctrl+X Tab then Enter, 
 
 /**
  * The pane put away (owner, 2026-10-06: the pane's close should minimize, and
- * only /bsd off shut the tutor down): one row above the prompt with the
+ * only /backseat off shut the tutor down): one row above the prompt with the
  * tutor's name and its tabs, each a button that brings the pane back, the
  * name on the tab it was on and a tab on itself. The name takes the focus
  * ring, so Ctrl+X Tab then Enter is the way back from the keyboard. No button

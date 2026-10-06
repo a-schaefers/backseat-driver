@@ -244,7 +244,7 @@ export function createTracer(now: () => number) {
 
 export type Tracer = ReturnType<typeof createTracer>
 
-/** What `/bsd debug` is asked to do. No word means status. Null for a word it does not know. */
+/** What `/backseat debug` is asked to do. No word means status. Null for a word it does not know. */
 export type DebugRequest = 'on' | 'off' | 'status' | 'dump' | 'clear'
 
 export function parseDebugRequest(rest: string): DebugRequest | null {
@@ -254,4 +254,4 @@ export function parseDebugRequest(rest: string): DebugRequest | null {
   return (['on', 'off', 'status', 'dump', 'clear'] as const).find(known => known === word) ?? null
 }
 
-export const DEBUG_USAGE = 'Say /bsd debug on, off, status, dump or clear.'
+export const DEBUG_USAGE = 'Say /backseat debug on, off, status, dump or clear.'

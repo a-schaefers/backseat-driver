@@ -139,7 +139,7 @@ const REVIEW_ONLY = { options: { ...QUIET, progress_report: false } } as const
 
 async function start($: Engine, session: Session): Promise<void> {
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 }
 
@@ -471,14 +471,14 @@ sessionTest('paused, a waiting commit waits, and resuming takes it up', REVIEW_O
   const left = { hash: commitHash(1), title: 'Start', at: 0, isReviewed: false, attempts: 0 }
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { [QUEUE]: { v: 1, commits: [left] } } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   // Paused before the tutor has finished starting.
-  await $.command.run(typed('bsd', 'pause'))
+  await $.command.run(typed('backseat', 'pause'))
   await session.clock.settle()
   await session.clock.advance(60_000)
   expect(session.spawned).toEqual([])
 
-  await $.command.run(typed('bsd', 'resume'))
+  await $.command.run(typed('backseat', 'resume'))
   await session.clock.settle()
   expect(session.spawned.length).toBe(1)
 })
@@ -492,7 +492,7 @@ sessionTest('switching off while a commit is assessed leaves it waiting for the 
   expect(session.assessments.length).toBe(1)
   expect(waitingIn(session)).toEqual([hash])
 
-  await $.command.run(typed('bsd', 'off'))
+  await $.command.run(typed('backseat', 'off'))
   session.release()
   await session.clock.settle()
   expect(waitingIn(session)).toEqual([hash])

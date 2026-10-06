@@ -43,7 +43,7 @@ troubleText = case _ of
 -- | What the status line says while the tutor is on or paused.
 playLine :: (Number -> String) -> Play -> String
 playLine clock = case _ of
-  Paused -> "Paused. /bsd resume to continue."
+  Paused -> "Paused. /backseat resume to continue."
   Starting -> "On. Getting ready."
   NoGit -> "On. This folder is not a git repository, so there is no play-by-play."
   Following -> "On. Another session is driving this project. This one is for the conversation."
@@ -108,7 +108,7 @@ healthLine clock facts = case facts.play of
     | otherwise = []
   keepsFailing
     | null facts.failing = []
-    | otherwise = [ "Keeps failing: " <> joinWith ", " facts.failing <> ". /bsd debug dump saves the details." ]
+    | otherwise = [ "Keeps failing: " <> joinWith ", " facts.failing <> ". /backseat debug dump saves the details." ]
 
 -- | The state the animated character takes its pose from.
 watchState :: Play -> String

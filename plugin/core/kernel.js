@@ -4429,7 +4429,7 @@ var slowScanMs = 1500;
 var playLine = function(clock) {
   return function(v) {
     if (v instanceof Paused) {
-      return "Paused. /bsd resume to continue.";
+      return "Paused. /backseat resume to continue.";
     }
     ;
     if (v instanceof Starting) {
@@ -4579,10 +4579,10 @@ var healthLine = function(clock) {
       }
       ;
       if (otherwise) {
-        return ["Keeps failing: " + (joinWith(", ")(facts.failing) + ". /bsd debug dump saves the details.")];
+        return ["Keeps failing: " + (joinWith(", ")(facts.failing) + ". /backseat debug dump saves the details.")];
       }
       ;
-      throw new Error("Failed pattern match at Kernel.Status (line 109, column 3 - line 111, column 113): ");
+      throw new Error("Failed pattern match at Kernel.Status (line 109, column 3 - line 111, column 118): ");
     })();
     if (facts.play instanceof Paused) {
       return "";

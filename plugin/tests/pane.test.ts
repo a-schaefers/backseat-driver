@@ -51,7 +51,7 @@ test('statusLine says what the watcher is doing, in what voice and with whose ju
   expect(statusLine({ ...VIEW, watch: { state: 'waiting', lastLookAt: 1, line: 'On. Claude is overloaded. Next try 12:07.' } })).toBe(
     'On. Claude is overloaded. Next try 12:07.',
   )
-  expect(statusLine({ ...VIEW, mode: 'paused' })).toBe('Paused. /bsd resume to continue.')
+  expect(statusLine({ ...VIEW, mode: 'paused' })).toBe('Paused. /backseat resume to continue.')
 })
 
 test('personaLine leaves out a half that is the default, and names a persona chosen for both once', async () => {
@@ -74,7 +74,7 @@ test('currentNote is the selected note while it is open, otherwise the most impo
 sessionTest('the pane opens on the play-by-play and switches tabs, on every surface that draws panes', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   for (const surface of ['terminal', 'desktop'] as const) {
@@ -96,9 +96,9 @@ sessionTest('the pane opens on the play-by-play and switches tabs, on every surf
 sessionTest('the pane shows a pause', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
-  await $.command.run(typed('bsd', 'pause'))
+  await $.command.run(typed('backseat', 'pause'))
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: 'Paused' })).toBeDefined()
@@ -108,7 +108,7 @@ sessionTest('the pane shows a pause', async ($, on) => {
 sessionTest('the pane says how to give it the keyboard, until it has it', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   const away = await $.ui.mount({ ...PANE, props: { ...PANE.props, isFocused: false }, surface: 'terminal' })
@@ -234,7 +234,7 @@ const QUIET_PANE = { options: { explain: 'off', animated_persona: false, progres
 sessionTest('the last review stays readable while the next commit is reviewed', { options: { ...QUIET_PANE.options, play_by_play: 'on request' } }, async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN_PY } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', `${MEAN_PY}# one\n`)
   session.commit('One')
@@ -264,7 +264,7 @@ sessionTest('the last review stays readable while the next commit is reviewed', 
 sessionTest('a row under the status line says when Claude is not answering and nothing is waiting on it', { options: { ...QUIET_PANE.options, play_by_play: 'on request' } }, async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN_PY } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: 'Background work waits until' })).toBe(undefined)
@@ -284,7 +284,7 @@ sessionTest('/clear empties the state the pane lives in, and the pane is put bac
   const session = stubSession(on, { head: { 'stats.py': MEAN_PY } })
   session.reply({ resolved: [], notes: [{ file: 'stats.py', line: 1, kind: 'bug', topic: 'empty-input', note: 'An empty list divides by zero.' }] })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', `${MEAN_PY}\ndef total(xs):\n    return sum(xs)\n`)
   await session.clock.advance(14_000)

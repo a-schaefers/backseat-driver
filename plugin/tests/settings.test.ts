@@ -137,7 +137,7 @@ test('a pick goes to /config as the row takes it, and shows in the rows at once'
 sessionTest('the Settings tab changes a setting as /config would', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -180,13 +180,13 @@ sessionTest('the Settings tab changes a setting as /config would', async ($, on)
   await ui.unmount()
 })
 
-sessionTest('/bsd settings opens the Settings tab, and says where they are while off', async ($, on) => {
+sessionTest('/backseat settings opens the Settings tab, and says where they are while off', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  expect((await $.command.run(typed('bsd', 'settings'))).text).toBe(SETTINGS_OFF)
-  await $.command.run(typed('bsd'))
+  expect((await $.command.run(typed('backseat', 'settings'))).text).toBe(SETTINGS_OFF)
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
-  await $.command.run(typed('bsd', 'settings'))
+  await $.command.run(typed('backseat', 'settings'))
   await session.clock.settle()
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -198,7 +198,7 @@ sessionTest('every setting in plugin.json says when a change to it takes effect'
   const session = stubSession(on)
   // Claude Code hands the module every field of userConfig, defaults filled in. One missing from SETTING_EFFECTS is reported.
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(session.logs.filter(line => line.includes('SETTING_EFFECTS'))).toEqual([])
 })

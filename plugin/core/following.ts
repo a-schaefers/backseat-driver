@@ -341,7 +341,7 @@ function soonest(ports: FollowPorts, wanted: Promise<void>, ms: number): Promise
   })
 }
 
-/** What the lookup tool and `/bsd explain` share: move the focus to a spot and say what is known about it. */
+/** What the lookup tool and `/backseat explain` share: move the focus to a spot and say what is known about it. */
 export async function lookUp(ports: FollowPorts, state: FollowState, spot: Spot): Promise<string> {
   const engine = state.explainer
   if (engine === null) return ''

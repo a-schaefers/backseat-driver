@@ -154,7 +154,7 @@ sessionTest('profiles left in the plugin store move into files, once', async ($,
     data: LICENSE_ANSWERED,
   })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   expect(parseProfile(session.data('profiles/python.json'))).toEqual(stored)
@@ -173,7 +173,7 @@ sessionTest('a profile already in a file is not overwritten by an older one in t
     data: { 'profiles/python.json': withAnswers(emptyProfile(), { level: 'For years: I know it well' }) },
   })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   expect(parseProfile(session.data('profiles/python.json')).answers.level).toBe('For years: I know it well')
@@ -184,7 +184,7 @@ sessionTest('BACKSEAT_DRIVER_HOME moves the data folder', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN }, env: { BACKSEAT_DRIVER_HOME: '/elsewhere' } })
   session.answers.push('Python', 'None yet')
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   expect(session.disk.has('/elsewhere/profiles/python.json')).toBe(true)
@@ -192,7 +192,7 @@ sessionTest('BACKSEAT_DRIVER_HOME moves the data folder', async ($, on) => {
   expect([...session.disk.keys()].some(path => path.startsWith(DATA_HOME))).toBe(false)
 })
 
-sessionTest('/bsd forget python deletes that language only after an explicit yes', async ($, on) => {
+sessionTest('/backseat forget python deletes that language only after an explicit yes', async ($, on) => {
   const session = stubSession(on, {
     head: { 'stats.py': MEAN },
     data: {
@@ -203,11 +203,11 @@ sessionTest('/bsd forget python deletes that language only after an explicit yes
   })
   session.disk.set(MARKER_PATH, 'marker')
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   // Dismissed: nothing happens.
-  const answered = await $.command.run(typed('bsd', 'forget python'))
+  const answered = await $.command.run(typed('backseat', 'forget python'))
   expect(answered.text).toBe('Nothing is forgotten until you confirm it. Esc keeps everything.')
   await session.clock.settle()
   expect(session.asked[session.asked.length - 1]).toBe('Forget your Python profile and progress? This cannot be undone.')
@@ -216,12 +216,12 @@ sessionTest('/bsd forget python deletes that language only after an explicit yes
 
   // "Keep it", which is the first option: nothing happens.
   session.answers.push(KEEP)
-  await $.command.run(typed('bsd', 'forget python'))
+  await $.command.run(typed('backseat', 'forget python'))
   await session.clock.settle()
   expect(session.removed).toEqual([])
 
   session.answers.push(FORGET)
-  await $.command.run(typed('bsd', 'forget python'))
+  await $.command.run(typed('backseat', 'forget python'))
   await session.clock.settle()
   expect(session.removed).toEqual([`${DATA_HOME}/profiles/python.json`, `${DATA_HOME}/progress/python.json`])
   expect(session.data('profiles/python.json')).toBeUndefined()
@@ -229,7 +229,7 @@ sessionTest('/bsd forget python deletes that language only after an explicit yes
   expect(session.logs).toContain('Forgot your Python profile and progress.')
 })
 
-sessionTest('/bsd forget asks what, and forgetting everything takes the words typed out', async ($, on) => {
+sessionTest('/backseat forget asks what, and forgetting everything takes the words typed out', async ($, on) => {
   const session = stubSession(on, {
     head: { 'stats.py': MEAN },
     data: {
@@ -242,20 +242,20 @@ sessionTest('/bsd forget asks what, and forgetting everything takes the words ty
 
   // Works with the tutor off. A yes without the phrase keeps everything.
   session.answers.push(SCOPE_EVERYTHING, FORGET, 'yes')
-  await $.command.run(typed('bsd', 'forget'))
+  await $.command.run(typed('backseat', 'forget'))
   await session.clock.settle()
   expect(session.asked.slice(-3)[0]).toBe('What should be forgotten?')
   expect(session.removed).toEqual([])
 
   session.answers.push(SCOPE_EVERYTHING, FORGET, PHRASE)
-  await $.command.run(typed('bsd', 'forget'))
+  await $.command.run(typed('backseat', 'forget'))
   await session.clock.settle()
   expect(session.removed).toEqual([`${DATA_HOME}/profiles`, `${DATA_HOME}/projects`])
   expect([...session.disk.keys()]).toEqual([MARKER_PATH])
   expect(session.logs).toContain("Forgot every profile, every progress record and every project's journal and cache.")
 })
 
-sessionTest('/bsd forget project clears this project and leaves the languages alone', async ($, on) => {
+sessionTest('/backseat forget project clears this project and leaves the languages alone', async ($, on) => {
   const session = stubSession(on, {
     head: { 'stats.py': MEAN },
     data: {
@@ -267,13 +267,13 @@ sessionTest('/bsd forget project clears this project and leaves the languages al
   session.disk.set(MARKER_PATH, 'marker')
   session.reply({ resolved: [], notes: [{ file: 'stats.py', line: 2, kind: 'bug', topic: 'empty-input', note: 'Empty list?' }] })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', `${MEAN}# more\n`)
   await session.clock.advance(14_000)
 
   session.answers.push(SCOPE_PROJECT, FORGET)
-  await $.command.run(typed('bsd', 'forget'))
+  await $.command.run(typed('backseat', 'forget'))
   await session.clock.settle()
 
   expect(session.removed).toEqual([`${DATA_HOME}/projects/${projectId(ROOT)}`])
@@ -295,7 +295,7 @@ sessionTest('nothing is deleted from a folder that does not carry the tutor\'s m
   await $.session.start(SESSION)
 
   session.answers.push(FORGET)
-  await $.command.run(typed('bsd', 'forget python'))
+  await $.command.run(typed('backseat', 'forget python'))
   await session.clock.settle()
 
   expect(session.removed).toEqual([])

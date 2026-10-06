@@ -19,7 +19,7 @@ import { PHRASE } from '../core/forget'
 import { DATA_HOME, HOME, PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const MANIFEST = { '/.claude-plugin/plugin.json': JSON.stringify({ name: 'backseat-driver', version: '0.2.0', repository: 'https://github.com/a-schaefers/backseat-driver' }) }
-const NOTICE = 'Backseat Driver 0.3.0 is out. You have 0.2.0. /bsd update fetches it.'
+const NOTICE = 'Backseat Driver 0.3.0 is out. You have 0.2.0. /backseat update fetches it.'
 
 test('versions, release tags and the notice', async () => {
   expect(parseVersion('v1.2.3')).toEqual([1, 2, 3])
@@ -70,7 +70,7 @@ test('the data folder itself is removed only when everything in it is the tutor\
 sessionTest('a newer release upstream is said in the pane, and asked about at most every six hours', async ($, on) => {
   const session = stubSession(on, { install: 'clone', tags: ['v0.2.0', 'v0.3.0'], pluginFiles: MANIFEST })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   expect(session.ran).toEqual(['git ls-remote --tags --refs git@example.com:me/backseat-driver.git'])
@@ -80,9 +80,9 @@ sessionTest('a newer release upstream is said in the pane, and asked about at mo
   expect(session.data('update.json')).toEqual({ checkedAt: 0, latest: '0.3.0' })
 
   // On again an hour later: the notice comes from what was kept, with no request.
-  await $.command.run(typed('bsd', 'off'))
+  await $.command.run(typed('backseat', 'off'))
   await session.clock.advance(60 * 60 * 1000)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(session.ran.length).toBe(1)
   const again = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -93,7 +93,7 @@ sessionTest('a newer release upstream is said in the pane, and asked about at mo
 sessionTest('no notice when this copy is the newest, and no request when the check is off', { options: { update_check: false } }, async ($, on) => {
   const session = stubSession(on, { install: 'clone', tags: ['v0.3.0'], pluginFiles: MANIFEST })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(session.ran).toEqual([])
 })
@@ -101,23 +101,23 @@ sessionTest('no notice when this copy is the newest, and no request when the che
 sessionTest('offline, the check fails quietly and is tried again at the next switch-on', async ($, on) => {
   const session = stubSession(on, { install: 'clone', pluginFiles: MANIFEST })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(session.data('update.json')).toBeUndefined()
 
-  await $.command.run(typed('bsd', 'off'))
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat', 'off'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(session.ran.length).toBe(2)
 })
 
-sessionTest('in a clone, /bsd update pulls, unless the clone has changes of its own', async ($, on) => {
+sessionTest('in a clone, /backseat update pulls, unless the clone has changes of its own', async ($, on) => {
   const session = stubSession(on, { install: 'clone', tags: ['v0.3.0'], pluginFiles: MANIFEST })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
-  expect((await $.command.run(typed('bsd', 'update'))).text).toBe('Looking for a newer release.')
+  expect((await $.command.run(typed('backseat', 'update'))).text).toBe('Looking for a newer release.')
   await session.clock.settle()
   expect(session.ran).toContain('git pull --ff-only')
   expect(session.logs).toContain('Updated. The plugin reloads by itself in a moment, and the tutor stays as it is.')
@@ -129,17 +129,17 @@ sessionTest('in a clone, /bsd update pulls, unless the clone has changes of its 
 sessionTest('a clone with changes of its own is never pulled', async ($, on) => {
   const session = stubSession(on, { install: 'clone', tags: ['v0.3.0'], pluginFiles: MANIFEST, isCloneDirty: true })
   await $.session.start(SESSION)
-  await $.command.run(typed('backseat-driver-update'))
+  await $.command.run(typed('backseat', 'update'))
   await session.clock.settle()
 
   expect(session.ran.includes('git pull --ff-only')).toBe(false)
   expect(session.logs.some(line => /^This copy, in \/.+, has changes of its own, so it was not updated\./.test(line))).toBe(true)
 })
 
-sessionTest('installed from a marketplace, /backseat-driver-update updates through claude plugin', async ($, on) => {
+sessionTest('installed from a marketplace, /backseat update updates through claude plugin', async ($, on) => {
   const session = stubSession(on, { install: 'installed', tags: ['v0.3.0'], pluginFiles: MANIFEST })
   await $.session.start(SESSION)
-  await $.command.run(typed('backseat-driver-update'))
+  await $.command.run(typed('backseat', 'update'))
   await session.clock.settle()
 
   expect(session.ran).toEqual(['claude plugin marketplace update backseat-driver', 'claude plugin update backseat-driver@backseat-driver'])
@@ -147,66 +147,66 @@ sessionTest('installed from a marketplace, /backseat-driver-update updates throu
   expect(session.logs.some(line => line.startsWith('Already up to date') || line.startsWith('Updated'))).toBe(true)
 })
 
-sessionTest('/bsd uninstall keeps everything unless told otherwise', async ($, on) => {
+sessionTest('/backseat uninstall keeps everything unless told otherwise', async ($, on) => {
   const session = stubSession(on, { install: 'installed', head: { 'stats.py': 'x = 1\n' } })
   session.disk.set(`${DATA_HOME}/${MARKER}`, 'marker')
   session.disk.set(`${DATA_HOME}/profiles/python.json`, '{}')
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   // Dismissed, then "Keep it", then erase without the typed words: nothing happens.
-  await $.command.run(typed('bsd', 'uninstall'))
+  await $.command.run(typed('backseat', 'uninstall'))
   await session.clock.settle()
   session.answers.push(UNINSTALL_KEEP)
-  await $.command.run(typed('bsd', 'uninstall'))
+  await $.command.run(typed('backseat', 'uninstall'))
   await session.clock.settle()
   session.answers.push(UNINSTALL_ERASE, 'yes')
-  await $.command.run(typed('bsd', 'uninstall'))
+  await $.command.run(typed('backseat', 'uninstall'))
   await session.clock.settle()
 
   expect(session.ran.some(line => line.startsWith('claude plugin uninstall'))).toBe(false)
   expect(session.disk.has(`${DATA_HOME}/profiles/python.json`)).toBe(true)
-  expect((await $.command.run(typed('bsd', 'status'))).text).toMatch('Backseat Driver is on.')
+  expect((await $.command.run(typed('backseat', 'status'))).text).toMatch('Backseat Driver is on.')
 })
 
-sessionTest('/bsd uninstall with erase removes the plugin and everything it remembered', async ($, on) => {
+sessionTest('/backseat uninstall with erase removes the plugin and everything it remembered', async ($, on) => {
   const session = stubSession(on, { install: 'installed', head: { 'stats.py': 'x = 1\n' } })
   session.disk.set(`${DATA_HOME}/${MARKER}`, 'marker')
   session.disk.set(`${DATA_HOME}/profiles/python.json`, '{}')
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.answers.push(UNINSTALL_ERASE, PHRASE)
-  expect((await $.command.run(typed('bsd', 'uninstall'))).text).toBe('Nothing is removed until you confirm it. Esc keeps everything.')
+  expect((await $.command.run(typed('backseat', 'uninstall'))).text).toBe('Nothing is removed until you confirm it. Esc keeps everything.')
   await session.clock.settle()
 
   expect(session.ran).toContain('claude plugin uninstall backseat-driver@backseat-driver --scope user --yes')
   expect(session.removed).toContain(DATA_HOME)
   expect([...session.disk.keys()].some(path => path.startsWith(DATA_HOME))).toBe(false)
   // Switched off, pane closed.
-  expect((await $.command.run(typed('bsd', 'status'))).text).toMatch('Backseat Driver is off.')
+  expect((await $.command.run(typed('backseat', 'status'))).text).toMatch('Backseat Driver is off.')
   const said = session.logs[session.logs.length - 1] ?? ''
   expect(said).toMatch('Everything it remembered is erased. The plugin is uninstalled.')
   expect(said).toMatch('claude plugin marketplace remove backseat-driver removes it.')
   expect(session.disk.has(`${HOME}/.claude/plugins/installed_plugins.json`)).toBe(true)
 })
 
-sessionTest('/bsd uninstall keeping the data leaves the folder alone, and a folder with files of yours is never removed', async ($, on) => {
+sessionTest('/backseat uninstall keeping the data leaves the folder alone, and a folder with files of yours is never removed', async ($, on) => {
   const session = stubSession(on, { install: 'installed', head: { 'stats.py': 'x = 1\n' } })
   session.disk.set(`${DATA_HOME}/${MARKER}`, 'marker')
   session.disk.set(`${DATA_HOME}/notes-of-mine.txt`, 'mine')
   await $.session.start(SESSION)
 
   session.answers.push(UNINSTALL_ONLY)
-  await $.command.run(typed('bsd', 'uninstall'))
+  await $.command.run(typed('backseat', 'uninstall'))
   await session.clock.settle()
   expect(session.removed).toEqual([])
   expect(session.logs[session.logs.length - 1]).toMatch(`What it remembers is kept in ${DATA_HOME}.`)
 
   session.answers.push(UNINSTALL_ERASE, PHRASE)
-  await $.command.run(typed('bsd', 'uninstall'))
+  await $.command.run(typed('backseat', 'uninstall'))
   await session.clock.settle()
   expect(session.removed).toEqual([])
   expect(session.disk.has(`${DATA_HOME}/notes-of-mine.txt`)).toBe(true)
@@ -223,7 +223,7 @@ test('marketplaceLocation finds Claude Code\'s clone of a marketplace', async ()
 sessionTest('an installed copy asks the marketplace it came from for releases, and falls back to the manifest', async ($, on) => {
   const session = stubSession(on, { install: 'installed', tags: ['backseat-driver--v0.3.0'], pluginFiles: MANIFEST })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   // No known_marketplaces.json in this fake home, so the manifest's repository is asked.
@@ -233,10 +233,10 @@ sessionTest('an installed copy asks the marketplace it came from for releases, a
   await ui.unmount()
 })
 
-sessionTest('/bsd update in a clone that has everything says so', async ($, on) => {
+sessionTest('/backseat update in a clone that has everything says so', async ($, on) => {
   const session = stubSession(on, { install: 'clone', tags: ['v0.2.0'], pluginFiles: MANIFEST, isCloneCurrent: true })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd', 'update'))
+  await $.command.run(typed('backseat', 'update'))
   await session.clock.settle()
 
   expect(session.ran).toContain('git pull --ff-only')
