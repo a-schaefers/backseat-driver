@@ -296,8 +296,6 @@ import type { KeyCheck } from '../core/licensekey'
 import type { Watcher } from '../core/watcher'
 import { chosen, parseWorking, tidy, WORKING_HEADER, WORKING_QUESTION, workingChoices } from '../core/working'
 
-const COMMANDS = ['backseat-driver', 'bsd'] as const
-
 const IDLE: Watch = { state: 'idle', lastLookAt: null, line: playLine({ at: 'watching' }) }
 const NO_REVIEW: Review = { state: 'none', subject: '', text: '', isUnseen: false, decisions: [], insights: [] }
 const NO_PROFILES: Profiles = { languages: [], subjects: {} }
@@ -786,14 +784,14 @@ async function stopDebug($: EngineInterface, why: string): Promise<void> {
   await stopDebugLog(debugPortsOf($), debugState, why)
 }
 
-/** Starts or stops this session's log when the switch was changed from outside: another session's `/bsd debug`, or `scripts/jack.py`. */
+/** Starts or stops this session's log when the switch was changed from outside: another session's `/backseat debug`, or `scripts/jack.py`. */
 async function followDebug($: EngineInterface, settings: Settings): Promise<void> {
   await followDebugSwitch(debugPortsOf($, settings), debugState)
   // While someone listens in, the state beside the log is never older than one look at itself, however quiet the session.
   await flushDebugLog(debugPortsOf($), debugState, true)
 }
 
-/** `/bsd debug`: switches the debug log, says where it is, writes down what just happened, or deletes the logs. */
+/** `/backseat debug`: switches the debug log, says where it is, writes down what just happened, or deletes the logs. */
 async function debugCommand($: EngineInterface, settings: Settings, request: DebugRequest): Promise<string> {
   return runDebugCommand(debugPortsOf($, settings), debugState, request)
 }
@@ -1099,7 +1097,7 @@ async function askPerson($: EngineInterface, question: string, choices: { option
 async function loadTutor($: EngineInterface, chosen: Persona): Promise<void> {
   const root = $.plugin.root
   const file = (path: string): Promise<string> => $.fs.read(`${root}/${path}`)
-  // Read side by side: `/bsd` waits for these, and nothing else.
+  // Read side by side: `/backseat` waits for these, and nothing else.
   const [skill, lookText, reviewText, explainText, progressFile, bubbleText, engineering, voice] = await Promise.all([
     file('skills/tutor/SKILL.md'),
     file('prompts/play-by-play.md'),
@@ -1278,7 +1276,7 @@ async function markHome($: EngineInterface): Promise<void> {
 }
 
 /** Said once when the pane is open and Claude Code does not draw it: a tutor that is on with nothing on screen is otherwise a mystery. */
-const PANE_WAITS = 'Backseat Driver is on. Its pane waits for a wider terminal: /bsd opens it now.'
+const PANE_WAITS = 'Backseat Driver is on. Its pane waits for a wider terminal: /backseat opens it now.'
 
 /** Opens the pane, and keeps what Claude Code said of it: open is not yet drawn. */
 async function openPane($: EngineInterface): Promise<void> {
@@ -1315,7 +1313,7 @@ async function showPane($: EngineInterface): Promise<void> {
 
 /**
  * Puts the pane away: it closes, and a strip above the prompt stands in for
- * it. The tutor stays on (owner, 2026-10-06: only /bsd off shuts it down).
+ * it. The tutor stays on (owner, 2026-10-06: only /backseat off shuts it down).
  * The person's own close arrives here from `ui.close`, already under way.
  */
 async function minimizePane($: EngineInterface, origin: 'person' | 'plugin'): Promise<void> {
@@ -1654,7 +1652,7 @@ async function startLicense($: EngineInterface): Promise<void> {
 /**
  * Personal or commercial, and for commercial the key. Dismissing either
  * question is an answer too: nothing is chosen, and nothing is asked again
- * unprompted. `/bsd license` changes it at any time.
+ * unprompted. `/backseat license` changes it at any time.
  */
 async function askLicense($: EngineInterface): Promise<LicenseRecord> {
   let answer: string
@@ -1717,7 +1715,7 @@ async function checkLicense($: EngineInterface, record: LicenseRecord): Promise<
   }
 }
 
-/** `/bsd license`: where they stand, a change of use, a key, or the key taken away. Works while the tutor is off. */
+/** `/backseat license`: where they stand, a change of use, a key, or the key taken away. Works while the tutor is off. */
 async function licenseCommand($: EngineInterface, asked: LicenseRequest): Promise<string> {
   try {
     await resolveHome($)
@@ -1734,7 +1732,7 @@ async function licenseCommand($: EngineInterface, asked: LicenseRequest): Promis
         record = await changeLicense($, stored => ({ ...stored, key: '', keySince: 0, answer: null, answeredAt: 0, triedAt: 0 }))
         break
       case 'key':
-        if (!looksLikeKey(asked.key)) return 'That is not a license key: one starts with BSD1. /bsd license personal, commercial or clear change the rest.'
+        if (!looksLikeKey(asked.key)) return 'That is not a license key: one starts with BSD1. /backseat license personal, commercial or clear change the rest.'
         record = await addKey($, asked.key)
         break
     }
@@ -1795,13 +1793,13 @@ async function checkForUpdate($: EngineInterface, settings: Settings): Promise<v
   }
 }
 
-/** `/bsd update`: fetches the newest release the way this copy was installed. */
+/** `/backseat update`: fetches the newest release the way this copy was installed. */
 async function runUpdate($: EngineInterface): Promise<void> {
   const install = await detectInstall($)
   if (install.kind === 'clone') {
     const changed = (await git($, install.top, ['status', '--porcelain', '--untracked-files=no'])).stdout.trim()
     if (changed !== '') {
-      tellPerson($, `This copy, in ${install.top}, has changes of its own, so it was not updated. Commit or stash them, then run /bsd update again.`)
+      tellPerson($, `This copy, in ${install.top}, has changes of its own, so it was not updated. Commit or stash them, then run /backseat update again.`)
 
       return
     }
@@ -1875,7 +1873,7 @@ async function removeHome($: EngineInterface): Promise<boolean> {
   }
 }
 
-/** `/bsd uninstall`: removes the plugin after asking, and erases what it remembers when told to. */
+/** `/backseat uninstall`: removes the plugin after asking, and erases what it remembers when told to. */
 async function runUninstall($: EngineInterface, settings: Settings): Promise<void> {
   await resolveHome($)
   const answer = await choose($, UNINSTALL_QUESTION, [UNINSTALL_KEEP, UNINSTALL_ERASE, UNINSTALL_ONLY])
@@ -3374,7 +3372,7 @@ async function moveFocus($: EngineInterface, step: 1 | -1): Promise<void> {
   await moveFocusOf(followPortsOf($), followState, step)
 }
 
-/** What the lookup tool and `/bsd explain` share: move the focus to a spot and say what is known about it. */
+/** What the lookup tool and `/backseat explain` share: move the focus to a spot and say what is known about it. */
 async function lookUp($: EngineInterface, spot: Spot): Promise<string> {
   return await lookUpOf(followPortsOf($), followState, spot)
 }
@@ -3490,7 +3488,7 @@ async function placeFirst($: EngineInterface, settings: Settings, run: number): 
 
 /**
  * Everything the tutor needs once it is on: the watcher, the profiles, the
- * reviewer and the tools. `/bsd` does not wait for this, so that it answers
+ * reviewer and the tools. `/backseat` does not wait for this, so that it answers
  * at once however slow git is. `isFresh` is false when the tutor was already
  * on and the module reloaded, in which case no questions are asked.
  */
@@ -3671,7 +3669,7 @@ async function pickScope($: EngineInterface): Promise<Scope | string> {
 }
 
 /**
- * `/bsd forget`: erases what the tutor remembers, after asking. Every way out
+ * `/backseat forget`: erases what the tutor remembers, after asking. Every way out
  * of a dialog but the explicit one keeps everything.
  */
 async function forget($: EngineInterface, settings: Settings, named: Scope | null): Promise<void> {
@@ -3988,8 +3986,8 @@ function noteShown($: EngineInterface, site: 'pane' | 'band', drawing: Shown): v
   })
 }
 
-/** `/bsd` and `/backseat-driver`: what was asked, done, and the answer shown under the command. */
-async function bsdCommand($: EngineInterface, settings: Settings, args: string): Promise<{ text: string }> {
+/** `/backseat`: what was asked, done, and the answer shown under the command. */
+async function backseatCommand($: EngineInterface, settings: Settings, args: string): Promise<{ text: string }> {
   const { request, rest, unknown } = parseRequest(args)
   trace($, 'cmd', request, () => ({ args, mode }))
   // Typing a command means the prompt had the keyboard, whatever the band last heard (Esc raises no event).
@@ -4001,7 +3999,7 @@ async function bsdCommand($: EngineInterface, settings: Settings, args: string):
   }
   if (request === 'license') return { text: await licenseCommand($, parseLicenseRequest(rest)) }
   if (request === 'questions') {
-    if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
+    if (mode === 'off') return { text: 'Backseat Driver is off. Run /backseat to start it.' }
     // Not awaited: the dialog stays open for as long as the person takes.
     void ask($, settings, firstRunQuestions(profiles.languages, false))
 
@@ -4016,16 +4014,16 @@ async function bsdCommand($: EngineInterface, settings: Settings, args: string):
     return { text: 'The settings are in the pane. Click a row to see its options, or Ctrl+X Tab, then Tab to it and Enter.' }
   }
   if (request === 'explain') {
-    if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
+    if (mode === 'off') return { text: 'Backseat Driver is off. Run /backseat to start it.' }
     if (settings.explain.mode === 'off') return { text: 'Explain is switched off. Its setting is in /config.' }
-    if (followState.explainer === null) return { text: 'Explain needs a git repository, and a moment after /bsd to get ready.' }
+    if (followState.explainer === null) return { text: 'Explain needs a git repository, and a moment after /backseat to get ready.' }
     await update($, tabAtom, () => 'explain')
     // The answer lands in the pane: one that was put away comes back for it.
     if (isMinimized) await restoreFromStrip($, null)
     watchClosely($)
     const spot = rest.trim() === '' ? followState.focus : parseTarget(rest, repoRoot)
     if (spot === null) {
-      return { text: rest.trim() === '' ? 'Name a file and a line: /bsd explain src/app.py:42' : `That is not a file in this project: ${rest.trim()}` }
+      return { text: rest.trim() === '' ? 'Name a file and a line: /backseat explain src/app.py:42' : `That is not a file in this project: ${rest.trim()}` }
     }
     // Not awaited: the answer goes to the pane as it arrives.
     void setFocus($, { path: spot.path, line: spot.line, ...(spot.endLine === undefined ? {} : { endLine: spot.endLine }), source: 'command' }, true)
@@ -4033,7 +4031,7 @@ async function bsdCommand($: EngineInterface, settings: Settings, args: string):
     return { text: `Explaining ${describeSpot(spot)} in the pane.` }
   }
   if (request === 'working') {
-    if (mode === 'off') return { text: 'Backseat Driver is off. Run /bsd to start it.' }
+    if (mode === 'off') return { text: 'Backseat Driver is off. Run /backseat to start it.' }
     if (journalState.recorder === null) {
       return { text: 'There is no journal to put that in: the tutor is still getting ready, or this folder is not a git repository.' }
     }
@@ -4106,22 +4104,14 @@ export const register: Register = (on, options) => {
     }
 
     try {
-      await $.command.register({ name: 'backseat-driver-update', description: 'Fetch the newest release of Backseat Driver', immediate: true })
+      await $.command.register({
+        name: 'backseat',
+        description: 'Turn the Backseat Driver tutor on. /backseat help lists the rest',
+        argumentHint: '[off | pause | resume | status | explain | settings | questions | working | forget | license | update | uninstall | debug | help]',
+        immediate: true,
+      })
     } catch (error) {
-      fail($, 'could not register /backseat-driver-update', error)
-    }
-    for (const name of COMMANDS) {
-      try {
-        await $.command.register({
-          name,
-          description: 'Turn the Backseat Driver tutor on. /bsd help lists the rest',
-          argumentHint: '[off | pause | resume | status | explain | settings | questions | working | forget | license | update | uninstall | debug | help]',
-          immediate: true,
-        })
-      } catch (error) {
-        // A taken name throws. The other command still has to register.
-        fail($, `could not register /${name}`, error)
-      }
+      fail($, 'could not register /backseat', error)
     }
 
     return next(e)
@@ -4152,17 +4142,10 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // Spelled out so that `claude plugin validate` can print which commands this answers.
-  on('command.run', { command: 'backseat-driver-update' }, $ => {
-    void runUpdate($)
-    noteSaid($, 'command', 'Looking for a newer release.', { args: 'update' })
-
-    return { text: 'Looking for a newer release.' }
-  })
-
-  on('command.run', { command: ['backseat-driver', 'bsd'] }, async ($, e) => {
-    const answer = await bsdCommand($, settings, e.args)
-    // What `/bsd` answered is on the screen, under the command: written down, so that it can be looked for there.
+  // Spelled out so that `claude plugin validate` can print which command this answers.
+  on('command.run', { command: 'backseat' }, async ($, e) => {
+    const answer = await backseatCommand($, settings, e.args)
+    // What `/backseat` answered is on the screen, under the command: written down, so that it can be looked for there.
     noteSaid($, 'command', answer.text, { args: e.args })
 
     return answer

@@ -109,7 +109,7 @@ const LESSON_FILES = { '/lessons/python-errors.md': ERRORS, '/lessons/commits.md
 sessionTest('the Lessons tab lists the paths found, and a step starts in the conversation and is recorded', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN }, pluginFiles: LESSON_FILES })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -147,7 +147,7 @@ sessionTest('the Lessons tab lists the paths found, and a step starts in the con
 sessionTest('with no lessons installed, the tab says where they come from', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-lessons' })

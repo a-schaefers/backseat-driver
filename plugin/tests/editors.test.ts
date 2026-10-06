@@ -68,7 +68,7 @@ test('editorsLine names who is connected', () => {
 sessionTest('the editors light is red until an editor with something of this project open is connected, and green while one is', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const light = async (text: string) => (await ui.find({ type: 'Text', text })) !== undefined
@@ -88,7 +88,7 @@ sessionTest('the editors light is red until an editor with something of this pro
   expect(await light('No editor is connected.')).toBe(true)
 
   // Paused, nothing reads the editors' files, so the light says nothing.
-  await $.command.run(typed('bsd', 'pause'))
+  await $.command.run(typed('backseat', 'pause'))
   await session.clock.settle()
   expect(await light('No editor is connected.')).toBe(false)
   await ui.unmount()

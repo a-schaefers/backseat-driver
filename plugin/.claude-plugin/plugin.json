@@ -130,7 +130,7 @@
     "update_check": {
       "type": "boolean",
       "title": "Check for updates",
-      "description": "Ask the plugin's GitHub repository for a newer release, at most every six hours while the tutor is on, and say so in the pane. /bsd update fetches it.",
+      "description": "Ask the plugin's GitHub repository for a newer release, at most every six hours while the tutor is on, and say so in the pane. /backseat update fetches it.",
       "default": true
     }
   }

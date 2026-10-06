@@ -2,7 +2,7 @@
  * Staying up to date. A release is a tag on the upstream repository whose
  * `plugin.json` carries the same version: `backseat-driver--v0.2.0`, the
  * name `claude plugin tag` gives it, or plain `v0.2.0`. The tutor compares
- * its own version with the newest such tag, and `/bsd update` fetches the
+ * its own version with the newest such tag, and `/backseat update` fetches the
  * release the way this copy was installed.
  */
 
@@ -141,7 +141,7 @@ export function isCheckDue(record: UpdateRecord, now: number): boolean {
 export function updateNotice(current: Version | null, latest: Version | null): string {
   if (current === null || latest === null || compareVersions(latest, current) <= 0) return ''
 
-  return `Backseat Driver ${versionText(latest)} is out. You have ${versionText(current)}. /bsd update fetches it.`
+  return `Backseat Driver ${versionText(latest)} is out. You have ${versionText(current)}. /backseat update fetches it.`
 }
 
 /** The commands that update an installed copy, in the order they run. */

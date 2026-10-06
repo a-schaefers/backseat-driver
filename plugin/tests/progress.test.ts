@@ -221,7 +221,7 @@ const OBSERVED = (commit: string): Assessment => ({
 sessionTest('your commit is assessed after its review, on your own lines, and three of them with enough lines place you', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   // The one commit there was is too small to place anyone.
   expect(session.assessments.length).toBe(0)
@@ -296,7 +296,7 @@ sessionTest('your commit is assessed after its review, on your own lines, and th
 sessionTest("someone else's commit, a co-authored one and a bulk import are not yours, and the tab says why", async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   const before = session.assessments.length
 
@@ -330,7 +330,7 @@ sessionTest("someone else's commit, a co-authored one and a bulk import are not 
 sessionTest('a commit of yours too small to say anything is not assessed, and the tab says so', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', `${MEAN}\n# A comment.\n`)
@@ -359,7 +359,7 @@ sessionTest('a first placement reads only your commits, however much better the 
   session.assess({ ...OBSERVED(mine.slice(0, 7)), level: 'beginner' })
 
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   expect(session.assessments.length).toBe(1)
@@ -374,7 +374,7 @@ sessionTest('a first placement reads only your commits, however much better the 
 sessionTest('with deep reviews off after commits, a commit of yours is still assessed when it is made', { options: { deep_review_after_commit: false } }, async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   const before = session.assessments.length
 
@@ -392,7 +392,7 @@ sessionTest('with deep reviews off after commits, a commit of yours is still ass
 sessionTest('with the report off, nothing is assessed and the tab says so', { options: { progress_report: false } }, async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', `${MEAN}\n\ndef total(xs):\n    result = sum(xs)\n    return result\n`)
   await session.clock.advance(4000)
@@ -411,7 +411,7 @@ sessionTest('with the report off, nothing is assessed and the tab says so', { op
 sessionTest('with no email in git, nothing can be confirmed as yours', { options: {} }, async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN }, email: '' })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   expect(session.assessments).toEqual([])
@@ -422,12 +422,12 @@ sessionTest('with no email in git, nothing can be confirmed as yours', { options
 })
 
 sessionTest('an email set in git after switch-on counts from the next commit', async ($, on) => {
-  // The owner (2026-10-05) set user.email between /bsd and their first commit, and the commit counted for nothing:
+  // The owner (2026-10-05) set user.email between /backseat and their first commit, and the commit counted for nothing:
   // the identity was read once, at switch-on.
   const options = { head: { 'stats.py': MEAN }, email: '' }
   const session = stubSession(on, options)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-profile' })
@@ -452,11 +452,11 @@ sessionTest('forgetting a language forgets its progress too', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { 'progress/python.json': placed } })
   session.disk.set(`${DATA_HOME}/.backseat-driver`, 'marker')
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.answers.push(FORGET)
-  await $.command.run(typed('bsd', 'forget python'))
+  await $.command.run(typed('backseat', 'forget python'))
   await session.clock.settle()
   expect(session.data('progress/python.json')).toBeUndefined()
   const told = String(((await $.tool.call({ tool: 'mcp__backseat-driver__progress', language: 'python' })) as { result: unknown }).result)

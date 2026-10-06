@@ -20,7 +20,7 @@ type Engine = Parameters<TestBody>[0]
 /** Starts a session, switches the tutor on and lets it read the working tree. */
 async function start($: Engine, session: Session): Promise<void> {
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 }
 
@@ -306,15 +306,15 @@ sessionTest('paused, nothing is scanned, and resumed, the tree is looked at stra
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   session.reply(NOTE)
   await start($, session)
-  await $.command.run(typed('bsd', 'pause'))
+  await $.command.run(typed('backseat', 'pause'))
   const before = session.scans
   session.write('stats.py', `${MEAN}# more\n`)
   await session.clock.advance(120_000)
   expect(session.scans).toBe(before)
   expect(session.requests.length).toBe(0)
-  expect(await says($, 'Paused. /bsd resume to continue.')).toBe(true)
+  expect(await says($, 'Paused. /backseat resume to continue.')).toBe(true)
 
-  await $.command.run(typed('bsd', 'resume'))
+  await $.command.run(typed('backseat', 'resume'))
   await session.clock.settle()
   expect(session.scans).toBe(before + 1)
   expect(await says($, 'On. Saw your save. Looking when you pause.')).toBe(true)

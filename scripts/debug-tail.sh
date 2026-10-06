@@ -12,7 +12,7 @@
 # n (name), ms (how long it took) and d (the details). The tutor's whole state
 # is beside the log, in state.json.
 #
-# The log is switched on with /bsd debug on, or by starting a dev session
+# The log is switched on with /backseat debug on, or by starting a dev session
 # with BSD_DEBUG=1. It is written in chunks that are written again as they
 # grow, so `tail -f` cannot follow it. This prints whole lines only, moves on
 # to the next chunk, and to a newer session when one starts logging.
@@ -58,7 +58,7 @@ seen=0
 while :; do
   newest="$(pick)"
   if [ -z "$newest" ]; then
-    if [ "$once" = 1 ]; then echo "No debug log in $root. Switch it on with /bsd debug on." >&2; exit 1; fi
+    if [ "$once" = 1 ]; then echo "No debug log in $root. Switch it on with /backseat debug on." >&2; exit 1; fi
     sleep 0.5
     continue
   fi

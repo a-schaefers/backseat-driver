@@ -5,7 +5,7 @@ import { STRIP_HINT } from '../hooks/pane'
 import { BAND, ENGINE_BAND, PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
 /**
- * The owner (2026-10-06): the pane's close should minimize, restoring should be obvious, and only /bsd off shuts
+ * The owner (2026-10-06): the pane's close should minimize, restoring should be obvious, and only /backseat off shuts
  * the tutor down. A test's `$` cannot raise the person's own close of the pane (its mark, Ctrl+X X), so these go
  * through the pane's `x` button, which ends in the same place; the mark is checked live.
  */
@@ -21,7 +21,7 @@ async function minimize($: Parameters<TestBody>[0], session: ReturnType<typeof s
 sessionTest('x puts the pane away as a strip above the prompt, and a tab on the strip brings it back on that tab', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(session.opened).toEqual(['backseat-driver'])
 
@@ -33,8 +33,8 @@ sessionTest('x puts the pane away as a strip above the prompt, and a tab on the 
 
   await minimize($, session)
   expect(session.closed).toEqual(['backseat-driver'])
-  // Still on: only /bsd off switches it off.
-  expect((await $.command.run(typed('bsd', 'status'))).text).toMatch('Backseat Driver is on.')
+  // Still on: only /backseat off switches it off.
+  expect((await $.command.run(typed('backseat', 'status'))).text).toMatch('Backseat Driver is on.')
 
   const strip = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await strip.find({ key: 'restore' })).toBeDefined()
@@ -55,10 +55,10 @@ sessionTest('x puts the pane away as a strip above the prompt, and a tab on the 
   await after.unmount()
 })
 
-sessionTest('/bsd brings back a pane that was put away, and /bsd off ends it', async ($, on) => {
+sessionTest('/backseat brings back a pane that was put away, and /backseat off ends it', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   await minimize($, session)
@@ -67,7 +67,7 @@ sessionTest('/bsd brings back a pane that was put away, and /bsd off ends it', a
   await strip.unmount()
 
   // Asking for the tutor again brings the pane back as it was.
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(session.opened).toEqual(['backseat-driver', 'backseat-driver'])
   const gone = await $.ui.mount({ ...BAND, surface: 'terminal' })
@@ -76,14 +76,14 @@ sessionTest('/bsd brings back a pane that was put away, and /bsd off ends it', a
 
   // Put away and then switched off: nothing of it stays above the prompt.
   await minimize($, session)
-  await $.command.run(typed('bsd', 'off'))
+  await $.command.run(typed('backseat', 'off'))
   await session.clock.settle()
   const off = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await off.find({ key: 'restore' })).toBeUndefined()
   expect(await off.find({ type: 'Text', text: ENGINE_BAND })).toBeDefined()
   await off.unmount()
   // Switched on again, it is the pane that comes up, not the strip.
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(session.opened.length).toBe(3)
 })
@@ -91,7 +91,7 @@ sessionTest('/bsd brings back a pane that was put away, and /bsd off ends it', a
 sessionTest('a pane put away stays put away through /clear', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   await minimize($, session)
 
