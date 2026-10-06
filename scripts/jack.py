@@ -712,6 +712,12 @@ def missing_pieces(texts: list[str], rows: list[str]) -> tuple[list[str], list[s
     return head, rest
 
 
+def pieces_below(texts: list[str], rows: list[str]) -> int:
+    """How many pieces from below the top of the drawing are really on the screen: long enough to be told apart, and found."""
+    where = flows(rows)
+    return sum(1 for t in texts[HEAD_PIECES:] if len(squash(demark(t))) >= 3 and is_on_screen(t, where))
+
+
 def sides(rows: list[str]) -> dict[str, list[str]]:
     """The screen's rows by what they are of: the conversation and the pane beside it, or one screen."""
     col = divider(rows)
@@ -1005,7 +1011,12 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
         texts = [t for t in drawing["texts"] if isinstance(t, str)]
         head, rest = missing_pieces(texts, rows)
         where = "pane" if layout == "vertical" else "lines above the prompt"
-        if head:
+        below = pieces_below(texts, rows)
+        if head and below > 0:
+            # The top is missing and the rest is there: the person scrolled the pane down to read (the owner, 2026-10-05,
+            # a long deep review in a 30-row terminal). Their view, not a fault.
+            out.append((NOTE, f"{who}'s {where} is scrolled: its top ({len(head)} piece(s), the tabs and the status line) is above the frame, and {below} piece(s) below it are on the screen"))
+        elif head:
             quoted = "; ".join(f"“{t[:60]}”" for t in head[:3])
             out.append((BAD, f"{who} says its {where} shows {quoted}{' and more' if len(head) > 3 else ''}: not on its screen (drawn {ago(now - (drawing.get('at') or now))} ago, {drawing.get('placement') or 'above the prompt'}, {drawing.get('columns')} columns)"))
         else:

@@ -302,6 +302,14 @@ class Disagreements(unittest.TestCase):
         wide = session(state=state(self.now), eyes={"kind": "tmux", "name": "0", "sock": "/x", "pane": "%0", "cols": 170, "rows": 40})
         self.assertTrue(any("not on its screen" in text for text in bad(jack.check_session(world([wide], now=self.now), wide, ["❯ "]))))
 
+    def test_a_pane_scrolled_down_to_read_is_their_view_and_not_a_fault(self):
+        # The owner (2026-10-05) scrolled a long deep review in a 30-row terminal: the tabs went above the frame.
+        s = session(state=state(self.now))
+        scrolled = [row for row in DOCKED if "1: Play" not in row and "On. Watching" not in row]
+        found = jack.check_session(world([s], now=self.now), s, scrolled)
+        self.assertEqual(bad(found), [])
+        self.assertTrue(any(level == jack.NOTE and "is scrolled" in text for level, text in found), found)
+
     def test_a_screen_that_cannot_be_seen_is_said_and_not_counted(self):
         s = session(state=state(self.now))
         found = jack.check_session(world([s], now=self.now), s, None)
