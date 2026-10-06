@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { encouragementLine, growthFacts, growthHeadline, growthMeter, growthMeterLabel, growthOf, growthText, improvedLine, raiseLine, workOnLine } from '../core/growth'
+import { encouragementLine, growthFacts, growthHeadline, growthLadder, growthMeterLabel, growthOf, growthText, improvedLine, raiseLine, rungWord, workOnLine } from '../core/growth'
 import { emptyLessonRecord, lessonView, parsePath, withDone, withHelp, withStarted } from '../core/lessons'
 import type { LessonPath } from '../core/lessons'
 import { emptyProfile, withFlagged, withLooked } from '../core/profiles'
@@ -70,31 +70,41 @@ test('own commits place the level, and the score is the level times a hundred pl
   expect(growthHeadline(growth)).toBe(`junior · growth ${growth.score}, ${growth.toNext} of the way to mid`)
 })
 
-test('the growth bar fills with the way to the next level, and goes from red to green', () => {
+test('the growth ladder has a rung per level: passed ones full, the current one filling toward the next, the rest empty', () => {
   const growth = growthOf(record(JUNIOR), undefined, [])
-  const meter = growthMeter(growth, 20)
-  expect(meter?.level).toBe('junior')
-  expect(meter?.next).toBe('mid')
-  expect((meter?.filled ?? 0) + (meter?.empty ?? 0)).toBe(20)
+  const ladder = growthLadder(growth, 60)
+  expect(ladder?.rungs.map(rung => `${rung.level}:${rung.state}`)).toEqual(['beginner:passed', 'junior:current', 'mid:ahead', 'senior:ahead'])
+  expect(ladder?.rungs.map(rung => rung.nick)).toEqual(['Padawan', 'Apprentice', 'Journeyman', 'Gandalf'])
+  // Four rungs with brackets and gaps fit 60 columns: (60 - 3) / 4 - 2 = 12 cells each; never under 6 or over 14.
+  expect(ladder?.width).toBe(12)
+  expect(ladder?.rungs.every(rung => rung.filled + rung.empty === 12)).toBe(true)
+  expect(ladder?.rungs[0]).toMatchObject({ filled: 12, empty: 0 })
+  expect(ladder?.rungs[2]).toMatchObject({ filled: 0, empty: 12 })
+  expect(growthLadder(growth, 30)?.width).toBe(6)
+  expect(growthLadder(growth, 200)?.width).toBe(14)
   expect(growthMeterLabel(growth)).toBe(`${growth.toNext}% to mid · growth ${growth.score}`)
   // Nothing to draw before a level: the headline says so instead.
   const unplaced = growthOf(record(JUNIOR.slice(0, 4)), undefined, [])
-  expect(growthMeter(unplaced, 20)).toBe(null)
+  expect(growthLadder(unplaced, 60)).toBe(null)
   expect(growthMeterLabel(unplaced)).toBe('Not placed yet')
 
-  const at = (toNext: number) => growthMeter({ ...growth, toNext }, 20)
-  expect(at(0)).toEqual({ level: 'junior', next: 'mid', filled: 0, empty: 20, band: 'red' })
-  // Any way made shows as a cell, and the bar is never full short of the next level.
-  expect(at(1)?.filled).toBe(1)
-  expect(at(24)?.band).toBe('red')
-  expect(at(25)?.band).toBe('orange')
-  expect(at(50)?.band).toBe('yellow')
-  expect(at(75)?.band).toBe('green')
-  expect(at(99)).toEqual({ level: 'junior', next: 'mid', filled: 19, empty: 1, band: 'green' })
-  // Senior has no next level: the bar still fills, and the label is the score alone.
+  const current = (toNext: number) => growthLadder({ ...growth, toNext }, 60)?.rungs[1]
+  const band = (toNext: number) => growthLadder({ ...growth, toNext }, 60)?.band
+  expect(current(0)).toMatchObject({ filled: 0, empty: 12 })
+  // Any way made shows as a cell, and the rung is never full short of the next level.
+  expect(current(1)?.filled).toBe(1)
+  expect(current(99)).toMatchObject({ filled: 11, empty: 1 })
+  expect(band(24)).toBe('red')
+  expect(band(25)).toBe('orange')
+  expect(band(50)).toBe('yellow')
+  expect(band(75)).toBe('green')
+  // Senior has no next level: every rung before it is full, the last fills with the way on, and the label is the score alone.
   const senior = { ...growth, level: 'senior' as const, score: 350, toNext: 50 }
-  expect(growthMeter(senior, 20)?.next).toBe(null)
+  expect(growthLadder(senior, 60)?.rungs.map(rung => rung.state)).toEqual(['passed', 'passed', 'passed', 'current'])
   expect(growthMeterLabel(senior)).toBe('growth 350')
+  // A rung's words are centered over its cells and brackets, and cut to fit.
+  expect(rungWord('mid', 6)).toBe('  mid   ')
+  expect(rungWord('Journeyman', 6)).toBe('Journeym')
 })
 
 test('lessons move the score toward the next level, and never carry a level alone', () => {
@@ -230,8 +240,8 @@ test('whatever their history, lessons never lower the score, and the score stays
     if (base.level !== null) {
       expect(`${where}: ${Math.floor(base.score / 100)}`).toBe(`${where}: ${LEVELS.indexOf(base.level)}`)
       expect(`${where}: ${base.toNext >= 0 && base.toNext <= 99}`).toBe(`${where}: true`)
-      const meter = growthMeter(base, 20)
-      expect(`${where}: ${meter !== null && meter.filled >= 0 && meter.filled <= 19 && meter.filled + meter.empty === 20}`).toBe(`${where}: true`)
+      const rung = growthLadder(base, 60)?.rungs.find(item => item.state === 'current')
+      expect(`${where}: ${rung !== undefined && rung.filled >= 0 && rung.filled <= 11 && rung.filled + rung.empty === 12}`).toBe(`${where}: true`)
     }
   }
 })

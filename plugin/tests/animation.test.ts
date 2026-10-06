@@ -215,15 +215,17 @@ sessionTest('switching off silences the character, and switching on again starts
   await ui.unmount()
 })
 
-sessionTest('the character stands on the play-by-play and deep review tabs only', async ($, on) => {
+sessionTest('the character stands on the play-by-play tab only', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
   await session.clock.advance(SAY_ALL)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'tab-review' })
   expect(await ui.find({ type: 'Text', text: 'Riding along. You drive.' })).toBeDefined()
+  // Taken off the review tab (owner, 2026-10-05): its line there repeated the review's takeaway above a long page.
+  await ui.press({ key: 'tab-review' })
+  expect(await ui.find({ type: 'Text', text: 'Riding along. You drive.' })).toBeUndefined()
   await ui.press({ key: 'tab-profile' })
   expect(await ui.find({ type: 'Text', text: 'Riding along. You drive.' })).toBeUndefined()
   await ui.press({ key: 'tab-explain' })

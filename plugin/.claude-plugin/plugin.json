@@ -86,6 +86,12 @@
       "description": "WARNING: burns your plan's tokens on purpose. Everything works as before, and every play-by-play, Explain and progress request is also sent to the most capable model available (fable, else opus) at maximum thinking, with the answer thrown away. For token-usage requirements at work. User discretion advised; no warranty.",
       "default": false
     },
+    "editor_command": {
+      "type": "string",
+      "title": "Editor command",
+      "description": "A command that opens a place in your editor, with {file}, {line} and {column} filled in: emacsclient -n +{line} {file}, code --goto {file}:{line}, nvim --server /tmp/nvim.sock --remote +{line} {file}. A command with no placeholder gets +{line} {file} added. Set, every place a review or a note names becomes clickable and opens there; empty, it opens the Explain tab instead. Use a form that returns at once (emacsclient -n, code), not one that waits.",
+      "default": ""
+    },
     "deep_review_every": {
       "type": "string",
       "title": "Deep review every",

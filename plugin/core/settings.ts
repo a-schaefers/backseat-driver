@@ -49,6 +49,8 @@ export type Settings = {
   isUpdateCheckOn: boolean
   /** Burn token mode: every model request is also sent to the most capable model at maximum thinking, and the answer dropped. */
   isBurning: boolean
+  /** The command that opens a place in their editor, with {file}, {line} and {column} in it. '' for none: places open in the Explain tab. */
+  editorCommand: string
   playByPlay: {
     isAutomatic: boolean
     quietMs: number
@@ -110,6 +112,7 @@ export function readSettings(options: Options): Settings {
     isProgressOn: options.progress_report !== false,
     isUpdateCheckOn: options.update_check !== false,
     isBurning: options.burn_tokens === true,
+    editorCommand: typeof options.editor_command === 'string' ? options.editor_command.trim() : '',
     playByPlay: {
       isAutomatic: options.play_by_play !== 'on request',
       // Quick by default (owner, 2026-10-05: "make this app as quick as possible"): a look five seconds after the
@@ -205,6 +208,7 @@ export const SETTING_EFFECTS = {
   progress_report: 'now',
   update_check: 'now',
   burn_tokens: 'now',
+  editor_command: 'now',
 } as const satisfies Record<string, SettingEffect>
 
 export type SettingEffect = 'now' | 'next look' | 'next review' | 'next lookup'

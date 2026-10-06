@@ -186,6 +186,7 @@ import {
   withReviewNotes,
 } from '../core/project'
 import type { Insight, KeptInsight, ProjectKnowledge, ReviewNotes, ReviewRecord } from '../core/project'
+import { editorArgv } from '../core/opening'
 import { explainAsk, explainContext, explainRequest, paneContext, reviewerSystem } from '../core/prompts'
 import { firstRunQuestions, groupAnswers } from '../core/questions'
 import type { Question } from '../core/questions'
@@ -862,6 +863,30 @@ async function findBurnModel($: EngineInterface): Promise<void> {
     }
   }
   burnModel = ''
+}
+
+/**
+ * Opens a place in the person's editor with their `editor_command` (owner, 2026-10-05). The command runs as given,
+ * through no shell, in the repository; it is their own command, run only when they click a place. A command that
+ * waits (an editor without -n) is cut off after `EDITOR_TIMEOUT_MS`, and told so.
+ */
+const EDITOR_TIMEOUT_MS = 10_000
+
+function openInEditor($: EngineInterface, settings: Settings, path: string, line: number): void {
+  const argv = editorArgv(settings.editorCommand, { file: repoRoot === '' ? path : `${repoRoot}/${path}`, line })
+  if (argv === null) return
+  const started = Date.now()
+  toastPerson($, `Opening ${path}:${line} in your editor.`)
+  void $.process
+    .run(argv, { cwd: repoRoot === '' ? undefined : repoRoot, timeoutMs: EDITOR_TIMEOUT_MS })
+    .then(result => {
+      trace($, 'process', 'editor', () => ({ argv, exitCode: result.exitCode, stderr: result.stderr }), Date.now() - started)
+      if (result.exitCode !== 0) toastPerson($, `The editor command ended with ${result.exitCode}: ${(result.stderr ?? '').trim().slice(0, 120) || argv[0]}`)
+    })
+    .catch((error: unknown) => {
+      trace($, 'process', 'editor', () => ({ argv, error: String(error) }), Date.now() - started)
+      toastPerson($, `The editor command could not run: ${String(error).slice(0, 120)}. Check editor_command in /config.`)
+    })
 }
 
 /** One burn: the request as it was, to the burn model at maximum thinking. The answer goes nowhere, and so does any failure. */
@@ -3934,11 +3959,25 @@ async function drawTutor(
     onJump: (path: string, line: number) => {
       touched($, settings, 'jump', () => ({ path, line }))
       void update($, jumpOpenAtom, () => '')
+      // With an editor command set, a place opens in their editor; without one, in the Explain tab.
+      if (settings.editorCommand !== '') {
+        openInEditor($, settings, path, line)
+
+        return
+      }
       void update($, tabAtom, () => 'explain')
       if (layout === 'unified') void update($, unfoldedAtom, () => true)
       watchClosely($)
       void setFocus($, { path, line, source: 'command' }, true)
     },
+    ...(settings.editorCommand === ''
+      ? {}
+      : {
+          onOpen: (path: string, line: number) => {
+            touched($, settings, 'open', () => ({ path, line }))
+            openInEditor($, settings, path, line)
+          },
+        }),
     onExplainFetch: () => {
       touched($, settings, 'explain fetch')
       // The press says something even when the file maps to nothing, so it never looks like a dead key.

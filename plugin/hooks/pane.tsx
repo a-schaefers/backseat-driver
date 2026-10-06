@@ -8,7 +8,7 @@ import type { Backdrop } from '../core/sprite'
 import { languageName } from '../core/languages'
 import { isProblem, sortNotes } from '../core/notes'
 import { ANSWER_LABELS, explained, GENERAL, recurring } from '../core/profiles'
-import { encouragementLine, growthCounts, growthHeadline, growthMeter, growthMeterLabel, helpLine, improvedLine, raiseLine, workOnLine } from '../core/growth'
+import { encouragementLine, growthCounts, growthHeadline, growthLadder, growthMeterLabel, helpLine, improvedLine, raiseLine, rungWord, workOnLine } from '../core/growth'
 import type { Growth, GrowthBand } from '../core/growth'
 import { lessonLanguage, lessonProgress } from '../core/lessons'
 import { lately, levelPhrase } from '../core/progress'
@@ -108,6 +108,8 @@ export type PaneActions = {
   onJumpFold?: (subject: string) => void
   /** Explain: put the symbol that starts at this line in focus. */
   onExplainPick?: (line: number) => void
+  /** Open a place in the person's own editor. Present only while `editor_command` is set. */
+  onOpen?: (path: string, line: number) => void
 }
 
 const TABS: readonly { tab: Tab; label: string; short: string; tiny: string; hotkey: string }[] = [
@@ -799,23 +801,45 @@ function listOf({ Box, Text }: Kit, heading: string, lines: readonly string[]) {
 }
 
 /** How many cells the growth bar has. With the level before it and the label after, it fits a 57-column dock. */
-const METER_WIDTH = 20
 
 /** The bar's colour at each band: a health bar, red when the way to the next level has barely begun, green when it is nearly there. Orange has no terminal name. */
 const BAND_COLORS: Record<GrowthBand, string> = { red: 'red', orange: '#ff8700', yellow: 'yellow', green: 'green' }
 
-/** The headline as a health bar: the level, the bar filling toward the next level, and the words. Before a level, the plain headline. */
-function growthBar(kit: Kit, growth: Growth, isProvisional: boolean) {
+/**
+ * The headline as a ladder (owner, 2026-10-05: "beginner | junior | senior | Gandalf, why not make some humor"): a
+ * nickname over each rung, the rungs passed full, the current one filling toward the next in the band's color, the
+ * rungs ahead empty, and the honest level word under each. Before a level, the plain headline.
+ */
+function growthBar(kit: Kit, growth: Growth, isProvisional: boolean, columns: number) {
   const { Box, Text } = kit
-  const meter = growthMeter(growth, METER_WIDTH)
-  if (meter === null) return <Text bold>{growthHeadline(growth)}</Text>
+  const ladder = growthLadder(growth, columns)
+  if (ladder === null) return <Text bold>{growthHeadline(growth)}</Text>
 
   return (
-    <Box flexDirection="row" columnGap={1}>
-      <Text bold>{meter.level}</Text>
-      <Box flexDirection="row">
-        <Text color={BAND_COLORS[meter.band]}>{'█'.repeat(meter.filled)}</Text>
-        <Text dimColor>{'░'.repeat(meter.empty)}</Text>
+    <Box flexDirection="column">
+      <Box flexDirection="row" columnGap={1}>
+        {ladder.rungs.map(rung => (
+          <Text bold={rung.state === 'current'} dimColor={rung.state !== 'current'}>
+            {rungWord(rung.nick, ladder.width)}
+          </Text>
+        ))}
+      </Box>
+      <Box flexDirection="row" columnGap={1}>
+        {ladder.rungs.map(rung => (
+          <Box flexDirection="row">
+            <Text dimColor>[</Text>
+            {rung.filled > 0 && <Text color={rung.state === 'passed' ? 'green' : BAND_COLORS[ladder.band]}>{'█'.repeat(rung.filled)}</Text>}
+            {rung.empty > 0 && <Text dimColor>{'░'.repeat(rung.empty)}</Text>}
+            <Text dimColor>]</Text>
+          </Box>
+        ))}
+      </Box>
+      <Box flexDirection="row" columnGap={1}>
+        {ladder.rungs.map(rung => (
+          <Text bold={rung.state === 'current'} dimColor={rung.state !== 'current'}>
+            {rungWord(rung.level, ladder.width)}
+          </Text>
+        ))}
       </Box>
       <Text dimColor>{`${growthMeterLabel(growth)}${isProvisional ? ' · provisional' : ''}`}</Text>
     </Box>
@@ -823,7 +847,7 @@ function growthBar(kit: Kit, growth: Growth, isProvisional: boolean) {
 }
 
 /** One language's growth, as the tab shows it: the score, what to work on, where they needed help, what would raise it, what improved. */
-function growthSection(kit: Kit, record: ProgressRecord, growth: Growth | undefined) {
+function growthSection(kit: Kit, record: ProgressRecord, growth: Growth | undefined, columns: number) {
   const { Box, Text } = kit
   const { report } = record
   const recent = lately(record, 3)
@@ -833,7 +857,7 @@ function growthSection(kit: Kit, record: ProgressRecord, growth: Growth | undefi
 
   return (
     <Box flexDirection="column">
-      {growth !== undefined && growthBar(kit, growth, record.isProvisional)}
+      {growth !== undefined && growthBar(kit, growth, record.isProvisional, columns)}
       {growth !== undefined && <Text dimColor>{growthCounts(growth)}</Text>}
       <Text dimColor>{`From your commits alone: ${levelPhrase(record).replace(/^no level yet: /, 'not placed yet, ')}`}</Text>
       {report !== null && report.why !== '' && <Text>{report.why}</Text>}
@@ -874,7 +898,7 @@ function profileTab(kit: Kit, view: PaneView, actions: PaneActions) {
         return (
           <Box flexDirection="column">
             <Text bold>{languageName(subject)}</Text>
-            {progress.isOn && record !== undefined && growthSection(kit, record, view.growth?.find(entry => entry.language === subject)?.growth)}
+            {progress.isOn && record !== undefined && growthSection(kit, record, view.growth?.find(entry => entry.language === subject)?.growth, view.columns)}
             {Object.entries(profile.answers).map(([id, answer]) => (
               <Text dimColor>{`${ANSWER_LABELS[id] ?? id}: ${answer}`}</Text>
             ))}
@@ -1049,8 +1073,8 @@ function settingsTab({ Box, Text, Select }: Kit, view: PaneView, actions: PaneAc
       <Text dimColor>{Select === undefined ? SETTINGS_ELSEWHERE : SETTINGS_HINT}</Text>
       <Text> </Text>
       {view.settings.map(row =>
-        row.isLocked || Select === undefined ? (
-          <Text dimColor>{`${row.label}: ${row.value}${row.isLocked ? ' (set by your organization)' : ''}`}</Text>
+        row.isLocked || Select === undefined || row.options === undefined ? (
+          <Text dimColor>{`${row.label}: ${row.value}${row.isLocked ? ' (set by your organization)' : row.options === undefined ? ' · set it in /config' : ''}`}</Text>
         ) : (
           <Select
             key={`setting-${row.key}`}
@@ -1111,7 +1135,8 @@ function statusRows({ Box, Text }: Kit, view: PaneView, withStatus: boolean) {
 
 /** The character speaks for the play-by-play and the deep review, so it stands on their tabs only. */
 function characterOf(view: PaneView): PaneView['character'] {
-  return view.tab === 'play' || view.tab === 'review' ? view.character : null
+  // The Play-by-play tab only (owner, 2026-10-05: on the review tab its line repeated the review's takeaway above a long page).
+  return view.tab === 'play' ? view.character : null
 }
 
 /** The vertical layout: every part stacked, as a pane beside the conversation wants it. */

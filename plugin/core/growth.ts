@@ -1,5 +1,6 @@
 import type { LessonView, Level, Profile, ProgressRecord } from '../types'
 import { growthOfFacts } from './core'
+import { LEVELS } from './progress'
 import { languageName } from './languages'
 
 /**
@@ -100,16 +101,38 @@ export function growthHeadline(growth: Growth): string {
 /** The bar's color, by how far toward the next level: red, orange, yellow, then green, like a health bar filling up. */
 export type GrowthBand = 'red' | 'orange' | 'yellow' | 'green'
 
-/** The headline as a bar: the level, how many of `width` cells are filled toward the next, and its color. */
-export type GrowthMeter = { level: Level; next: Level | null; filled: number; empty: number; band: GrowthBand }
+/** A nickname per level, for the ladder's top row (owner, 2026-10-05: "why not make some humor"). The honest level word stays beside it. */
+export const LEVEL_NICKNAMES: Record<Level, string> = { beginner: 'Padawan', junior: 'Apprentice', mid: 'Journeyman', senior: 'Gandalf' }
 
-/** Null until there is a level. Any way made shows as a cell at least, and the bar is never full short of the next level. */
-export function growthMeter(growth: Growth, width: number): GrowthMeter | null {
+/** One rung of the ladder: a level, passed (full), current (filling toward the next) or ahead (empty). */
+export type LadderRung = { level: Level; nick: string; state: 'passed' | 'current' | 'ahead'; filled: number; empty: number }
+
+/** The headline as a ladder of the four levels, each `width` cells wide, the current one filling toward the next. */
+export type GrowthLadder = { rungs: LadderRung[]; width: number; band: GrowthBand }
+
+/** The fewest and most cells a rung has: four rungs with their brackets and gaps have to fit the pane. */
+export const RUNG_MIN = 6
+export const RUNG_MAX = 14
+
+/**
+ * Null until there is a level. The current rung shows any way made as a cell
+ * at least, and is never full short of the next level; at senior, which has
+ * no next, it fills with the way on. Rungs passed are full, rungs ahead empty.
+ */
+export function growthLadder(growth: Growth, columns: number): GrowthLadder | null {
   if (growth.level === null) return null
+  const width = Math.max(RUNG_MIN, Math.min(RUNG_MAX, Math.floor((columns - 3) / 4) - 2))
   const way = Math.min(99, Math.max(0, growth.toNext))
   const filled = way === 0 ? 0 : Math.min(width - 1, Math.max(1, Math.round((way * width) / 100)))
+  const at = LEVELS.indexOf(growth.level)
+  const rungs = LEVELS.map((level, index): LadderRung => {
+    const state = index < at ? 'passed' : index === at ? 'current' : 'ahead'
+    const cells = state === 'passed' ? width : state === 'current' ? filled : 0
 
-  return { level: growth.level, next: LEVEL_AFTER[growth.level], filled, empty: width - filled, band: bandOf(way) }
+    return { level, nick: LEVEL_NICKNAMES[level], state, filled: cells, empty: width - cells }
+  })
+
+  return { rungs, width, band: bandOf(way) }
 }
 
 /** The words beside the bar: "10% to junior · growth 10"; at senior, which has no next, only the score. */
@@ -118,6 +141,15 @@ export function growthMeterLabel(growth: Growth): string {
   const next = LEVEL_AFTER[growth.level]
 
   return next === null ? `growth ${growth.score}` : `${growth.toNext}% to ${next} · growth ${growth.score}`
+}
+
+/** A rung's word, centered over its cells and brackets: the nickname above, the level below. */
+export function rungWord(word: string, width: number): string {
+  const room = width + 2
+  const cut = word.length > room ? word.slice(0, room) : word
+  const left = Math.floor((room - cut.length) / 2)
+
+  return `${' '.repeat(left)}${cut}${' '.repeat(room - cut.length - left)}`
 }
 
 function bandOf(way: number): GrowthBand {

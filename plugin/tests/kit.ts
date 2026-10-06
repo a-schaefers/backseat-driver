@@ -155,6 +155,8 @@ export type StubOptions = {
   isNewProject?: boolean
   /** The email git says is the person's in the fake repository. '' for none. Default: `me@example.com`. */
   email?: string
+  /** Programs besides git and claude the fake world lets run (the person's editor command): each run is recorded in `ran` and answers exit code 0. */
+  allowProcesses?: string[]
   /** How this copy of the plugin was installed: a clone (whose top is the plugin's parent folder), or through a marketplace. Left out, neither. */
   install?: 'clone' | 'installed'
   /** The release tags upstream, such as `v0.3.0`. Left out, `git ls-remote` fails, as it does offline. */
@@ -635,6 +637,11 @@ export function stubSession(on: On, options: StubOptions = {}) {
       return ok('')
     }
     if (e.argv[0] === 'claude') {
+      session.ran.push(e.argv.join(' '))
+
+      return ok('')
+    }
+    if (typeof e.argv[0] === 'string' && (options.allowProcesses ?? []).includes(e.argv[0])) {
       session.ran.push(e.argv.join(' '))
 
       return ok('')
