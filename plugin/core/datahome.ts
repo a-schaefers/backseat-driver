@@ -101,6 +101,11 @@ export function journalPath(root: string, repoRoot: string): string {
   return `${projectDir(root, repoRoot)}/journal.json`
 }
 
+/** The files the watcher saw change since the last commit: work watched arrive counts in full toward progress. */
+export function watchedPath(root: string, repoRoot: string): string {
+  return `${projectDir(root, repoRoot)}/watched.json`
+}
+
 /** The folder in which each running editor keeps one file to say where its caret is. Every tutor reads them all and keeps what is about its own repository. */
 export function editorsPath(root: string): string {
   return `${root}/editors`

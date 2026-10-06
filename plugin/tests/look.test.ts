@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Note } from '../types'
 import type { ModelReply } from '../core/host'
-import { freshLookState, runLook } from '../core/look'
+import { freshLookState, runLook, topicsRaised } from '../core/look'
 import type { LookPorts } from '../core/look'
 import { readSettings } from '../core/settings'
 import type { Watcher } from '../core/watcher'
@@ -98,4 +98,20 @@ test('a look is not started while another is under way, and with no watcher ther
   const none = world({ isAnswered: true, text: '{}' })
   await runLook({ ...none.ports, watcher: () => null }, freshLookState(), true)
   expect(none.log).toEqual([])
+})
+
+test('topicsRaised names the topics of the files\' languages and of general, most raised first', async () => {
+  const stats = (flagged: number, explained = 0) => ({ flagged, explained, lastLook: 0 })
+  const profiles = {
+    languages: ['python', 'shell'],
+    subjects: {
+      general: { answers: {}, isAsked: true, hushed: [], looks: 0, topics: { 'commit-messages': stats(2) } },
+      python: { answers: {}, isAsked: true, hushed: [], looks: 9, topics: { quoting: stats(1), 'error-handling': stats(3, 1), 'magic-numbers': stats(1) } },
+      shell: { answers: {}, isAsked: true, hushed: [], looks: 3, topics: { 'unset-variable': stats(5) } },
+    },
+  }
+  expect(topicsRaised(profiles, ['stats.py'])).toEqual(['error-handling', 'commit-messages', 'magic-numbers', 'quoting'])
+  // Shell's topics are not python's, and a file of no known language brings only the general ones.
+  expect(topicsRaised(profiles, ['notes.txt'])).toEqual(['commit-messages'])
+  expect(topicsRaised({ languages: [], subjects: {} }, ['stats.py'])).toEqual([])
 })

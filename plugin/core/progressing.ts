@@ -12,7 +12,7 @@ import type { LevelChange, ProgressRecord, ProgressView } from '../types'
 import { addedLines, byLanguage, commitInfoArgs, commitPatchArgs, identityOf, judge, MIN_LINES, parseCommitInfo, parseRecent, RECENT_COMMITS_ARGS, sizeOf } from './authorship'
 import type { Host } from './host'
 import { languageName } from './languages'
-import { progressPath } from './datahome'
+import { progressPath, watchedPath } from './datahome'
 import { ANSWER_LABELS, GENERAL } from './profiles'
 import type { Profiles } from '../types'
 import { assessmentRequest, emptyRecord, parseAssessment, parseRecord, withAssessment } from './progress'
@@ -93,9 +93,52 @@ export async function readIdentity(ports: Pick<ProgressPorts, 'git'>, state: Pro
   return isChanged
 }
 
-/** Whose commits count, and the records of the languages in play. */
+/** The files the watcher saw change since the last commit, as kept in the project folder. */
+type Watched = { v: 1; paths: string[] }
+
+function parseWatched(stored: unknown): Watched {
+  const paths = typeof stored === 'object' && stored !== null && Array.isArray((stored as { paths?: unknown }).paths) ? (stored as { paths: unknown[] }).paths : []
+
+  return { v: 1, paths: paths.filter((path): path is string => typeof path === 'string') }
+}
+
+type WatchedPorts = Pick<ProgressPorts, 'store' | 'dataRoot' | 'repoRoot'>
+
+/**
+ * The watched files are kept in the project folder (`watched.json`), not only
+ * in memory: a reload or a restart between the saves and the commit emptied
+ * them, and the commit then weighed half, as work the tutor never saw arrive
+ * (the owner's first evening, 2026-10-05: both commits at 0.5).
+ */
+export async function loadWatched(ports: WatchedPorts, state: ProgressState): Promise<void> {
+  if (ports.dataRoot() === '' || ports.repoRoot() === '') return
+  for (const path of parseWatched(await ports.store().read(watchedPath(ports.dataRoot(), ports.repoRoot()))).paths) state.watchedPaths.add(path)
+}
+
+async function saveWatched(ports: WatchedPorts, state: ProgressState): Promise<void> {
+  if (ports.dataRoot() === '' || ports.repoRoot() === '') return
+  const paths = [...state.watchedPaths].sort()
+  await updateJson(ports.store(), watchedPath(ports.dataRoot(), ports.repoRoot()), parseWatched, () => ({ v: 1, paths }))
+}
+
+/** The watcher saw these files change: what is in them counts in full when it is committed. */
+export async function noteWatched(ports: WatchedPorts, state: ProgressState, paths: readonly string[]): Promise<void> {
+  const before = state.watchedPaths.size
+  for (const path of paths) state.watchedPaths.add(path)
+  if (state.watchedPaths.size !== before) await saveWatched(ports, state)
+}
+
+/** A commit's files were weighed: they start over. */
+export async function forgetWatched(ports: WatchedPorts, state: ProgressState, paths: readonly string[]): Promise<void> {
+  let isChanged = false
+  for (const path of paths) isChanged = state.watchedPaths.delete(path) || isChanged
+  if (isChanged) await saveWatched(ports, state)
+}
+
+/** Whose commits count, the watched files, and the records of the languages in play. */
 export async function setUpProgress(ports: ProgressPorts, state: ProgressState): Promise<void> {
   await readIdentity(ports, state)
+  await loadWatched(ports, state)
   state.records.clear()
   for (const language of ports.profiles().languages) state.records.set(language, await loadRecord(ports, language))
   await showProgress(ports, state)
@@ -207,7 +250,7 @@ export async function assessCommit(ports: ProgressPorts, state: ProgressState, h
   const title = info.message.split('\n')[0] ?? ''
   const languages = [...byLanguage(verdict.files)].filter(([, group]) => sizeOf(group) >= MIN_LINES).slice(0, 2)
   if (languages.length === 0) {
-    for (const file of verdict.files) state.watchedPaths.delete(file.path)
+    await forgetWatched(ports, state, verdict.files.map(file => file.path))
     await ports.setProgress({ skipped: `Commit ${short} is too small to say anything about your progress.` })
 
     return true
@@ -217,7 +260,7 @@ export async function assessCommit(ports: ProgressPorts, state: ProgressState, h
     if (!(await assess(ports, state, language, [{ hash: info.hash, short, weight, title, files: group }], review))) isSettled = false
   }
   // Kept until the commit is settled, so that another try weighs it the same.
-  if (isSettled) for (const file of verdict.files) state.watchedPaths.delete(file.path)
+  if (isSettled) await forgetWatched(ports, state, verdict.files.map(file => file.path))
 
   return isSettled
 }

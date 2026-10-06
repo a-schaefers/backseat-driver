@@ -160,7 +160,12 @@ export function tabRow(
   if (fits(reviewOnly, 1)) return { labels: reviewOnly, gap: 1 }
 
   // Narrower than a docked pane: the longest names give way, and still the review's badge stays.
-  return { labels: TABS.map(({ tab, tiny }) => (tab === 'review' ? `${tiny}${tabBadge(tab, view)}` : tiny)), gap: 1 }
+  const tinyWithBadge = TABS.map(({ tab, tiny }) => (tab === 'review' ? `${tiny}${tabBadge(tab, view)}` : tiny))
+  if (fits(tinyWithBadge, 1)) return { labels: tinyWithBadge, gap: 1 }
+
+  // Not even that (a 57-column dock with "(new)", seen 2026-10-05, wrapped "Set" onto the status line): the
+  // review's badge shrinks to one mark, which still says there is something to read.
+  return { labels: TABS.map(({ tab, tiny }) => (tab === 'review' && tabBadge(tab, view) !== '' ? `${tiny}*` : tiny)), gap: 1 }
 }
 
 /** Shown while the pane does not have the keyboard: its keys do nothing until it does. */

@@ -141,6 +141,7 @@ import {
   assessCommit as assessCommitOf,
   freshProgressState,
   loadRecord as loadRecordOf,
+  noteWatched as noteWatchedOf,
   placeFirst as placeFirstOf,
   queueProgress as queueProgressWork,
   setUpProgress as setUpProgressOf,
@@ -3073,7 +3074,7 @@ async function scan($: EngineInterface, settings: Settings): Promise<void> {
       trace($, 'watch', 'saved', () => ({ files: active.changed(), dirty: active.dirty(), scanMs: now - started }))
       // Read before the save is followed, so that what it sets going knows how close the limit is.
       await readPressure($)
-      for (const path of active.changed()) progressState.watchedPaths.add(path)
+      await noteWatchedOf(progressPortsOf($, settings), progressState, active.changed())
       await followSaves($, active.changed(), now)
     }
     // Until an editor has written its focus file, looking for it this often is enough.

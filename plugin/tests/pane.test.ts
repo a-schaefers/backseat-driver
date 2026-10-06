@@ -153,8 +153,11 @@ test('the tab row keeps what the tabs say for as long as there is room, and neve
   expect(tabRow({ ...busy, columns: 67 })).toEqual({ labels: ['Play', 'Review (new)', 'Explain', 'Growth', 'Lessons', 'Settings'], gap: 1 })
   // A docked pane: the longest names give way.
   expect(tabRow({ ...busy, columns: 64 })).toEqual({ labels: ['Play', 'Review (new)', 'Expl', 'Growth', 'Lessons', 'Set'], gap: 1 })
+  // The owner's 57-column dock (2026-10-05): not even that fit, and "Set" wrapped onto the status line. The badge shrinks to a mark.
+  expect(tabRow({ ...busy, columns: 57 })).toEqual({ labels: ['Play', 'Review*', 'Expl', 'Growth', 'Lessons', 'Set'], gap: 1 })
+  expect(tabRow({ ...busy, review: DONE, columns: 57 })).toEqual({ labels: ['Play', 'Review', 'Expl', 'Growth', 'Lessons', 'Set'], gap: 1 })
   // Every row fits its pane.
-  for (const columns of [98, 80, 75, 72, 67, 64]) {
+  for (const columns of [98, 80, 75, 72, 67, 64, 57]) {
     const row = tabRow({ ...busy, columns })
     expect(row.labels.reduce((sum, label) => sum + label.length + 3, 0) + row.gap * 5 <= columns).toBe(true)
   }

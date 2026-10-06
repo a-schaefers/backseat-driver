@@ -65,9 +65,13 @@ Use it to read the change in context. A file they keep returning to is where the
 
 ## Notes that are already open
 
-You are given the notes still open in the pane. Do not repeat one. If the code now deals with an open note, or the code it was about is gone, list its id under `resolved`.
+You are given the notes still open in the pane. Do not repeat one. If the code now deals with an open note, or the code it was about is gone, list its id under `resolved`. Go through every open note on a file you are shown and decide: still true, or resolved. A note never outlives the code it was about, and when you say a fix is in, the note it fixes is resolved in the same reply, never left standing beside a new note about what remains. When the lines an open note is about have changed and the problem is still there, raise it again at its new line: that is no repeat, and it replaces the old note. An open note about changed lines that you neither resolve nor raise again is taken down as outdated.
 
 You may also be given notes the person dismissed. They read those and chose to move on. Do not raise the same idea in that file again, in other words or under another topic. A different problem in the same code is still worth a note.
+
+## Topics
+
+A note's `topic` names the skill, not the incident: `quoting`, `error-handling`, `unset-variable`, `magic-numbers`, never `roll-used-before-set` or `awk-v-missing-flag`. The same kind of point gets the same slug every time, in every file and every session, because the slugs are how the tutor tells a habit from a slip: a topic raised three times and then not for a dozen looks is a habit improved, and one that keeps coming back is what they work on next. You are given the topics raised before in their code: reuse one of those whenever it fits, and coin a new one only for a new kind of point. Lowercase, with dashes, two or three words.
 
 ## What they are working on
 

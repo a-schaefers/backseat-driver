@@ -192,3 +192,39 @@ test('playByPlayPrompt tells the reviewer what was dismissed in the files it is 
   expect(prompt.includes('not in this look')).toBe(false)
   expect(playByPlayPrompt([change], [], []).prompt.includes('dismissed')).toBe(false)
 })
+
+test('playByPlayPrompt reminds the reviewer of the topics raised before, so that a kind of point keeps its slug', async () => {
+  const change = { path: 'a.py', before: '', after: 'x = 1\n', hunks: diffLines('', 'x = 1\n') }
+  const { prompt } = playByPlayPrompt([change], [], [], null, '', '', ['quoting', 'error-handling'])
+
+  expect(prompt).toMatch('Topics raised before in their code. Reuse the slug when a note is the same kind of point: quoting, error-handling\n')
+  expect(playByPlayPrompt([change], []).prompt.includes('Topics raised before')).toBe(false)
+})
+
+test('after a look at its file, an open note is kept, moved or taken down by the line it pointed at', async () => {
+  // The owner's evening (2026-10-05): three notes about fixed bugs stood through the looks that saw the fixes.
+  const before = 'a = 1\nroll=$(awk "BEGIN{srand(); print int(rand()*6)+1}")\necho $roll\n'
+  const open = [
+    note(1, { line: 2, lineText: 'roll=$(awk "BEGIN{srand(); print int(rand()*6)+1}")' }),
+    note(2, { line: 3, lineText: 'echo $roll' }),
+    note(3, { file: 'other.py', line: 9, lineText: 'gone = 1' }),
+    note(4, { line: 1 }), // from before notes knew their line
+  ]
+  const nothing = { resolved: [], notes: [] }
+  // The seeded line is fixed and the echo moved down a line: note 1 goes, note 2 follows its line, 3 and 4 stay.
+  const fixed = 'a = 1\np=$$\nroll=$(awk -v p="$p" "BEGIN{srand(p); print int(rand()*6)+1}")\necho $roll\n'
+  const shown = [{ path: 'a.py', after: fixed, hunks: diffLines(before, fixed) }]
+  const { notes } = applyReply(open, nothing, ['a.py'], 5, [], shown)
+  expect(notes.map(n => `${n.id}:${n.line}`).sort()).toEqual(['2:4', '3:9', '4:1'])
+
+  // The same point raised again at its new line replaces the old note, and a new note learns its line's text.
+  const again = { resolved: [], notes: [{ ...note(9), id: undefined, line: 3, topic: 'topic-1', text: 'still unseeded on some awks' } as never] }
+  const replaced = applyReply(open, again, ['a.py'], 5, [], shown).notes
+  expect(replaced.find(n => n.topic === 'topic-1')).toEqual(expect.objectContaining({ id: 5, line: 3, lineText: 'roll=$(awk -v p="$p" "BEGIN{srand(p); print int(rand()*6)+1}")' }))
+
+  // A note from before notes knew their line goes when the lines around it changed, and stays when they did not.
+  const oldStyle = [note(7, { line: 2 }), note(8, { line: 1 })]
+  expect(applyReply(oldStyle, nothing, ['a.py'], 9, [], shown).notes.map(n => n.id)).toEqual([8])
+  // A file the look was not shown is left alone, whatever its notes say.
+  expect(applyReply(open, nothing, ['b.py'], 5, [], []).notes.map(n => n.id).sort()).toEqual([1, 2, 3, 4])
+})

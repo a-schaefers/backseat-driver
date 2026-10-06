@@ -121,7 +121,7 @@ export async function runLook(ports: LookPorts, state: LookState, isAsked: boole
     const brief = ports.brief(changedFiles, insight => current.has(insight))
     // What the journal says they have been doing, so that the changes are read in the light of it.
     const doing = await ports.glance()
-    const { prompt, shown } = playByPlayPrompt(changes, await ports.notes.open(), await ports.notes.dismissed(), bubble, brief, doing)
+    const { prompt, shown } = playByPlayPrompt(changes, await ports.notes.open(), await ports.notes.dismissed(), bubble, brief, doing, topicsRaised(ports.profiles(), changedFiles))
     const result = await ports.ask('play-by-play', {
       model: settings.playByPlay.model,
       effort: settings.playByPlay.thinking,
@@ -161,7 +161,7 @@ export async function runLook(ports: LookPorts, state: LookState, isAsked: boole
       // Read again: a note dismissed while this look ran must not come back with it.
       const dismissed = await ports.notes.dismissed()
       const dealtWith = (await ports.notes.open()).filter(note => reply.resolved.includes(note.id))
-      await ports.notes.change(open => applyReply(open, reply, paths, firstId, dismissed).notes)
+      await ports.notes.change(open => applyReply(open, reply, paths, firstId, dismissed, shown).notes)
       // The notes about these files are about the text this look saw.
       for (const change of shown) ports.notePrints.set(change.path, sourcePrint(change.after))
       void ports.saveNotes()
@@ -211,4 +211,29 @@ export async function runLook(ports: LookPorts, state: LookState, isAsked: boole
     // The pane's line and the next look both follow from how this one went.
     await ports.planNext()
   }
+}
+
+/** The most topics the play-by-play is reminded of. */
+export const TOPICS_SHOWN = 24
+
+/**
+ * The topic slugs raised before in the languages of these files, and in
+ * general, most raised first. The play-by-play is told them so that the same
+ * kind of point gets the same slug: the habits half of the growth score counts
+ * a topic raised three times, which nine one-off slugs never add up to (the
+ * owner's first evening, 2026-10-05).
+ */
+export function topicsRaised(profiles: Profiles, files: readonly string[]): string[] {
+  const languages = new Set([GENERAL, ...files.map(file => languageOf(file)).filter((language): language is string => language !== null)])
+  const counts = new Map<string, number>()
+  for (const language of languages) {
+    for (const [topic, stats] of Object.entries(profiles.subjects[language]?.topics ?? {})) {
+      counts.set(topic, (counts.get(topic) ?? 0) + stats.flagged + stats.explained)
+    }
+  }
+
+  return [...counts]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, TOPICS_SHOWN)
+    .map(([topic]) => topic)
 }

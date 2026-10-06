@@ -1,7 +1,10 @@
 import { expect, test } from 'claude-code/testing'
 
 import { NO_PRESSURE } from '../core/health'
-import { freshProgressState, placeFirst, queueProgress, setUpProgress } from '../core/progressing'
+import { watchedPath } from '../core/datahome'
+import { forgetWatched, freshProgressState, loadWatched, noteWatched, placeFirst, queueProgress, setUpProgress } from '../core/progressing'
+import { memoryDisk } from '../core/storage'
+import { plainStore } from '../core/store'
 import type { ProgressPorts } from '../core/progressing'
 import { readSettings } from '../core/settings'
 import type { Profiles } from '../types'
@@ -76,4 +79,25 @@ test('progress work runs one piece after the other, and a failure does not stop 
 
   expect(order).toEqual(['a', 'c'])
   expect(w.log).toEqual(['fail: progress failed: Error: boom'])
+})
+
+test('the files the watcher saw change are kept in the project folder, so a restart does not halve a commit\'s weight', async () => {
+  // The owner's first evening (2026-10-05): a restart between the saves and the commit, and the commit weighed 0.5.
+  const store = plainStore(memoryDisk())
+  const w = world({ store: () => store })
+  const state = freshProgressState()
+  await noteWatched(w.ports, state, ['stats.py', 'README.md'])
+  await noteWatched(w.ports, state, ['stats.py'])
+  expect(await store.read(watchedPath('/data', '/work'))).toEqual({ v: 1, paths: ['README.md', 'stats.py'] })
+
+  const after = freshProgressState()
+  await loadWatched(w.ports, after)
+  expect([...after.watchedPaths].sort()).toEqual(['README.md', 'stats.py'])
+
+  await forgetWatched(w.ports, after, ['stats.py', 'never-seen.py'])
+  expect(await store.read(watchedPath('/data', '/work'))).toEqual({ v: 1, paths: ['README.md'] })
+  // Outside a repository, or without a data folder, nothing is written.
+  const nowhere = world({ store: () => store, repoRoot: () => '' })
+  await noteWatched(nowhere.ports, freshProgressState(), ['x.py'])
+  expect(await store.read(watchedPath('/data', ''))).toBe(null)
 })

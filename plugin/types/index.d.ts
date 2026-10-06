@@ -52,6 +52,12 @@ export type Note = {
   /** A short slug for the idea behind the note, such as `lock-across-await`. */
   topic: string
   text: string
+  /**
+   * The line it points at, trimmed, as the look that raised it saw it. A later
+   * look moves the note when that line moved and takes it down when it is gone.
+   * Absent on notes from before 2026-10-05.
+   */
+  lineText?: string
 }
 
 /** What the play-by-play is doing, for the pane's status line and the animated character's pose. */

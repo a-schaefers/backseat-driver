@@ -1,4 +1,6 @@
 import type { Note, NoteKind } from '../types'
+import { splitLines } from './diff'
+import type { Hunk } from './diff'
 
 /**
  * What the play-by-play model sends back: notes it adds, the ids of open
@@ -122,14 +124,27 @@ export function applyReply(
   lookedAt: readonly string[],
   nextId: number,
   dismissed: readonly Note[] = [],
+  /** The changes this look was shown, with each file's text as it is now: the open notes about them are placed again. */
+  changed: readonly ShownChange[] = [],
 ): { notes: Note[]; nextId: number } {
-  const notes = open.filter(note => !reply.resolved.includes(note.id))
+  // A note never outlives the code it was about (the owner, 2026-10-05: three notes about fixed bugs stood through
+  // the looks that saw the fixes). The look just saw these files: every open note about them is placed again by the
+  // line it pointed at, moved when that line moved, taken down when it is gone, kept when it reads as before.
+  const notes: Note[] = []
+  for (const note of open) {
+    if (reply.resolved.includes(note.id)) continue
+    const change = changed.find(shown => shown.path === note.file)
+    const placed = change === undefined ? note : placeNote(note, change)
+    if (placed !== null) notes.push(placed)
+  }
   let id = nextId
   for (const added of reply.notes) {
     if (!lookedAt.includes(added.file)) continue
     if (notes.some(note => isSamePoint(note, added))) continue
     if (dismissed.some(note => isSamePoint(note, added))) continue
-    notes.push({ ...added, id })
+    const after = changed.find(shown => shown.path === added.file)?.after
+    const lineText = after === undefined ? '' : (splitLines(after)[added.line - 1] ?? '').trim()
+    notes.push({ ...added, id, ...(lineText === '' ? {} : { lineText }) })
     id += 1
   }
 
@@ -138,6 +153,45 @@ export function applyReply(
   const kept = sortNotes(byWorth.slice(0, MAX_OPEN_NOTES))
 
   return { notes: kept, nextId: id }
+}
+
+/** A file a look was shown: its path, its text as it is now, and what changed in it since the last look. */
+export type ShownChange = { path: string; after?: string; hunks: readonly Pick<Hunk, 'oldStart' | 'lines'>[] }
+
+/**
+ * Where an open note stands after a look at its file: as it was when its
+ * line still reads the same, moved when that line is found once elsewhere,
+ * gone (null) when it is not. A note that does not know its line's text (from
+ * before 2026-10-05) is gone when the lines around it changed.
+ */
+export function placeNote(note: Note, change: ShownChange): Note | null {
+  if (note.lineText === undefined || note.lineText === '' || change.after === undefined) {
+    return change.hunks.some(hunk => changedOldLines(hunk).has(note.line)) ? null : note
+  }
+  const lines = splitLines(change.after).map(line => line.trim())
+  if (lines[note.line - 1] === note.lineText) return note
+  const found = lines.flatMap((line, index) => (line === note.lineText ? [index + 1] : []))
+
+  return found.length === 1 ? { ...note, line: found[0] ?? note.line } : null
+}
+
+/** The lines of the old text a hunk changed: each removed line, and the lines on either side of an insertion. Context lines do not count. */
+export function changedOldLines(hunk: Pick<Hunk, 'oldStart' | 'lines'>): Set<number> {
+  const lines = new Set<number>()
+  let old = hunk.oldStart
+  for (const line of hunk.lines) {
+    if (line.startsWith('-')) {
+      lines.add(old)
+      old += 1
+    } else if (line.startsWith('+')) {
+      lines.add(old - 1)
+      lines.add(old)
+    } else {
+      old += 1
+    }
+  }
+
+  return lines
 }
 
 /** The dismissed notes as the reviewer reads them. No line numbers: the code has moved on since. */
@@ -176,6 +230,7 @@ function parseNote(value: unknown): Note | null {
     kind,
     topic: typeof note.topic === 'string' ? note.topic : '',
     text: note.text.slice(0, MAX_NOTE_CHARS),
+    ...(typeof note.lineText === 'string' && note.lineText !== '' ? { lineText: note.lineText } : {}),
   }
 }
 
