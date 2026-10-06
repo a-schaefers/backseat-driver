@@ -109,8 +109,10 @@ export function readSettings(options: Options): Settings {
     isUpdateCheckOn: options.update_check !== false,
     playByPlay: {
       isAutomatic: options.play_by_play !== 'on request',
-      quietMs: durationMs(options.quiet_time, 10_000),
-      minGapMs: durationMs(options.minimum_gap, 60_000),
+      // Quick by default (owner, 2026-10-05: "make this app as quick as possible"): a look five seconds after the
+      // last save, and no gap between looks. The gap is there for whoever wants to cap the spend.
+      quietMs: durationMs(options.quiet_time, 5_000),
+      minGapMs: durationMs(options.minimum_gap, 0),
       model: text(options.play_by_play_model, 'sonnet'),
       thinking: thinking(options.play_by_play_thinking, 'medium'),
     },

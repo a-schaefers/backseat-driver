@@ -41,8 +41,8 @@ test('readSettings applies the documented defaults to empty options', async () =
     isUpdateCheckOn: true,
     playByPlay: {
       isAutomatic: true,
-      quietMs: 10_000,
-      minGapMs: 60_000,
+      quietMs: 5_000,
+      minGapMs: 0,
       model: 'sonnet',
       thinking: 'medium',
     },

@@ -30,7 +30,9 @@ export function relativeTo(repoRoot: string, file: string): string | null {
   const relative = path.startsWith('/') ? (path.startsWith(`${root}/`) ? path.slice(root.length + 1) : null) : path.replace(/^\.\//, '')
   if (relative === null || relative === '') return null
 
-  return relative.split('/').some(segment => segment === '' || segment === '.' || segment === '..') ? null : relative
+  // The repository's own folder is not the project's code: a caret in `.git/COMMIT_EDITMSG` (a commit written in the
+  // editor) is nowhere Explain can follow, and the journal would otherwise credit the time to it (seen 2026-10-05).
+  return relative.split('/').some(segment => segment === '' || segment === '.' || segment === '..' || segment === '.git') ? null : relative
 }
 
 function lineNumber(value: unknown): number | null {

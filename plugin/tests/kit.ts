@@ -16,12 +16,18 @@ import { emptyProject } from '../core/project'
  */
 const SESSION_TEST_MS = 30_000
 
+/**
+ * The pacing the session tests were written against: a look 10 s after the save, a minute between looks. The
+ * product's defaults are quicker (5 s, no gap; owner, 2026-10-05), and a test that wants them says so.
+ */
+export const KIT_PACE = { quiet_time: '10 seconds', minimum_gap: '1 minute' }
+
 /** `test`, for a test that starts a session: the same, with more time. */
 export function sessionTest(name: string, ...rest: TestRest): void {
   const [first, second] = rest
   const options: TestOptions = typeof first === 'function' ? {} : first
   const body = (typeof first === 'function' ? first : second) as TestBody
-  test(name, { timeoutMs: SESSION_TEST_MS, ...options }, body)
+  test(name, { timeoutMs: SESSION_TEST_MS, ...options, options: { ...KIT_PACE, ...options.options } }, body)
 }
 
 /** A `/name args` typed at the prompt of a wide fullscreen terminal. */

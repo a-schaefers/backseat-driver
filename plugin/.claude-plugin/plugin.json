@@ -50,15 +50,15 @@
       "type": "string",
       "title": "Play-by-play quiet time",
       "description": "How long the working tree must be still before the play-by-play looks.",
-      "options": ["5 seconds", "10 seconds", "20 seconds", "30 seconds", "60 seconds"],
-      "default": "10 seconds"
+      "options": ["2 seconds", "5 seconds", "10 seconds", "20 seconds", "30 seconds", "60 seconds"],
+      "default": "5 seconds"
     },
     "minimum_gap": {
       "type": "string",
       "title": "Play-by-play minimum gap",
       "description": "The shortest time between two play-by-play looks.",
       "options": ["none", "30 seconds", "1 minute", "2 minutes", "5 minutes"],
-      "default": "1 minute"
+      "default": "none"
     },
     "play_by_play_model": {
       "type": "string",

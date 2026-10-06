@@ -64,6 +64,10 @@ test('relativeTo and the two ways a spot is named', async () => {
   expect(relativeTo('/work', '/workshop/a.py')).toBe(null)
   expect(relativeTo('/work', '../secrets')).toBe(null)
   expect(relativeTo('/work', 'src/../../secrets')).toBe(null)
+  // A commit message written in the editor is in the repository's own folder, not in the project.
+  expect(relativeTo('/work', '/work/.git/COMMIT_EDITMSG')).toBe(null)
+  expect(relativeTo('/work', '/work/vendor/.git/config')).toBe(null)
+  expect(relativeTo('/work', '/work/.gitignore')).toBe('.gitignore')
   expect(relativeTo('/work', '')).toBe(null)
 
   expect(parseTarget('stats.py', '/work')).toEqual({ path: 'stats.py', line: 1 })
