@@ -274,13 +274,12 @@ sessionTest('with the log on, the tutor writes down what it says it is showing a
   // And beside the log, the state: who the session is, where it draws, what Claude Code said of its pane.
   const folder = [...session.disk.keys()].find(path => path.startsWith(`${DATA_HOME}/debug/`) && path.endsWith('/state.json')) ?? ''
   const state = JSON.parse(session.disk.get(folder) ?? '{}') as {
-    session: { id: string; cwd: string; surfaces: string[]; layout: string; panes: { id: string; isPlaced: boolean }[] }
+    session: { id: string; cwd: string; surfaces: string[]; panes: { id: string; isPlaced: boolean }[] }
     shown: { pane: { texts: string[] } | null; opened: { isPlaced: boolean } | null }
   }
   expect(state.session.id).toBe(SESSION_ID)
   expect(state.session.cwd).toBe(ROOT)
   expect(state.session.surfaces).toEqual(['terminal'])
-  expect(state.session.layout).toBe('vertical')
   expect(state.session.panes.map(pane => pane.id)).toEqual(['backseat-driver'])
   expect(state.shown.opened?.isPlaced).toBe(true)
   expect(state.shown.pane?.texts.some(text => text.startsWith('On.'))).toBe(true)

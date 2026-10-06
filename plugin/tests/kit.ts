@@ -227,17 +227,8 @@ export function stubSession(on: On, options: StubOptions = {}) {
   let cloneTop = ''
   let cloneHead = commitHash(500)
   const session = {
-    /** The rows of `/config`, as `$.config.list()` answers: three of the plugin's own and one of another plugin's. */
+    /** The rows of `/config`, as `$.config.list()` answers: two of the plugin's own and one of another plugin's. */
     config: [
-      {
-        key: 'backseat-driver.layout',
-        label: 'Layout',
-        kind: 'choice',
-        value: 'unified',
-        options: ['unified', 'horizontal', 'vertical'],
-        provider: { plugin: 'backseat-driver', tier: 'user' },
-        isLocked: false,
-      },
       {
         key: 'backseat-driver.voice',
         label: 'Voice persona',

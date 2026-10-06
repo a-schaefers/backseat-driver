@@ -923,7 +923,7 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
     if mode != "off" and stale is not None and stale > STATE_STALE_MS:
         out.append((BAD, f"{who} last wrote its state {ago(stale)} ago and writes it every ten seconds with the log on: its timers do not run (stopped, asleep, or the log went off)"))
         return out
-    out.append((FINE, f"{who} wrote its state {ago(stale)} ago: mode {mode}, layout {dig(state, 'session.layout')}"))
+    out.append((FINE, f"{who} wrote its state {ago(stale)} ago: mode {mode}, layout {dig(state, 'session.layout') or 'vertical'}"))
 
     if s["entry"] is None and mode != "off":
         out.append((BAD, f"{who} says the tutor is {mode}, and sessions.json does not: a process that carries this conversation on would start off"))
@@ -1000,7 +1000,7 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
     # What it says it shows, against the screen.
     shown = state.get("shown") if isinstance(state.get("shown"), dict) else {}
     opened = shown.get("opened")
-    layout = dig(state, "session.layout")
+    layout = dig(state, "session.layout") or "vertical"
     drawing = shown.get("pane") if layout == "vertical" else shown.get("band")
     if mode != "off" and layout == "vertical":
         panes = dig(state, "session.panes")

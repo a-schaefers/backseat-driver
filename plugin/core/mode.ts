@@ -4,9 +4,9 @@ import type { Mode } from '../types'
 export type ModeRequest = 'on' | 'off' | 'pause' | 'resume' | 'status'
 
 /** Everything `/bsd <word>` can ask for. */
-export type Request = ModeRequest | 'explain' | 'layout' | 'settings' | 'questions' | 'working' | 'forget' | 'license' | 'update' | 'uninstall' | 'debug' | 'help'
+export type Request = ModeRequest | 'explain' | 'settings' | 'questions' | 'working' | 'forget' | 'license' | 'update' | 'uninstall' | 'debug' | 'help'
 
-const WORDS: readonly Request[] = ['on', 'off', 'pause', 'resume', 'status', 'explain', 'layout', 'settings', 'questions', 'working', 'forget', 'license', 'update', 'uninstall', 'debug', 'help']
+const WORDS: readonly Request[] = ['on', 'off', 'pause', 'resume', 'status', 'explain', 'settings', 'questions', 'working', 'forget', 'license', 'update', 'uninstall', 'debug', 'help']
 
 export type Parsed = {
   request: Request
@@ -30,7 +30,6 @@ export function parseRequest(args: string): Parsed {
 export function isModeRequest(request: Request): request is ModeRequest {
   return (
     request !== 'explain' &&
-    request !== 'layout' &&
     request !== 'settings' &&
     request !== 'questions' &&
     request !== 'working' &&
@@ -53,8 +52,6 @@ export const HELP = [
   '  /bsd resume      carry on',
   '  /bsd status      whether it is on, its voice and its engineering persona',
   '  /bsd explain     explain a spot in the code: /bsd explain src/app.py:42',
-  '  /bsd layout      vertical (the default), horizontal or unified; kept',
-  '                   /bsd layout alone moves to the next one',
   '  /bsd settings    change its settings in the pane, as in /config',
   '  /bsd questions   answer the first-run questions again',
   '  /bsd working     say what you are working on: /bsd working on the parser',
@@ -78,7 +75,7 @@ export const HELP = [
   '  q         answer the questions again',
   '  s c b     in Lessons: start the next step, mark it done yourself, back to the list',
   '',
-  'The layout, models, thinking levels, pacing, the voice and the engineering persona are in the Settings tab, and in /config: search for "backseat".',
+  'The models, thinking levels, pacing, the voice and the engineering persona are in the Settings tab, and in /config: search for "backseat".',
 ].join('\n')
 
 /** What `/bsd settings` says while the tutor is off, when there is no pane to show them in. */
@@ -114,5 +111,3 @@ export function transition(from: Mode, request: ModeRequest): { to: Mode; text: 
   }
 }
 
-/** What `/bsd layout` prints when the word after it is not a layout. */
-export const LAYOUT_USAGE = 'The layouts are unified, horizontal and vertical: /bsd layout vertical. /bsd layout alone moves to the next one.'

@@ -12,13 +12,6 @@
   "keywords": ["tutor", "learning", "code-review", "mod"],
   "types": "./types/index.d.ts",
   "userConfig": {
-    "layout": {
-      "type": "string",
-      "title": "Layout",
-      "description": "Where the tutor shows itself. vertical: the whole view in a pane, which sits beside the conversation in Claude Code's fullscreen layout. horizontal: the whole view in a frame above the prompt, side by side. unified: a few lines above the prompt that open into the tabs when you ask, and a line under the prompt; no pane. /bsd layout switches it.",
-      "options": ["unified", "horizontal", "vertical"],
-      "default": "vertical"
-    },
     "voice": {
       "type": "string",
       "title": "Voice persona",

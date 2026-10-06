@@ -85,7 +85,6 @@ Type `/bsd` in Claude Code. The first time you work in a language, it asks a few
 | `/bsd explain src/app.py:42` | Explain a spot in the code |
 | `/bsd working on the parser` | Tell it what you're working on |
 | `/bsd settings` | Open the Settings tab |
-| `/bsd layout` | A pane at the side, a frame above the prompt, or a few lines above it. It remembers |
 | `/bsd forget` | Erase what it remembers: one project, one language, or everything |
 | `/bsd license` | Switch between personal and commercial use, or add a key |
 | `/bsd update`, `/bsd uninstall` | Fetch a newer release when it announces one, or remove the plugin |

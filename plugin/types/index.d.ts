@@ -357,12 +357,8 @@ declare module 'claude-code' {
       speech: Speech
       /** What they are working on, for the line under the status line. */
       working: Working
-      /** In the unified layout, whether the lines above the prompt are opened into the tab. */
-      unfolded: boolean
-      /** The subject of the review whose "Jump to" list is open, or '' while it is folded. */
-      jumpOpen: string
-      /** Whether the band above the prompt has the keyboard, as far as its focus ring has told. */
-      bandKeys: boolean
+      /** Which list opened downward is open: `jump:<subject>` or `setting:<key>`, or '' while every one is folded. */
+      openList: string
       /** The plugin's own `/config` rows, for the Settings tab. Read again whenever the tab is opened. */
       settings: SettingRow[]
       /** The `userConfig` values this module was last loaded with, so that a reload can tell which of them changed. */

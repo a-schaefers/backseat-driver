@@ -15,7 +15,7 @@ import { lately, levelPhrase } from '../core/progress'
 import { readableReview, shownReview, spotsIn, SURVEY_SUBJECT } from '../core/review'
 import { DEFAULT_PERSONA } from '../core/settings'
 import { clockTime, playLine } from '../core/status'
-import type { Layout, Persona } from '../core/settings'
+import type { Persona } from '../core/settings'
 
 /** The elements the pane is built from. Every surface that draws panes has them, save `Select`, which some lack, and `Raster`, which only the terminal has. */
 export type Kit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdown'> & Partial<Pick<Elements['terminal'], 'Select' | 'Raster'>>
@@ -55,12 +55,8 @@ export type PaneView = {
   character: { avatar: Avatar; speech: Speech; backdrop?: Backdrop } | null
   /** True where rows are scarce, as in a pane above the prompt: the character is then drawn in one line. */
   isCompact: boolean
-  /** Which of the three ways of showing the tutor this drawing is for. */
-  layout: Layout
-  /** Unified only: whether the lines above the prompt are opened into the tab shown. */
-  isUnfolded: boolean
-  /** The subject of the review whose "Jump to" list is open, or '' while it is folded. */
-  jumpOpen?: string
+  /** Which list opened downward is open: `jump:<subject>` or `setting:<key>`, or '' while every one is folded. */
+  openList?: string
   /** How many rows the terminal has, as far as the drawing knows. */
   rows: number
   /** The plugin's own `/config` rows, for the Settings tab. */
@@ -88,8 +84,6 @@ export type PaneActions = {
   onExplainAsk: () => void
   /** Ask what they are working on, so that they can say it themselves or take it back. */
   onWorking: () => void
-  /** Unified only: fold the opened tab back into the few lines above the prompt. */
-  onFold: () => void
   /** Select the next note in the order they are drawn, or the previous one. */
   onStep: (step: 1 | -1) => void
   /** Change one of the plugin's `/config` rows to the value picked. */
@@ -106,6 +100,8 @@ export type PaneActions = {
   onJump?: (path: string, line: number) => void
   /** Open the list of places the review names, or fold it again. */
   onJumpFold?: (subject: string) => void
+  /** Open a setting's options under its row, or fold them again. */
+  onSettingFold?: (key: string) => void
   /** Explain: put the symbol that starts at this line in focus. */
   onExplainPick?: (line: number) => void
   /** Open a place in the person's own editor. Present only while `editor_command` is set. */
@@ -235,11 +231,11 @@ export function underlineSpans(labels: readonly string[], gap: number, withDigit
 }
 
 /** The rule under the tabs, heavy and in the accent color under the open one: what makes the row read as a tab bar. */
-function tabUnderline({ Box, Text }: Pick<Kit, 'Box' | 'Text'>, view: Pick<PaneView, 'tab' | 'columns' | 'layout' | 'isFocused'>, row: { labels: string[]; gap: number }) {
+function tabUnderline({ Box, Text }: Pick<Kit, 'Box' | 'Text'>, view: Pick<PaneView, 'tab' | 'columns'>, row: { labels: string[]; gap: number }) {
   const spans = underlineSpans(
     row.labels,
     row.gap,
-    hasDigits(view),
+    true,
     TABS.findIndex(entry => entry.tab === view.tab),
     view.columns,
   )
@@ -340,7 +336,7 @@ function workingOn({ Box, Text, Button }: Kit, view: PaneView, actions: PaneActi
 }
 
 /**
- * The notes in the order every layout draws them: decision points first,
+ * The notes in the order they are drawn: decision points first,
  * as theirs to make, then what will or may break and what reads better,
  * then insights.
  */
@@ -525,6 +521,7 @@ function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
   }
 
   const { target, detail } = explain
+  const spot = explain.spot
   // Nothing known about the file, and nothing on its way: say what to do rather than show an empty tab.
   const isBlank = target === null && explain.outline.length === 0 && explain.fileSummary === '' && explain.status === 'fresh'
   const notice = isBlank ? NOTHING_EXPLAINED : explainNotice(explain)
@@ -543,6 +540,7 @@ function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
         {explain.outline.length > 1 && <Button key="explain-previous" label="previous" hotkey="p" plain onPress={() => actions.onExplainMove(-1)} />}
         {target !== null && <Button key="explain-ask" label="ask about this" hotkey="e" plain onPress={() => actions.onExplainAsk()} />}
         {canFetch && <Button key="explain-fetch" label="look this up" hotkey="f" plain onPress={() => actions.onExplainFetch()} />}
+        {actions.onOpen !== undefined && <Button key="explain-open" label="open in editor" hotkey="o" plain onPress={() => actions.onOpen?.(spot.path, spot.line)} />}
       </Box>
       {/* The keys and the list stay at the top, so that a press moves the mark without moving the page (owner, 2026-10-05). */}
       {rule({ Text }, view.columns)}
@@ -612,12 +610,12 @@ export function jumpHeading(count: number, isOpen: boolean): string {
  * itself; more fold under a heading that opens them, one row each, and they
  * fold again on a jump or a change of tab.
  */
-function jumpList({ Box, Button }: Pick<Kit, 'Box' | 'Button'>, view: Pick<PaneView, 'jumpOpen'>, subject: string, spots: readonly { path: string; line: number }[], actions: PaneActions) {
+function jumpList({ Box, Button }: Pick<Kit, 'Box' | 'Button'>, view: Pick<PaneView, 'openList'>, subject: string, spots: readonly { path: string; line: number }[], actions: PaneActions) {
   const row = (spot: { path: string; line: number }, lead: string) => (
     <Button key={`jump-${spot.path}:${spot.line}`} label={`▸ ${lead}${spot.path}:${spot.line}`} plain onPress={() => actions.onJump?.(spot.path, spot.line)} />
   )
   if (spots.length === 1) return <Box flexDirection="column">{spots.map(spot => row(spot, 'Jump to '))}</Box>
-  const isOpen = view.jumpOpen === subject
+  const isOpen = view.openList === `jump:${subject}`
 
   return (
     <Box flexDirection="column">
@@ -763,6 +761,7 @@ function playByPlay(kit: Kit, view: PaneView, actions: PaneActions) {
         notes.length > 1 && <Button key="next-note" label="next note" hotkey="j" plain onPress={() => actions.onStep(1)} />,
         notes.length > 1 && <Button key="previous-note" label="previous" hotkey="k" plain onPress={() => actions.onStep(-1)} />,
         canLook && <Button key="look" label="look now" hotkey="l" plain onPress={() => actions.onLook()} />,
+        actions.onOpen !== undefined && <Button key="open" label="open in editor" hotkey="o" plain onPress={() => actions.onOpen?.(current.file, current.line)} />,
       ])}
     </Box>
   )
@@ -1026,67 +1025,67 @@ function tabBody(kit: Kit, view: PaneView, actions: PaneActions) {
   return profileTab(kit, view, actions)
 }
 
-/**
- * Whether the tab buttons carry their digits. A pane's keys work only while
- * it has the keyboard. Above the prompt, Claude Code also lets a bare digit
- * typed into an empty prompt press a button, so there the digits are only
- * given while the band has the keyboard: otherwise answering Claude with
- * "2" would open a tab.
- */
-export function hasDigits(view: Pick<PaneView, 'layout' | 'isFocused'>): boolean {
-  return view.layout === 'vertical' || view.isFocused
-}
-
-/** The tabs as a row of buttons. */
+/** The tabs as a row of buttons, each with its digit. */
 function tabButtons({ Box, Button }: Kit, view: PaneView, actions: PaneActions, row: { labels: string[]; gap: number }) {
-  const isUnified = view.layout === 'unified'
-
   return (
-    <Box flexDirection="row" columnGap={row.gap} flexShrink={0} marginRight={view.layout === 'vertical' ? 0 : 2}>
+    <Box flexDirection="row" columnGap={row.gap} flexShrink={0}>
       {TABS.map(({ tab, hotkey }, index) => (
-        <Button
-          key={`tab-${tab}`}
-          label={row.labels[index] ?? ''}
-          {...(hasDigits(view) ? { hotkey } : {})}
-          {...(view.layout !== 'vertical' && view.tab === tab ? { autoFocus: true as const } : {})}
-          plain
-          dimColor={view.tab !== tab || (isUnified && !view.isUnfolded)}
-          onPress={() => actions.onTab(tab)}
-        />
+        <Button key={`tab-${tab}`} label={row.labels[index] ?? ''} hotkey={hotkey} plain dimColor={view.tab !== tab} onPress={() => actions.onTab(tab)} />
       ))}
     </Box>
   )
 }
 
 /** What the Settings tab says above the rows. */
-export const SETTINGS_HINT = 'The same settings as in /config. Click a row, or Tab to it and press Enter, to change it. A change applies at once.'
+export const SETTINGS_HINT = 'The same settings as in /config. Click a row to see its options, then click one; or Tab to it and press Enter. A change applies at once.'
 
-/** What the Settings tab says where it cannot offer a pick. */
-export const SETTINGS_ELSEWHERE = 'The settings as they are now. They are changed in /config here.'
+/** What a row says when its value is typed rather than picked, which the pane does not offer. */
+export const SET_IN_CONFIG = 'set it in /config'
 
-/** The plugin's `/config` rows, each changed in place with a pick. */
-function settingsTab({ Box, Text, Select }: Kit, view: PaneView, actions: PaneActions) {
+/** A row's heading, folded or open: "▸ Voice persona: knuth", "▾ Voice persona: knuth". */
+export function settingHeading(row: Pick<SettingRow, 'label' | 'value'>, isOpen: boolean): string {
+  return `${isOpen ? '▾' : '▸'} ${row.label}: ${row.value}`
+}
+
+/**
+ * The plugin's `/config` rows, each a list that opens downward: the row
+ * names its value, a press opens its options under it, and a press on an
+ * option picks it and folds them again. A `Select` was tried first: on the
+ * owner's terminal a click opened it and could neither pick an option nor
+ * close it (2026-10-05).
+ */
+function settingsTab({ Box, Text, Button }: Kit, view: PaneView, actions: PaneActions) {
   if (view.settings.length === 0) return <Text dimColor>Reading the settings from /config.</Text>
 
   return (
     <Box flexDirection="column">
-      <Text dimColor>{Select === undefined ? SETTINGS_ELSEWHERE : SETTINGS_HINT}</Text>
+      <Text dimColor>{SETTINGS_HINT}</Text>
       <Text> </Text>
-      {view.settings.map(row =>
-        row.isLocked || Select === undefined || row.options === undefined ? (
-          <Text dimColor>{`${row.label}: ${row.value}${row.isLocked ? ' (set by your organization)' : row.options === undefined ? ' · set it in /config' : ''}`}</Text>
-        ) : (
-          <Select
-            key={`setting-${row.key}`}
-            label={row.label}
-            options={row.options.map(option => ({ value: option }))}
-            value={row.value}
-            onSelect={value => {
-              if (value !== row.value) actions.onSetting(row, value)
-            }}
-          />
-        ),
-      )}
+      {view.settings.map(row => {
+        if (row.isLocked) return <Text dimColor>{`${row.label}: ${row.value} (set by your organization)`}</Text>
+        if (row.options === undefined || row.options.length === 0) return <Text dimColor>{`${row.label}: ${row.value === '' ? '(empty)' : row.value} · ${SET_IN_CONFIG}`}</Text>
+        const isOpen = view.openList === `setting:${row.key}`
+
+        return (
+          <Box flexDirection="column">
+            <Button key={`setting-${row.key}`} label={settingHeading(row, isOpen)} plain onPress={() => actions.onSettingFold?.(row.key)} />
+            {isOpen && (
+              <Box flexDirection="column" paddingLeft={2}>
+                {row.options.map(option =>
+                  option === row.value ? (
+                    <Box flexDirection="row" columnGap={1}>
+                      <Text color="claude">❯</Text>
+                      <Text bold>{option}</Text>
+                    </Box>
+                  ) : (
+                    <Button key={`option-${row.key}-${option}`} label={`▸ ${option}`} plain onPress={() => actions.onSetting(row, option)} />
+                  ),
+                )}
+              </Box>
+            )}
+          </Box>
+        )
+      })}
     </Box>
   )
 }
@@ -1139,7 +1138,7 @@ function characterOf(view: PaneView): PaneView['character'] {
   return view.tab === 'play' ? view.character : null
 }
 
-/** The vertical layout: every part stacked, as a pane beside the conversation wants it. */
+/** The pane: every part stacked, tabs first, controls and the keys row last. */
 function renderStacked(kit: Kit, view: PaneView, actions: PaneActions) {
   const { Box, Text } = kit
   const character = characterOf(view)
@@ -1161,68 +1160,7 @@ function renderStacked(kit: Kit, view: PaneView, actions: PaneActions) {
   )
 }
 
-/** What the horizontal layout's frame and padding take from each side. */
-const FRAME_COLUMNS = 4
-/** The gap between the horizontal layout's two columns. */
-const SPLIT_GAP = 3
-
-/**
- * How the horizontal layout splits its width: a side column for the
- * character and what they are working on, and the rest for the tab. Null
- * when the strip is too narrow for two columns, which then stack.
- */
-export function stripColumns(columns: number): { side: number; body: number } | null {
-  const inner = columns - FRAME_COLUMNS
-  const side = Math.max(30, Math.min(48, Math.round(inner * 0.34)))
-  const body = inner - side - SPLIT_GAP
-
-  return body < 44 ? null : { side, body }
-}
-
-/** The horizontal layout: a framed strip above the prompt, the character beside the tab rather than above it. */
-function renderStrip(kit: Kit, view: PaneView, actions: PaneActions) {
-  const { Box, Text } = kit
-  const inner = { ...view, columns: view.columns - FRAME_COLUMNS }
-  const split = stripColumns(view.columns)
-  if (split === null) {
-    return (
-      <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
-        {renderStacked(kit, inner, actions)}
-      </Box>
-    )
-  }
-  const side = { ...view, columns: split.side }
-  const body = { ...view, columns: split.body }
-  const character = characterOf(side)
-  const row = tabRow(inner)
-
-  return (
-    <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
-      {tabButtons(kit, view, actions, row)}
-      {tabUnderline(kit, inner, row)}
-      {statusRows(kit, inner, true)}
-      <Text> </Text>
-      <Box flexDirection="row" columnGap={SPLIT_GAP}>
-        <Box flexDirection="column" width={split.side} flexShrink={0}>
-          {view.watch.state !== 'no-git' && workingOn(kit, side, actions)}
-          {character !== null && <Text> </Text>}
-          {character !== null && characterRow(kit, side, character)}
-        </Box>
-        <Box flexDirection="column" width={split.body}>
-          {tabBody(kit, body, actions)}
-        </Box>
-      </Box>
-      {keysRow(kit, view)}
-    </Box>
-  )
-}
-
-/** How many notes the unified layout shows above the prompt while it is folded: fewer on a short terminal. */
-export function previewCount(rows: number): number {
-  return rows < 40 ? 2 : 3
-}
-
-/** The mark and color a note's kind gets on its one line in the unified layout: Claude Code's own for errors and warnings. */
+/** The mark and color a note's kind gets on its row: Claude Code's own for errors and warnings. */
 export function noteMark(note: Pick<Note, 'kind'>): { mark: string; color: string | undefined } {
   switch (note.kind) {
     case 'decision':
@@ -1238,148 +1176,6 @@ export function noteMark(note: Pick<Note, 'kind'>): { mark: string; color: strin
   }
 }
 
-/** One note on one line: where it is, then as much of it as fits. */
-export function previewLine(note: Note): string {
-  return `${note.file}:${note.line}  ${note.text}`
-}
-
-/** What the unified layout says under its notes when more are open than it shows. '' when none are hidden. */
-export function moreLine(count: number, shown: number): string {
-  const hidden = count - shown
-
-  return hidden <= 0 ? '' : hidden === 1 ? 'and one more note' : `and ${hidden} more notes`
-}
-
-/** The play-by-play's state in a word or two, for the end of Claude Code's hint line. */
-export function statusWord(view: Pick<PaneView, 'mode' | 'watch'>): string {
-  if (view.mode === 'paused') return 'paused'
-  const { state, line } = view.watch
-  switch (state) {
-    case 'starting':
-      return 'starting'
-    case 'no-git':
-      return 'no git repository'
-    case 'looking':
-      return 'looking…'
-    case 'settling':
-      return 'saw your save'
-    case 'waiting': {
-      const next = /Next try (\S+)\./.exec(line)?.[1] ?? /until (\S+),/.exec(line)?.[1]
-
-      return next === undefined ? 'waiting' : `waiting, next try ${next}`
-    }
-    case 'idle':
-      return line.includes('Another session') ? 'in another session' : line.includes('only when you ask') ? 'on request' : 'watching'
-  }
-}
-
-/**
- * The tutor's entry at the end of Claude Code's hint line under the prompt,
- * in the unified layout: what the play-by-play is doing, and where the
- * keyboard is, since nothing else in that layout says so.
- */
-export function statusEntry(view: Pick<PaneView, 'mode' | 'watch'>, hasKeys: boolean): string {
-  return `backseat ${statusWord(view)} · ${hasKeys ? '1–6 tabs · esc to leave' : 'ctrl+x tab for keys'}`
-}
-
-/** The tabs' labels in the unified layout's one row: short names, and what each says about itself. */
-export function unifiedTabs(view: Pick<PaneView, 'review'> & Partial<Pick<PaneView, 'notes' | 'explain' | 'progress'>>): string[] {
-  return TABS.map(({ tab, short }) => `${short}${tabBadge(tab, view)}`)
-}
-
-/** How wide the unified layout's tab row draws, with its digits or without, and its margin. */
-export function unifiedTabsWidth(labels: readonly string[], withDigits: boolean): number {
-  return labels.reduce((sum, label) => sum + label.length + (withDigits ? 3 : 0), 0) + 2 * (labels.length - 1) + 2
-}
-
-/** The speech left room on the unified layout's row, below which it is left out rather than cut to a word. */
-const MIN_SPEECH = 16
-
-/** The full names of the tabs, for the heading of one opened in the unified layout. */
-function tabName(tab: Tab): string {
-  return TABS.find(entry => entry.tab === tab)?.label ?? tab
-}
-
-/**
- * The unified layout: no pane. One row above the prompt holds the character's
- * line and the tabs, with the open notes under it, one line each. A tab's
- * key opens it right there, and folds it again. What the play-by-play is
- * doing ends Claude Code's own hint line under the prompt (`statusEntry`).
- */
-function renderUnified(kit: Kit, view: PaneView, actions: PaneActions) {
-  const { Box, Text, Button } = kit
-  const notes = drawnOrder(view.notes)
-  const isAsleep = view.mode === 'paused'
-  const character = view.character
-  const labels = unifiedTabs(view)
-  const face = character === null ? 'Backseat' : character.avatar.mini[poseOf(view.mode, view.watch.state, character.speech)]
-  const room = view.columns - unifiedTabsWidth(labels, hasDigits(view)) - face.length - 3
-  const said = character === null || room < MIN_SPEECH ? '' : isAsleep ? ASLEEP : saidSoFar(character.speech)
-  const isSpeaking = character !== null && isTalking(character.speech)
-  const shown = previewCount(view.rows)
-  const body = { ...view, columns: view.columns - 2, isCompact: true }
-
-  return (
-    <Box flexDirection="column" marginTop={1}>
-      <Box flexDirection="row" columnGap={2}>
-        <Box flexDirection="row" columnGap={1} flexGrow={1} flexShrink={1}>
-          <Box flexShrink={0}>
-            <Text color={character?.avatar.color} dimColor={!isSpeaking} wrap="truncate">
-              {face}
-            </Text>
-          </Box>
-          {said !== '' && (
-            <Text dimColor={isAsleep || !isSpeaking} wrap="truncate-end">
-              {said}
-            </Text>
-          )}
-        </Box>
-        {tabButtons(kit, view, actions, { labels, gap: 2 })}
-      </Box>
-      {statusRows(kit, view, false)}
-      {!view.isUnfolded &&
-        notes.slice(0, shown).map(note => {
-          const { mark, color } = noteMark(note)
-
-          return (
-            <Box flexDirection="row" columnGap={1}>
-              <Text color={color}>{mark}</Text>
-              <Text dimColor wrap="truncate-end">
-                {previewLine(note)}
-              </Text>
-            </Box>
-          )
-        })}
-      {!view.isUnfolded && moreLine(notes.length, shown) !== '' && (
-        <Box paddingLeft={2}>
-          <Text dimColor>{moreLine(notes.length, shown)}</Text>
-        </Box>
-      )}
-      {/* The note keys (e d m) act on an open tab. Folded, j opens the notes, so none of them falls through into the prompt. */}
-      {!view.isUnfolded && notes.length > 0 && hasDigits(view) && (
-        <Box paddingLeft={2} columnGap={2}>
-          <Button key="open-notes" label="open the notes" hotkey="j" plain dimColor onPress={() => actions.onTab('play')} />
-        </Box>
-      )}
-      {view.isUnfolded && (
-        <Box flexDirection="column" paddingLeft={2}>
-          <Box flexDirection="row" columnGap={2}>
-            <Text bold>{tabName(view.tab)}</Text>
-            <Button key="fold" label="fold" hotkey="x" plain dimColor onPress={() => actions.onFold()} />
-          </Box>
-          {view.tab === 'play' && <Text dimColor>{statusLine(view)}</Text>}
-          {view.tab === 'play' && view.watch.state !== 'no-git' && workingOn(kit, body, actions)}
-          <Text> </Text>
-          {tabBody(kit, body, actions)}
-        </Box>
-      )}
-    </Box>
-  )
-}
-
 export function renderPane(kit: Kit, view: PaneView, actions: PaneActions) {
-  if (view.layout === 'unified') return renderUnified(kit, view, actions)
-  if (view.layout === 'horizontal') return renderStrip(kit, view, actions)
-
   return renderStacked(kit, view, actions)
 }

@@ -106,7 +106,7 @@ test('starting a step sends the step itself, with the path around it on the firs
 
 const LESSON_FILES = { '/lessons/python-errors.md': ERRORS, '/lessons/commits.md': COMMITS, '/lessons/broken.md': 'nothing' }
 
-sessionTest('the Lessons tab lists the paths found, and a step starts in the conversation and is recorded', { options: { layout: 'vertical' } }, async ($, on) => {
+sessionTest('the Lessons tab lists the paths found, and a step starts in the conversation and is recorded', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN }, pluginFiles: LESSON_FILES })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -144,7 +144,7 @@ sessionTest('the Lessons tab lists the paths found, and a step starts in the con
   await ui.unmount()
 })
 
-sessionTest('with no lessons installed, the tab says where they come from', { options: { layout: 'vertical' } }, async ($, on) => {
+sessionTest('with no lessons installed, the tab says where they come from', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))

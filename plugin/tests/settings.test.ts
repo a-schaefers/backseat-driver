@@ -35,7 +35,6 @@ test('durationMs falls back on anything it does not recognise', async () => {
 test('readSettings applies the documented defaults to empty options', async () => {
   expect(readSettings({})).toEqual({
     persona: { voice: 'default', engineering: 'default' },
-    layout: 'vertical',
     isAnimated: true,
     isProgressOn: true,
     isUpdateCheckOn: true,
@@ -151,8 +150,14 @@ sessionTest('the Settings tab changes a setting as /config would', async ($, on)
   // Another plugin's row, or Claude Code's own, is not this tab's business.
   expect(await ui.find({ key: 'setting-theme' })).toBe(undefined)
 
-  await ui.select({ key: 'setting-backseat-driver.voice', value: 'knuth' })
-  await ui.select({ key: 'setting-backseat-driver.animated_persona', value: 'off' })
+  // A row opens its options under it; an option picks and folds them again.
+  expect(await ui.find({ key: 'option-backseat-driver.voice-knuth' })).toBeUndefined()
+  await ui.press({ key: 'setting-backseat-driver.voice' })
+  expect(await ui.find({ key: 'option-backseat-driver.voice-knuth' })).toBeDefined()
+  await ui.press({ key: 'option-backseat-driver.voice-knuth' })
+  expect(await ui.find({ key: 'option-backseat-driver.voice-knuth' })).toBeUndefined()
+  await ui.press({ key: 'setting-backseat-driver.animated_persona' })
+  await ui.press({ key: 'option-backseat-driver.animated_persona-off' })
   await session.clock.settle()
   expect(session.configured).toEqual([
     { key: 'backseat-driver.voice', value: 'knuth' },
@@ -166,7 +171,8 @@ sessionTest('the Settings tab changes a setting as /config would', async ($, on)
 
   // Refused: the row goes back to what it was, and a toast says why.
   session.configDeny = 'managed elsewhere'
-  await ui.select({ key: 'setting-backseat-driver.voice', value: 'torvalds' })
+  await ui.press({ key: 'setting-backseat-driver.voice' })
+  await ui.press({ key: 'option-backseat-driver.voice-torvalds' })
   await session.clock.settle()
   expect(session.toasts).toContain('Voice persona stays knuth: managed elsewhere')
   // Refused, nothing was saved, so no reload is owed.
@@ -199,7 +205,7 @@ sessionTest('every setting in plugin.json says when a change to it takes effect'
 })
 
 test('unclassified names the fields with no entry', async () => {
-  expect(unclassified({ voice: 'knuth', layout: 'unified' })).toEqual([])
+  expect(unclassified({ voice: 'knuth' })).toEqual([])
   expect(unclassified({ voice: 'knuth', sound: true })).toEqual(['sound'])
   expect(Object.keys(SETTING_EFFECTS)).toContain('update_check')
 })
