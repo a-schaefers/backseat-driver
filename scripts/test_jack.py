@@ -310,6 +310,16 @@ class Disagreements(unittest.TestCase):
         self.assertEqual(bad(found), [])
         self.assertTrue(any(level == jack.NOTE and "is scrolled" in text for level, text in found), found)
 
+    def test_watchers_missing_right_after_a_reload_are_being_started_again(self):
+        # The procs table has no inotifywait under this fake pid, and the state says two are live.
+        live = {"pushers": [{"role": "tree", "isLive": True}, {"role": "focus", "isLive": True}]}
+        just = session(pid=4242, state=state(self.now, loaded={"at": self.now - 1000, "options": {}}, **live))
+        found = jack.check_session(world([just], now=self.now), just, DOCKED)
+        self.assertEqual(bad(found), [])
+        self.assertTrue(any(level == jack.NOTE and "being started again" in text for level, text in found), found)
+        settled = session(pid=4242, state=state(self.now, loaded={"at": self.now - 60_000, "options": {}}, **live))
+        self.assertTrue(any("inotifywait run under it" in text for text in bad(jack.check_session(world([settled], now=self.now), settled, DOCKED))))
+
     def test_a_screen_that_cannot_be_seen_is_said_and_not_counted(self):
         s = session(state=state(self.now))
         found = jack.check_session(world([s], now=self.now), s, None)

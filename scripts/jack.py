@@ -85,6 +85,8 @@ ALIVE_MS = 660_000
 STATE_STALE_MS = 3 * SELF_CHECK_MS
 # A deadline this far past its time has not been met.
 OVERDUE_MS = 15_000
+# After a reload the watchers are killed and started again: this long, a mismatch with the processes is that.
+WATCHERS_GRACE_MS = 5_000
 # The first pieces of a drawing are the tabs and the status line: the top of the pane, which is never below the fold.
 HEAD_PIECES = 6
 # Claude Code docks a pane at the side from this many columns (CLAUDE.md, "Handoff"); under it the pane goes above the prompt.
@@ -959,7 +961,12 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
     # The watchers it says it runs.
     said = sorted(p.get("role", "?") for p in state.get("pushers", []) if isinstance(p, dict) and p.get("isLive"))
     running = [pid for pid in children(s["pid"], w["procs"]) if any("inotifywait" in word for word in w["procs"][pid]["argv"][:1])] if s["pid"] else []
-    if len(said) != len(running):
+    loaded_at = dig(state, "loaded.at")
+    if len(said) != len(running) and isinstance(loaded_at, (int, float)) and now - loaded_at < WATCHERS_GRACE_MS:
+        # A reload kills the children and starts them again a moment after `engaged` (seen 2026-10-05: the old two gone,
+        # the new two up within a second). Not a disagreement until the moment has passed.
+        out.append((NOTE, f"{who} reloaded {ago(now - loaded_at)} ago and says {len(said)} file watcher(s) are live while {len(running)} inotifywait run under it: its watchers are being started again"))
+    elif len(said) != len(running):
         out.append((BAD, f"{who} says {len(said)} file watcher(s) are live ({', '.join(said) or 'none'}), and {len(running)} inotifywait run under it"))
     elif said:
         out.append((FINE, f"{who} runs {len(running)} file watcher(s): {', '.join(said)}"))
@@ -1594,8 +1601,12 @@ def cmd_sync(args) -> int:
             print(f"  {BAD if tutor_mode(s) != 'off' else NOTE} {s['short']} has not loaded the live copy within {SYNC_WAIT_S} s"
                   + (" (its debug log is off, so this cannot be seen: jack.py in)" if s["state"] is None else ": /reload-plugins in it"))
     print()
+    # A moment for the reloaded sessions to start their watchers and draw again.
+    time.sleep(3)
+    w["now"] = now_ms()
     found = check_homes(w)
     for s in running:
+        fresh_state(s)
         if tutor_mode(s) != "off":
             found += check_session(w, s, screen_of(s["eyes"]))
     bad = print_findings(found, False)
