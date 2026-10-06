@@ -192,9 +192,12 @@ export type SettingEffect = 'now' | 'next look' | 'next review' | 'next lookup'
 
 export type SettingField = keyof typeof SETTING_EFFECTS
 
-/** The fields among `options` that `SETTING_EFFECTS` does not cover. Claude Code fills in every declared field, defaults included. */
+/** Fields that plugin.json no longer declares. A value left in someone's settings.json under one of these names is nothing to report. */
+export const RETIRED_SETTINGS: readonly string[] = ['layout']
+
+/** The fields among `options` that `SETTING_EFFECTS` does not cover, retired ones aside. Claude Code fills in every declared field, defaults included. */
 export function unclassified(options: Options): string[] {
-  return Object.keys(options).filter(field => !Object.hasOwn(SETTING_EFFECTS, field))
+  return Object.keys(options).filter(field => !Object.hasOwn(SETTING_EFFECTS, field) && !RETIRED_SETTINGS.includes(field))
 }
 
 /** The fields whose value differs between two sets of options, in plugin.json's order. */

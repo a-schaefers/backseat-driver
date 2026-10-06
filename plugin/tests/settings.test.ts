@@ -207,6 +207,8 @@ sessionTest('every setting in plugin.json says when a change to it takes effect'
 test('unclassified names the fields with no entry', async () => {
   expect(unclassified({ voice: 'knuth' })).toEqual([])
   expect(unclassified({ voice: 'knuth', sound: true })).toEqual(['sound'])
+  // A setting that was retired (the layout, 2026-10-05) may still sit in someone's settings.json: nothing to report.
+  expect(unclassified({ voice: 'knuth', layout: 'unified' })).toEqual([])
   expect(Object.keys(SETTING_EFFECTS)).toContain('update_check')
 })
 
