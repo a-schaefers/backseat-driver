@@ -219,9 +219,12 @@ function keysRow({ Box, Text, Button }: Pick<Kit, 'Box' | 'Text' | 'Button'>, vi
         </Box>
       )}
       <Box flexDirection="row" columnGap={1} flexShrink={1}>
-        <Text bold color={view.isFocused ? 'green' : 'yellow'}>
-          {view.isFocused ? 'Keys on' : 'Keys off'}
-        </Text>
+        {/* The word that says where the keyboard is keeps its width, and only the hint after it gives way (seen live: "Keys" with the "on" squeezed out). */}
+        <Box flexShrink={0}>
+          <Text bold color={view.isFocused ? 'green' : 'yellow'}>
+            {view.isFocused ? 'Keys on' : 'Keys off'}
+          </Text>
+        </Box>
         <Text dimColor wrap="truncate-end">
           {view.isFocused ? FOCUSED_HINT : KEYBOARD_HINT}
         </Text>
