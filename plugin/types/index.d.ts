@@ -89,6 +89,9 @@ export type ReviewText = {
   text: string
   decisions: DecisionPoint[]
   insights: string[]
+  /** When it finished, and the commit it was about, for the history of the Deep review tab. Absent on a review of the work since the last one. */
+  at?: number
+  commit?: string
 }
 
 /** The latest deep review, for the pane's Deep review tab. */
@@ -110,6 +113,10 @@ export type Review = {
   waiting?: number
   /** The last review that finished, kept in the tab while a newer one runs, waits or has failed. */
   last?: ReviewText | null
+  /** Every review that finished in this project, newest first (reviews.json), so that the tab can go back to "the last review" a newer one refers to. */
+  older?: ReviewText[]
+  /** Which review the tab shows: 0 is the latest readable one, 1 the one before it, and so on. Back to 0 when a review lands. */
+  opened?: number
 }
 
 /** What the pane's animated character is saying. */

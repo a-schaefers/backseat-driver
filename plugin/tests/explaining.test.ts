@@ -173,6 +173,10 @@ sessionTest('saving a file maps it once it has settled, and the Explain tab foll
   expect((await ui.find({ key: 'explanation' }))?.props.text).toMatch('**Relies on** mean')
   expect(asked(session).length).toBe(3)
 
+  // A row of the outline is a button too: back to mean by its line (owner, 2026-10-05: "n and p they should be clickable as well").
+  await ui.press({ key: 'explain-row-1' })
+  expect(await ui.find({ type: 'Text', text: 'stats.py · mean' })).toBeDefined()
+  await ui.press({ key: 'explain-next' })
   // e takes it to the conversation, naming the spot so that the tutor can look it up.
   await ui.press({ key: 'explain-ask' })
   expect(session.submitted).toEqual(['Tell me more about variance in stats.py (lines 5 to 7).'])
@@ -373,7 +377,7 @@ sessionTest('with the Explain tab open, an edit takes the old explanation off th
   expect(await ui.find({ key: 'explanation' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: 'Mapping this file.' })).toBeDefined()
   // The function that did not change is still listed. The one that did is not.
-  expect(await ui.find({ type: 'Text', text: '  mean  The average of a list.' })).toBeDefined()
+  expect((await ui.find({ key: 'explain-row-1' }))?.props.label).toBe('  mean  The average of a list.')
   expect((await ui.findAll({ type: 'Text', text: 'stats.py · variance' })).length).toBe(0)
   // And nothing is asked of the model while the file may still be being typed.
   expect(session.lookups.length).toBe(before)

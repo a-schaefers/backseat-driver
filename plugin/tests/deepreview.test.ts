@@ -245,6 +245,45 @@ sessionTest('a commit made while a review runs is reviewed next', async ($, on) 
   expect(session.spawned[1]?.prompt).toMatch('Add a comment')
 })
 
+sessionTest('the tab walks back to earlier reviews, and a place a review names is a jump to Explain', async ($, on) => {
+  // The owner (2026-10-05): a review said "the $$ point from last review is still open", and there was no way to the last review.
+  // The kit's commits share one short hash, and a commit's review replaces the review of that commit: the first review here
+  // is one of uncommitted work, by hand, which is kept apart.
+  const session = stubSession(on)
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+  await session.clock.settle()
+  session.write('stats.py', MEAN)
+  await session.clock.advance(2000)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-review' })
+  await ui.press({ key: 'review-now' })
+  await $.turn.complete(session.finish(1, 'The division at stats.py:2 has nothing for an empty list.'))
+  await session.clock.settle()
+  session.commit('Add mean')
+  await session.clock.advance(2000)
+  await $.turn.complete(session.finish(2, 'The empty-list point from the last review is still open.'))
+  await session.clock.settle()
+
+  const reading = async () => (await ui.find({ key: 'review' }))?.props.text
+  expect(await reading()).toBe('The empty-list point from the last review is still open.')
+  expect(await ui.find({ key: 'review-older' })).toBeDefined()
+  expect(await ui.find({ key: 'review-newer' })).toBeUndefined()
+
+  // p goes to the review before it, and n back.
+  await ui.press({ key: 'review-older' })
+  expect(await reading()).toBe('The division at stats.py:2 has nothing for an empty list.')
+  expect(await ui.find({ key: 'review-older' })).toBeUndefined()
+  // The place it names is a button, and the button opens Explain there.
+  await ui.press({ key: 'jump-stats.py:2' })
+  expect(await ui.find({ type: 'Text', text: 'stats.py' })).toBeDefined()
+  await ui.press({ key: 'tab-review' })
+  await ui.press({ key: 'review-newer' })
+  expect(await reading()).toBe('The empty-list point from the last review is still open.')
+  await ui.unmount()
+})
+
 sessionTest('a review that fails says so in the pane', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)

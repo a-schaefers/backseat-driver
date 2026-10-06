@@ -180,6 +180,7 @@ import {
   parseReviews,
   projectBrief,
   reviewDigest,
+  reviewTexts,
   splitReview,
   withReview,
   withReviewNotes,
@@ -222,6 +223,7 @@ import {
   scopeSubject,
   shortHash,
   showCommitArgs,
+  shownReview,
   withReviewChange,
 } from '../core/review'
 import type { ReviewScope } from '../core/review'
@@ -2614,7 +2616,7 @@ async function restorePaneFromDisk($: EngineInterface, isFresh: boolean): Promis
   if (kept.dismissed.length > 0 && (await read($, dismissedAtom)).length === 0) await update($, dismissedAtom, () => kept.dismissed)
   const last = reviews.at(-1)
   if (last !== undefined && (await read($, reviewAtom)).state === 'none') {
-    await setReview($, { state: 'done', subject: last.subject, text: last.text, isUnseen: false, decisions: last.decisions ?? [], insights: last.insights ?? [] })
+    await setReview($, { state: 'done', subject: last.subject, text: last.text, isUnseen: false, decisions: last.decisions ?? [], insights: last.insights ?? [], older: reviewTexts(reviews) })
   }
   trace($, 'state', 'pane taken up from disk', () => ({ notes: open.length, of: kept.notes.length, review: last?.subject ?? null }))
 }
@@ -2793,6 +2795,7 @@ async function keepReview($: EngineInterface, scope: ReviewScope, answer: string
       reviews = await updateJson(storeOf($), `${folder}/reviews.json`, parseReviews, kept =>
         withReview(kept, { commit, subject: scopeSubject(scope), at, text, decisions: notes?.decisions ?? [], insights: insightLines(notes) }),
       )
+      await setReview($, { older: reviewTexts(reviews) })
     }
   } catch (error) {
     fail($, "could not keep the deep review's notes", error)
@@ -3861,6 +3864,28 @@ async function drawTutor(
     onExplainMove: (step: 1 | -1) => {
       touched($, settings, 'explain move', () => step)
       void moveFocus($, step)
+    },
+    onExplainPick: (line: number) => {
+      touched($, settings, 'explain pick', () => line)
+      void read($, explainAtom).then(shown => {
+        if (shown.spot !== null) void setFocus($, { path: shown.spot.path, line, source: 'command' }, true)
+      })
+    },
+    onReviewStep: (step: 1 | -1) => {
+      touched($, settings, 'review step', () => step)
+      void update($, reviewAtom, (review): Review => {
+        const { index, count } = shownReview(review)
+        const next = Math.min(Math.max(index + step, 0), Math.max(count - 1, 0))
+
+        return next === index ? review : { ...review, opened: next }
+      })
+    },
+    onJump: (path: string, line: number) => {
+      touched($, settings, 'jump', () => ({ path, line }))
+      void update($, tabAtom, () => 'explain')
+      if (layout === 'unified') void update($, unfoldedAtom, () => true)
+      watchClosely($)
+      void setFocus($, { path, line, source: 'command' }, true)
     },
     onExplainFetch: () => {
       touched($, settings, 'explain fetch')

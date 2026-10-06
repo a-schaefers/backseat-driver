@@ -2,10 +2,10 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Note } from '../types'
 import { NO_VIEW } from '../core/explainer'
-import { currentNote, detailMarkdown, explainNotice, KEYBOARD_HINT, personaLine, reviewBanner, statusLine, tabBadge, tabRow, waitingLine } from '../hooks/pane'
+import { currentNote, detailMarkdown, explainNotice, KEYBOARD_HINT, personaLine, reviewBanner, reviewPlace, reviewSpots, statusLine, tabBadge, tabRow, waitingLine } from '../hooks/pane'
 import type { PaneView } from '../hooks/pane'
 import { paneContext } from '../core/prompts'
-import { readableReview, SURVEY_SUBJECT, withReviewChange } from '../core/review'
+import { readableReview, reviewHistory, shownReview, spotsIn, SURVEY_SUBJECT, withReviewChange } from '../core/review'
 import { clockTime, watchOf } from '../core/status'
 import { PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
@@ -276,4 +276,41 @@ sessionTest('/clear empties the state the pane lives in, and the pane is put bac
   await session.clock.settle()
   expect(await ui.find({ type: 'Text', text: 'An empty list divides by zero.' })).toBeDefined()
   await ui.unmount()
+})
+
+test('the review history lists the readable review once, then the older ones, and the tab walks it', async () => {
+  const older = [
+    { subject: 'commit aaaaaaa: Add mean', text: 'Good.', decisions: [], insights: [], at: new Date(2026, 9, 5, 19, 57).getTime(), commit: 'aaaaaaa' },
+    { subject: 'commit 9999999: First commit', text: 'Six lines.', decisions: [], insights: [], at: new Date(2026, 9, 5, 18, 35).getTime(), commit: '9999999' },
+  ]
+  const done = { ...DONE, older }
+  // The readable review is reviews.json's first entry: listed once.
+  expect(reviewHistory(done).map(r => r.subject)).toEqual(['commit aaaaaaa: Add mean', 'commit 9999999: First commit'])
+  expect(shownReview(done)).toEqual({ shown: older[0], index: 0, count: 2 })
+  expect(shownReview({ ...done, opened: 1 }).shown?.subject).toBe('commit 9999999: First commit')
+  // Out of range stays in range; a review that lands comes back to the latest.
+  expect(shownReview({ ...done, opened: 7 }).index).toBe(1)
+  expect(withReviewChange({ ...done, opened: 1 }, { state: 'done', subject: 'commit ccccccc: More', text: 'Fine.' }).opened).toBe(0)
+  // A review by hand that reviews.json does not hold yet is listed first.
+  const byHand = { ...done, subject: 'the work since the last review', text: 'Looks fine.' }
+  expect(reviewHistory(byHand).length).toBe(3)
+  expect(reviewPlace(1, 3, older[1]?.at)).toBe(`Review 2 of 3 · ${clockTime(older[1]?.at ?? 0)}`)
+  expect(reviewPlace(0, 2, undefined)).toBe('Review 1 of 2')
+})
+
+test('the places a review names are what the person can jump to', async () => {
+  const text = 'See playground.sh:24 and src/stats.py:6, again playground.sh:24. Not a time like 19:57, not v1.2:3, and tests/a_b.test.ts:120 counts.'
+  expect(spotsIn(text)).toEqual([
+    { path: 'playground.sh', line: 24 },
+    { path: 'src/stats.py', line: 6 },
+    { path: 'tests/a_b.test.ts', line: 120 },
+  ])
+  expect(spotsIn('one a.py:1, two b.py:2, three c.py:3, four d.py:4, five e.py:5').length).toBe(4)
+  // Decisions come first, then what the text and the insights name.
+  const shown = { text: 'The *) branch at playground.sh:24 exits 0.', decisions: [{ file: 'playground.sh', line: 6, choice: 'shuf', tradeoff: '' }], insights: ['playground.sh:11: debug output.'] }
+  expect(reviewSpots(shown)).toEqual([
+    { path: 'playground.sh', line: 6 },
+    { path: 'playground.sh', line: 24 },
+    { path: 'playground.sh', line: 11 },
+  ])
 })

@@ -1,6 +1,6 @@
 import type { Elements } from 'claude-code'
 
-import type { ExplainView, LessonsView, LessonView, Mode, Note, OutlineRow, Profile, Profiles, ProgressRecord, ProgressView, Review, SettingRow, Speech, Tab, Watch, Working } from '../types'
+import type { ExplainView, LessonsView, LessonView, Mode, Note, OutlineRow, Profile, Profiles, ProgressRecord, ProgressView, Review, ReviewText, SettingRow, Speech, Tab, Watch, Working } from '../types'
 import { bubbleColumn, bubbleWidth, isTalking, poseOf, saidSoFar, wordsSaid } from '../core/avatar'
 import type { Avatar } from '../core/avatar'
 import { artShape, characterArt } from './character'
@@ -12,7 +12,7 @@ import { encouragementLine, growthCounts, growthHeadline, helpLine, improvedLine
 import type { Growth } from '../core/growth'
 import { lessonLanguage, lessonProgress } from '../core/lessons'
 import { lately, levelPhrase } from '../core/progress'
-import { readableReview, SURVEY_SUBJECT } from '../core/review'
+import { readableReview, shownReview, spotsIn, SURVEY_SUBJECT } from '../core/review'
 import { DEFAULT_PERSONA } from '../core/settings'
 import { clockTime, playLine } from '../core/status'
 import type { Layout, Persona } from '../core/settings'
@@ -98,6 +98,12 @@ export type PaneActions = {
   onLessonStart?: (id: string) => void
   /** They did the next step of a path, by their word. */
   onLessonDone?: (id: string) => void
+  /** Deep review: show an older review (1) or a newer one (-1). */
+  onReviewStep?: (step: 1 | -1) => void
+  /** Open a place a review or a note names in the Explain tab. */
+  onJump?: (path: string, line: number) => void
+  /** Explain: put the symbol that starts at this line in focus. */
+  onExplainPick?: (line: number) => void
 }
 
 const TABS: readonly { tab: Tab; label: string; short: string; tiny: string; hotkey: string }[] = [
@@ -385,6 +391,23 @@ function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
           {`${target.kind}, lines ${target.startLine} to ${target.endLine}`}
         </Text>
       )}
+      <Box flexDirection="row" columnGap={3}>
+        {explain.outline.length > 1 && <Button key="explain-next" label="next" hotkey="n" plain onPress={() => actions.onExplainMove(1)} />}
+        {explain.outline.length > 1 && <Button key="explain-previous" label="previous" hotkey="p" plain onPress={() => actions.onExplainMove(-1)} />}
+        {target !== null && <Button key="explain-ask" label="ask about this" hotkey="e" plain onPress={() => actions.onExplainAsk()} />}
+        {canFetch && <Button key="explain-fetch" label="look this up" hotkey="f" plain onPress={() => actions.onExplainFetch()} />}
+      </Box>
+      {explain.outline.length > 0 && <Text bold>In this file</Text>}
+      {explain.outline.map(row => {
+        const isCurrent = target !== null && row.startLine === target.startLine && row.endLine === target.endLine
+        // The keys and the list stay at the top, so that a press moves the mark without moving the page (owner, 2026-10-05).
+        return actions.onExplainPick === undefined ? (
+          <Text dimColor={!isCurrent}>{outlineLine(row, isCurrent, view.columns)}</Text>
+        ) : (
+          <Button key={`explain-row-${row.startLine}`} label={outlineLine(row, isCurrent, view.columns)} plain onPress={() => actions.onExplainPick?.(row.startLine)} />
+        )
+      })}
+      {explain.outline.length > 0 && <Text> </Text>}
       {target === null && explain.fileSummary !== '' && <Text>{explain.fileSummary}</Text>}
       {target !== null && detail === null && target.summary !== '' && <Text>{target.summary}</Text>}
       {detail !== null && <Markdown key="explanation" text={detailMarkdown(detail)} />}
@@ -393,20 +416,6 @@ function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
       ))}
       {notice !== '' && <Text dimColor>{notice}</Text>}
       {!explain.isMappable && <Text dimColor>This file is too large to map, so only the lines around the cursor are explained.</Text>}
-      {explain.outline.length > 0 && <Text> </Text>}
-      {explain.outline.length > 0 && <Text bold>In this file</Text>}
-      {explain.outline.map(row => {
-        const isCurrent = target !== null && row.startLine === target.startLine && row.endLine === target.endLine
-
-        return <Text dimColor={!isCurrent}>{outlineLine(row, isCurrent, view.columns)}</Text>
-      })}
-      <Text> </Text>
-      <Box flexDirection="row" columnGap={3}>
-        {explain.outline.length > 1 && <Button key="explain-next" label="next" hotkey="n" plain onPress={() => actions.onExplainMove(1)} />}
-        {explain.outline.length > 1 && <Button key="explain-previous" label="previous" hotkey="p" plain onPress={() => actions.onExplainMove(-1)} />}
-        {target !== null && <Button key="explain-ask" label="ask about this" hotkey="e" plain onPress={() => actions.onExplainAsk()} />}
-        {canFetch && <Button key="explain-fetch" label="look this up" hotkey="f" plain onPress={() => actions.onExplainFetch()} />}
-      </Box>
     </Box>
   )
 }
@@ -436,22 +445,49 @@ export function waitingLine(review: Review): string {
   return behind === 1 ? 'One more commit is waiting for its review.' : `${behind} more commits are waiting for their reviews.`
 }
 
+/** What a review's history line says: which review of how many, and when it finished. */
+export function reviewPlace(index: number, count: number, at: number | undefined): string {
+  return `Review ${index + 1} of ${count}${at === undefined || at === 0 ? '' : ` · ${clockTime(at)}`}`
+}
+
+/** The places a review names, as `path:line`, for the person to jump to. */
+export function reviewSpots(shown: Pick<ReviewText, 'text' | 'decisions' | 'insights'>): { path: string; line: number }[] {
+  const named = shown.decisions.filter(decision => decision.line > 0).map(decision => `${decision.file}:${decision.line}`)
+
+  return spotsIn([...named, shown.text, ...shown.insights].join('\n'))
+}
+
 function deepReview({ Box, Text, Button, Markdown }: Kit, view: PaneView, actions: PaneActions) {
   const { review } = view
   const banner = reviewBanner(review)
   const behind = waitingLine(review)
-  // What there is to read: the latest review, or the one before it while a newer one is on its way.
-  const shown = readableReview(review)
-  const isOlder = shown !== null && review.state !== 'done'
+  // What there is to read: the review opened in the history, the latest one when none is.
+  const { shown, index, count } = shownReview(review)
+  const isOlder = shown !== null && index === 0 && review.state !== 'done'
+  const spots = shown === null || actions.onJump === undefined ? [] : reviewSpots(shown)
 
   return (
     <Box flexDirection="column">
       {review.state === 'none' && <Text dimColor>No deep review yet. One runs {view.reviewSchedule}.</Text>}
       {banner !== '' && <Text dimColor={review.state === 'running'}>{banner}</Text>}
       {behind !== '' && <Text dimColor>{behind}</Text>}
-      {isOlder && <Text> </Text>}
+      {count > 1 && (
+        <Box flexDirection="row" columnGap={3}>
+          <Text dimColor>{reviewPlace(index, count, shown?.at)}</Text>
+          {index + 1 < count && <Button key="review-older" label="older" hotkey="p" plain onPress={() => actions.onReviewStep?.(1)} />}
+          {index > 0 && <Button key="review-newer" label="newer" hotkey="n" plain onPress={() => actions.onReviewStep?.(-1)} />}
+        </Box>
+      )}
       {isOlder && <Text dimColor>The review before it:</Text>}
       {shown !== null && <Text bold>{capitalized(shown.subject)}</Text>}
+      {spots.length > 0 && (
+        <Box flexDirection="row" columnGap={2}>
+          <Text dimColor>Jump to</Text>
+          {spots.map(spot => (
+            <Button key={`jump-${spot.path}:${spot.line}`} label={`${spot.path}:${spot.line}`} plain onPress={() => actions.onJump?.(spot.path, spot.line)} />
+          ))}
+        </Box>
+      )}
       {shown !== null && shown.decisions.length > 0 && (
         <Box flexDirection="column">
           <Text bold color="magenta">

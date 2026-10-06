@@ -1,4 +1,4 @@
-import type { DecisionPoint } from '../types'
+import type { DecisionPoint, ReviewText } from '../types'
 
 /**
  * What is known about a project as a whole: the part of the per-project
@@ -297,6 +297,18 @@ export function projectBrief(
 /** The reviews so far with one more, newest last, and only the latest few. */
 export function withReview(reviews: readonly ReviewRecord[], review: ReviewRecord): ReviewRecord[] {
   return [...reviews.filter(old => old.commit === '' || old.commit !== review.commit), review].slice(-MAX_REVIEWS)
+}
+
+/** The stored reviews as the Deep review tab reads them: newest first, with when and about what. */
+export function reviewTexts(reviews: readonly ReviewRecord[]): ReviewText[] {
+  return [...reviews].reverse().map(review => ({
+    subject: review.subject,
+    text: review.text,
+    decisions: review.decisions ?? [],
+    insights: review.insights ?? [],
+    at: review.at,
+    ...(review.commit === '' ? {} : { commit: review.commit }),
+  }))
 }
 
 export function parseReviews(value: unknown): ReviewRecord[] {

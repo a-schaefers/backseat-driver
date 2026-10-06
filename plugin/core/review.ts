@@ -172,7 +172,50 @@ export function withReviewChange(review: Review, change: Partial<Review>): Revie
       ? null
       : (review.last ?? null)
 
-  return { ...review, ...change, last }
+  // A review that lands is the one to read: the tab comes back to it from wherever it was in the history.
+  return { ...review, ...change, last, ...(change.state === 'done' ? { opened: 0 } : {}) }
+}
+
+/**
+ * Every review there is to read, newest first: the one readable now, then
+ * the earlier ones kept in reviews.json (which hold the readable one too,
+ * once it is written: it is listed once).
+ */
+export function reviewHistory(review: Review): ReviewText[] {
+  const current = readableReview(review)
+  const older = review.older ?? []
+  if (current === null) return older
+
+  return older.some(earlier => earlier.text === current.text && earlier.subject === current.subject) ? older : [current, ...older]
+}
+
+/** The review the tab shows, where it stands in the history, and how many there are. */
+export function shownReview(review: Review): { shown: ReviewText | null; index: number; count: number } {
+  const history = reviewHistory(review)
+  const index = Math.min(Math.max(review.opened ?? 0, 0), Math.max(history.length - 1, 0))
+
+  return { shown: history[index] ?? null, index, count: history.length }
+}
+
+/** How many places a review's text can send the person to, at most. */
+export const MAX_JUMPS = 4
+
+/**
+ * The places a review names as `path:line`, in order and each once: what the
+ * person can jump to (owner, 2026-10-05: "should be clickable to jump to the
+ * exact spot"). A path has to look like a file (an extension of letters).
+ */
+export function spotsIn(text: string, limit = MAX_JUMPS): { path: string; line: number }[] {
+  const found: { path: string; line: number }[] = []
+  for (const match of text.matchAll(/(?<![\w./-])((?:[\w.-]+\/)*[\w-]+(?:\.[\w-]+)*\.[A-Za-z]\w*):(\d{1,6})(?!\d)/g)) {
+    const path = match[1] ?? ''
+    const line = Number(match[2])
+    if (line < 1 || found.some(spot => spot.path === path && spot.line === line)) continue
+    found.push({ path, line })
+    if (found.length >= limit) break
+  }
+
+  return found
 }
 
 /** The review the person can read right now: the latest when it is done, else the last one that was. */
