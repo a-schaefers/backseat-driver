@@ -55,7 +55,7 @@ test('every layout draws the notes in one order, decisions first, and the keys s
 test('the hint line says what the play-by-play is doing in a word or two, and where the keyboard is', async () => {
   const watch = (state: 'idle' | 'waiting' | 'looking', line: string) => ({ state, lastLookAt: null, line })
   expect(statusEntry({ mode: 'on', watch: watch('idle', 'On. Watching for your next save.') }, false)).toBe('backseat watching · ctrl+x tab for keys')
-  expect(statusEntry({ mode: 'paused', watch: watch('idle', 'On.') }, true)).toBe('backseat paused · esc to leave')
+  expect(statusEntry({ mode: 'paused', watch: watch('idle', 'On.') }, true)).toBe('backseat paused · 1–6 tabs · esc to leave')
   expect(statusEntry({ mode: 'on', watch: watch('looking', 'On. Looking at your changes.') }, false)).toBe('backseat looking… · ctrl+x tab for keys')
   expect(statusEntry({ mode: 'on', watch: watch('waiting', 'On. Claude is overloaded. Next try 12:07.') }, false)).toBe('backseat waiting, next try 12:07 · ctrl+x tab for keys')
 })

@@ -357,6 +357,8 @@ declare module 'claude-code' {
       working: Working
       /** In the unified layout, whether the lines above the prompt are opened into the tab. */
       unfolded: boolean
+      /** The subject of the review whose "Jump to" list is open, or '' while it is folded. */
+      jumpOpen: string
       /** Whether the band above the prompt has the keyboard, as far as its focus ring has told. */
       bandKeys: boolean
       /** The plugin's own `/config` rows, for the Settings tab. Read again whenever the tab is opened. */

@@ -59,6 +59,8 @@ export type PaneView = {
   layout: Layout
   /** Unified only: whether the lines above the prompt are opened into the tab shown. */
   isUnfolded: boolean
+  /** The subject of the review whose "Jump to" list is open, or '' while it is folded. */
+  jumpOpen?: string
   /** How many rows the terminal has, as far as the drawing knows. */
   rows: number
   /** The plugin's own `/config` rows, for the Settings tab. */
@@ -102,6 +104,8 @@ export type PaneActions = {
   onReviewStep?: (step: 1 | -1) => void
   /** Open a place a review or a note names in the Explain tab. */
   onJump?: (path: string, line: number) => void
+  /** Open the list of places the review names, or fold it again. */
+  onJumpFold?: (subject: string) => void
   /** Explain: put the symbol that starts at this line in focus. */
   onExplainPick?: (line: number) => void
 }
@@ -178,7 +182,7 @@ export function tabRow(
 export const KEYBOARD_HINT = 'Click here or press Ctrl+X Tab to use the keys.'
 
 /** Shown while the pane has the keyboard: how it is driven. */
-export const FOCUSED_HINT = 'Tab moves · Enter presses · ↑↓ scroll · Esc goes back to the prompt.'
+export const FOCUSED_HINT = 'Tab moves · Enter presses · 1–6 open a tab · Esc goes back to the prompt.'
 
 /**
  * One grammar for everything that can be pressed, so that a glance says what
@@ -193,11 +197,11 @@ function rule({ Text }: Pick<Kit, 'Text'>, columns: number) {
   return <Text dimColor>{'─'.repeat(Math.max(1, columns))}</Text>
 }
 
-/** A tab's controls, in one row at its end under a rule, the same place on every tab. Where rows are scarce the rule gives way to a blank row. */
-function controlsRow({ Box, Text }: Pick<Kit, 'Box' | 'Text'>, view: Pick<PaneView, 'columns' | 'isCompact'>, controls: readonly RenderChildren[]) {
+/** A tab's controls, in one row at its end under a rule, the same place on every tab. A rule costs the row a blank would, so it is drawn compact too. */
+function controlsRow({ Box, Text }: Pick<Kit, 'Box' | 'Text'>, view: Pick<PaneView, 'columns'>, controls: readonly RenderChildren[]) {
   return (
     <Box flexDirection="column">
-      {view.isCompact ? <Text> </Text> : rule({ Text }, view.columns)}
+      {rule({ Text }, view.columns)}
       <Box flexDirection="row" columnGap={3} flexWrap="wrap">
         {controls}
       </Box>
@@ -461,6 +465,52 @@ export function detailMarkdown(detail: NonNullable<ExplainView['detail']>): stri
 /** What the Explain tab says about a file it knows nothing about yet. */
 export const NOTHING_EXPLAINED = 'Nothing explained here yet: either this file has not been looked up, or it has no functions or classes to explain. f looks it up again, or run /bsd explain with a file and a line.'
 
+/** The widest a symbol's name is drawn in the outline: longer names are cut, so that the summaries line up in a column. */
+const NAME_COLUMNS = 24
+
+/** How wide the outline's name column is: the longest name, cut at NAME_COLUMNS, plus its mark. */
+export function nameColumns(outline: readonly OutlineRow[]): number {
+  return 2 + Math.min(NAME_COLUMNS, outline.reduce((widest, row) => Math.max(widest, row.name.length), 0))
+}
+
+/** A name as the outline draws it: whole, or cut to NAME_COLUMNS with an ellipsis. */
+export function outlineName(name: string): string {
+  return name.length <= NAME_COLUMNS ? name : `${name.slice(0, NAME_COLUMNS - 1).trimEnd()}…`
+}
+
+/**
+ * One symbol of the outline: its name in a column of its own, its summary
+ * dim beside it, so that the names read as a list and the one in focus
+ * stands out (owner, 2026-10-05: the rows "all look the same, becomes a
+ * large blob of text"). The one in focus is marked and bold; the others
+ * are rows to press.
+ */
+function outlineRow({ Box, Text, Button }: Pick<Kit, 'Box' | 'Text' | 'Button'>, row: OutlineRow, isCurrent: boolean, width: number, actions: PaneActions) {
+  const name = outlineName(row.name)
+
+  return (
+    <Box flexDirection="row" columnGap={2}>
+      <Box width={width} flexShrink={0}>
+        {isCurrent ? (
+          <Box flexDirection="row" columnGap={1}>
+            <Text color="claude">❯</Text>
+            <Text bold>{name}</Text>
+          </Box>
+        ) : actions.onExplainPick === undefined ? (
+          <Text dimColor>{`▸ ${name}`}</Text>
+        ) : (
+          <Button key={`explain-row-${row.startLine}`} label={`▸ ${name}`} plain onPress={() => actions.onExplainPick?.(row.startLine)} />
+        )}
+      </Box>
+      {row.summary !== '' && (
+        <Text dimColor wrap="truncate-end">
+          {row.summary}
+        </Text>
+      )}
+    </Box>
+  )
+}
+
 function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, actions: PaneActions) {
   const { explain } = view
   if (explain.spot === null) {
@@ -492,17 +542,13 @@ function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
         {target !== null && <Button key="explain-ask" label="ask about this" hotkey="e" plain onPress={() => actions.onExplainAsk()} />}
         {canFetch && <Button key="explain-fetch" label="look this up" hotkey="f" plain onPress={() => actions.onExplainFetch()} />}
       </Box>
+      {/* The keys and the list stay at the top, so that a press moves the mark without moving the page (owner, 2026-10-05). */}
+      {rule({ Text }, view.columns)}
       {explain.outline.length > 0 && <Text bold>In this file</Text>}
-      {explain.outline.map(row => {
-        const isCurrent = target !== null && row.startLine === target.startLine && row.endLine === target.endLine
-        // The keys and the list stay at the top, so that a press moves the mark without moving the page (owner, 2026-10-05).
-        return actions.onExplainPick === undefined ? (
-          <Text dimColor={!isCurrent}>{outlineLine(row, isCurrent, view.columns)}</Text>
-        ) : (
-          <Button key={`explain-row-${row.startLine}`} label={outlineLine(row, isCurrent, view.columns)} plain onPress={() => actions.onExplainPick?.(row.startLine)} />
-        )
-      })}
-      {explain.outline.length > 0 && <Text> </Text>}
+      {explain.outline.map(row =>
+        outlineRow({ Box, Text, Button }, row, target !== null && row.startLine === target.startLine && row.endLine === target.endLine, nameColumns(explain.outline), actions),
+      )}
+      {explain.outline.length > 0 && rule({ Text }, view.columns)}
       {target === null && explain.fileSummary !== '' && <Text>{explain.fileSummary}</Text>}
       {target !== null && detail === null && target.summary !== '' && <Text>{target.summary}</Text>}
       {detail !== null && <Markdown key="explanation" text={detailMarkdown(detail)} />}
@@ -552,6 +598,37 @@ export function reviewSpots(shown: Pick<ReviewText, 'text' | 'decisions' | 'insi
   return spotsIn([...named, shown.text, ...shown.insights].join('\n'))
 }
 
+/** The heading of a review's places, folded or open: "▸ Jump to a place (3)", "▾ Jump to a place (3)". */
+export function jumpHeading(count: number, isOpen: boolean): string {
+  return `${isOpen ? '▾' : '▸'} Jump to a place (${count})`
+}
+
+/**
+ * The places a review names, as a list that opens downward rather than a
+ * row that grows sideways (owner, 2026-10-05: "should be vertically stacked
+ * … maybe even should be a kind of drop down menu"). One place is a row by
+ * itself; more fold under a heading that opens them, one row each, and they
+ * fold again on a jump or a change of tab.
+ */
+function jumpList({ Box, Button }: Pick<Kit, 'Box' | 'Button'>, view: Pick<PaneView, 'jumpOpen'>, subject: string, spots: readonly { path: string; line: number }[], actions: PaneActions) {
+  const row = (spot: { path: string; line: number }, lead: string) => (
+    <Button key={`jump-${spot.path}:${spot.line}`} label={`▸ ${lead}${spot.path}:${spot.line}`} plain onPress={() => actions.onJump?.(spot.path, spot.line)} />
+  )
+  if (spots.length === 1) return <Box flexDirection="column">{spots.map(spot => row(spot, 'Jump to '))}</Box>
+  const isOpen = view.jumpOpen === subject
+
+  return (
+    <Box flexDirection="column">
+      <Button key="jump-list" label={jumpHeading(spots.length, isOpen)} plain onPress={() => actions.onJumpFold?.(subject)} />
+      {isOpen && (
+        <Box flexDirection="column" paddingLeft={2}>
+          {spots.map(spot => row(spot, ''))}
+        </Box>
+      )}
+    </Box>
+  )
+}
+
 function deepReview({ Box, Text, Button, Markdown }: Kit, view: PaneView, actions: PaneActions) {
   const { review } = view
   const banner = reviewBanner(review)
@@ -575,14 +652,7 @@ function deepReview({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
       )}
       {isOlder && <Text dimColor>The review before it:</Text>}
       {shown !== null && <Text bold>{capitalized(shown.subject)}</Text>}
-      {spots.length > 0 && (
-        <Box flexDirection="row" columnGap={2}>
-          <Text dimColor>Jump to</Text>
-          {spots.map(spot => (
-            <Button key={`jump-${spot.path}:${spot.line}`} label={`${spot.path}:${spot.line}`} onPress={() => actions.onJump?.(spot.path, spot.line)} />
-          ))}
-        </Box>
-      )}
+      {shown !== null && spots.length > 0 && jumpList({ Box, Button }, view, shown.subject, spots, actions)}
       {shown !== null && shown.decisions.length > 0 && (
         <Box flexDirection="column">
           <Text bold color="magenta">
@@ -1053,7 +1123,7 @@ function renderStacked(kit: Kit, view: PaneView, actions: PaneActions) {
   return (
     <Box flexDirection="column">
       {tabButtons(kit, view, actions, row)}
-      {!view.isCompact && tabUnderline(kit, view, row)}
+      {tabUnderline(kit, view, row)}
       {statusRows(kit, view, true)}
       {/* Outside a repository there is no journal, so nothing to go on and nowhere to keep an answer. */}
       {view.watch.state !== 'no-git' && workingOn(kit, view, actions)}
@@ -1184,7 +1254,7 @@ export function statusWord(view: Pick<PaneView, 'mode' | 'watch'>): string {
  * keyboard is, since nothing else in that layout says so.
  */
 export function statusEntry(view: Pick<PaneView, 'mode' | 'watch'>, hasKeys: boolean): string {
-  return `backseat ${statusWord(view)} · ${hasKeys ? 'esc to leave' : 'ctrl+x tab for keys'}`
+  return `backseat ${statusWord(view)} · ${hasKeys ? '1–6 tabs · esc to leave' : 'ctrl+x tab for keys'}`
 }
 
 /** The tabs' labels in the unified layout's one row: short names, and what each says about itself. */

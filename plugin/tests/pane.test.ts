@@ -1,8 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
-import type { Note, Watch } from '../types'
+import type { Note, OutlineRow, Watch } from '../types'
 import { NO_VIEW } from '../core/explainer'
-import { currentNote, detailMarkdown, explainNotice, FOCUSED_HINT, KEYBOARD_HINT, personaLine, reviewBanner, reviewPlace, reviewSpots, stateMark, statusLine, tabBadge, tabRow, underlineSpans, waitingLine } from '../hooks/pane'
+import { currentNote, detailMarkdown, explainNotice, FOCUSED_HINT, jumpHeading, KEYBOARD_HINT, nameColumns, outlineName, personaLine, reviewBanner, reviewPlace, reviewSpots, stateMark, statusLine, tabBadge, tabRow, underlineSpans, waitingLine } from '../hooks/pane'
 import type { PaneView } from '../hooks/pane'
 import { paneContext } from '../core/prompts'
 import { readableReview, reviewHistory, shownReview, spotsIn, SURVEY_SUBJECT, withReviewChange } from '../core/review'
@@ -340,4 +340,17 @@ test('the places a review names are what the person can jump to', async () => {
     { path: 'playground.sh', line: 24 },
     { path: 'playground.sh', line: 11 },
   ])
+})
+
+test('the outline keeps its names in one column and cuts the long ones', () => {
+  const rows = [{ name: 'setup' }, { name: 'roll the dice' }] as OutlineRow[]
+  expect(nameColumns(rows)).toBe(2 + 'roll the dice'.length)
+  expect(nameColumns([{ name: 'x'.repeat(40) }] as OutlineRow[])).toBe(26)
+  expect(outlineName('roll the dice')).toBe('roll the dice')
+  expect(outlineName('a'.repeat(30))).toBe(`${'a'.repeat(23)}…`)
+})
+
+test('several places fold under a heading that counts them, and opens downward', () => {
+  expect(jumpHeading(3, false)).toBe('▸ Jump to a place (3)')
+  expect(jumpHeading(3, true)).toBe('▾ Jump to a place (3)')
 })

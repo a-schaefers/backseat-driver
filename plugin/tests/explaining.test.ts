@@ -377,7 +377,9 @@ sessionTest('with the Explain tab open, an edit takes the old explanation off th
   expect(await ui.find({ key: 'explanation' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: 'Mapping this file.' })).toBeDefined()
   // The function that did not change is still listed. The one that did is not.
-  expect((await ui.find({ key: 'explain-row-1' }))?.props.label).toBe('  mean  The average of a list.')
+  // The outline is a table: the name is the row's button, the summary a dim text beside it.
+  expect((await ui.find({ key: 'explain-row-1' }))?.props.label).toBe('▸ mean')
+  expect(await ui.find({ type: 'Text', text: 'The average of a list.' })).toBeDefined()
   expect((await ui.findAll({ type: 'Text', text: 'stats.py · variance' })).length).toBe(0)
   // And nothing is asked of the model while the file may still be being typed.
   expect(session.lookups.length).toBe(before)

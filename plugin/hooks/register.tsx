@@ -322,6 +322,8 @@ const licenseAtom = atom({ plugin: 'backseat-driver', key: 'license' } as const,
 const speechAtom = atom({ plugin: 'backseat-driver', key: 'speech' } as const, SILENT)
 const workingAtom = atom({ plugin: 'backseat-driver', key: 'working' } as const, NO_WORKING)
 const unfoldedAtom = atom({ plugin: 'backseat-driver', key: 'unfolded' } as const, false)
+/** The subject of the review whose "Jump to" list is open in the Deep review tab, or '' while it is folded. */
+const jumpOpenAtom = atom({ plugin: 'backseat-driver', key: 'jumpOpen' } as const, '' as string)
 const bandKeysAtom = atom({ plugin: 'backseat-driver', key: 'bandKeys' } as const, false)
 
 /** The pane's id, for the vertical layout. The other two layouts draw above the prompt and open no pane. */
@@ -3786,7 +3788,7 @@ async function drawTutor(
 ) {
   quiet.renders += 1
   // One round for everything the pane shows, not a dozen in a row for every frame.
-  const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, shownSettings, licensing, backdrop, isUnfolded, lessons] = await Promise.all([
+  const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, shownSettings, licensing, backdrop, isUnfolded, lessons, jumpOpen] = await Promise.all([
     read($, modeAtom),
     read($, tabAtom),
     read($, notesAtom),
@@ -3805,6 +3807,7 @@ async function drawTutor(
     settings.isAnimated ? themeBackdrop($) : ('dark' as const),
     read($, unfoldedAtom),
     read($, lessonsAtom),
+    read($, jumpOpenAtom),
   ])
   const view: PaneView = {
     mode: shownMode,
@@ -3832,12 +3835,15 @@ async function drawTutor(
     rows: where.rows,
     character: settings.isAnimated ? { avatar: avatarFor(settings.persona.voice), speech, backdrop } : null,
     isUnfolded,
+    jumpOpen,
     settings: shownSettings,
   }
 
   const tree = renderPane(kit, view, {
     onTab: (tab: Tab) => {
       touched($, settings, 'tab', () => tab)
+      // The review's list of places folds again whenever the person moves on.
+      void update($, jumpOpenAtom, () => '')
       // Read again each time: a change made in /config meanwhile shows.
       if (tab === 'settings') void showSettings($)
       if (where.layout === 'vertical') {
@@ -3921,8 +3927,13 @@ async function drawTutor(
         return next === index ? review : { ...review, opened: next }
       })
     },
+    onJumpFold: (subject: string) => {
+      touched($, settings, 'jump fold', () => subject)
+      void update($, jumpOpenAtom, (open: string): string => (open === subject ? '' : subject))
+    },
     onJump: (path: string, line: number) => {
       touched($, settings, 'jump', () => ({ path, line }))
+      void update($, jumpOpenAtom, () => '')
       void update($, tabAtom, () => 'explain')
       if (layout === 'unified') void update($, unfoldedAtom, () => true)
       watchClosely($)

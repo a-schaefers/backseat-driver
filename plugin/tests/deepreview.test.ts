@@ -263,24 +263,35 @@ sessionTest('the tab walks back to earlier reviews, and a place a review names i
   await session.clock.settle()
   session.commit('Add mean')
   await session.clock.advance(2000)
-  await $.turn.complete(session.finish(2, 'The empty-list point from the last review is still open.'))
+  const second = 'The empty-list point from the last review is still open at stats.py:2, and stats.py:4 is new.'
+  await $.turn.complete(session.finish(2, second))
   await session.clock.settle()
 
   const reading = async () => (await ui.find({ key: 'review' }))?.props.text
-  expect(await reading()).toBe('The empty-list point from the last review is still open.')
+  expect(await reading()).toBe(second)
   expect(await ui.find({ key: 'review-older' })).toBeDefined()
   expect(await ui.find({ key: 'review-newer' })).toBeUndefined()
+  // Two places fold under one heading, which opens them downward (the owner, 2026-10-05: a row "does not scale well").
+  expect(await ui.find({ key: 'jump-list' })).toBeDefined()
+  expect(await ui.find({ key: 'jump-stats.py:4' })).toBeUndefined()
+  await ui.press({ key: 'jump-list' })
+  expect(await ui.find({ key: 'jump-stats.py:4' })).toBeDefined()
+  expect(await ui.find({ key: 'jump-stats.py:2' })).toBeDefined()
 
   // p goes to the review before it, and n back.
   await ui.press({ key: 'review-older' })
   expect(await reading()).toBe('The division at stats.py:2 has nothing for an empty list.')
   expect(await ui.find({ key: 'review-older' })).toBeUndefined()
-  // The place it names is a button, and the button opens Explain there.
+  // One place is a row by itself, and the row opens Explain there.
+  expect(await ui.find({ key: 'jump-list' })).toBeUndefined()
   await ui.press({ key: 'jump-stats.py:2' })
   expect(await ui.find({ type: 'Text', text: 'stats.py' })).toBeDefined()
   await ui.press({ key: 'tab-review' })
   await ui.press({ key: 'review-newer' })
-  expect(await reading()).toBe('The empty-list point from the last review is still open.')
+  expect(await reading()).toBe(second)
+  // Folded again after the jump and the change of tab.
+  expect(await ui.find({ key: 'jump-list' })).toBeDefined()
+  expect(await ui.find({ key: 'jump-stats.py:4' })).toBeUndefined()
   await ui.unmount()
 })
 
