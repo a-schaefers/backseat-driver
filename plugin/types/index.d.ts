@@ -78,7 +78,7 @@ export type Watch = {
   /**
    * Which editors are connected to this project, as a sentence (`editors.ts`), and '' when none is: the pane's
    * light is green for the one and red for the other. Absent while this session cannot say: before the editors'
-   * files were first read, and in a session that does not read them.
+   * files were first read (the driver reads them at every scan, a session that does not drive at every beat of the lease).
    */
   editors?: string
 }

@@ -230,8 +230,8 @@ sessionTest('a session that took over a project shows what the pane held for the
   await $.session.start(SESSION)
   await $.command.run(typed('backseat'))
   await session.clock.settle()
-  // While another session drives, its notes are its own.
-  expect(await shows($, NOTE.text)).toBe(false)
+  // While another session drives, its notes show here too, read from the project's folder.
+  expect(await shows($, NOTE.text)).toBe(true)
 
   await session.clock.advance(60_000 + 3000)
   await session.clock.settle()

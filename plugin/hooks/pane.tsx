@@ -155,27 +155,61 @@ export function tabBadge(tab: Tab, view: Partial<Pick<PaneView, 'notes' | 'revie
 export function tabRow(
   view: Pick<PaneView, 'columns' | 'review'> & Partial<Pick<PaneView, 'notes' | 'explain' | 'progress'>>,
 ): { labels: string[]; gap: number } {
-  // A button draws as its key, a colon, a space and its label.
-  const fits = (labels: readonly string[], gap: number): boolean =>
-    labels.reduce((sum, label) => sum + label.length + 3, 0) + gap * (TABS.length - 1) <= view.columns
-  const full = TABS.map(({ tab, label }) => `${label}${tabBadge(tab, view)}`)
+  return labelsFor(view, TABS)
+}
+
+/** A button draws as its key, a colon, a space and its label: whether a row of them fits the pane in one line. */
+function rowFits(labels: readonly string[], gap: number, columns: number): boolean {
+  return labels.reduce((sum, label) => sum + label.length + 3, 0) + gap * (labels.length - 1) <= columns
+}
+
+/** `tabRow`'s choice of names, for the tabs given: all of them, or one row of them. */
+function labelsFor(
+  view: Pick<PaneView, 'columns' | 'review'> & Partial<Pick<PaneView, 'notes' | 'explain' | 'progress'>>,
+  entries: readonly (typeof TABS)[number][],
+): { labels: string[]; gap: number } {
+  const fits = (labels: readonly string[], gap: number): boolean => rowFits(labels, gap, view.columns)
+  const full = entries.map(({ tab, label }) => `${label}${tabBadge(tab, view)}`)
   if (fits(full, 3)) return { labels: full, gap: 3 }
-  const short = TABS.map(({ tab, short: name }) => `${name}${tabBadge(tab, view)}`)
+  const short = entries.map(({ tab, short: name }) => `${name}${tabBadge(tab, view)}`)
   if (fits(short, 2)) return { labels: short, gap: 2 }
   if (fits(short, 1)) return { labels: short, gap: 1 }
 
   // No room for everything: the review's badge is the one that asks for a look, so it stays.
-  const reviewOnly = TABS.map(({ tab, short: name }) => (tab === 'review' ? `${name}${tabBadge(tab, view)}` : name))
+  const reviewOnly = entries.map(({ tab, short: name }) => (tab === 'review' ? `${name}${tabBadge(tab, view)}` : name))
   if (fits(reviewOnly, 2)) return { labels: reviewOnly, gap: 2 }
   if (fits(reviewOnly, 1)) return { labels: reviewOnly, gap: 1 }
 
   // Narrower than a docked pane: the longest names give way, and still the review's badge stays.
-  const tinyWithBadge = TABS.map(({ tab, tiny }) => (tab === 'review' ? `${tiny}${tabBadge(tab, view)}` : tiny))
+  const tinyWithBadge = entries.map(({ tab, tiny }) => (tab === 'review' ? `${tiny}${tabBadge(tab, view)}` : tiny))
   if (fits(tinyWithBadge, 1)) return { labels: tinyWithBadge, gap: 1 }
 
   // Not even that (a 57-column dock with "(new)", seen 2026-10-05, wrapped "Set" onto the status line): the
   // review's badge shrinks to one mark, which still says there is something to read.
-  return { labels: TABS.map(({ tab, tiny }) => (tab === 'review' && tabBadge(tab, view) !== '' ? `${tiny}*` : tiny)), gap: 1 }
+  return { labels: entries.map(({ tab, tiny }) => (tab === 'review' && tabBadge(tab, view) !== '' ? `${tiny}*` : tiny)), gap: 1 }
+}
+
+/** A row of the tab bar as drawn: the first of its tabs, their labels, and the gap between them. */
+export type TabRowView = { from: number; labels: string[]; gap: number }
+
+/**
+ * The rows the tabs are drawn in: one, as `tabRow` chooses it, or two of
+ * three when not even the shortest names fit one. Claude Code docked the pane
+ * at 46 columns on the owner's 157-column terminal (2026-10-06) and "6: Set"
+ * was cut off the row, a tab nobody could click. Each row chooses its names
+ * by itself, so the badges come back.
+ */
+export function tabRows(
+  view: Pick<PaneView, 'columns' | 'review'> & Partial<Pick<PaneView, 'notes' | 'explain' | 'progress'>>,
+): TabRowView[] {
+  const one = tabRow(view)
+  if (rowFits(one.labels, one.gap, view.columns)) return [{ from: 0, ...one }]
+  const half = Math.ceil(TABS.length / 2)
+
+  return [
+    { from: 0, ...labelsFor(view, TABS.slice(0, half)) },
+    { from: half, ...labelsFor(view, TABS.slice(half)) },
+  ]
 }
 
 /** Shown while the pane does not have the keyboard: its keys do nothing until it does. */
@@ -242,15 +276,11 @@ export function underlineSpans(labels: readonly string[], gap: number, withDigit
   return { before, active, after: Math.max(0, columns - before - active) }
 }
 
-/** The rule under the tabs, heavy and in the accent color under the open one: what makes the row read as a tab bar. */
-function tabUnderline({ Box, Text }: Pick<Kit, 'Box' | 'Text'>, view: Pick<PaneView, 'tab' | 'columns'>, row: { labels: string[]; gap: number }) {
-  const spans = underlineSpans(
-    row.labels,
-    row.gap,
-    true,
-    TABS.findIndex(entry => entry.tab === view.tab),
-    view.columns,
-  )
+/** The rule under the tabs, heavy and in the accent color under the open one: what makes the row read as a tab bar. A row without the open tab gets the plain rule. */
+function tabUnderline({ Box, Text }: Pick<Kit, 'Box' | 'Text'>, view: Pick<PaneView, 'tab' | 'columns'>, row: TabRowView) {
+  const open = TABS.findIndex(entry => entry.tab === view.tab) - row.from
+  if (open < 0 || open >= row.labels.length) return rule({ Text }, view.columns)
+  const spans = underlineSpans(row.labels, row.gap, true, open, view.columns)
 
   return (
     <Box flexDirection="row">
@@ -1037,11 +1067,11 @@ function tabBody(kit: Kit, view: PaneView, actions: PaneActions) {
   return profileTab(kit, view, actions)
 }
 
-/** The tabs as a row of buttons, each with its digit. */
-function tabButtons({ Box, Button }: Kit, view: PaneView, actions: PaneActions, row: { labels: string[]; gap: number }) {
+/** The tabs of one row as buttons, each with its digit. */
+function tabButtons({ Box, Button }: Kit, view: PaneView, actions: PaneActions, row: TabRowView) {
   return (
     <Box flexDirection="row" columnGap={row.gap} flexShrink={0}>
-      {TABS.map(({ tab, hotkey }, index) => (
+      {TABS.slice(row.from, row.from + row.labels.length).map(({ tab, hotkey }, index) => (
         <Button key={`tab-${tab}`} label={row.labels[index] ?? ''} hotkey={hotkey} plain dimColor={view.tab !== tab} onPress={() => actions.onTab(tab)} />
       ))}
     </Box>
@@ -1154,12 +1184,14 @@ function characterOf(view: PaneView): PaneView['character'] {
 function renderStacked(kit: Kit, view: PaneView, actions: PaneActions) {
   const { Box, Text } = kit
   const character = characterOf(view)
-  const row = tabRow(view)
+  const [first, second] = tabRows(view)
 
   return (
     <Box flexDirection="column">
-      {tabButtons(kit, view, actions, row)}
-      {tabUnderline(kit, view, row)}
+      {first !== undefined && tabButtons(kit, view, actions, first)}
+      {first !== undefined && tabUnderline(kit, view, first)}
+      {second !== undefined && tabButtons(kit, view, actions, second)}
+      {second !== undefined && tabUnderline(kit, view, second)}
       {statusRows(kit, view, true)}
       {/* Outside a repository there is no journal, so nothing to go on and nowhere to keep an answer. */}
       {view.watch.state !== 'no-git' && workingOn(kit, view, actions)}

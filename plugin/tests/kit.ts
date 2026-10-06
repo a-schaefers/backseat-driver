@@ -3,6 +3,14 @@
  * stub here answers in Claude Code's place.
  */
 import type { AgentSpec, ConfigRow, ModelCompleteRequest, On, RenderElement, ToolSpec } from 'claude-code'
+
+/** A model request as the kit records it: the prompt as one string, however it was sent (2.1.292 takes blocks too). */
+type Asked = Omit<ModelCompleteRequest, 'prompt'> & { prompt: string }
+
+/** The request's prompt as the model reads it: the blocks' text joined, in order. */
+function promptText(prompt: ModelCompleteRequest['prompt']): string {
+  return typeof prompt === 'string' ? prompt : prompt.map(block => block.text).join('')
+}
 import { mock, test } from 'claude-code/testing'
 import type { TestBody, TestOptions, TestRest } from 'claude-code/testing'
 
@@ -264,15 +272,15 @@ export function stubSession(on: On, options: StubOptions = {}) {
     submitted: [] as string[],
     contexts: [] as (readonly string[])[],
     /** Every request the plugin made to a model. */
-    requests: [] as ModelCompleteRequest[],
+    requests: [] as Asked[],
     /** Queued replies; with none queued the model has nothing to add. */
     replies: [] as string[],
     /** The same for the Explain tab's lookups, which are kept apart from the play-by-play's. */
-    lookups: [] as ModelCompleteRequest[],
+    lookups: [] as Asked[],
     lookupReplies: [] as string[],
     lookupAnswers: [] as { when: string; reply: string }[],
     /** The progress assessments the plugin asked for, and the replies queued for them. With none queued, nothing is seen. */
-    assessments: [] as ModelCompleteRequest[],
+    assessments: [] as Asked[],
     assessmentReplies: [] as string[],
     /** Queues the reply to the next progress assessment. */
     assess(reply: unknown) {
@@ -812,7 +820,7 @@ export function stubSession(on: On, options: StubOptions = {}) {
       if (job === 'explain') {
         if (failure !== undefined) return refused(failure)
         const text =
-          session.lookupAnswers.find(known => e.prompt.includes(known.when))?.reply ??
+          session.lookupAnswers.find(known => promptText(e.prompt).includes(known.when))?.reply ??
           session.lookupReplies.shift() ??
           '{"summary": "", "symbols": []}'
 
@@ -823,9 +831,10 @@ export function stubSession(on: On, options: StubOptions = {}) {
       return { value: { isAnswered: true as const, text: session.replies.shift() ?? '{"resolved": [], "notes": []}', usage: USAGE } }
     }
     // Recorded when it is asked, whenever it is answered.
-    if (job === 'progress') session.assessments.push(e)
-    else if (job === 'explain') session.lookups.push(e)
-    else session.requests.push(e)
+    const asked: Asked = { ...e, prompt: promptText(e.prompt) }
+    if (job === 'progress') session.assessments.push(asked)
+    else if (job === 'explain') session.lookups.push(asked)
+    else session.requests.push(asked)
     if (!session.stalled.includes(job)) return answer()
 
     return new Promise<ReturnType<typeof answer>>(resolve => {

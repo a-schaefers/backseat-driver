@@ -23,6 +23,7 @@ function world(overrides: Partial<LeasePorts> = {}) {
     deadline: { set: name => void log.push(`set ${name}`) },
     startDriving: async run => void log.push(`start ${run}`),
     stopDriving: async () => void log.push('stop'),
+    followDriver: async () => void log.push('follow'),
     ...overrides,
   }
 
@@ -50,7 +51,10 @@ test('a lease another session holds makes this one wait, once', async () => {
   await keepLease(w.ports, state, 1)
 
   expect(state.isDriver).toBe(false)
-  expect(w.log).toEqual(['set lease', 'stop'])
+  // Waiting, it takes up what the driver writes, now and at every beat; it stops driving only once.
+  expect(w.log).toEqual(['set lease', 'stop', 'follow'])
+  await keepLease(w.ports, state, 1)
+  expect(w.log).toEqual(['set lease', 'stop', 'follow', 'set lease', 'follow'])
 })
 
 test('with no repository there is no lease to hold, and a stale switch-on changes nothing', async () => {

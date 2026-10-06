@@ -78,6 +78,7 @@ PANE_ID = "backseat-driver"
 # The tutor's own numbers (kernel/src/Kernel/Lease.purs, Sessions.purs; plugin/core/editors.ts).
 # scripts/test_jack.py holds them to the source.
 LEASE_TTL_MS = 60_000
+LEASE_BEAT_MS = 20_000
 EDITOR_TTL_MS = 60_000
 SELF_CHECK_MS = 10_000
 ALIVE_MS = 660_000
@@ -87,6 +88,13 @@ STATE_STALE_MS = 3 * SELF_CHECK_MS
 OVERDUE_MS = 15_000
 # After a reload the watchers are killed and started again: this long, a mismatch with the processes is that.
 WATCHERS_GRACE_MS = 5_000
+# A session that does not drive takes the project folder up at every beat of the lease: its pane may be a beat
+# behind the files. The driver writes them itself, and reads the shared ones from its scan within a few seconds.
+FOLLOW_GRACE_MS = LEASE_BEAT_MS + 5_000
+DRIVER_GRACE_MS = 5_000
+SHARED_GRACE_MS = 15_000
+# What the pane calls the first look around a project, which reviews nothing and is not kept in reviews.json (plugin/core/review.ts).
+SURVEY_SUBJECT = "a first look around this project"
 # The first pieces of a drawing are the tabs and the status line: the top of the pane, which is never below the fold.
 HEAD_PIECES = 6
 # Claude Code docks a pane at the side from this many columns (CLAUDE.md, "Handoff"); under it the pane goes above the prompt.
@@ -211,6 +219,8 @@ def projects(home: pathlib.Path) -> list[dict]:
         known = read_json(folder / "project.json") or {}
         notes = read_json(folder / "notes.json") or {}
         queue = read_json(folder / "queue.json")
+        reviews = read_json(folder / "reviews.json")
+        journal = read_json(folder / "journal.json")
         out.append({
             "id": folder.name,
             "dir": folder,
@@ -221,6 +231,10 @@ def projects(home: pathlib.Path) -> list[dict]:
             "dismissed": notes.get("dismissed", []) if isinstance(notes, dict) else [],
             "notes_at": mtime_ms(folder / "notes.json"),
             "queue": queue,
+            "queue_at": mtime_ms(folder / "queue.json"),
+            "reviews": [r for r in reviews if isinstance(r, dict)] if isinstance(reviews, list) else [],
+            "reviews_at": mtime_ms(folder / "reviews.json"),
+            "journal": journal if isinstance(journal, dict) else {},
             "journal_at": mtime_ms(folder / "journal.json"),
         })
     return out
@@ -989,13 +1003,15 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
             out.append((FINE, f"{who}'s editors light is {'green: ' + light if light else 'red: no editor connected'}"))
 
     # The notes. notes.json may keep more than the pane shows: a note about text changed since is kept there and
-    # never shown again (seen live after /backseat off and on). A note in the pane that notes.json lacks is lost at a restart.
+    # never shown again (seen live after /backseat off and on). A note in the pane that notes.json lacks is lost at a restart,
+    # or, in a session that does not drive, is one the driver took down that the next beat takes down here.
     notes = dig(state, "pane.notes")
-    if mode != "off" and is_driver is True and project is not None and isinstance(notes, list):
+    if mode != "off" and project is not None and isinstance(notes, list):
         kept = {n.get("id") for n in project["notes"] if isinstance(n, dict)}
         lost = [n for n in notes if isinstance(n, dict) and n.get("id") not in kept]
-        if lost and now - (project["notes_at"] or 0) > 5000:
+        if lost and now - (project["notes_at"] or 0) > (DRIVER_GRACE_MS if is_driver is True else FOLLOW_GRACE_MS):
             out.append((BAD, f"{who} has {len(notes)} open note(s) in its pane, and notes.json, written {ago(now - (project['notes_at'] or 0))} ago, lacks {len(lost)} of them: a restart would lose them"))
+    out += check_cache(w, s, project)
 
     # What it says it shows, against the screen.
     shown = state.get("shown") if isinstance(state.get("shown"), dict) else {}
@@ -1028,13 +1044,17 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
         head, rest = missing_pieces(texts, rows)
         where = "strip above the prompt" if minimized else "pane" if layout == "vertical" else "lines above the prompt"
         below = pieces_below(texts, rows)
-        if head and below > 0:
+        # A scrolled pane lacks its first piece. One whose first piece is there and a later one of the top is not has
+        # that piece cut off its row (the owner's 157-column terminal, 2026-10-06: a 46-column dock cut "6: Set" off).
+        is_top_there = bool(texts) and is_on_screen(texts[0], flows(rows))
+        if head and below > 0 and not is_top_there:
             # The top is missing and the rest is there: the person scrolled the pane down to read (the owner, 2026-10-05,
             # a long deep review in a 30-row terminal). Their view, not a fault.
             out.append((NOTE, f"{who}'s {where} is scrolled: its top ({len(head)} piece(s), the tabs and the status line) is above the frame, and {below} piece(s) below it are on the screen"))
         elif head:
             quoted = "; ".join(f"“{t[:60]}”" for t in head[:3])
-            out.append((BAD, f"{who} says its {where} shows {quoted}{' and more' if len(head) > 3 else ''}: not on its screen (drawn {ago(now - (drawing.get('at') or now))} ago, {drawing.get('placement') or 'above the prompt'}, {drawing.get('columns')} columns)"))
+            cut = " The first piece is on the screen, so the row is cut, not scrolled." if is_top_there else ""
+            out.append((BAD, f"{who} says its {where} shows {quoted}{' and more' if len(head) > 3 else ''}: not on its screen (drawn {ago(now - (drawing.get('at') or now))} ago, {drawing.get('placement') or 'above the prompt'}, {drawing.get('columns')} columns).{cut}"))
         else:
             out.append((FINE, f"{who}'s {where} is on its screen as it says ({len(texts) - len(rest)} of {len(texts)} pieces{', the rest below the fold or cut' if rest else ''})"))
     elif mode != "off" and rows is not None:
@@ -1050,6 +1070,187 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
     for r in recent[-3:]:
         out.append((BAD, f"{who} {clock(r.get('t'))} error: {r.get('n')}: {brief(dig(r, 'd.message'), 120)}"))
     return out
+
+
+# ------------------------------------------------------------------ the pane against the cache ----
+
+def unchanged_since(root: str, path: str, at: float | None, now: int) -> bool:
+    """Whether a file of the repository was last written before `at`: a note about it is still what the look saw."""
+    if not root or at is None:
+        return False
+    written = mtime_ms(pathlib.Path(root) / path)
+    return written is not None and written < at
+
+
+def check_cache(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]]:
+    """The pane against the project's cache on disk and the person's record: what a restart, a takeover and a
+    session that does not drive take up from the folder, and what every session keeps in step with. The deep
+    reviews, the notes kept about files unchanged since, what they said they are working on, the commits waiting,
+    the level. The driver writes the project's files itself; a session that does not drive reads them at each beat
+    of the lease, and the shared ones every session reads within seconds: a file written within that is not held
+    against a pane. The owner's 2026-10-06: a fresh session beside the night's showed an empty Deep review tab with
+    four reviews on disk, and took the cache for broken."""
+    out: list[tuple[str, str]] = []
+    state = s["state"]
+    if state is None or tutor_mode(s) == "off" or project is None:
+        return out
+    now = w["now"]
+    who = s["short"]
+    is_driver = dig(state, "lease.isDriver") is True
+    grace = DRIVER_GRACE_MS if is_driver else FOLLOW_GRACE_MS
+    settled = lambda at, within=grace: at is not None and now - at > within
+
+    # The deep reviews.
+    pane_review = dig(state, "pane.review") if isinstance(dig(state, "pane.review"), dict) else {}
+    reviews = project["reviews"]
+    last = reviews[-1] if reviews else None
+    if last is not None and not settled(project["reviews_at"]):
+        out.append((NOTE, f"reviews.json of {project['id']} was written {ago(now - (project['reviews_at'] or now))} ago: {who}'s Deep review tab is held against it next time"))
+    elif last is not None:
+        older = pane_review.get("older") if isinstance(pane_review.get("older"), list) else []
+        if pane_review.get("state") == "none":
+            out.append((BAD, f"{who}'s Deep review tab has nothing to read, and reviews.json holds {len(reviews)} review(s), the latest “{last.get('subject')}” at {clock(last.get('at'))}: the cache is not taken up"))
+        elif len(older) != len(reviews):
+            out.append((BAD, f"{who}'s Deep review tab lists {len(older)} earlier review(s), and reviews.json holds {len(reviews)}"))
+        elif pane_review.get("state") == "done" and pane_review.get("subject") not in (last.get("subject"), SURVEY_SUBJECT):
+            out.append((BAD, f"{who}'s Deep review tab shows “{pane_review.get('subject')}” as the latest review, and reviews.json's latest is “{last.get('subject')}”"))
+        else:
+            out.append((FINE, f"{who}'s Deep review tab has the cache's {len(reviews)} review(s), the latest “{last.get('subject')}”"))
+
+    # The notes kept about files unchanged since the look that raised them: still true, so still shown, unless dismissed here.
+    notes = dig(state, "pane.notes")
+    kept = [n for n in project["notes"] if isinstance(n, dict)]
+    if isinstance(notes, list) and kept and settled(project["notes_at"]):
+        shown = {n.get("id") for n in notes if isinstance(n, dict)}
+        gone = {(n.get("file"), n.get("topic")) for n in (dig(state, "pane.dismissed") or []) if isinstance(n, dict)}
+        root = state.get("repoRoot") or ""
+        missing = [n for n in kept if n.get("id") not in shown and (n.get("file"), n.get("topic")) not in gone
+                   and unchanged_since(root, str(n.get("file", "")), project["notes_at"], now)]
+        if missing:
+            named = ", ".join("%s: “%s”" % (n.get("file"), str(n.get("text", ""))[:40]) for n in missing[:3])
+            out.append((BAD, f"{who}'s pane lacks {len(missing)} note(s) that notes.json keeps about files unchanged since it was written: {named}"))
+
+    # What they said they are working on, which holds across sessions.
+    said = dig(project["journal"], "said")
+    pane_said = dig(state, "pane.working.said")
+    if isinstance(said, dict) and isinstance(said.get("text"), str) and isinstance(pane_said, str) and said["text"] != pane_said:
+        # The driver's own journal merges the file at its next write (later wins): held against it once it has written since.
+        is_due = settled(project["journal_at"]) if not is_driver else (project["journal_at"] or 0) > (said.get("at") or 0) + DRIVER_GRACE_MS
+        if is_due:
+            out.append((BAD, f"{who}'s pane says they are working on “{pane_said or '(nothing said)'}”, and the journal says they said “{said['text'] or '(taken back)'}” at {clock(said.get('at'))}"))
+
+    # The commits waiting, as the tab counts them. The driver's count in memory is held against the file in check_world.
+    if not is_driver and isinstance(project["queue"], dict) and settled(project["queue_at"]):
+        count = len([c for c in project["queue"].get("commits", []) if isinstance(c, dict) and not c.get("isReviewed")])
+        counted = pane_review.get("waiting") or 0
+        if count != counted:
+            out.append((BAD, f"{who}'s Deep review tab counts {counted} commit(s) waiting for their review, and queue.json has {count}"))
+
+    # The level, which any session may change.
+    for record in (dig(state, "pane.progress.records") or []):
+        if not isinstance(record, dict) or s["home"] is None:
+            continue
+        language = str(record.get("language", ""))
+        file = s["home"] / "progress" / f"{language}.json"
+        stored = read_json(file) or {}
+        if isinstance(stored, dict) and stored and settled(mtime_ms(file), max(grace, SHARED_GRACE_MS)) and stored.get("level") != record.get("level"):
+            out.append((BAD, f"{who}'s Growth tab places {language} at {record.get('level') or 'no level'}, and progress/{language}.json says {stored.get('level') or 'no level'}"))
+    return out
+
+
+def print_bundle(w: dict, s: dict) -> None:
+    """One session, everything a reader needs to judge its pane: the screen as the person sees it, what the tutor
+    says it drew, the pane's state tab by tab, the cache on disk, what the person was told lately, and the checks."""
+    now = w["now"]
+    state = s["state"] or {}
+    mode = tutor_mode(s)
+    drives = "drives" if dig(state, "lease.isDriver") is True else "does not drive"
+    print(f"=== SESSION {s['short']} · {s['kind']} {s['status']} · {tilde(s['cwd'])} · eyes {eyes_label(s['eyes'])} · tutor {mode} · {drives} · {copy_label(s)}")
+    rows = screen_of(s["eyes"])
+    eyes = s["eyes"] if isinstance(s["eyes"], dict) else {}
+    print(f"--- SCREEN ({eyes.get('cols', '?')}x{eyes.get('rows', '?')}) as the person sees it")
+    if rows is None:
+        print("(cannot be seen: not in tmux and not in the background)")
+    else:
+        print("\n".join(row.rstrip() for row in rows).rstrip("\n"))
+    shown = state.get("shown") if isinstance(state.get("shown"), dict) else {}
+    drawing = shown.get("band") if shown.get("minimized") else shown.get("pane")
+    if isinstance(drawing, dict):
+        print(f"--- WHAT IT SAYS IT DRAWS ({'the strip above the prompt' if shown.get('minimized') else 'the pane'}, drawn {ago(now - (drawing.get('at') or now))} ago, {drawing.get('placement')}, {drawing.get('columns')} columns, {'focused' if drawing.get('isFocused') else 'keys off'})")
+        print(" ¦ ".join(str(t) for t in drawing.get("texts", []) if isinstance(t, str)))
+    pane = state.get("pane") if isinstance(state.get("pane"), dict) else {}
+    print("--- THE PANE'S STATE (what each tab draws from)")
+    watch = pane.get("watch") if isinstance(pane.get("watch"), dict) else {}
+    print(f"tab open: {pane.get('tab')} · minimized: {'yes' if shown.get('minimized') else 'no'} · status: {watch.get('line')} · health: {watch.get('health') or '-'} · editors: {watch.get('editors') if watch.get('editors') is not None else '(no light)'}")
+    working = pane.get("working") if isinstance(pane.get("working"), dict) else {}
+    print(f"working on: said “{working.get('said', '')}” · inferred “{working.get('inferred', '')}” · where “{working.get('where', '')}”")
+    notes = [n for n in (pane.get("notes") or []) if isinstance(n, dict)]
+    dismissed = [n for n in (pane.get("dismissed") or []) if isinstance(n, dict)]
+    print(f"notes: {len(notes)} open, {len(dismissed)} dismissed")
+    for n in notes:
+        print(f"  #{n.get('id')} {n.get('kind')} {n.get('file')}:{n.get('line')} “{brief(n.get('text'), 110)}”")
+    review = pane.get("review") if isinstance(pane.get("review"), dict) else {}
+    older = review.get("older") if isinstance(review.get("older"), list) else []
+    print(f"review: state {review.get('state')} · subject “{review.get('subject')}” · {'unseen' if review.get('isUnseen') else 'seen'} · {len(older)} in history · opened {review.get('opened', 0)} · waiting {review.get('waiting') or 0}")
+    if review.get("text"):
+        print(f"  text: “{brief(review.get('text'), 200)}”")
+    for r in (pane.get("progress") or {}).get("records", []) if isinstance(pane.get("progress"), dict) else []:
+        if isinstance(r, dict):
+            print(f"growth: {r.get('language')} {r.get('level') or 'not placed'}{' (provisional)' if r.get('isProvisional') else ''} · {len(r.get('observations') or [])} observations")
+    lessons = pane.get("lessons") if isinstance(pane.get("lessons"), dict) else {}
+    print(f"lessons: {len(lessons.get('paths') or [])} path(s) · selected {lessons.get('selected')} · update notice: {brief(pane.get('update'), 80) or '-'} · license line: {brief(pane.get('license'), 80) or '-'}")
+    speech = pane.get("speech") if isinstance(pane.get("speech"), dict) else {}
+    print(f"character says: “{speech.get('text', '')}”")
+    root = state.get("repoRoot") or ""
+    project = next((p for home in w["homes"] for p in projects(home) if root and (p["root"] == root or p["id"] == project_id(root))), None) if root else None
+    print(f"--- THE CACHE ON DISK ({project['id'] if project else 'no project folder'})")
+    if project is not None:
+        lease = project["lease"]
+        since = lambda at: f"written {ago(now - at)} ago" if at else "not written"
+        print(f"lease: {short(str(lease.get('session', ''))) or 'free'} renewed {ago(now - (lease.get('at') or 0))} ago")
+        print(f"notes.json ({since(project['notes_at'])}): {len(project['notes'])} open, {len(project['dismissed'])} dismissed")
+        for n in project["notes"]:
+            if isinstance(n, dict):
+                print(f"  #{n.get('id')} {n.get('kind')} {n.get('file')}:{n.get('line')} “{brief(n.get('text'), 110)}”")
+        print(f"reviews.json ({since(project['reviews_at'])}): {len(project['reviews'])} review(s), oldest first")
+        for r in project["reviews"]:
+            print(f"  {clock(r.get('at'))} “{r.get('subject')}” · {len(r.get('decisions') or [])} decision(s), {len(r.get('insights') or [])} insight(s) · “{brief(r.get('text'), 90)}”")
+        waiting = [c for c in (dig(project["queue"], "commits") or []) if isinstance(c, dict)] if isinstance(project["queue"], dict) else []
+        print(f"queue.json ({since(project['queue_at'])}): {len(waiting)} waiting: " + ", ".join(f"{str(c.get('hash', ''))[:7]} “{c.get('title')}”{' reviewed' if c.get('isReviewed') else ''}" for c in waiting))
+        said = dig(project["journal"], "said") or {}
+        inferred = dig(project["journal"], "inferred") or {}
+        print(f"journal.json ({since(project['journal_at'])}): said “{said.get('text', '') if isinstance(said, dict) else ''}” at {clock(said.get('at')) if isinstance(said, dict) and said.get('at') else '-'} · inferred “{inferred.get('text', '') if isinstance(inferred, dict) else ''}” · {len(dig(project['journal'], 'entries') or [])} entries in this sitting")
+    if s["home"] is not None:
+        for file in sorted((s["home"] / "progress").glob("*.json")):
+            stored = read_json(file) or {}
+            if isinstance(stored, dict):
+                print(f"{file.parent.name}/{file.name} (written {ago(now - (mtime_ms(file) or now))} ago): level {stored.get('level') or 'none'}{' (provisional)' if stored.get('isProvisional') else ''} · {len(stored.get('observations') or [])} observations")
+        print("profiles: " + ", ".join(f.stem for f in sorted((s["home"] / "profiles").glob("*.json"))))
+        for e in editors(s["home"]):
+            d = e["data"]
+            print(f"editor {d.get('editor', e['name'])} pid {d.get('pid')} {'alive' if e['alive'] else 'GONE'} · wrote {ago(now - (e['at'] or 0))} ago · {tilde(str(d.get('file', '')))}:{d.get('line', '')}")
+        book = (read_json(s["home"] / "sessions.json") or {}).get("sessions", [])
+        print("sessions.json: " + "; ".join(f"{short(str(e.get('session', '')))} {e.get('mode')} born {clock(e.get('born'))} said {ago(now - (e.get('at') or 0))} ago{' left' if e.get('leftAt') else ''}" for e in book if isinstance(e, dict)))
+    print("--- SAID LATELY (outside the pane, newest last)")
+    for told in (state.get("said") or [])[-8:]:
+        if isinstance(told, dict):
+            print(f"  {clock(told.get('at'))} {told.get('how')}: {brief(told.get('text'), 140)}")
+    print("--- CHECKS (!! disagrees, ok agrees, ·· a note)")
+    for level, text in check_session(w, s, rows):
+        print(f"  {level} {text}")
+    print()
+
+
+def cmd_bundle(args) -> int:
+    w = world(args.home)
+    chosen = [need(w, args.session)] if args.session else [s for s in w["sessions"] if not s["is_me"] and tutor_mode(s) != "off"]
+    if not chosen:
+        print("no session with the tutor on: `scripts/jack.py` lists them")
+        return 2
+    print(f"jack bundle · {clock(w['now'])} · working copy {working_copy()} · {len(chosen)} session(s)\n")
+    for s in chosen:
+        print_bundle(w, s)
+    return 0
 
 
 # ------------------------------------------------------------------ what it told the person ----
@@ -1958,6 +2159,7 @@ def main(argv: list[str] | None = None) -> int:
     add("out", cmd_out, session=False)
     add("screen", cmd_screen)
     add("truth", cmd_truth)
+    add("bundle", cmd_bundle, help="one session's screen, what it says it draws, its pane's state, the cache on disk, what it said lately, and the checks: what the ui-truth pass reads")
     p = add("watch", cmd_watch)
     p.add_argument("--every", type=float, default=1.5, help="seconds between looks")
     p.add_argument("--rows", type=int, default=14, help="at most this many new screen rows per change")

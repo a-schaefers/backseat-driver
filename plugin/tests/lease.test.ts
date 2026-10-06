@@ -4,7 +4,9 @@ import type { TestBody } from 'claude-code/testing'
 import { projectId } from '../core/datahome'
 import { claimed, isHeld, LEASE_BEAT_MS, LEASE_SLACK_MS, LEASE_TTL_MS, nextLeaseCheck, NO_LEASE, parseLease, released } from '../core/lease'
 import type { Lease } from '../core/lease'
+import { sourcePrint } from '../core/knowledge'
 import { emptyProfile, withHush } from '../core/profiles'
+import type { Note } from '../types'
 import { COMPOSE, DATA_HOME, PANE, ROOT, SESSION, SESSION_ID, sessionTest, stubSession, typed } from './kit'
 
 /** Which session drives a project, and what every session shares about the person. */
@@ -225,4 +227,100 @@ sessionTest('a session that took over goes on saying so, and Explain and the pro
   await session.clock.advance(LEASE_BEAT_MS + 1000)
   await session.clock.settle()
   expect(leaseIn(session).at > taken).toBe(true)
+})
+
+const PROJECT = `projects/${projectId(ROOT)}`
+const review = (commit: string, title: string, text: string) => ({ commit, subject: `commit ${commit}: ${title}`, at: 1, text, decisions: [], insights: [] })
+const noteOf = (id: number, topic: string, text: string): Note => ({ id, file: 'stats.py', line: 1, kind: 'tip', topic, text })
+const keptNotes = (notes: Note[]) => ({ v: 1, notes, dismissed: [], prints: { 'stats.py': sourcePrint(MEAN) } })
+const waiting = (digit: string, title: string, at: number) => ({ hash: digit.repeat(40), title, at, isReviewed: false, attempts: 0 })
+
+sessionTest("a session that does not drive shows the driver's notes, reviews and journal, and takes up what it writes at each beat", QUIET, async ($, on) => {
+  const session = stubSession(on, {
+    head: { 'stats.py': MEAN },
+    data: {
+      [LEASE]: { v: 1, session: OTHER, at: 0 },
+      [`${PROJECT}/notes.json`]: keptNotes([noteOf(3, 'naming', 'A note the other session raised.')]),
+      [`${PROJECT}/reviews.json`]: [review('abc1234', 'Add mean', 'The mean is fine.')],
+      [`${PROJECT}/journal.json`]: { said: { text: 'the mean', at: 0 }, inferred: null, entries: [], sittings: [] },
+    },
+  })
+  await start($, session)
+  expect(leaseIn(session).session).toBe(OTHER)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const hasReview = async (text: string): Promise<boolean> => ((await ui.find({ type: 'Markdown', text })) ?? (await ui.find({ type: 'Text', text }))) !== undefined
+  expect(await ui.find({ type: 'Text', text: 'A note the other session raised.' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'the mean' })).toBeDefined()
+  await ui.press({ key: 'tab-review' })
+  expect(await hasReview('The mean is fine.')).toBe(true)
+  // History, not news: nothing is said about it, and no model was asked.
+  expect(session.toasts).toEqual([])
+  expect(session.requests).toEqual([])
+  await ui.press({ key: 'tab-play' })
+
+  // The other session reviews a commit, looks at a save, and has two more commits waiting. Its lease is renewed meanwhile.
+  const renew = (): void => void session.disk.set(`${DATA_HOME}/${LEASE}`, JSON.stringify({ v: 1, session: OTHER, at: session.clock.now() }))
+  renew()
+  session.disk.set(`${DATA_HOME}/${PROJECT}/reviews.json`, JSON.stringify([review('abc1234', 'Add mean', 'The mean is fine.'), review('def5678', 'Add median', 'The median sorts a copy. Good.')]))
+  session.disk.set(`${DATA_HOME}/${PROJECT}/notes.json`, JSON.stringify(keptNotes([noteOf(3, 'naming', 'A note the other session raised.'), noteOf(4, 'even-length', 'What is the median of four numbers?')])))
+  session.disk.set(`${DATA_HOME}/${PROJECT}/queue.json`, JSON.stringify({ v: 1, commits: [waiting('1', 'Later', session.clock.now()), waiting('2', 'Later still', session.clock.now())] }))
+  await session.clock.advance(LEASE_BEAT_MS)
+  await session.clock.settle()
+  expect(await ui.find({ type: 'Text', text: 'What is the median of four numbers?' })).toBeDefined()
+  expect(session.toasts).toEqual(['Deep review ready: commit def5678: Add median'])
+  expect(await ui.find({ key: 'tab-review', text: 'Review (new)' })).toBeDefined()
+  await ui.press({ key: 'tab-review' })
+  expect(await hasReview('The median sorts a copy. Good.')).toBe(true)
+  expect(await ui.find({ type: 'Text', text: 'One more commit is waiting for its review.' })).toBeDefined()
+  expect(session.requests).toEqual([])
+  expect(session.spawned).toEqual([])
+
+  // A note dismissed here stays dismissed when the driver's notes are read again, and a new one shows.
+  await ui.press({ key: 'tab-play' })
+  await ui.press({ key: 'dismiss' })
+  expect(await ui.find({ type: 'Text', text: 'A note the other session raised.' })).toBeUndefined()
+  renew()
+  session.disk.set(
+    `${DATA_HOME}/${PROJECT}/notes.json`,
+    JSON.stringify(keptNotes([noteOf(3, 'naming', 'A note the other session raised.'), noteOf(4, 'even-length', 'What is the median of four numbers?'), noteOf(5, 'docstring', 'A third note.')])),
+  )
+  await session.clock.advance(LEASE_BEAT_MS)
+  await session.clock.settle()
+  expect(await ui.find({ type: 'Text', text: 'A third note.' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'What is the median of four numbers?' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'A note the other session raised.' })).toBeUndefined()
+
+  // The editors' light follows too, within a beat, and so does what they said they are working on.
+  session.editor('stats.py', 1, undefined, { editor: 'neovim' })
+  session.disk.set(`${DATA_HOME}/${PROJECT}/journal.json`, JSON.stringify({ said: { text: 'the median, at last', at: session.clock.now() }, inferred: null, entries: [], sittings: [] }))
+  renew()
+  await session.clock.advance(LEASE_BEAT_MS)
+  await session.clock.settle()
+  expect(await ui.find({ type: 'Text', text: 'Neovim is connected.' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'the median, at last' })).toBeDefined()
+
+  // What they say here goes into the journal on disk, for the driver to merge, and shows here at once.
+  const told = await $.command.run(typed('backseat', 'working the mode, next'))
+  expect(told.text).toBe('Noted. Working on: the mode, next')
+  await session.clock.settle()
+  expect(JSON.parse(session.disk.get(`${DATA_HOME}/${PROJECT}/journal.json`) ?? '{}').said.text).toBe('the mode, next')
+  expect(await ui.find({ type: 'Text', text: 'the mode, next' })).toBeDefined()
+  await ui.unmount()
+})
+
+sessionTest("asked for a look, a session that does not drive names the session that does, when it knows when it started", QUIET, async ($, on) => {
+  const session = stubSession(on, {
+    head: { 'stats.py': MEAN },
+    data: {
+      [LEASE]: { v: 1, session: OTHER, at: 0 },
+      'sessions.json': { v: 1, sessions: [{ session: OTHER, born: 0, cwd: ROOT, mode: 'on', at: 0, leftAt: 0 }] },
+    },
+  })
+  await start($, session)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'look' })
+  await ui.unmount()
+  await session.clock.settle()
+  expect(session.toasts.length).toBe(1)
+  expect(session.toasts[0]).toMatch(/^Another session of yours, started \d{1,2}:\d{2}( [AP]M)?, is driving Backseat Driver in this project\. Ask for it there, or switch it off there: this one takes over within a minute\.$/)
 })

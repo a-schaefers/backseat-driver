@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Note, OutlineRow, Watch } from '../types'
 import { NO_VIEW } from '../core/explainer'
-import { currentNote, detailMarkdown, explainNotice, FOCUSED_HINT, jumpHeading, KEYBOARD_HINT, nameColumns, outlineName, personaLine, reviewBanner, reviewPlace, reviewSpots, stateMark, statusLine, tabBadge, tabRow, underlineSpans, waitingLine } from '../hooks/pane'
+import { currentNote, detailMarkdown, explainNotice, FOCUSED_HINT, jumpHeading, KEYBOARD_HINT, nameColumns, outlineName, personaLine, reviewBanner, reviewPlace, reviewSpots, stateMark, statusLine, tabBadge, tabRow, tabRows, underlineSpans, waitingLine } from '../hooks/pane'
 import type { PaneView } from '../hooks/pane'
 import { paneContext } from '../core/prompts'
 import { readableReview, reviewHistory, shownReview, spotsIn, SURVEY_SUBJECT, withReviewChange } from '../core/review'
@@ -175,6 +175,13 @@ test('the tab row keeps what the tabs say for as long as there is room, and neve
   expect(tabRow({ ...busy, columns: 75 })).toEqual({ labels: ['Play (2)', 'Review (new)', 'Explain (…)', 'Growth', 'Lessons', 'Settings'], gap: 1 })
   // Narrower still: the review's word is the one that asks for a look, so it is the one kept.
   expect(tabRow({ ...busy, columns: 72 })).toEqual({ labels: ['Play', 'Review (new)', 'Explain', 'Growth', 'Lessons', 'Settings'], gap: 2 })
+  // Not even the shortest names fit a 46-column dock (Claude Code's, on the owner's 157-column terminal, 2026-10-06, where
+  // "6: Set" was cut off): two rows of three, each choosing its names and keeping its badges.
+  expect(tabRows({ ...busy, columns: 46 })).toEqual([
+    { from: 0, labels: ['Play (2)', 'Review (new)', 'Explain (…)'], gap: 2 },
+    { from: 3, labels: ['Growth', 'Lessons', 'Settings'], gap: 3 },
+  ])
+  expect(tabRows({ ...busy, columns: 72 })).toEqual([{ from: 0, labels: ['Play', 'Review (new)', 'Explain', 'Growth', 'Lessons', 'Settings'], gap: 2 }])
   expect(tabRow({ ...busy, columns: 67 })).toEqual({ labels: ['Play', 'Review (new)', 'Explain', 'Growth', 'Lessons', 'Settings'], gap: 1 })
   // A docked pane: the longest names give way.
   expect(tabRow({ ...busy, columns: 64 })).toEqual({ labels: ['Play', 'Review (new)', 'Expl', 'Growth', 'Lessons', 'Set'], gap: 1 })

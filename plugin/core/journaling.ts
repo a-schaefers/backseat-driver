@@ -10,7 +10,11 @@
  */
 
 import type { Working } from '../types'
+import { workingOf } from './glance'
+import type { Seen } from './glance'
+import { parseEntry, parseJournal, withEntry } from './journal'
 import { createRecorder } from './recorder'
+import { updateJson } from './store'
 import type { Recorder } from './recorder'
 import type { Host } from './host'
 import type { Watcher } from './watcher'
@@ -45,14 +49,43 @@ export type JournalPorts = Pick<Host, 'now' | 'trace' | 'isOn' | 'store' | 'repo
   watcher: () => Pick<Watcher, 'dirty'> | null
 }
 
-/** Tells the pane what they are working on, when that has changed since it was last told. */
-export async function showWorking(ports: JournalPorts, state: JournalState, now: number): Promise<void> {
-  const working = state.recorder === null ? NO_WORKING : state.recorder.working(now)
+/** Tells the pane, when that is not what it was last told. */
+async function tell(ports: JournalPorts, state: JournalState, working: Working): Promise<void> {
   const text = JSON.stringify(working)
   if (text === state.workingShown) return
   state.workingShown = text
   ports.trace('state', 'working', () => working)
   await ports.showWorking(working)
+}
+
+/** Tells the pane what they are working on, when that has changed since it was last told. */
+export async function showWorking(ports: JournalPorts, state: JournalState, now: number): Promise<void> {
+  await tell(ports, state, state.recorder === null ? NO_WORKING : state.recorder.working(now))
+}
+
+/**
+ * In a session that keeps no journal of its own (one that does not drive the
+ * project), what the journal on disk says they are working on: what they
+ * said, which holds across sessions until they change it, and what the
+ * driver's last look inferred while that holds. Read when the driver wrote it.
+ */
+export async function showStoredWorking(ports: JournalPorts, state: JournalState, root: string): Promise<void> {
+  if (state.recorder !== null) return
+  const seen = await storedSeen(ports, root)
+  if (seen !== null) await tell(ports, state, workingOf(seen))
+}
+
+/**
+ * The journal on disk as its readers see it (`glance.ts`), for a session that
+ * keeps none of its own: the driver's saves, commits and caret time, and what
+ * they said. No attention of this session's own, and no caret. Null outside
+ * a repository.
+ */
+export async function storedSeen(ports: JournalPorts, root: string): Promise<Seen | null> {
+  const file = ports.file(root)
+  if (file === '') return null
+
+  return { journal: parseJournal(await ports.store().read(file)), live: [], caret: null, now: await ports.now() }
 }
 
 /** Writes the journal when it is due, or now when `isForced`. A write that fails is made again with the next one. */
@@ -130,10 +163,28 @@ export async function startJournal(ports: JournalPorts, state: JournalState, run
 
 /** Records what they said they are working on, or takes it back with ''. It is saved at once. */
 export async function sayWorking(ports: JournalPorts, state: JournalState, said: string): Promise<void> {
-  const journal = state.recorder
-  if (journal === null) return
   const now = await ports.now()
-  journal.say(said, now)
-  await showWorking(ports, state, now)
-  await flushJournal(ports, journal, now, true)
+  const journal = state.recorder
+  if (journal !== null) {
+    journal.say(said, now)
+    await showWorking(ports, state, now)
+    await flushJournal(ports, journal, now, true)
+
+    return
+  }
+  // No journal of its own (a session that does not drive): what they said goes straight into the journal on disk,
+  // which the driver's merges at its next write (later wins), and shows here at once.
+  const root = ports.repoRoot()
+  const file = ports.file(root)
+  if (file === '') return
+  const entry = parseEntry({ at: now, kind: 'said', text: said })
+  if (entry === null || entry.kind !== 'said') return
+  try {
+    await updateJson(ports.store(), file, parseJournal, stored => ({ ...stored, said: { text: entry.text, at: now }, entries: withEntry(stored.entries, entry) }))
+  } catch (error) {
+    ports.fail('could not write what they are working on', error)
+
+    return
+  }
+  await showStoredWorking(ports, state, root)
 }

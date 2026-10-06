@@ -93,6 +93,8 @@ class Numbers(unittest.TestCase):
         self.assertEqual(jack.SELF_CHECK_MS, self.number("kernel/src/Kernel/Sessions.purs", "checkEveryMs"))
         self.assertEqual(jack.ALIVE_MS, self.number("kernel/src/Kernel/Sessions.purs", "aliveMs"))
         self.assertEqual(jack.EDITOR_TTL_MS, self.number("plugin/core/editors.ts", "EDITOR_TTL_MS"))
+        self.assertEqual(jack.LEASE_BEAT_MS, self.number("kernel/src/Kernel/Lease.purs", "beatMs"))
+        self.assertIn(f"export const SURVEY_SUBJECT = '{jack.SURVEY_SUBJECT}'", (REPO / "plugin" / "core" / "review.ts").read_text())
 
     def test_a_project_folder_is_named_as_the_tutor_names_it(self):
         # Both seen in real data folders.
@@ -310,6 +312,18 @@ class Disagreements(unittest.TestCase):
         self.assertEqual(bad(found), [])
         self.assertTrue(any(level == jack.NOTE and "is scrolled" in text for level, text in found), found)
 
+    def test_a_tab_cut_off_its_row_is_not_a_scrolled_pane(self):
+        # The owner's 157-column terminal, 2026-10-06: Claude Code docked the pane at 46 columns and "6: Set" was cut off.
+        told = state(self.now)
+        told["shown"]["pane"]["texts"] = ["1: Play", "2: Review", "3: Expl", "4: Growth", "5: Lessons", "6: Set", *TEXTS[4:]]
+        told["shown"]["pane"]["columns"] = 46
+        s = session(state=told)
+        cut = [row.replace("1: Play (1)  2: Review  3: Explain  4: Progress", "1: Play 2: Review 3: Expl 4: Growth 5: Lessons") for row in DOCKED]
+        found = bad(jack.check_session(world([s], now=self.now), s, cut))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("“6: Set”", found[0])
+        self.assertIn("the row is cut, not scrolled", found[0])
+
     def test_watchers_missing_right_after_a_reload_are_being_started_again(self):
         # The procs table has no inotifywait under this fake pid, and the state says two are live.
         live = {"pushers": [{"role": "tree", "isLive": True}, {"role": "focus", "isLive": True}]}
@@ -473,6 +487,135 @@ class Disagreements(unittest.TestCase):
         self.assertIs(jack.pick(w, "off"), off)
         self.assertIs(jack.pick(w, "bsd"), on)
         self.assertIsNone(jack.pick(w, "nobody"))
+
+
+class Cache(unittest.TestCase):
+    """The pane against the project's cache: what a restart, a takeover and a session that does not drive take up
+    from the folder, and what every session keeps in step with. The owner's 2026-10-06: a fresh session beside the
+    night's showed an empty Deep review tab with four reviews on disk."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = pathlib.Path(self.tmp.name) / "home"
+        self.root = str(pathlib.Path(self.tmp.name) / "ride")
+        pathlib.Path(self.root).mkdir()
+        self.now = jack.now_ms()
+        self.folder = self.home / "projects" / jack.project_id(self.root)
+        self.folder.mkdir(parents=True)
+        (self.folder / "project.json").write_text(json.dumps({"v": 1, "root": self.root}))
+        (self.folder / "lease.json").write_text(json.dumps({"v": 1, "session": "other", "at": self.now - 1000}))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, path: pathlib.Path, value, age_ms: int) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(value))
+        written = (self.now - age_ms) / 1000
+        os.utime(path, (written, written))
+
+    def told(self, is_driver: bool, **pane) -> dict:
+        made = state(self.now, repoRoot=self.root, lease={"isDriver": is_driver, "holder": "x" if is_driver else ""})
+        made["pane"] = {**made["pane"], **pane}
+        return made
+
+    def found(self, told: dict) -> list[tuple[str, str]]:
+        s = session(home=self.home, state=told)
+        w = world([s], [self.home], self.now)
+        project = jack.projects(self.home)[0]
+        return jack.check_cache(w, s, project)
+
+    def test_an_empty_deep_review_tab_with_reviews_on_disk(self):
+        reviews = [{"commit": "abc1234", "subject": "commit abc1234: Add mean", "at": self.now - 7_200_000, "text": "Fine."},
+                   {"commit": "def5678", "subject": "commit def5678: Add median", "at": self.now - 3_600_000, "text": "Good."}]
+        self.write(self.folder / "reviews.json", reviews, 60_000)
+        empty = {"state": "none", "subject": "", "text": "", "older": []}
+        found = bad(self.found(self.told(False, review=empty)))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("Deep review tab has nothing to read, and reviews.json holds 2 review(s)", found[0])
+        self.assertIn("commit def5678: Add median", found[0])
+        # The tab has them: nothing against it. Short of one in the history, or showing another as the latest: a disagreement.
+        full = {"state": "done", "subject": "commit def5678: Add median", "text": "Good.", "older": [{}, {}]}
+        self.assertEqual(bad(self.found(self.told(False, review=full))), [])
+        self.assertTrue(any("has the cache's 2 review(s)" in text for _, text in self.found(self.told(False, review=full))))
+        self.assertIn("lists 1 earlier review(s), and reviews.json holds 2", bad(self.found(self.told(True, review={**full, "older": [{}]})))[0])
+        self.assertIn("shows “commit abc1234: Add mean” as the latest review", bad(self.found(self.told(True, review={**full, "subject": "commit abc1234: Add mean"})))[0])
+        # A first look around is not kept in reviews.json: the tab may show it as the latest.
+        self.assertEqual(bad(self.found(self.told(True, review={**full, "subject": jack.SURVEY_SUBJECT}))), [])
+        # Written a moment ago: a session that does not drive has a beat to take it up.
+        self.write(self.folder / "reviews.json", reviews, 3_000)
+        self.assertEqual(bad(self.found(self.told(False, review=empty))), [])
+        self.assertTrue(any(level == jack.NOTE and "held against it next time" in text for level, text in self.found(self.told(False, review=empty))))
+
+    def test_notes_kept_about_unchanged_files_that_the_pane_lacks(self):
+        stats = pathlib.Path(self.root) / "stats.py"
+        stats.write_text("def mean(xs): ...\n")
+        old = (self.now - 600_000) / 1000
+        os.utime(stats, (old, old))
+        note = {"id": 7, "file": "stats.py", "line": 1, "kind": "tip", "topic": "naming", "text": "A note about the mean."}
+        self.write(self.folder / "notes.json", {"v": 1, "notes": [note], "dismissed": [], "prints": {"stats.py": "x"}}, 300_000)
+        found = bad(self.found(self.told(False, notes=[], dismissed=[])))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("lacks 1 note(s) that notes.json keeps about files unchanged since", found[0])
+        self.assertIn("stats.py: “A note about the mean.”", found[0])
+        # Shown, or dismissed here: nothing against it.
+        self.assertEqual(bad(self.found(self.told(False, notes=[note], dismissed=[]))), [])
+        self.assertEqual(bad(self.found(self.told(False, notes=[], dismissed=[{"file": "stats.py", "topic": "naming"}]))), [])
+        # The file was saved after the notes were written: the next look says what is true of it, and the note may well be gone.
+        fresh = (self.now - 60_000) / 1000
+        os.utime(stats, (fresh, fresh))
+        self.assertEqual(bad(self.found(self.told(False, notes=[], dismissed=[]))), [])
+
+    def test_what_they_said_they_are_working_on(self):
+        said_at = self.now - 120_000
+        journal = {"said": {"text": "the mean", "at": said_at}, "inferred": None, "entries": [], "sittings": []}
+        self.write(self.folder / "journal.json", journal, 100_000)
+        blank = {"said": "", "saidAgo": "", "inferred": "", "where": "", "share": ""}
+        found = bad(self.found(self.told(False, working=blank)))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("says they are working on “(nothing said)”, and the journal says they said “the mean”", found[0])
+        self.assertEqual(bad(self.found(self.told(False, working={**blank, "said": "the mean"}))), [])
+        # The driver merges the file at its next write: held against it once the file was written after what was said.
+        self.assertEqual(len(bad(self.found(self.told(True, working=blank)))), 1)
+        self.write(self.folder / "journal.json", journal, 120_000)
+        self.assertEqual(bad(self.found(self.told(True, working=blank))), [])
+
+    def test_the_commits_waiting_and_the_level(self):
+        commits = [{"hash": "1" * 40, "title": "Later", "at": self.now, "isReviewed": False, "attempts": 0},
+                   {"hash": "2" * 40, "title": "Done", "at": self.now, "isReviewed": True, "attempts": 0}]
+        self.write(self.folder / "queue.json", {"v": 1, "commits": commits}, 60_000)
+        review = {"state": "none", "subject": "", "text": "", "older": [], "waiting": 0}
+        found = bad(self.found(self.told(False, review=review)))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("counts 0 commit(s) waiting for their review, and queue.json has 1", found[0])
+        self.assertEqual(bad(self.found(self.told(False, review={**review, "waiting": 1}))), [])
+        # The driver's count is held against the file in check_world, from memory, not from the pane.
+        self.assertEqual(bad(self.found(self.told(True, review=review))), [])
+
+        self.write(self.home / "progress" / "python.json", {"v": 1, "language": "python", "level": "junior", "observations": []}, 60_000)
+        records = {"records": [{"language": "python", "level": "beginner", "isProvisional": True, "observations": []}]}
+        found = bad(self.found(self.told(True, progress=records)))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("places python at beginner, and progress/python.json says junior", found[0])
+        self.assertEqual(bad(self.found(self.told(True, progress={"records": [{"language": "python", "level": "junior"}]}))), [])
+        self.write(self.home / "progress" / "python.json", {"v": 1, "language": "python", "level": "mid"}, 5_000)
+        self.assertEqual(bad(self.found(self.told(True, progress={"records": [{"language": "python", "level": "junior"}]}))), [])
+
+    def test_a_bundle_reads_as_one_page(self):
+        import contextlib
+        import io
+        self.write(self.folder / "reviews.json", [{"commit": "abc1234", "subject": "commit abc1234: Add mean", "at": self.now, "text": "Fine."}], 60_000)
+        told = self.told(True, review={"state": "done", "subject": "commit abc1234: Add mean", "text": "Fine.", "older": [{}]})
+        s = session(home=self.home, state=told)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            jack.print_bundle(world([s], [self.home], self.now), s)
+        page = out.getvalue()
+        for heading in ("=== SESSION aaaaaaaa", "--- SCREEN", "cannot be seen", "--- WHAT IT SAYS IT DRAWS", "--- THE PANE'S STATE", "--- THE CACHE ON DISK", "--- SAID LATELY", "--- CHECKS"):
+            self.assertIn(heading, page)
+        self.assertIn("review: state done · subject “commit abc1234: Add mean”", page)
+        self.assertIn("reviews.json (written 60s ago): 1 review(s), oldest first", page)
+        self.assertIn("ok aaaaaaaa's Deep review tab has the cache's 1 review(s)", page)
 
 
 class ToldAndBelieved(unittest.TestCase):

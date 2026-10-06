@@ -35,6 +35,7 @@ import {
   isRemovable,
   journalPath,
   leasePath,
+  sessionsPath,
   licensePath,
   lockRepoPath,
   MARKER,
@@ -92,7 +93,7 @@ import type { Scope } from '../core/forget'
 import { HEALTHY, mayAsk, NO_PRESSURE, outcomeOf, outcomeOfError, pressureOf, stepHealth } from '../core/health'
 import type { Health, Outcome, Pressure } from '../core/health'
 import { parseStatus } from '../core/git'
-import { NO_ACTIVITY } from '../core/glance'
+import { briefText, glanceText, NO_ACTIVITY } from '../core/glance'
 import { DENIAL, isUsersFile } from '../core/guard'
 import { languageName, languageOf, mainLanguages } from '../core/languages'
 import { sourcePrint } from '../core/knowledge'
@@ -153,6 +154,7 @@ import { isNoiseFile } from '../core/noise'
 import { isLookDue, playOf, wakeAt } from '../core/play'
 import type { Play, PlayFacts } from '../core/play'
 import { isProblem, keepNotes, parseKeptNotes, stillOpen, withDismissed } from '../core/notes'
+import type { KeptNotes } from '../core/notes'
 import { renderMinimized, renderPane, reviewSchedule, steppedNote } from './pane'
 import type { Kit, PaneView } from './pane'
 import {
@@ -197,8 +199,10 @@ import {
   keepJournal as keepJournalOf,
   NO_WORKING,
   sayWorking as sayWorkingOf,
+  showStoredWorking as showStoredWorkingOf,
   showWorking as showWorkingOf,
   startJournal as startJournalOf,
+  storedSeen as storedSeenOf,
 } from '../core/journaling'
 import type { JournalPorts, JournalState } from '../core/journaling'
 import { createScheduler } from '../core/scheduler'
@@ -206,7 +210,9 @@ import type { Scheduler } from '../core/scheduler'
 import { freshLeaseState, giveLease as giveLeaseOf, keepLease as keepLeaseOf } from '../core/leasing'
 import type { LeasePorts, LeaseState } from '../core/leasing'
 import { scanGapMs } from '../core/sensor'
-import { SELF_CHECK_MS } from '../core/sessions'
+import { parseSessions, SELF_CHECK_MS } from '../core/sessions'
+import { parseLease } from '../core/lease'
+import { clockTime } from '../core/clock'
 import { isSameShown, textsOf } from './shown'
 import type { Shown } from './shown'
 import { healthLine, playLine, watchOf } from '../core/status'
@@ -499,6 +505,11 @@ const loaded: { at: number; options: PluginOptions | null } = { at: Date.now(), 
  */
 let sharedStamp: string | null = null
 let sharedCheckedAt = 0
+/**
+ * The project folder's files, each as its size and time, as a session that does not drive last took them up
+ * (`followProject`), or null before it has: what tells it which of them to read again.
+ */
+let followedStamps: Record<string, string> | null = null
 /** How often a scan looks at whether those files changed. One listing per folder. */
 const SHARED_CHECK_MS = 5000
 
@@ -1960,11 +1971,29 @@ async function sayWorking($: EngineInterface, said: string): Promise<void> {
   await sayWorkingOf(journalPortsOf($), journalState, said)
 }
 
+/**
+ * What the journal says, for the conversation of a session that keeps none of
+ * its own (one that does not drive): the brief that goes with a prompt, or the
+ * glance the `activity` tool answers with. '' outside a repository.
+ */
+async function storedJournalText($: EngineInterface, as: 'brief' | 'glance'): Promise<string> {
+  if (repoRoot === '') return ''
+  try {
+    const seen = await storedSeenOf(journalPortsOf($), repoRoot)
+
+    return seen === null ? '' : as === 'brief' ? briefText(seen) : glanceText(seen)
+  } catch (error) {
+    fail($, 'could not read the journal', error)
+
+    return ''
+  }
+}
+
 /** Asks what they are working on. Dismissing the dialog leaves everything as it is. */
 async function askWorking($: EngineInterface): Promise<void> {
-  const journal = journalState.recorder
-  if (journal === null) return
-  const working = journal.working(await $.clock.now())
+  // A session that keeps no journal of its own (one that does not drive) asks from what its pane shows, and what
+  // they answer goes into the journal on disk.
+  const working = journalState.recorder?.working(await $.clock.now()) ?? (await read($, workingAtom))
   let answer = ''
   try {
     answer = await askPerson($, WORKING_QUESTION, { options: workingChoices(working), header: WORKING_HEADER })
@@ -2227,7 +2256,7 @@ async function registerTools($: EngineInterface): Promise<void> {
  */
 async function look($: EngineInterface, settings: Settings, isAsked: boolean): Promise<void> {
   if (!leaseState.isDriver) {
-    if (isAsked) toastPerson($, FOLLOWING)
+    if (isAsked) toastPerson($, await followingText($))
 
     return
   }
@@ -2373,6 +2402,16 @@ async function restorePane($: EngineInterface, settings: Settings): Promise<void
     await showProgress($, settings)
     await showPlay($, settings)
     await refreshView($)
+    // The notes and the review went with the state, and nothing was read out before: they come back from the project's folder.
+    try {
+      if (leaseState.isDriver) await restorePaneFromDisk($, true)
+      else {
+        followedStamps = null
+        await followProject($, settings)
+      }
+    } catch (error) {
+      fail($, 'could not take the pane up from disk', error)
+    }
 
     return
   }
@@ -2472,6 +2511,24 @@ async function checkSelf($: EngineInterface, settings: Settings): Promise<void> 
 const FOLLOWING = 'Another session is driving Backseat Driver in this project. Ask for it there.'
 
 /**
+ * The same, naming when the session that drives began, when `sessions.json`
+ * knows it: a session of theirs left on from the night before is the usual
+ * one (owner, 2026-10-06: "if that's you then that's fine"). Two small reads.
+ */
+async function followingText($: EngineInterface): Promise<string> {
+  if (repoRoot === '' || dataRoot === '') return FOLLOWING
+  try {
+    const lease = parseLease(await storeOf($).read(leasePath(dataRoot, repoRoot)))
+    const driver = parseSessions(await storeOf($).read(sessionsPath(dataRoot))).sessions.find(entry => entry.session === lease.session)
+    if (driver === undefined) return FOLLOWING
+
+    return `Another session of yours, started ${clockTime(driver.born)}, is driving Backseat Driver in this project. Ask for it there, or switch it off there: this one takes over within a minute.`
+  } catch {
+    return FOLLOWING
+  }
+}
+
+/**
  * Tries for the project's lease, or renews it, and takes up or lays down the
  * driving when that changes who drives. Called at switch-on, when the
  * `lease` deadline comes, and after `/clear`, which gives the session
@@ -2492,6 +2549,7 @@ function leasePortsOf($: EngineInterface, settings: Settings): LeasePorts {
     ...hostOf($, settings),
     startDriving: run => startDriving($, settings, run),
     stopDriving: () => stopDriving($, settings),
+    followDriver: () => followDriver($, settings),
   }
 }
 
@@ -2505,6 +2563,7 @@ async function startDriving($: EngineInterface, settings: Settings, run: number)
   // Everything starts again, as at a reload, this time as the driver: the watcher, the journal, what is known of
   // the project, Explain, the lease's own renewal. What the pane showed for the driver before comes back from the
   // project's folder. Starting the watcher alone laid all of that down and left this session driving without it.
+  followedStamps = null
   engagement += 1
   await engage($, settings, engagement, false, null, '')
 }
@@ -2523,8 +2582,111 @@ async function stopDriving($: EngineInterface, settings: Settings): Promise<void
   reviewState.waiting = EMPTY_QUEUE
   if (leaving !== null) await flushJournal($, leaving, await $.clock.now(), true)
   await showWorking($, await $.clock.now())
-  await forgetEditors($)
   await showPlay($, settings)
+}
+
+/**
+ * What the beat of the lease also does in a session that does not drive, each
+ * of which the driver does from its scan: what is on record about the person
+ * (another session may have changed it), the editors' files (the light), and
+ * what the driver keeps in the project's folder for the pane.
+ */
+async function followDriver($: EngineInterface, settings: Settings): Promise<void> {
+  if (mode === 'off' || leaseState.isDriver) return
+  await refreshShared($, settings)
+  await readFocus($)
+  await followProject($, settings)
+}
+
+/** The files the driver writes for the pane. A change in one is what makes a session that does not drive read it again. */
+const FOLLOWED_FILES: readonly string[] = ['notes.json', 'reviews.json', 'queue.json', 'journal.json']
+
+/** Those files as they are now, each as its size and time. One listing. */
+async function projectStamps($: EngineInterface): Promise<Record<string, string>> {
+  const stamps: Record<string, string> = {}
+  try {
+    for (const entry of await $.fs.list(projectDir(dataRoot, repoRoot))) {
+      if (FOLLOWED_FILES.includes(entry.name)) stamps[entry.name] = `${entry.size}:${entry.mtimeMs}`
+    }
+  } catch {
+    // No folder yet: nothing has been written about this project.
+  }
+
+  return stamps
+}
+
+/**
+ * The pane of a session that does not drive shows what the driver keeps in
+ * the project's folder: its open notes, the last deep review and the ones
+ * before it, how many commits wait for theirs, and what the journal says
+ * they are working on. Taken up at switch-on, and again at each beat of the
+ * lease for every file that changed since. Until 2026-10-06 such a session
+ * showed nothing of the project: the owner opened one beside a session left
+ * on from the night before, found the Deep review tab empty, and took the
+ * cache for broken.
+ */
+async function followProject($: EngineInterface, settings: Settings): Promise<void> {
+  if (mode === 'off' || leaseState.isDriver || repoRoot === '' || dataRoot === '') return
+  const stamps = await projectStamps($)
+  const before = followedStamps
+  followedStamps = stamps
+  const isFirst = before === null
+  const isChanged = (name: string): boolean => before === null || stamps[name] !== before[name]
+  try {
+    if (isChanged('notes.json')) await followNotes($, isFirst)
+    if (isChanged('reviews.json') || isChanged('queue.json')) await followReviews($, settings, isFirst)
+    if (isChanged('journal.json')) await showStoredWorkingOf(journalPortsOf($), journalState, repoRoot)
+  } catch (error) {
+    fail($, 'could not take up what the driver wrote', error)
+  }
+}
+
+/** The driver's open notes: those still true of the files, less any dismissed here. */
+async function followNotes($: EngineInterface, isFirst: boolean): Promise<void> {
+  const kept = parseKeptNotes(await storeOf($).read(notesPath()))
+  const now = await printsNow($, kept)
+  const dismissed = await read($, dismissedAtom)
+  const open = stillOpen(kept, now).filter(note => !dismissed.some(gone => gone.file === note.file && gone.topic === note.topic))
+  if (JSON.stringify(await read($, notesAtom)) !== JSON.stringify(open)) {
+    trace($, 'state', 'notes taken up', () => ({ notes: open.length, of: kept.notes.length, isFirst }))
+    await update($, notesAtom, () => open)
+  }
+  if (open.length > 0) lookState.nextNoteId = Math.max(lookState.nextNoteId, ...open.map(note => note.id + 1))
+  if (isFirst && dismissed.length === 0 && kept.dismissed.length > 0) await update($, dismissedAtom, () => kept.dismissed)
+}
+
+/** The driver's last deep review and the ones before it, and how many commits wait for theirs. One that landed since the last beat is news. */
+async function followReviews($: EngineInterface, settings: Settings, isFirst: boolean): Promise<void> {
+  const folder = projectDir(dataRoot, repoRoot)
+  reviews = parseReviews(await storeOf($).read(`${folder}/reviews.json`))
+  const waiting = current(parseQueue(await storeOf($).read(queuePath())), await $.clock.now())
+  const count = waiting.commits.filter(commit => !commit.isReviewed).length
+  const last = reviews.at(-1)
+  const review = await read($, reviewAtom)
+  const isNews = last !== undefined && (review.subject !== last.subject || review.text !== last.text)
+  const landed: Partial<Review> =
+    last !== undefined && isNews
+      ? {
+          state: 'done',
+          subject: last.subject,
+          text: last.text,
+          isUnseen: !isFirst && ((await read($, tabAtom)) !== 'review' || !(await isTabShown())),
+          decisions: last.decisions ?? [],
+          insights: last.insights ?? [],
+        }
+      : {}
+  const change: Partial<Review> = {
+    ...landed,
+    ...(isNews || (review.older?.length ?? 0) !== reviews.length ? { older: reviewTexts(reviews) } : {}),
+    ...(count !== (review.waiting ?? 0) ? { waiting: count } : {}),
+  }
+  if (Object.keys(change).length === 0) return
+  trace($, 'state', 'reviews taken up', () => ({ review: last?.subject ?? null, isNews, isFirst, waiting: count, older: reviews.length }))
+  await setReview($, change)
+  if (last === undefined || !isNews || isFirst) return
+  if (landed.isUnseen === true) toastPerson($, `Deep review ready: ${last.subject}`)
+  // The driver's character spoke the review's closing line there. This pane's does here.
+  if (settings.isAnimated) await say($, `Review's in. ${closingLine(last.text)}`)
 }
 
 /** The shared files' names, sizes and times, in one string. One listing per folder. */
@@ -2610,22 +2772,30 @@ async function saveNotes($: EngineInterface): Promise<void> {
   }
 }
 
-/**
- * Takes up what the project's folder holds from an earlier session: the notes
- * whose files still read as they did when the notes were raised, the
- * dismissed notes, and, when the tab has nothing to show, the last deep
- * review. A note about text that has changed since is left out: the next look
- * at that file says what is true of it.
- */
-async function restorePaneFromDisk($: EngineInterface, isFresh: boolean): Promise<void> {
-  const path = notesPath()
-  if (path === '') return
-  const kept = parseKeptNotes(await storeOf($).read(path))
+/** The fingerprint today of each file the kept notes are about, and none for a file that is gone. */
+async function printsNow($: EngineInterface, kept: KeptNotes): Promise<Map<string, string>> {
   const now = new Map<string, string>()
   for (const file of Object.keys(kept.prints)) {
     const text = await readSource($, repoRoot, file)
     if (text !== null) now.set(file, sourcePrint(text))
   }
+
+  return now
+}
+
+/**
+ * Takes up what the project's folder holds from an earlier session: the notes
+ * whose files still read as they did when the notes were raised, the
+ * dismissed notes, and, when the tab has nothing to show, the last deep
+ * review. A note about text that has changed since is left out: the next look
+ * at that file says what is true of it. The driver's; a session that does not
+ * drive takes the folder up in `followProject`, and keeps taking it up.
+ */
+async function restorePaneFromDisk($: EngineInterface, isFresh: boolean): Promise<void> {
+  const path = notesPath()
+  if (path === '') return
+  const kept = parseKeptNotes(await storeOf($).read(path))
+  const now = await printsNow($, kept)
   for (const [file, print] of Object.entries(kept.prints)) {
     if (!notePrints.has(file) && now.get(file) === print) notePrints.set(file, print)
   }
@@ -2849,7 +3019,7 @@ async function maybeSurvey($: EngineInterface, settings: Settings, run: number):
 async function reviewSince($: EngineInterface, settings: Settings, isAsked: boolean): Promise<void> {
   if (mode === 'off' || (mode === 'paused' && !isAsked)) return
   if (!leaseState.isDriver) {
-    if (isAsked) toastPerson($, FOLLOWING)
+    if (isAsked) toastPerson($, await followingText($))
 
     return
   }
@@ -3149,6 +3319,7 @@ function stopWatching(): void {
   notePrints.clear()
   project = null
   reviews = []
+  followedStamps = null
   followState.focus = null
   followState.editorFiles.clear()
   followState.focusText = null
@@ -3523,7 +3694,8 @@ async function engage(
     await moveOutOfStore($)
     const main = await setUpProfiles($)
     await loadProject($)
-    // What the pane showed when the tutor was last on here: notes still true, and the last review.
+    // What the pane showed when the tutor was last on here: notes still true, and the last review. A session that
+    // does not drive took the folder up in `keepLease` (`followDriver`), and takes it up again at every beat.
     if (leaseState.isDriver) await restorePaneFromDisk($, isFresh || takesUp !== null)
     await setUpProgress($, settings)
     await loadLessons($)
@@ -3712,6 +3884,7 @@ async function forget($: EngineInterface, settings: Settings, named: Scope | nul
     if (scope.kind !== 'language') {
       project = repoRoot === '' ? null : emptyProject(repoRoot)
       reviews = []
+      followedStamps = null
       reviewState.waiting = EMPTY_QUEUE
       reviewState.reviewRetryAt = null
       followState.explainer?.reset()
@@ -4032,7 +4205,8 @@ async function backseatCommand($: EngineInterface, settings: Settings, args: str
   }
   if (request === 'working') {
     if (mode === 'off') return { text: 'Backseat Driver is off. Run /backseat to start it.' }
-    if (journalState.recorder === null) {
+    // A session that does not drive keeps no journal of its own and writes into the project's (`sayWorking`).
+    if (repoRoot === '') {
       return { text: 'There is no journal to put that in: the tutor is still getting ready, or this folder is not a git repository.' }
     }
     const said = parseWorking(rest)
@@ -4189,7 +4363,7 @@ export const register: Register = (on, options) => {
     const shown = [
       paneContext(await read($, notesAtom), await read($, reviewAtom), isHello ? '' : said),
       explainContext(await read($, explainAtom)),
-      journalState.recorder?.brief(await $.clock.now()) ?? '',
+      journalState.recorder === null ? await storedJournalText($, 'brief') : journalState.recorder.brief(await $.clock.now()),
     ].filter(part => part !== '')
     // Another session may have recorded something about the person since the last look at the files.
     await refreshShared($, settings)
@@ -4422,7 +4596,8 @@ export const register: Register = (on, options) => {
   })
 
   on('tool.call', { tool: 'mcp__backseat-driver__working' }, async ($, e) => {
-    if (mode === 'off' || journalState.recorder === null) return answered($, e, 'No journal is being kept here, so nothing was recorded.')
+    // A session that does not drive keeps no journal of its own and writes into the project's (`sayWorking`).
+    if (mode === 'off' || repoRoot === '') return answered($, e, 'No journal is being kept here, so nothing was recorded.')
     // Only an empty string takes their words back. A call that left `on` out, as one did in a live session, changes nothing.
     if (typeof e.on !== 'string') {
       return answered($, e, 'Nothing was recorded: give `on`, what they said in their words, or an empty string when they take it back.')
@@ -4440,8 +4615,9 @@ export const register: Register = (on, options) => {
   })
 
   on('tool.call', { tool: 'mcp__backseat-driver__activity' }, async ($, e) => {
-    if (mode === 'off' || journalState.recorder === null) return answered($, e, NO_ACTIVITY)
-    const doing = journalState.recorder.activity(await $.clock.now())
+    if (mode === 'off') return answered($, e, NO_ACTIVITY)
+    // A session that does not drive reads the driver's journal: the glance without the latest diffs, which are the driver's.
+    const doing = journalState.recorder === null ? await storedJournalText($, 'glance') : journalState.recorder.activity(await $.clock.now())
 
     return answered($, e, doing === '' ? NO_ACTIVITY : doing)
   })

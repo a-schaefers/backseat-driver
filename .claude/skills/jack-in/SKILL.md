@@ -42,6 +42,13 @@ scripts/jack.py out      # off again, if `in` switched it on
 Read every `!!` line before anything else. Then `scripts/jack.py truth` for the
 checks that passed too: a check that did not run proves nothing.
 
+Then the ui-truth pass (the `ui-truth` skill): an agent reads
+`scripts/jack.py bundle` for every session with the tutor on and judges the
+screen against the state and the cache as the owner would. Run it now, after
+every `sync`, and about every 45 minutes while jacked in (an hourly
+`CronCreate` in this session). The mechanical checks agree with an empty tab
+that the tutor meant to leave empty; the reader does not.
+
 ## Seeing
 
 | Command | What you get |
@@ -49,6 +56,7 @@ checks that passed too: a check that did not run proves nothing.
 | *(none)* / `status` | every session Claude Code lists, what the tutor says in each, how each can be seen, every disagreement, each project's lease and notes, connected editors, the latest log records |
 | `screen [S]` | the session's screen right now, as the owner sees it |
 | `truth [S]` | every check, passed or not. Exit 1 when anything disagrees |
+| `bundle [S]` | one page per session with the tutor on: the screen, what it says it draws, the pane's state tab by tab, the cache on disk, what it said lately, and the checks. What the ui-truth agent reads |
 | `watch [S]` | follows a session: new log records, screen rows that changed (the conversation and the pane apart), disagreements as they appear and go, and each thing the tutor told the person, until it shows on the screen or should have. Run it in the background or under Monitor while the owner works |
 | `tour [S] [--steps …]` | drives a session in tmux as a person would (switch on, every tab, `/backseat status`, a save with a bug, a commit, pause, off) and runs every check after each step. Real model calls. Writes only into a scratch repository unless `--write` |
 | `log [S] [-k kinds] [-n N] [--grep text] [--full]` | the debug log. Kinds: `cmd hook state look watch model agent tool guard ui shown said heard start push git fs store error meta`. `said` is what the person was told; `heard` what Claude Code and other plugins told them |

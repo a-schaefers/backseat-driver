@@ -8,6 +8,8 @@
  * Moved out of `hooks/register.tsx` with each call made in the order it was
  * made there. What taking up or laying down the driving does to the other
  * engines (`startDriving`, `stopDriving`) is the host's: it names them all.
+ * So is what a session that does not drive takes up at each beat
+ * (`followDriver`): the pane shows what the driver writes.
  */
 
 import { leasePath } from './datahome'
@@ -38,6 +40,8 @@ export type LeasePorts = Pick<Host, 'now' | 'trace' | 'fail' | 'isOn' | 'engagem
   /** This session drives from now on, or has to stop. `run` is the switch-on it belongs to. */
   startDriving: (run: number) => Promise<void>
   stopDriving: () => Promise<void>
+  /** This session does not drive: what the driver writes is taken up, now and at every beat. The host says what. */
+  followDriver: () => Promise<void>
 }
 
 /**
@@ -77,10 +81,13 @@ export async function keepLease(ports: LeasePorts, state: LeaseState, run: numbe
   state.isDriver = lease.session === me
   if (state.isDriver) state.holder = me
   ports.deadline.set('lease', nextLeaseCheck(lease, me, now, Math.random()), () => keepLease(ports, state, ports.engagement()))
-  if (state.isDriver === wasDriver) return
-  ports.trace('state', 'lease', () => ({ isDriver: state.isDriver, lease, me }))
-  if (state.isDriver) await ports.startDriving(run)
-  else await ports.stopDriving()
+  if (state.isDriver !== wasDriver) {
+    ports.trace('state', 'lease', () => ({ isDriver: state.isDriver, lease, me }))
+    if (state.isDriver) await ports.startDriving(run)
+    else await ports.stopDriving()
+  }
+  // A session that does not drive shows what the driver writes: taken up now, and again at every beat.
+  if (!state.isDriver) await ports.followDriver()
 }
 
 /** Gives the lease back, so that a session waiting for it does not have to wait for it to run out. */
