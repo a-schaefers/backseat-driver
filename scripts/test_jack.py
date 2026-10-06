@@ -626,6 +626,11 @@ class ToldAndBelieved(unittest.TestCase):
         self.assertTrue(any("neovim moved to" in text and "stats.py:9" in text for text in found), found)
         s["state"]["explain"]["editorFocusAt"] = self.now - 7900
         self.assertEqual(bad(jack.check_world(world([s], [home], self.now), s)), [])
+        # A caret that moved after the state was written (every ten seconds when nothing is logged) is not yet news
+        # the tutor could have: seen as a false `!!` on 2026-10-05, 5 s after a move, with the state 9 s old.
+        s["state"]["explain"]["editorFocusAt"] = self.now - 60_000
+        s["state"]["at"] = self.now - 9000
+        self.assertEqual(bad(jack.check_world(world([s], [home], self.now), s)), [])
 
 
 class Finding(unittest.TestCase):

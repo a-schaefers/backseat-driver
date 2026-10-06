@@ -867,18 +867,24 @@ def check_homes(w: dict) -> list[tuple[str, str]]:
 # A screen and a state file are read a moment apart, and either may be the newer: what one of them lacks is looked
 # at once more, this long after, before it is called a disagreement.
 RECHECK_S = 1.2
+# How many times: seen flapping six times in two minutes (2026-10-05) with one look, each taken back within seconds.
+RECHECKS = 3
 
 
 def check_session(w: dict, s: dict, rows: list[str] | None) -> list[tuple[str, str]]:
     """What one session says, against what is so. Where the screen lacks something the tutor says it shows, both
     are read again a moment later, so that a drawing caught between two writes is not called a fault."""
     found = check_session_once(w, s, rows)
-    if s["eyes"] is None or s["debug"] is None or not any(level == BAD and "on its screen" in text for level, text in found):
-        return found
-    time.sleep(RECHECK_S)
-    state = read_json(s["debug"] / "state.json")
-    again = {**s, "state": state if isinstance(state, dict) else None}
-    return check_session_once({**w, "now": now_ms()}, again, screen_of(s["eyes"]))
+    # A tab's badge flips with every lookup while the caret moves (`3: Explain (…)`), so a drawing and the screen
+    # are often half a phase apart: a few looks, not one, before a missing piece is called a disagreement.
+    for _ in range(RECHECKS):
+        if s["eyes"] is None or s["debug"] is None or not any(level == BAD and "on its screen" in text for level, text in found):
+            return found
+        time.sleep(RECHECK_S)
+        state = read_json(s["debug"] / "state.json")
+        again = {**s, "state": state if isinstance(state, dict) else None}
+        found = check_session_once({**w, "now": now_ms()}, again, screen_of(s["eyes"]))
+    return found
 
 
 def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[str, str]]:
@@ -1255,7 +1261,10 @@ def check_world(w: dict, s: dict) -> list[tuple[str, str]]:
         if speaker is not None:
             d = speaker["data"]
             moved = d.get("changed") or 0
-            if moved > followed + FOLLOW_MS and now - moved > FOLLOW_MS and is_under(str(d.get("file", "")), root):
+            # The belief is as old as the state file (written every ten seconds when nothing is logged): a caret that
+            # moved after it was written is not one the tutor failed to follow.
+            believed_at = state.get("at") if isinstance(state.get("at"), (int, float)) else now
+            if moved > followed + FOLLOW_MS and believed_at - moved > FOLLOW_MS and is_under(str(d.get("file", "")), root):
                 out.append((BAD, f"{who} last followed the editor {ago(now - followed) if followed else 'never'} ago, and {d.get('editor')} moved to {tilde(str(d.get('file')))}:{d.get('line')} {ago(now - moved)} ago"))
             elif moved:
                 focus = dig(state, "explain.focus") or {}
