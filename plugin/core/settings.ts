@@ -26,8 +26,6 @@ export type Settings = {
   isProgressOn: boolean
   /** Whether the tutor asks the upstream repository for a newer release, at most every six hours. */
   isUpdateCheckOn: boolean
-  /** Burn token mode: every model request is also sent to the most capable model at maximum thinking, and the answer dropped. */
-  isBurning: boolean
   /** The command that opens a place in their editor, with {file}, {line} and {column} in it. '' for none: places open in the Explain tab. */
   editorCommand: string
   playByPlay: {
@@ -89,7 +87,6 @@ export function readSettings(options: Options): Settings {
     isAnimated: options.animated_persona !== false,
     isProgressOn: options.progress_report !== false,
     isUpdateCheckOn: options.update_check !== false,
-    isBurning: options.burn_tokens === true,
     editorCommand: typeof options.editor_command === 'string' ? options.editor_command.trim() : '',
     playByPlay: {
       isAutomatic: options.play_by_play !== 'on request',
@@ -184,7 +181,6 @@ export const SETTING_EFFECTS = {
   explain_thinking: 'next lookup',
   progress_report: 'now',
   update_check: 'now',
-  burn_tokens: 'now',
   editor_command: 'now',
 } as const satisfies Record<string, SettingEffect>
 
@@ -193,18 +189,18 @@ export type SettingEffect = 'now' | 'next look' | 'next review' | 'next lookup'
 export type SettingField = keyof typeof SETTING_EFFECTS
 
 /** Fields that plugin.json no longer declares. A value left in someone's settings.json under one of these names is nothing to report. */
-export const RETIRED_SETTINGS: readonly string[] = ['layout']
+export const RETIRED_SETTINGS: readonly string[] = ['layout', 'burn_tokens']
 
 /** The fields among `options` that `SETTING_EFFECTS` does not cover, retired ones aside. Claude Code fills in every declared field, defaults included. */
 export function unclassified(options: Options): string[] {
   return Object.keys(options).filter(field => !Object.hasOwn(SETTING_EFFECTS, field) && !RETIRED_SETTINGS.includes(field))
 }
 
-/** The fields whose value differs between two sets of options, in plugin.json's order. */
+/** The fields whose value differs between two sets of options, in plugin.json's order, retired ones aside: the load before a field was retired still had its default. */
 export function changedFields(before: Options, after: Options): string[] {
   const fields = [...new Set([...Object.keys(SETTING_EFFECTS), ...Object.keys(before), ...Object.keys(after)])]
 
-  return fields.filter(field => JSON.stringify(before[field] ?? null) !== JSON.stringify(after[field] ?? null))
+  return fields.filter(field => !RETIRED_SETTINGS.includes(field) && JSON.stringify(before[field] ?? null) !== JSON.stringify(after[field] ?? null))
 }
 
 /**

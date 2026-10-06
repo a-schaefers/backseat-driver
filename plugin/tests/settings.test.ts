@@ -38,7 +38,6 @@ test('readSettings applies the documented defaults to empty options', async () =
     isAnimated: true,
     isProgressOn: true,
     isUpdateCheckOn: true,
-    isBurning: false,
     editorCommand: '',
     playByPlay: {
       isAutomatic: true,
@@ -207,8 +206,9 @@ sessionTest('every setting in plugin.json says when a change to it takes effect'
 test('unclassified names the fields with no entry', async () => {
   expect(unclassified({ voice: 'knuth' })).toEqual([])
   expect(unclassified({ voice: 'knuth', sound: true })).toEqual(['sound'])
-  // A setting that was retired (the layout, 2026-10-05) may still sit in someone's settings.json: nothing to report.
+  // A setting that was retired (the layout, 2026-10-05; burn token mode, 2026-10-06) may still sit in someone's settings.json: nothing to report.
   expect(unclassified({ voice: 'knuth', layout: 'unified' })).toEqual([])
+  expect(unclassified({ voice: 'knuth', burn_tokens: true })).toEqual([])
   expect(Object.keys(SETTING_EFFECTS)).toContain('update_check')
 })
 
@@ -216,6 +216,8 @@ test('changedFields lists what a reload changed, a value left to its default inc
   expect(changedFields({ voice: 'knuth', quiet_time: '10 seconds' }, { voice: 'knuth', quiet_time: '10 seconds' })).toEqual([])
   expect(changedFields({ voice: 'knuth', quiet_time: '10 seconds' }, { voice: 'torvalds', quiet_time: '30 seconds' })).toEqual(['voice', 'quiet_time'])
   expect(changedFields({ animated_persona: true }, {})).toEqual(['animated_persona'])
+  // The load before a setting was retired had its default; the one after has nothing. That is no change.
+  expect(changedFields({ voice: 'knuth', burn_tokens: false }, { voice: 'knuth' })).toEqual([])
 })
 
 test('catchUp starts the work that otherwise waits for the next switch-on', async () => {
