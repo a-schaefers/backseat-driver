@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { encouragementLine, growthFacts, growthHeadline, growthOf, growthText, improvedLine, raiseLine, workOnLine } from '../core/growth'
+import { encouragementLine, growthFacts, growthHeadline, growthMeter, growthMeterLabel, growthOf, growthText, improvedLine, raiseLine, workOnLine } from '../core/growth'
 import { emptyLessonRecord, lessonView, parsePath, withDone, withHelp, withStarted } from '../core/lessons'
 import type { LessonPath } from '../core/lessons'
 import { emptyProfile, withFlagged, withLooked } from '../core/profiles'
@@ -54,6 +54,33 @@ test('own commits place the level, and the score is the level times a hundred pl
   expect(Math.floor(growth.score / 100)).toBe(1)
   expect(growth.score % 100).toBe(growth.toNext)
   expect(growthHeadline(growth)).toBe(`junior · growth ${growth.score}, ${growth.toNext} of the way to mid`)
+})
+
+test('the growth bar fills with the way to the next level, and goes from red to green', () => {
+  const growth = growthOf(record(JUNIOR), undefined, [])
+  const meter = growthMeter(growth, 20)
+  expect(meter?.level).toBe('junior')
+  expect(meter?.next).toBe('mid')
+  expect((meter?.filled ?? 0) + (meter?.empty ?? 0)).toBe(20)
+  expect(growthMeterLabel(growth)).toBe(`${growth.toNext}% to mid · growth ${growth.score}`)
+  // Nothing to draw before a level: the headline says so instead.
+  const unplaced = growthOf(record(JUNIOR.slice(0, 4)), undefined, [])
+  expect(growthMeter(unplaced, 20)).toBe(null)
+  expect(growthMeterLabel(unplaced)).toBe('Not placed yet')
+
+  const at = (toNext: number) => growthMeter({ ...growth, toNext }, 20)
+  expect(at(0)).toEqual({ level: 'junior', next: 'mid', filled: 0, empty: 20, band: 'red' })
+  // Any way made shows as a cell, and the bar is never full short of the next level.
+  expect(at(1)?.filled).toBe(1)
+  expect(at(24)?.band).toBe('red')
+  expect(at(25)?.band).toBe('orange')
+  expect(at(50)?.band).toBe('yellow')
+  expect(at(75)?.band).toBe('green')
+  expect(at(99)).toEqual({ level: 'junior', next: 'mid', filled: 19, empty: 1, band: 'green' })
+  // Senior has no next level: the bar still fills, and the label is the score alone.
+  const senior = { ...growth, level: 'senior' as const, score: 350, toNext: 50 }
+  expect(growthMeter(senior, 20)?.next).toBe(null)
+  expect(growthMeterLabel(senior)).toBe('growth 350')
 })
 
 test('lessons move the score toward the next level, and never carry a level alone', () => {
@@ -189,6 +216,8 @@ test('whatever their history, lessons never lower the score, and the score stays
     if (base.level !== null) {
       expect(`${where}: ${Math.floor(base.score / 100)}`).toBe(`${where}: ${LEVELS.indexOf(base.level)}`)
       expect(`${where}: ${base.toNext >= 0 && base.toNext <= 99}`).toBe(`${where}: true`)
+      const meter = growthMeter(base, 20)
+      expect(`${where}: ${meter !== null && meter.filled >= 0 && meter.filled <= 19 && meter.filled + meter.empty === 20}`).toBe(`${where}: true`)
     }
   }
 })

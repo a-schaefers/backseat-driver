@@ -1,8 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
-import type { Note } from '../types'
+import type { Note, Watch } from '../types'
 import { NO_VIEW } from '../core/explainer'
-import { currentNote, detailMarkdown, explainNotice, KEYBOARD_HINT, personaLine, reviewBanner, reviewPlace, reviewSpots, statusLine, tabBadge, tabRow, waitingLine } from '../hooks/pane'
+import { currentNote, detailMarkdown, explainNotice, FOCUSED_HINT, KEYBOARD_HINT, personaLine, reviewBanner, reviewPlace, reviewSpots, stateMark, statusLine, tabBadge, tabRow, underlineSpans, waitingLine } from '../hooks/pane'
 import type { PaneView } from '../hooks/pane'
 import { paneContext } from '../core/prompts'
 import { readableReview, reviewHistory, shownReview, spotsIn, SURVEY_SUBJECT, withReviewChange } from '../core/review'
@@ -114,12 +114,39 @@ sessionTest('the pane says how to give it the keyboard, until it has it', async 
   await session.clock.settle()
 
   const away = await $.ui.mount({ ...PANE, props: { ...PANE.props, isFocused: false }, surface: 'terminal' })
+  expect(await away.find({ type: 'Text', text: 'Keys off' })).toBeDefined()
   expect(await away.find({ type: 'Text', text: KEYBOARD_HINT })).toBeDefined()
   await away.unmount()
 
+  // With the keyboard, the last row says how the pane is driven instead.
   const focused = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await focused.findAll({ type: 'Text', text: KEYBOARD_HINT })).length).toBe(0)
+  expect(await focused.find({ type: 'Text', text: 'Keys on' })).toBeDefined()
+  expect(await focused.find({ type: 'Text', text: FOCUSED_HINT })).toBeDefined()
   await focused.unmount()
+})
+
+test('the tab bar is underlined under the open tab, measured as the buttons draw', () => {
+  const labels = ['Play (2)', 'Review (new)', 'Explain', 'Growth', 'Lessons', 'Settings']
+  // With its digit a button is its key, a colon, a space and its label: "1: Play (2)" is 11 wide.
+  expect(underlineSpans(labels, 2, true, 0, 80)).toEqual({ before: 0, active: 11, after: 69 })
+  expect(underlineSpans(labels, 2, true, 1, 80)).toEqual({ before: 13, active: 15, after: 52 })
+  // Without digits (a band without the keyboard), the labels alone.
+  expect(underlineSpans(labels, 1, false, 2, 60)).toEqual({ before: 22, active: 7, after: 31 })
+  // A row wider than the pane leaves nothing after.
+  expect(underlineSpans(labels, 3, true, 5, 40).after).toBe(0)
+})
+
+test('the status line carries a light for what the play-by-play is doing', () => {
+  const at = (state: Watch['state']) => ({ mode: 'on' as const, watch: { ...VIEW.watch, state } })
+  expect(stateMark(at('idle'))).toEqual({ mark: '●', color: 'green' })
+  expect(stateMark(at('looking'))).toEqual({ mark: '◐', color: 'yellow' })
+  expect(stateMark(at('settling')).color).toBe('yellow')
+  expect(stateMark(at('waiting')).color).toBe('yellow')
+  expect(stateMark(at('no-git')).color).toBe('red')
+  expect(stateMark(at('starting')).color).toBeUndefined()
+  // Paused is out, whatever the watcher last was.
+  expect(stateMark({ mode: 'paused', watch: { ...VIEW.watch, state: 'looking' } })).toEqual({ mark: '○', color: undefined })
 })
 
 test('just switched on, the pane says it is getting ready', async () => {

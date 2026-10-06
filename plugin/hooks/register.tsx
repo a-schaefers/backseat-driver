@@ -2350,29 +2350,24 @@ async function showTab($: EngineInterface, tab: Tab, isFolding: boolean): Promis
 }
 
 /**
- * A tab's digit pressed in the band above the prompt. Claude Code also lets
- * a bare digit typed into an empty prompt press a band's button, and nothing
- * says when the band gave the keyboard back (Esc raises no event). So the
- * press first moves the band's focus ring onto that tab, which Claude Code
- * refuses when the band does not have the keyboard: then the digit was meant
- * for the prompt, and it is put there.
+ * A tab pressed in the band above the prompt: a click, Enter on it, or its
+ * digit. A press says nothing about which, so the tab opens whichever way it
+ * came (owner, 2026-10-05: a click on Settings put a "6" into the prompt and
+ * opened nothing, when the press was taken for a digit meant for the prompt).
+ * The press is still the one moment that says whether the band holds the
+ * keyboard, which nothing else does after Esc (it raises no event): the focus
+ * ring is moved onto the tab, and a refusal means the band had given the
+ * keyboard back, so its digits are withdrawn from the buttons.
  */
 async function pressBandTab($: EngineInterface, tab: Tab, isFolding: boolean): Promise<void> {
   // Where the focus ring cannot be asked at all, the press is taken at its word.
   const moved = bandId === '' ? {} : await $.ui.focus({ requestId: bandId, key: `tab-${tab}` }).catch((): UiFocusResult => ({}))
   if (moved.deny !== undefined) {
-    trace($, 'ui', 'digit for the prompt', () => ({ tab, why: moved.deny }))
+    trace($, 'ui', 'band without the keyboard', () => ({ tab, why: moved.deny }))
     await update($, bandKeysAtom, () => false)
-    const digit = String(TAB_ORDER.indexOf(tab) + 1)
-    await $.prompt.fill({ text: digit, mode: 'insert' })
-
-    return
   }
   await showTab($, tab, isFolding)
 }
-
-/** The tabs in the order of their digits. */
-const TAB_ORDER: readonly Tab[] = ['play', 'review', 'explain', 'profile', 'lessons', 'settings']
 
 /** Said once at switch-on in the layouts with no pane, which do not say by themselves how to reach them. */
 const BAND_INTRO = 'Notes show above the prompt. Ctrl+X Tab gives it the keyboard, then 1 to 6 open its tabs. /bsd layout switches to a pane.'

@@ -94,6 +94,37 @@ export function growthHeadline(growth: Growth): string {
   return next === null ? `${growth.level} · growth ${growth.score}` : `${growth.level} · growth ${growth.score}, ${growth.toNext} of the way to ${next}`
 }
 
+/** The bar's color, by how far toward the next level: red, orange, yellow, then green, like a health bar filling up. */
+export type GrowthBand = 'red' | 'orange' | 'yellow' | 'green'
+
+/** The headline as a bar: the level, how many of `width` cells are filled toward the next, and its color. */
+export type GrowthMeter = { level: Level; next: Level | null; filled: number; empty: number; band: GrowthBand }
+
+/** Null until there is a level. Any way made shows as a cell at least, and the bar is never full short of the next level. */
+export function growthMeter(growth: Growth, width: number): GrowthMeter | null {
+  if (growth.level === null) return null
+  const way = Math.min(99, Math.max(0, growth.toNext))
+  const filled = way === 0 ? 0 : Math.min(width - 1, Math.max(1, Math.round((way * width) / 100)))
+
+  return { level: growth.level, next: LEVEL_AFTER[growth.level], filled, empty: width - filled, band: bandOf(way) }
+}
+
+/** The words beside the bar: "10% to junior · growth 10"; at senior, which has no next, only the score. */
+export function growthMeterLabel(growth: Growth): string {
+  if (growth.level === null) return growthHeadline(growth)
+  const next = LEVEL_AFTER[growth.level]
+
+  return next === null ? `growth ${growth.score}` : `${growth.toNext}% to ${next} · growth ${growth.score}`
+}
+
+function bandOf(way: number): GrowthBand {
+  if (way < 25) return 'red'
+  if (way < 50) return 'orange'
+  if (way < 75) return 'yellow'
+
+  return 'green'
+}
+
 /** What went into the score, in a line. */
 export function growthCounts(growth: Growth): string {
   const parts = [`own commits: ${round(growth.shown)} shown, ${round(growth.missed)} missed`]

@@ -1,4 +1,4 @@
-import type { Elements } from 'claude-code'
+import type { Elements, RenderChildren } from 'claude-code'
 
 import type { ExplainView, LessonsView, LessonView, Mode, Note, OutlineRow, Profile, Profiles, ProgressRecord, ProgressView, Review, ReviewText, SettingRow, Speech, Tab, Watch, Working } from '../types'
 import { bubbleColumn, bubbleWidth, isTalking, poseOf, saidSoFar, wordsSaid } from '../core/avatar'
@@ -8,8 +8,8 @@ import type { Backdrop } from '../core/sprite'
 import { languageName } from '../core/languages'
 import { isProblem, sortNotes } from '../core/notes'
 import { ANSWER_LABELS, explained, GENERAL, recurring } from '../core/profiles'
-import { encouragementLine, growthCounts, growthHeadline, helpLine, improvedLine, raiseLine, workOnLine } from '../core/growth'
-import type { Growth } from '../core/growth'
+import { encouragementLine, growthCounts, growthHeadline, growthMeter, growthMeterLabel, helpLine, improvedLine, raiseLine, workOnLine } from '../core/growth'
+import type { Growth, GrowthBand } from '../core/growth'
 import { lessonLanguage, lessonProgress } from '../core/lessons'
 import { lately, levelPhrase } from '../core/progress'
 import { readableReview, shownReview, spotsIn, SURVEY_SUBJECT } from '../core/review'
@@ -175,7 +175,95 @@ export function tabRow(
 }
 
 /** Shown while the pane does not have the keyboard: its keys do nothing until it does. */
-export const KEYBOARD_HINT = 'Ctrl+X Tab or a click to use these keys. Esc to go back.'
+export const KEYBOARD_HINT = 'Click here or press Ctrl+X Tab to use the keys.'
+
+/** Shown while the pane has the keyboard: how it is driven. */
+export const FOCUSED_HINT = 'Tab moves · Enter presses · ↑↓ scroll · Esc goes back to the prompt.'
+
+/**
+ * One grammar for everything that can be pressed, so that a glance says what
+ * is a control (owner, 2026-10-05: "what can i click on, what the keys are"):
+ * a control with a key reads `k: label`, one without reads `[ label ]`, a row
+ * of a list reads `▸ …` (`❯ …` the one the keys act on). Every tab ends with
+ * its controls under a rule, and the last row says whether the keys work.
+ */
+
+/** A thin rule across the pane, setting one part apart from the next. */
+function rule({ Text }: Pick<Kit, 'Text'>, columns: number) {
+  return <Text dimColor>{'─'.repeat(Math.max(1, columns))}</Text>
+}
+
+/** A tab's controls, in one row at its end under a rule, the same place on every tab. Where rows are scarce the rule gives way to a blank row. */
+function controlsRow({ Box, Text }: Pick<Kit, 'Box' | 'Text'>, view: Pick<PaneView, 'columns' | 'isCompact'>, controls: readonly RenderChildren[]) {
+  return (
+    <Box flexDirection="column">
+      {view.isCompact ? <Text> </Text> : rule({ Text }, view.columns)}
+      <Box flexDirection="row" columnGap={3} flexWrap="wrap">
+        {controls}
+      </Box>
+    </Box>
+  )
+}
+
+/** The last row: whether the keys work now, and how the pane is driven. On every tab, since nothing else says it. */
+function keysRow({ Box, Text }: Pick<Kit, 'Box' | 'Text'>, view: Pick<PaneView, 'isFocused'>) {
+  return (
+    <Box flexDirection="row" columnGap={1}>
+      <Text bold color={view.isFocused ? 'green' : 'yellow'}>
+        {view.isFocused ? 'Keys on' : 'Keys off'}
+      </Text>
+      <Text dimColor wrap="truncate-end">
+        {view.isFocused ? FOCUSED_HINT : KEYBOARD_HINT}
+      </Text>
+    </Box>
+  )
+}
+
+/** How far along the tab row the open tab's label runs: the columns before it, its own, and the rest of the row. A button draws as its key, a colon, a space and its label. */
+export function underlineSpans(labels: readonly string[], gap: number, withDigits: boolean, open: number, columns: number): { before: number; active: number; after: number } {
+  const widths = labels.map(label => label.length + (withDigits ? 3 : 0))
+  const before = widths.slice(0, open).reduce((sum, width) => sum + width, 0) + gap * Math.max(0, open)
+  const active = widths[open] ?? 0
+
+  return { before, active, after: Math.max(0, columns - before - active) }
+}
+
+/** The rule under the tabs, heavy and in the accent color under the open one: what makes the row read as a tab bar. */
+function tabUnderline({ Box, Text }: Pick<Kit, 'Box' | 'Text'>, view: Pick<PaneView, 'tab' | 'columns' | 'layout' | 'isFocused'>, row: { labels: string[]; gap: number }) {
+  const spans = underlineSpans(
+    row.labels,
+    row.gap,
+    hasDigits(view),
+    TABS.findIndex(entry => entry.tab === view.tab),
+    view.columns,
+  )
+
+  return (
+    <Box flexDirection="row">
+      {spans.before > 0 && <Text dimColor>{'─'.repeat(spans.before)}</Text>}
+      {spans.active > 0 && <Text color="claude">{'━'.repeat(spans.active)}</Text>}
+      {spans.after > 0 && <Text dimColor>{'─'.repeat(spans.after)}</Text>}
+    </Box>
+  )
+}
+
+/** The mark before the status line: a light for what the play-by-play is doing, as the editors have one. */
+export function stateMark(view: Pick<PaneView, 'mode' | 'watch'>): { mark: string; color: string | undefined } {
+  if (view.mode === 'paused') return { mark: '○', color: undefined }
+  switch (view.watch.state) {
+    case 'looking':
+    case 'settling':
+      return { mark: '◐', color: 'yellow' }
+    case 'waiting':
+      return { mark: '◌', color: 'yellow' }
+    case 'no-git':
+      return { mark: '○', color: 'red' }
+    case 'starting':
+      return { mark: '◌', color: undefined }
+    case 'idle':
+      return { mark: '●', color: 'green' }
+  }
+}
 
 /** What the play-by-play is doing. The sentence is worked out where its state is (`status.ts`). */
 function watching(view: PaneView): string {
@@ -226,8 +314,15 @@ function workingOn({ Box, Text, Button }: Kit, view: PaneView, actions: PaneActi
   return (
     <Box flexDirection="column">
       <Box flexDirection="row" columnGap={1}>
-        <Button key="working" label="Working on" hotkey="w" plain onPress={() => actions.onWorking()} />
-        <Text wrap="truncate-end">{head}</Text>
+        <Box flexShrink={0}>
+          <Text dimColor>Working on:</Text>
+        </Box>
+        <Box flexShrink={1}>
+          <Text wrap="truncate-end">{head}</Text>
+        </Box>
+        <Box flexShrink={0} marginLeft={1}>
+          <Button key="working" label={head === NOT_CLEAR ? 'say what' : 'change'} hotkey="w" plain onPress={() => actions.onWorking()} />
+        </Box>
       </Box>
       {tail !== '' && !view.isCompact && (
         <Text dimColor wrap="truncate-end">
@@ -484,7 +579,7 @@ function deepReview({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
         <Box flexDirection="row" columnGap={2}>
           <Text dimColor>Jump to</Text>
           {spots.map(spot => (
-            <Button key={`jump-${spot.path}:${spot.line}`} label={`${spot.path}:${spot.line}`} plain onPress={() => actions.onJump?.(spot.path, spot.line)} />
+            <Button key={`jump-${spot.path}:${spot.line}`} label={`${spot.path}:${spot.line}`} onPress={() => actions.onJump?.(spot.path, spot.line)} />
           ))}
         </Box>
       )}
@@ -516,8 +611,7 @@ function deepReview({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
           ))}
         </Box>
       )}
-      <Text> </Text>
-      <Button key="review-now" label="review now" hotkey="r" plain onPress={() => actions.onReview()} />
+      {controlsRow({ Box, Text }, view, [<Button key="review-now" label="review now" hotkey="r" plain onPress={() => actions.onReview()} />])}
     </Box>
   )
 }
@@ -563,8 +657,7 @@ function playByPlay(kit: Kit, view: PaneView, actions: PaneActions) {
     return (
       <Box flexDirection="column">
         <Text dimColor>No notes. Keep going.</Text>
-        {canLook && <Text> </Text>}
-        {canLook && <Button key="look" label="look now" hotkey="l" plain onPress={() => actions.onLook()} />}
+        {canLook && controlsRow(kit, view, [<Button key="look" label="look now" hotkey="l" plain onPress={() => actions.onLook()} />])}
       </Box>
     )
   }
@@ -591,15 +684,14 @@ function playByPlay(kit: Kit, view: PaneView, actions: PaneActions) {
       {insights.length > 0 && (decisions.length > 0 || others.length > 0) && <Text> </Text>}
       {insights.length > 0 && <Text color="cyan">{INSIGHT_HEADING}</Text>}
       {insights.map(note => noteRow(kit, note, current, `${note.id}  ${note.file} · line ${note.line}`, actions))}
-      <Text> </Text>
-      <Box flexDirection="row" columnGap={3} flexWrap="wrap">
-        {notes.length > 1 && <Button key="next-note" label="next" hotkey="j" plain onPress={() => actions.onStep(1)} />}
-        {notes.length > 1 && <Button key="previous-note" label="previous" hotkey="k" plain onPress={() => actions.onStep(-1)} />}
-        <Button key="explain" label="explain" hotkey="e" plain onPress={() => actions.onExplain(current)} />
-        <Button key="dismiss" label="dismiss" hotkey="d" plain onPress={() => actions.onDismiss(current)} />
-        <Button key="mute" label="mute" hotkey="m" plain onPress={() => actions.onMute(current)} />
-        {canLook && <Button key="look" label="look now" hotkey="l" plain onPress={() => actions.onLook()} />}
-      </Box>
+      {controlsRow(kit, view, [
+        <Button key="explain" label="explain" hotkey="e" plain onPress={() => actions.onExplain(current)} />,
+        <Button key="dismiss" label="dismiss" hotkey="d" plain onPress={() => actions.onDismiss(current)} />,
+        <Button key="mute" label="mute" hotkey="m" plain onPress={() => actions.onMute(current)} />,
+        notes.length > 1 && <Button key="next-note" label="next note" hotkey="j" plain onPress={() => actions.onStep(1)} />,
+        notes.length > 1 && <Button key="previous-note" label="previous" hotkey="k" plain onPress={() => actions.onStep(-1)} />,
+        canLook && <Button key="look" label="look now" hotkey="l" plain onPress={() => actions.onLook()} />,
+      ])}
     </Box>
   )
 }
@@ -636,6 +728,30 @@ function listOf({ Box, Text }: Kit, heading: string, lines: readonly string[]) {
   )
 }
 
+/** How many cells the growth bar has. With the level before it and the label after, it fits a 57-column dock. */
+const METER_WIDTH = 20
+
+/** The bar's colour at each band: a health bar, red when the way to the next level has barely begun, green when it is nearly there. Orange has no terminal name. */
+const BAND_COLORS: Record<GrowthBand, string> = { red: 'red', orange: '#ff8700', yellow: 'yellow', green: 'green' }
+
+/** The headline as a health bar: the level, the bar filling toward the next level, and the words. Before a level, the plain headline. */
+function growthBar(kit: Kit, growth: Growth) {
+  const { Box, Text } = kit
+  const meter = growthMeter(growth, METER_WIDTH)
+  if (meter === null) return <Text bold>{growthHeadline(growth)}</Text>
+
+  return (
+    <Box flexDirection="row" columnGap={1}>
+      <Text bold>{meter.level}</Text>
+      <Box flexDirection="row">
+        <Text color={BAND_COLORS[meter.band]}>{'█'.repeat(meter.filled)}</Text>
+        <Text dimColor>{'░'.repeat(meter.empty)}</Text>
+      </Box>
+      <Text dimColor>{growthMeterLabel(growth)}</Text>
+    </Box>
+  )
+}
+
 /** One language's growth, as the tab shows it: the score, what to work on, where they needed help, what would raise it, what improved. */
 function growthSection(kit: Kit, record: ProgressRecord, growth: Growth | undefined) {
   const { Box, Text } = kit
@@ -647,7 +763,7 @@ function growthSection(kit: Kit, record: ProgressRecord, growth: Growth | undefi
 
   return (
     <Box flexDirection="column">
-      {growth !== undefined && <Text bold>{growthHeadline(growth)}</Text>}
+      {growth !== undefined && growthBar(kit, growth)}
       {growth !== undefined && <Text dimColor>{growthCounts(growth)}</Text>}
       <Text dimColor>{`From your commits alone: ${levelPhrase(record).replace(/^no level yet: /, 'not placed yet, ')}`}</Text>
       {report !== null && report.why !== '' && <Text>{report.why}</Text>}
@@ -694,13 +810,8 @@ function profileTab(kit: Kit, view: PaneView, actions: PaneActions) {
             ))}
             {profile.hushed.map(hush => (
               <Box flexDirection="row" columnGap={1}>
-                <Button
-                  key={`unhush-${subject}-${hush.topic}`}
-                  label="unmute"
-                  plain
-                  onPress={() => actions.onUnhush(subject, hush.topic)}
-                />
                 <Text>{`Muted: ${hush.text}`}</Text>
+                <Button key={`unhush-${subject}-${hush.topic}`} label="unmute" onPress={() => actions.onUnhush(subject, hush.topic)} />
               </Box>
             ))}
             {/* With a record, the growth section says these under "Needed help with" and "Work on". */}
@@ -714,19 +825,21 @@ function profileTab(kit: Kit, view: PaneView, actions: PaneActions) {
           </Box>
         )
       })}
-      <Button
-        key="questions"
-        label={subjects.some(({ profile }) => Object.keys(profile.answers).length > 0) ? 'answer the questions again' : 'answer a few questions'}
-        hotkey="q"
-        plain
-        onPress={() => actions.onQuestions()}
-      />
+      {controlsRow(kit, view, [
+        <Button
+          key="questions"
+          label={subjects.some(({ profile }) => Object.keys(profile.answers).length > 0) ? 'answer the questions again' : 'answer a few questions'}
+          hotkey="q"
+          plain
+          onPress={() => actions.onQuestions()}
+        />,
+      ])}
     </Box>
   )
 }
 
 /** What the Lessons tab says above the list. */
-export const LESSONS_HINT = 'Learning paths, done in your own code. Open one, then s starts its next step in the conversation. Skipping them costs nothing.'
+export const LESSONS_HINT = 'Learning paths, done in your own code. Click one, or Tab to it and press Enter; s then starts its next step in the conversation. Skipping them costs nothing.'
 
 /** What it says when the plugin has none. */
 export const NO_LESSONS = 'No lessons are installed. A path is a markdown file in the plugin\'s lessons folder.'
@@ -741,7 +854,7 @@ function stepMark(state: string, isNext: boolean): string {
 }
 
 /** One path opened: its steps, and what can be done with it. */
-function lessonDetail({ Box, Text, Button }: Kit, lesson: LessonView, actions: PaneActions) {
+function lessonDetail({ Box, Text, Button }: Kit, view: PaneView, lesson: LessonView, actions: PaneActions) {
   const next = lesson.steps[lesson.next]
 
   return (
@@ -755,9 +868,9 @@ function lessonDetail({ Box, Text, Button }: Kit, lesson: LessonView, actions: P
           {`${stepMark(step.state, index === lesson.next)} ${index + 1}. ${step.title}${step.state === 'done' ? ' (your word)' : ''}${step.helped > 0 ? ' (needed help)' : ''}`}
         </Text>
       ))}
-      <Text> </Text>
-      <Box flexDirection="row" columnGap={2}>
-        {next !== undefined && (
+      {next === undefined && <Text dimColor>Every step is done.</Text>}
+      {controlsRow({ Box, Text }, view, [
+        next !== undefined && (
           <Button
             key="lesson-start"
             label={next.state === 'started' ? `continue step ${lesson.next + 1}` : `start step ${lesson.next + 1}`}
@@ -765,11 +878,10 @@ function lessonDetail({ Box, Text, Button }: Kit, lesson: LessonView, actions: P
             plain
             onPress={() => actions.onLessonStart?.(lesson.id)}
           />
-        )}
-        {next !== undefined && <Button key="lesson-done" label={`I did step ${lesson.next + 1}`} hotkey="c" plain onPress={() => actions.onLessonDone?.(lesson.id)} />}
-        <Button key="lesson-back" label="all lessons" hotkey="b" plain onPress={() => actions.onLessonOpen?.(null)} />
-      </Box>
-      {next === undefined && <Text dimColor>Every step is done.</Text>}
+        ),
+        next !== undefined && <Button key="lesson-done" label={`I did step ${lesson.next + 1}`} hotkey="c" plain onPress={() => actions.onLessonDone?.(lesson.id)} />,
+        <Button key="lesson-back" label="all lessons" hotkey="b" plain onPress={() => actions.onLessonOpen?.(null)} />,
+      ])}
     </Box>
   )
 }
@@ -779,7 +891,7 @@ function lessonsTab(kit: Kit, view: PaneView, actions: PaneActions) {
   const { Box, Text, Button } = kit
   const lessons = view.lessons ?? { paths: [], selected: null, problems: [] }
   const opened = lessons.paths.find(lesson => lesson.id === lessons.selected)
-  if (opened !== undefined) return lessonDetail(kit, opened, actions)
+  if (opened !== undefined) return lessonDetail(kit, view, opened, actions)
   const languages = [...new Set(lessons.paths.map(lesson => lesson.language))]
 
   return (
@@ -794,7 +906,7 @@ function lessonsTab(kit: Kit, view: PaneView, actions: PaneActions) {
             .map(lesson => (
               <Button
                 key={`lesson-${lesson.id}`}
-                label={`${lesson.title} · ${lesson.level} · ${lessonProgress(lesson)}`}
+                label={`▸ ${lesson.title} · ${lesson.level} · ${lessonProgress(lesson)}`}
                 plain
                 onPress={() => actions.onLessonOpen?.(lesson.id)}
               />
@@ -853,7 +965,7 @@ function tabButtons({ Box, Button }: Kit, view: PaneView, actions: PaneActions, 
 }
 
 /** What the Settings tab says above the rows. */
-export const SETTINGS_HINT = 'The same settings as in /config. Pick a row, then Enter to change it. A change applies at once.'
+export const SETTINGS_HINT = 'The same settings as in /config. Click a row, or Tab to it and press Enter, to change it. A change applies at once.'
 
 /** What the Settings tab says where it cannot offer a pick. */
 export const SETTINGS_ELSEWHERE = 'The settings as they are now. They are changed in /config here.'
@@ -904,9 +1016,17 @@ export function editorLight(view: Pick<PaneView, 'mode' | 'watch'>): { isOn: boo
 /** The lines under the tabs: what the play-by-play is doing, what keeps going wrong, the editors' light, a newer release, the license. */
 function statusRows({ Box, Text }: Kit, view: PaneView, withStatus: boolean) {
   const light = editorLight(view)
+  const state = stateMark(view)
 
   return [
-    withStatus && <Text dimColor>{statusLine(view)}</Text>,
+    withStatus && (
+      <Box flexDirection="row" columnGap={1}>
+        <Text color={state.color} dimColor={state.color === undefined}>
+          {state.mark}
+        </Text>
+        <Text dimColor>{statusLine(view)}</Text>
+      </Box>
+    ),
     view.mode !== 'paused' && (view.watch.health ?? '') !== '' && <Text dimColor>{view.watch.health}</Text>,
     light !== null && (
       <Box flexDirection="row" columnGap={1}>
@@ -928,10 +1048,12 @@ function characterOf(view: PaneView): PaneView['character'] {
 function renderStacked(kit: Kit, view: PaneView, actions: PaneActions) {
   const { Box, Text } = kit
   const character = characterOf(view)
+  const row = tabRow(view)
 
   return (
     <Box flexDirection="column">
-      {tabButtons(kit, view, actions, tabRow(view))}
+      {tabButtons(kit, view, actions, row)}
+      {!view.isCompact && tabUnderline(kit, view, row)}
       {statusRows(kit, view, true)}
       {/* Outside a repository there is no journal, so nothing to go on and nowhere to keep an answer. */}
       {view.watch.state !== 'no-git' && workingOn(kit, view, actions)}
@@ -939,7 +1061,7 @@ function renderStacked(kit: Kit, view: PaneView, actions: PaneActions) {
       {character !== null && characterRow(kit, view, character)}
       {character !== null && <Text> </Text>}
       {tabBody(kit, view, actions)}
-      {!view.isFocused && <Text dimColor>{KEYBOARD_HINT}</Text>}
+      {keysRow(kit, view)}
     </Box>
   )
 }
@@ -977,10 +1099,12 @@ function renderStrip(kit: Kit, view: PaneView, actions: PaneActions) {
   const side = { ...view, columns: split.side }
   const body = { ...view, columns: split.body }
   const character = characterOf(side)
+  const row = tabRow(inner)
 
   return (
     <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
-      {tabButtons(kit, view, actions, tabRow(inner))}
+      {tabButtons(kit, view, actions, row)}
+      {tabUnderline(kit, inner, row)}
       {statusRows(kit, inner, true)}
       <Text> </Text>
       <Box flexDirection="row" columnGap={SPLIT_GAP}>
@@ -993,7 +1117,7 @@ function renderStrip(kit: Kit, view: PaneView, actions: PaneActions) {
           {tabBody(kit, body, actions)}
         </Box>
       </Box>
-      {!view.isFocused && <Text dimColor>{KEYBOARD_HINT}</Text>}
+      {keysRow(kit, view)}
     </Box>
   )
 }
