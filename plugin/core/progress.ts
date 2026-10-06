@@ -10,8 +10,10 @@ import { languageName } from './languages'
 export const LEVELS: readonly Level[] = ['beginner', 'junior', 'mid', 'senior']
 
 /** No level until this many observations, from at least this many commits. */
-export const PLACE_OBSERVATIONS = 5
-export const PLACE_COMMITS = 2
+export const PLACE_OBSERVATIONS = 8
+export const PLACE_COMMITS = 3
+/** Of the person's own added lines read, in all: eight lines of a toy script are no basis for a level (owner, 2026-10-05). */
+export const PLACE_LINES = 80
 /** A step up needs this much new evidence at the next level, from this many commits. */
 export const UP_WEIGHT = 4
 export const UP_COMMITS = 2
@@ -28,7 +30,7 @@ const MAX_ASSESSED = 600
 const MAX_HISTORY = 50
 
 export function emptyRecord(language: string): ProgressRecord {
-  return { v: 1, language, level: null, isProvisional: true, observations: [], history: [], report: null, assessed: [] }
+  return { v: 1, language, level: null, isProvisional: true, observations: [], history: [], report: null, assessed: [], linesRead: 0 }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -110,6 +112,7 @@ export function parseRecord(value: unknown, language: string): ProgressRecord {
             at: whole(report.at),
           },
     assessed: (Array.isArray(stored.assessed) ? stored.assessed : []).filter((hash): hash is string => typeof hash === 'string').slice(-MAX_ASSESSED),
+    linesRead: whole(stored.linesRead),
   }
 }
 
@@ -165,12 +168,23 @@ function weightOf(observations: readonly Observation[]): number {
 }
 
 /** The highest level with at least two observations' worth of evidence shown at or above it. */
-function supportedLevel(observations: readonly Observation[]): Level {
-  for (const level of [...LEVELS].reverse()) {
+/**
+ * The highest level with two weight of evidence shown at it or above. Beginner
+ * needs evidence as the others do: two weight missed at junior or below. With
+ * neither, nothing has been shown either way, and there is no level (owner,
+ * 2026-10-05: two toy commits called a devops engineer of years a beginner).
+ */
+function supportedLevel(observations: readonly Observation[]): Level | null {
+  for (const level of LEVELS.slice(1).reverse()) {
     if (weightOf(observations.filter(seen => seen.verdict === 'shown' && rank(seen.level) >= rank(level))) >= 2) return level
   }
 
-  return 'beginner'
+  return weightOf(observations.filter(seen => seen.verdict === 'missed' && rank(seen.level) <= rank('junior'))) >= DOWN_WEIGHT ? 'beginner' : null
+}
+
+/** Whether there is enough to place anyone: the observations, the commits they come from, and the lines read. */
+export function isPlaceable(record: Pick<ProgressRecord, 'observations' | 'linesRead'>): boolean {
+  return record.observations.length >= PLACE_OBSERVATIONS && commitsIn(record.observations) >= PLACE_COMMITS && record.linesRead >= PLACE_LINES
 }
 
 /** Where the level goes after new evidence, and why, under the rules above. */
@@ -182,12 +196,17 @@ export function decideLevel(
   const isConfirmed = all.length >= CONFIRM_OBSERVATIONS && commitsIn(all) >= CONFIRM_COMMITS
   const current = record.level
 
+  // A provisional level that no longer rests on enough is withdrawn: a record from before the bar was raised.
+  if (current !== null && record.isProvisional && !isPlaceable(record)) {
+    return { level: null, isProvisional: true, reason: `Withdrawn: a level needs ${PLACE_OBSERVATIONS} observations from ${PLACE_COMMITS} commits and ${PLACE_LINES} lines of your own read.` }
+  }
   if (current === null) {
-    if (all.length < PLACE_OBSERVATIONS || commitsIn(all) < PLACE_COMMITS) return { level: null, isProvisional: true, reason: '' }
+    if (!isPlaceable(record)) return { level: null, isProvisional: true, reason: '' }
     const supported = supportedLevel(all)
+    if (supported === null) return { level: null, isProvisional: true, reason: '' }
     const placed = proposed === null || rank(proposed) > rank(supported) ? supported : proposed
 
-    return { level: placed, isProvisional: !isConfirmed, reason: `First placement, from ${all.length} observations over ${commitsIn(all)} commits.` }
+    return { level: placed, isProvisional: !isConfirmed, reason: `First placement, from ${all.length} observations over ${commitsIn(all)} commits and ${record.linesRead} lines.` }
   }
 
   const since = all.slice(record.history[record.history.length - 1]?.observationCount ?? 0)
@@ -218,7 +237,7 @@ export function decideLevel(
 }
 
 /** A commit an assessment covered: its full hash and short one, and how much what is seen in it counts. */
-export type AssessedCommit = { hash: string; short: string; weight: number }
+export type AssessedCommit = { hash: string; short: string; weight: number; lines: number }
 
 /**
  * The record after an assessment of one or more commits in a project. An
@@ -256,6 +275,7 @@ export function withAssessment(
     observations: observations.slice(dropped),
     history: record.history.map(change => ({ ...change, observationCount: Math.max(0, change.observationCount - dropped) })),
     assessed: [...record.assessed, ...fresh.map(commit => commit.hash)].slice(-MAX_ASSESSED),
+    linesRead: record.linesRead + fresh.reduce((sum, commit) => sum + Math.max(0, commit.lines), 0),
   }
   const decided = decideLevel(grown, assessment.level)
   const change: LevelChange | null =
@@ -316,7 +336,9 @@ export function levelPhrase(record: ProgressRecord): string {
   if (record.level !== null) return record.isProvisional ? `${record.level} (provisional)` : record.level
   const commits = commitsIn(record.observations)
 
-  return `no level yet: ${Math.min(record.observations.length, PLACE_OBSERVATIONS)} of ${PLACE_OBSERVATIONS} observations, from ${Math.min(commits, PLACE_COMMITS)} of ${PLACE_COMMITS} commits`
+  const counts = `${Math.min(record.observations.length, PLACE_OBSERVATIONS)} of ${PLACE_OBSERVATIONS} observations, from ${Math.min(commits, PLACE_COMMITS)} of ${PLACE_COMMITS} commits, ${Math.min(record.linesRead, PLACE_LINES)} of ${PLACE_LINES} lines read`
+
+  return isPlaceable(record) ? `no level yet: nothing shows one either way (${counts})` : `no level yet: ${counts}`
 }
 
 /** The last few things seen, newest first, as the "lately" lines. */

@@ -1191,13 +1191,13 @@ var skillStates = /* @__PURE__ */ (function() {
       ;
       if (v instanceof Just) {
         return map3(function(state) {
-          var $64 = state.skill !== seen.skill;
-          if ($64) {
+          var $66 = state.skill !== seen.skill;
+          if ($66) {
             return state;
           }
           ;
-          var $65 = state.commit === seen.commit;
-          if ($65) {
+          var $67 = state.commit === seen.commit;
+          if ($67) {
             return {
               commit: state.commit,
               skill: state.skill,
@@ -1221,7 +1221,7 @@ var skillStates = /* @__PURE__ */ (function() {
         })(states);
       }
       ;
-      throw new Error("Failed pattern match at Kernel.Growth (line 226, column 22 - line 243, column 15): " + [v.constructor.name]);
+      throw new Error("Failed pattern match at Kernel.Growth (line 248, column 22 - line 265, column 15): " + [v.constructor.name]);
     };
   };
   return foldl2(step2)([]);
@@ -1246,7 +1246,7 @@ var rankOf = function(n) {
     return Senior.value;
   }
   ;
-  throw new Error("Failed pattern match at Kernel.Growth (line 66, column 1 - line 66, column 22): " + [n.constructor.name]);
+  throw new Error("Failed pattern match at Kernel.Growth (line 72, column 1 - line 72, column 22): " + [n.constructor.name]);
 };
 var rankNumber = function(v) {
   if (v instanceof Beginner) {
@@ -1265,10 +1265,11 @@ var rankNumber = function(v) {
     return 3;
   }
   ;
-  throw new Error("Failed pattern match at Kernel.Growth (line 73, column 1 - line 73, column 26): " + [v.constructor.name]);
+  throw new Error("Failed pattern match at Kernel.Growth (line 79, column 1 - line 79, column 26): " + [v.constructor.name]);
 };
-var placeObservations = 5;
-var placeCommits = 2;
+var placeObservations = 8;
+var placeLines = 80;
+var placeCommits = 3;
 var ownAtLeast = 2;
 var lessonCap = 2;
 var item = function(kind) {
@@ -1336,8 +1337,8 @@ var eqRank = {
     };
   }
 };
-var eq22 = /* @__PURE__ */ eq(eqRank);
-var eq3 = /* @__PURE__ */ eq(/* @__PURE__ */ eqMaybe(eqRank));
+var eq22 = /* @__PURE__ */ eq(/* @__PURE__ */ eqMaybe(eqRank));
+var eq3 = /* @__PURE__ */ eq(eqRank);
 var ordRank = {
   compare: function(x) {
     return function(y) {
@@ -1388,8 +1389,15 @@ var ordRank = {
     return eqRank;
   }
 };
-var greaterThanOrEq2 = /* @__PURE__ */ greaterThanOrEq(ordRank);
 var lessThanOrEq1 = /* @__PURE__ */ lessThanOrEq(ordRank);
+var greaterThanOrEq2 = /* @__PURE__ */ greaterThanOrEq(ordRank);
+var missedLow = function(facts) {
+  return sum1(map3(function(v) {
+    return v.weight;
+  })(filter(function(seen) {
+    return !seen.isShown && lessThanOrEq1(seen.rank)(Junior.value);
+  })(facts.seen)));
+};
 var ownAt = function(facts) {
   return function(rank) {
     return sum1(map3(function(v) {
@@ -1405,7 +1413,7 @@ var commitCount = function(seen) {
   })(seen)));
 };
 var isPlaced = function(facts) {
-  return length(facts.seen) >= placeObservations && commitCount(facts.seen) >= placeCommits;
+  return length(facts.seen) >= placeObservations && (commitCount(facts.seen) >= placeCommits && facts.linesRead >= placeLines);
 };
 var clamp$prime = function(low) {
   return function(high) {
@@ -1436,22 +1444,37 @@ var holds = function(facts) {
     return evidenceAt(facts)(rank) >= reach && ownAt(facts)(rank) >= ownAtLeast;
   };
 };
+var byCount = /* @__PURE__ */ sortBy(function(a) {
+  return function(b) {
+    return compare2(b.count)(a.count);
+  };
+});
+var beginnerNeeds = 2;
 var levelOf = function(facts) {
   if (!isPlaced(facts)) {
     return Nothing.value;
   }
   ;
   if (otherwise) {
-    return new Just(fromMaybe(Beginner.value)(find2(holds(facts))([Senior.value, Mid.value, Junior.value])));
+    var v = find2(holds(facts))([Senior.value, Mid.value, Junior.value]);
+    if (v instanceof Just) {
+      return new Just(v.value0);
+    }
+    ;
+    if (v instanceof Nothing) {
+      var $78 = missedLow(facts) >= beginnerNeeds;
+      if ($78) {
+        return new Just(Beginner.value);
+      }
+      ;
+      return Nothing.value;
+    }
+    ;
+    throw new Error("Failed pattern match at Kernel.Growth (line 238, column 17 - line 240, column 85): " + [v.constructor.name]);
   }
   ;
-  throw new Error("Failed pattern match at Kernel.Growth (line 215, column 1 - line 215, column 31): " + [facts.constructor.name]);
+  throw new Error("Failed pattern match at Kernel.Growth (line 235, column 1 - line 235, column 31): " + [facts.constructor.name]);
 };
-var byCount = /* @__PURE__ */ sortBy(function(a) {
-  return function(b) {
-    return compare2(b.count)(a.count);
-  };
-});
 var alt2 = function(v) {
   return function(v1) {
     if (v instanceof Just) {
@@ -1462,7 +1485,7 @@ var alt2 = function(v) {
       return v1;
     }
     ;
-    throw new Error("Failed pattern match at Kernel.Growth (line 372, column 1 - line 372, column 47): " + [v.constructor.name, v1.constructor.name]);
+    throw new Error("Failed pattern match at Kernel.Growth (line 398, column 1 - line 398, column 47): " + [v.constructor.name, v1.constructor.name]);
   };
 };
 var above = function(v) {
@@ -1482,28 +1505,20 @@ var above = function(v) {
     return Nothing.value;
   }
   ;
-  throw new Error("Failed pattern match at Kernel.Growth (line 79, column 1 - line 79, column 28): " + [v.constructor.name]);
+  throw new Error("Failed pattern match at Kernel.Growth (line 85, column 1 - line 85, column 28): " + [v.constructor.name]);
 };
 var growthOf = function(facts) {
   var states = skillStates(facts.seen);
-  var placeItem = (function() {
-    var $78 = isPlaced(facts);
-    if ($78) {
-      return [];
-    }
-    ;
-    return [item("place")("")(max1(0)(placeObservations - length(facts.seen) | 0))(max1(0)(placeCommits - commitCount(facts.seen) | 0))];
-  })();
   var open = filter(function(lesson) {
     return lesson.isCounted && !isFinished(lesson);
   })(facts.lessons);
   var nub$prime = function(lessons) {
     return foldl2(function(kept2) {
       return function(lesson) {
-        var $79 = any2(function(other) {
+        var $83 = any2(function(other) {
           return other.id === lesson.id;
         })(kept2);
-        if ($79) {
+        if ($83) {
           return kept2;
         }
         ;
@@ -1512,6 +1527,26 @@ var growthOf = function(facts) {
     })([])(lessons);
   };
   var level = levelOf(facts);
+  var placeItem = (function() {
+    var $84 = isPlaced(facts);
+    if ($84) {
+      var $85 = eq22(level)(Nothing.value);
+      if ($85) {
+        return [item("evidence")("")(0)(0)];
+      }
+      ;
+      return [];
+    }
+    ;
+    return append2([item("place")("")(max1(0)(placeObservations - length(facts.seen) | 0))(max1(0)(placeCommits - commitCount(facts.seen) | 0))])((function() {
+      var $86 = facts.linesRead < placeLines;
+      if ($86) {
+        return [item("lines")("")(placeLines - facts.linesRead | 0)(placeLines)];
+      }
+      ;
+      return [];
+    })());
+  })();
   var target = (function() {
     if (level instanceof Nothing) {
       return Nothing.value;
@@ -1521,7 +1556,7 @@ var growthOf = function(facts) {
       return above(level.value0);
     }
     ;
-    throw new Error("Failed pattern match at Kernel.Growth (line 340, column 12 - line 342, column 28): " + [level.constructor.name]);
+    throw new Error("Failed pattern match at Kernel.Growth (line 362, column 12 - line 364, column 28): " + [level.constructor.name]);
   })();
   var nextSkills = (function() {
     if (target instanceof Nothing) {
@@ -1532,11 +1567,11 @@ var growthOf = function(facts) {
       return map3(function(state) {
         return item("skill")(state.skill)(rankNumber(target.value0))(0);
       })(filter(function(state) {
-        return eq22(state.rank)(target.value0) && !state.shownNow;
+        return eq3(state.rank)(target.value0) && !state.shownNow;
       })(states));
     }
     ;
-    throw new Error("Failed pattern match at Kernel.Growth (line 345, column 16 - line 347, column 147): " + [target.constructor.name]);
+    throw new Error("Failed pattern match at Kernel.Growth (line 367, column 16 - line 369, column 147): " + [target.constructor.name]);
   })();
   var ownItem = (function() {
     if (target instanceof Just && ownAt(facts)(target.value0) < ownAtLeast) {
@@ -1585,12 +1620,12 @@ var growthOf = function(facts) {
           return clamp$prime(0)(1)(evidenceAt(facts)(level.value0) / (2 * reach)) * evidenceSpan;
         }
         ;
-        throw new Error("Failed pattern match at Kernel.Growth (line 303, column 19 - line 306, column 91): " + [v.constructor.name]);
+        throw new Error("Failed pattern match at Kernel.Growth (line 325, column 19 - line 328, column 91): " + [v.constructor.name]);
       })();
       return floor2(clamp$prime(0)(99)(carried + habitLift - comingDrag));
     }
     ;
-    throw new Error("Failed pattern match at Kernel.Growth (line 299, column 12 - line 308, column 67): " + [level.constructor.name]);
+    throw new Error("Failed pattern match at Kernel.Growth (line 321, column 12 - line 330, column 67): " + [level.constructor.name]);
   })();
   var score = (function() {
     if (level instanceof Nothing) {
@@ -1601,7 +1636,7 @@ var growthOf = function(facts) {
       return (rankNumber(level.value0) * 100 | 0) + toNext | 0;
     }
     ;
-    throw new Error("Failed pattern match at Kernel.Growth (line 310, column 11 - line 312, column 48): " + [level.constructor.name]);
+    throw new Error("Failed pattern match at Kernel.Growth (line 332, column 11 - line 334, column 48): " + [level.constructor.name]);
   })();
   var focus = append2(map3(function(v) {
     return v.skill;
@@ -1648,10 +1683,10 @@ var growthOf = function(facts) {
       return greaterThanOrEq2(lesson.rank)(level.value0);
     }
     ;
-    throw new Error("Failed pattern match at Kernel.Growth (line 352, column 20 - line 354, column 37): " + [level.constructor.name]);
+    throw new Error("Failed pattern match at Kernel.Growth (line 374, column 20 - line 376, column 37): " + [level.constructor.name]);
   };
   var suggested = take(2)(nub$prime(append2(filter(fits)(open))(append2(filter(function(lesson) {
-    return eq3(new Just(lesson.rank))(target);
+    return eq22(new Just(lesson.rank))(target);
   })(open))(filter(atLeast)(open)))));
   var lessonItems = map3(function(lesson) {
     return item("lesson")(lesson.title)(lesson.done)(lesson.steps);
@@ -1668,10 +1703,10 @@ var growthOf = function(facts) {
     })(facts.seen))),
     missed: sum1(map3(function(v) {
       return v.weight;
-    })(filter(function($97) {
+    })(filter(function($104) {
       return !(function(v) {
         return v.isShown;
-      })($97);
+      })($104);
     })(facts.seen))),
     lessonSteps: sum22(map3(function(v) {
       return v.done;
@@ -1697,7 +1732,7 @@ var growthWire = function(wire) {
           return f(v.value0);
         }
         ;
-        throw new Error("Failed pattern match at Kernel.Growth (line 424, column 23 - line 426, column 18): " + [v.constructor.name]);
+        throw new Error("Failed pattern match at Kernel.Growth (line 452, column 23 - line 454, column 18): " + [v.constructor.name]);
       };
     };
   };
@@ -1724,7 +1759,8 @@ var growthWire = function(wire) {
         checked: max1(0)(min1(lesson.done)(lesson.checked))
       };
     })(wire.lessons),
-    topics: wire.topics
+    topics: wire.topics,
+    linesRead: max1(0)(wire.linesRead)
   });
   return {
     rank: maybe$prime2(-1 | 0)(rankNumber)(grown.level),

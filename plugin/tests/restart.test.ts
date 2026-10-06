@@ -114,7 +114,7 @@ test('the level still moves once the record holds as many observations as it kee
   let hash = 0
   const assess = (assessment: Assessment): void => {
     hash += 1
-    const commit = { hash: `${hash}`.padStart(40, '0'), short: `${hash}`, weight: 1 }
+    const commit = { hash: `${hash}`.padStart(40, '0'), short: `${hash}`, weight: 1, lines: 10 }
     record = withAssessment(record, assessment, [commit], 'stats', hash).record
   }
   for (let index = 0; index < 60; index += 1) assess(at('junior', 'shown'))

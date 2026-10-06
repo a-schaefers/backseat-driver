@@ -11,8 +11,8 @@ function seen(commit: string, skill: string, verdict: 'shown' | 'missed', level:
   return { commit, project: 'stats', at: 1, skill, verdict, level, weight, note: '' }
 }
 
-function record(observations: Observation[]): ProgressRecord {
-  return { ...emptyRecord('python'), observations }
+function record(observations: Observation[], linesRead = 100): ProgressRecord {
+  return { ...emptyRecord('python'), observations, linesRead }
 }
 
 const PATH = (() => {
@@ -29,7 +29,7 @@ function lesson(path: LessonPath, change: (record: ReturnType<typeof emptyLesson
   return lessonView(path, change(emptyLessonRecord(path.id, path.language)))
 }
 
-/** Junior work from two commits: placed at junior. */
+/** Junior work from three commits, a hundred lines read: placed at junior. */
 const JUNIOR = [
   seen('a', 'naming', 'shown', 'junior'),
   seen('a', 'tests', 'shown', 'junior'),
@@ -37,15 +37,29 @@ const JUNIOR = [
   seen('b', 'loops', 'shown', 'junior'),
   seen('b', 'naming', 'shown', 'junior'),
   seen('b', 'edge-cases', 'missed', 'junior', 0.5),
+  seen('c', 'idioms', 'shown', 'junior'),
+  seen('c', 'errors', 'shown', 'junior'),
 ]
 
-test('nothing is placed before five observations from two commits, and the score says so', () => {
+test('nothing is placed before eight observations from three commits and eighty lines read, and the score says so', () => {
   const growth = growthOf(record(JUNIOR.slice(0, 4)), undefined, [])
   expect(growth.level).toBe(null)
   expect(growth.score).toBe(-1)
   expect(growthHeadline(growth)).toBe('Not placed yet')
   expect(growth.toRaise[0]?.kind).toBe('place')
-  expect(raiseLine(growth.toRaise[0] ?? { kind: '', what: '', count: 0, total: 0 })).toBe('Commit work of your own. A level needs 1 more observations from 0 more commits.')
+  expect(raiseLine(growth.toRaise[0] ?? { kind: '', what: '', count: 0, total: 0 })).toBe('Commit work of your own. A level needs 4 more observations from 1 more commits.')
+  // The counts are there and the lines are not: eight lines of a toy script place nobody (the owner, 2026-10-05).
+  const thin = growthOf(record(JUNIOR, 8), undefined, [])
+  expect(thin.level).toBe(null)
+  expect(thin.toRaise.map(item => item.kind)).toEqual(['place', 'lines'])
+  expect(raiseLine(thin.toRaise[1] ?? { kind: '', what: '', count: 0, total: 0 })).toBe('A level also needs 72 more lines of your own read: 80 in all, from real work, not a toy script.')
+  // Everything there, and nothing shown at junior or missed below it: no level either way, beginner included.
+  const faint = growthOf(record(JUNIOR.map(item => ({ ...item, level: 'beginner' as const }))), undefined, [])
+  expect(faint.level).toBe(null)
+  expect(faint.toRaise[0]?.kind).toBe('evidence')
+  // Beginner takes evidence like the rest: two weight missed at junior or below.
+  const struggling = growthOf(record(JUNIOR.map(item => ({ ...item, verdict: 'missed' as const }))), undefined, [])
+  expect(struggling.level).toBe('beginner')
 })
 
 test('own commits place the level, and the score is the level times a hundred plus the way to the next', () => {
@@ -175,7 +189,7 @@ test('a path about no one language is suggested and moves no level', () => {
 test('growthText says it all in a few lines for the tutor', () => {
   const text = growthText('python', growthOf(record(JUNIOR), undefined, []))
   expect(text).toMatch(/^Python growth: junior · growth 1\d\d/)
-  expect(text).toMatch('Counted: own commits: 5 shown, 0.5 missed.')
+  expect(text).toMatch('Counted: own commits: 7 shown, 0.5 missed.')
 })
 
 function seededRandom(seed: number): () => number {

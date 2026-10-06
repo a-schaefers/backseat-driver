@@ -619,6 +619,7 @@ export function growthOfFacts(facts: GrowthFacts): Growth {
     seen: facts.seen.map(seen => ({ commit: seen.commit, skill: seen.skill, rank: RANKS.indexOf(seen.level), isShown: seen.isShown, weight: seen.weight })),
     lessons: facts.lessons.map(({ level, ...lesson }) => ({ ...lesson, rank: RANKS.indexOf(level) })),
     topics: facts.topics,
+    linesRead: facts.linesRead,
   })
 
   return {

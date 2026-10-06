@@ -194,6 +194,7 @@ export type GrowthFactsWire = {
   seen: { commit: string; skill: string; rank: number; isShown: boolean; weight: number }[]
   lessons: { id: string; title: string; rank: number; steps: number; done: number; checked: number; helped: number; isCounted: boolean; skills: string[] }[]
   topics: { topic: string; flagged: number; explained: number; sinceLooks: number }[]
+  linesRead: number
 }
 /** `rank` 0 to 3 is beginner to senior, -1 none. `encouragement` holds at most one item. */
 export type GrowthWire = {

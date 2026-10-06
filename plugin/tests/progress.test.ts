@@ -25,7 +25,7 @@ function seen(commit: string, skill: string, verdict: 'shown' | 'missed', level:
 }
 
 function record(observations: Observation[], level: Level | null = null, extra: Partial<ProgressRecord> = {}): ProgressRecord {
-  return { ...emptyRecord('python'), observations, level, ...extra }
+  return { ...emptyRecord('python'), observations, level, linesRead: 100, ...extra }
 }
 
 const SAW: Assessment = {
@@ -93,22 +93,33 @@ test('a commit is yours only when your email wrote it, alone, and by hand', asyn
   expect(refused(judge(mine, ['me@example.com'], bulk))).toMatch('reads as an import or generated code')
 })
 
-test('no level until five observations from two commits, and a first placement never outruns the evidence', async () => {
+test('no level until eight observations from three commits and eighty lines, and a first placement never outruns the evidence', async () => {
   const four = [seen('a', 'naming', 'shown', 'junior'), seen('a', 'loops', 'shown', 'junior'), seen('b', 'tests', 'shown', 'junior'), seen('b', 'errors', 'missed', 'junior')]
   expect(decideLevel(record(four), 'junior').level).toBe(null)
-  // Five, but all from one commit.
-  expect(decideLevel(record([...four.slice(0, 2), seen('a', 'x', 'shown', 'junior'), seen('a', 'y', 'shown', 'junior'), seen('a', 'z', 'shown', 'junior')]), 'junior').level).toBe(null)
+  // Eight, but from two commits.
+  const eightFromTwo = [...four, seen('a', 'x', 'shown', 'junior'), seen('a', 'y', 'shown', 'junior'), seen('b', 'z', 'shown', 'junior'), seen('b', 'w', 'shown', 'junior')]
+  expect(decideLevel(record(eightFromTwo), 'junior').level).toBe(null)
 
-  const five = [...four, seen('b', 'idioms', 'shown', 'junior')]
-  const placed = decideLevel(record(five), 'junior')
+  const eight = [...four, seen('b', 'idioms', 'shown', 'junior'), seen('c', 'x', 'shown', 'junior'), seen('c', 'y', 'shown', 'junior'), seen('c', 'z', 'shown', 'junior')]
+  const placed = decideLevel(record(eight), 'junior')
   expect(placed.level).toBe('junior')
   expect(placed.isProvisional).toBe(true)
-  expect(placed.reason).toBe('First placement, from 5 observations over 2 commits.')
+  expect(placed.reason).toBe('First placement, from 8 observations over 3 commits and 100 lines.')
+  // The same from eight lines of a toy script: nothing (the owner, 2026-10-05, a devops engineer of years called a beginner).
+  expect(decideLevel(record(eight, null, { linesRead: 8 }), 'junior').level).toBe(null)
 
   // The model says senior. The evidence supports junior, and junior it is.
-  expect(decideLevel(record(five), 'senior').level).toBe('junior')
+  expect(decideLevel(record(eight), 'senior').level).toBe('junior')
   // The model is more cautious than the evidence: its reading stands.
-  expect(decideLevel(record(five), 'beginner').level).toBe('beginner')
+  expect(decideLevel(record(eight), 'beginner').level).toBe('beginner')
+  // Nothing shown at junior and nothing missed: no level either way, not beginner by default.
+  expect(decideLevel(record(eight.map(item => ({ ...item, level: 'beginner' as const }))), 'beginner').level).toBe(null)
+  // Beginner needs evidence as the others do: two weight missed at junior or below.
+  expect(decideLevel(record(eight.map(item => ({ ...item, verdict: 'missed' as const }))), 'beginner').level).toBe('beginner')
+  // A provisional level from before the bar was raised is withdrawn until the bar is met.
+  const early = record(eightFromTwo, 'beginner', { history: [{ at: 1, from: null, to: 'beginner', reason: 'First placement.', observationCount: 8 }] })
+  expect(decideLevel(early, 'beginner')).toMatchObject({ level: null, isProvisional: true })
+  expect(decideLevel(early, 'beginner').reason).toMatch('Withdrawn')
 })
 
 test('a step up takes new evidence at the next level from two commits, and the model agreeing', async () => {
@@ -146,25 +157,30 @@ test('a level comes back down when what it assumes is missed, and the skill is m
 })
 
 test('withAssessment records what was seen once per commit, and keeps the history of every change', async () => {
-  const first = withAssessment(emptyRecord('python'), SAW, [{ hash: 'a'.repeat(40), short: 'aaaaaaa', weight: 1 }], 'stats', 10)
+  const first = withAssessment(emptyRecord('python'), SAW, [{ hash: 'a'.repeat(40), short: 'aaaaaaa', weight: 1, lines: 40 }], 'stats', 10)
   expect(first.record.observations.map(item => `${item.commit.slice(0, 7)} ${item.verdict} ${item.skill} x${item.weight}`)).toEqual(['aaaaaaa missed edge-cases x1', 'aaaaaaa shown naming x1'])
   expect(first.record.report?.why).toBe('Small, working functions with clear names.')
   expect(first.change).toBe(null)
-  expect(levelPhrase(first.record)).toBe('no level yet: 2 of 5 observations, from 1 of 2 commits')
+  expect(levelPhrase(first.record)).toBe('no level yet: 2 of 8 observations, from 1 of 3 commits, 40 of 80 lines read')
 
   // The same commit again, from another project or another session, adds nothing.
-  expect(withAssessment(first.record, SAW, [{ hash: 'a'.repeat(40), short: 'aaaaaaa', weight: 1 }], 'fork', 20).record).toBe(first.record)
+  expect(withAssessment(first.record, SAW, [{ hash: 'a'.repeat(40), short: 'aaaaaaa', weight: 1, lines: 40 }], 'fork', 20).record).toBe(first.record)
 
   const more: Assessment = { ...SAW, observations: [...SAW.observations, { ...SAW.observations[1]!, skill: 'idioms' }, { ...SAW.observations[1]!, skill: 'tests' }] }
-  const second = withAssessment(first.record, more, [{ hash: 'b'.repeat(40), short: 'bbbbbbb', weight: 0.5 }], 'stats', 30)
-  expect(second.record.level).toBe('junior')
-  expect(second.change).toEqual({ at: 30, from: null, to: 'junior', reason: 'First placement, from 6 observations over 2 commits.', observationCount: 6 })
-  expect(second.record.history).toEqual([second.change!])
-  expect(parseRecord(JSON.parse(JSON.stringify(second.record)), 'python')).toEqual(second.record)
-  expect(parseRecord({ ...second.record, language: 'rust' }, 'python')).toEqual(emptyRecord('python'))
+  const second = withAssessment(first.record, more, [{ hash: 'b'.repeat(40), short: 'bbbbbbb', weight: 0.5, lines: 40 }], 'stats', 30)
+  // Six observations from two commits and eighty lines: not yet.
+  expect(second.record.level).toBe(null)
+  expect(second.change).toBe(null)
+  expect(second.record.linesRead).toBe(80)
+  const third = withAssessment(second.record, more, [{ hash: 'c'.repeat(40), short: 'ccccccc', weight: 0.5, lines: 40 }], 'stats', 40)
+  expect(third.record.level).toBe('junior')
+  expect(third.change).toEqual({ at: 40, from: null, to: 'junior', reason: 'First placement, from 10 observations over 3 commits and 120 lines.', observationCount: 10 })
+  expect(third.record.history).toEqual([third.change!])
+  expect(parseRecord(JSON.parse(JSON.stringify(third.record)), 'python')).toEqual(third.record)
+  expect(parseRecord({ ...third.record, language: 'rust' }, 'python')).toEqual(emptyRecord('python'))
 
-  expect(recordText(second.record)).toMatch('Python: junior (provisional)\nWhy: Small, working functions with clear names.\nFor the next level: Handle the empty input on purpose, and test it.')
-  expect(progressText([second.record])).toMatch('- Python: observed level junior (provisional).')
+  expect(recordText(third.record)).toMatch('Python: junior (provisional)\nWhy: Small, working functions with clear names.\nFor the next level: Handle the empty input on purpose, and test it.')
+  expect(progressText([third.record])).toMatch('- Python: observed level junior (provisional).')
   expect(progressText([first.record])).toBe('')
 })
 
@@ -202,7 +218,7 @@ const OBSERVED = (commit: string): Assessment => ({
   encouragement: 'Steady work.',
 })
 
-sessionTest('your commit is assessed after its review, on your own lines, and two of them place you', async ($, on) => {
+sessionTest('your commit is assessed after its review, on your own lines, and three of them with enough lines place you', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
   await $.command.run(typed('bsd'))
@@ -237,18 +253,35 @@ sessionTest('your commit is assessed after its review, on your own lines, and tw
   await $.turn.complete(session.finish(2, 'Fine.'))
   await session.clock.settle()
 
-  expect(parseRecord(session.data('progress/python.json'), 'python').level).toBe('junior')
+  // Six observations from two commits and six lines: no level yet, whatever the model proposed.
+  const sofar = parseRecord(session.data('progress/python.json'), 'python')
+  expect(sofar.level).toBe(null)
+  expect(sofar.linesRead).toBe(6)
+  expect(session.toasts.some(toast => toast.includes('junior'))).toBe(false)
+
+  // A third commit of real size: now there is enough to go on.
+  const big = Array.from({ length: 40 }, (_, index) => `def f${index}(x):\n    return x + ${index}\n`).join('\n')
+  session.write('shapes.py', big)
+  await session.clock.advance(4000)
+  const third = session.commit('Add shapes')
+  await session.clock.advance(2000)
+  session.assess(OBSERVED(third.slice(0, 7)))
+  await $.turn.complete(session.finish(3, 'Fine.'))
+  await session.clock.settle()
+  const placed = parseRecord(session.data('progress/python.json'), 'python')
+  expect(placed.level).toBe('junior')
+  expect(placed.linesRead).toBe(86)
   expect(session.toasts).toContain('Python: junior (provisional). See the Growth tab.')
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-profile' })
   expect(await ui.find({ type: 'Text', text: 'From your commits alone: junior (provisional)' })).toBeDefined()
-  // The headline is a bar: the level, the cells filled toward the next level, and the words beside it.
-  expect(await ui.find({ type: 'Text', text: /^\d+% to (junior|mid) · growth \d+$/ })).toBeDefined()
+  // The headline is a bar: the level, the cells filled toward the next level, and the words beside it, provisional while it is.
+  expect(await ui.find({ type: 'Text', text: /^\d+% to (junior|mid) · growth \d+ · provisional$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^░+$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'Next level: Design a module with a clear interface.' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'Steady work.' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: `- Showed edge cases in work (${second.slice(0, 7)}): stats.py: edge-cases.` })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: `- Showed edge cases in work (${third.slice(0, 7)}): stats.py: edge-cases.` })).toBeDefined()
   await ui.unmount()
 
   // The tutor, both reviewers and the tool all know it now.
@@ -415,7 +448,7 @@ sessionTest('an email set in git after switch-on counts from the next commit', a
 })
 
 sessionTest('forgetting a language forgets its progress too', async ($, on) => {
-  const placed = withAssessment(emptyRecord('python'), OBSERVED('aaaaaaa'), [{ hash: 'a'.repeat(40), short: 'aaaaaaa', weight: 1 }], 'stats', 1).record
+  const placed = withAssessment(emptyRecord('python'), OBSERVED('aaaaaaa'), [{ hash: 'a'.repeat(40), short: 'aaaaaaa', weight: 1, lines: 40 }], 'stats', 1).record
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { 'progress/python.json': placed } })
   session.disk.set(`${DATA_HOME}/.backseat-driver`, 'marker')
   await $.session.start(SESSION)
@@ -443,8 +476,8 @@ test('showing and missing a skill in the same commit is a mixed result, not a sl
 })
 
 test('observations from several commits are kept oldest commit first, whatever order the model gave them', async () => {
-  const older = { hash: 'a'.repeat(40), short: 'aaaaaaa', weight: 0.5 }
-  const newer = { hash: 'b'.repeat(40), short: 'bbbbbbb', weight: 0.5 }
+  const older = { hash: 'a'.repeat(40), short: 'aaaaaaa', weight: 0.5, lines: 40 }
+  const newer = { hash: 'b'.repeat(40), short: 'bbbbbbb', weight: 0.5, lines: 40 }
   const assessment: Assessment = {
     ...SAW,
     observations: [

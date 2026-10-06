@@ -276,6 +276,8 @@ export type ProgressRecord = {
   report: Report | null
   /** Full hashes of the commits already assessed, so that none counts twice, in any project. */
   assessed: string[]
+  /** The person's own added lines the assessments have read, in all. A level needs enough of them (owner, 2026-10-05: eight lines are no basis for one). */
+  linesRead: number
 }
 
 /** One step of a lesson as the Lessons tab shows it. `checked` is done with the tutor watching, `done` marked done by them. */

@@ -805,7 +805,7 @@ const METER_WIDTH = 20
 const BAND_COLORS: Record<GrowthBand, string> = { red: 'red', orange: '#ff8700', yellow: 'yellow', green: 'green' }
 
 /** The headline as a health bar: the level, the bar filling toward the next level, and the words. Before a level, the plain headline. */
-function growthBar(kit: Kit, growth: Growth) {
+function growthBar(kit: Kit, growth: Growth, isProvisional: boolean) {
   const { Box, Text } = kit
   const meter = growthMeter(growth, METER_WIDTH)
   if (meter === null) return <Text bold>{growthHeadline(growth)}</Text>
@@ -817,7 +817,7 @@ function growthBar(kit: Kit, growth: Growth) {
         <Text color={BAND_COLORS[meter.band]}>{'█'.repeat(meter.filled)}</Text>
         <Text dimColor>{'░'.repeat(meter.empty)}</Text>
       </Box>
-      <Text dimColor>{growthMeterLabel(growth)}</Text>
+      <Text dimColor>{`${growthMeterLabel(growth)}${isProvisional ? ' · provisional' : ''}`}</Text>
     </Box>
   )
 }
@@ -833,7 +833,7 @@ function growthSection(kit: Kit, record: ProgressRecord, growth: Growth | undefi
 
   return (
     <Box flexDirection="column">
-      {growth !== undefined && growthBar(kit, growth)}
+      {growth !== undefined && growthBar(kit, growth, record.isProvisional)}
       {growth !== undefined && <Text dimColor>{growthCounts(growth)}</Text>}
       <Text dimColor>{`From your commits alone: ${levelPhrase(record).replace(/^no level yet: /, 'not placed yet, ')}`}</Text>
       {report !== null && report.why !== '' && <Text>{report.why}</Text>}

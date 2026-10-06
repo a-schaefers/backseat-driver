@@ -19,10 +19,14 @@
 -- |
 -- | The level is the highest one their evidence holds: `reach` of weight shown
 -- | at that level or above, less what they missed at that level or below, of
--- | which `ownAtLeast` from their own commits. The score is the level times a
--- | hundred plus how far they are toward the next: 162 is a junior 62 of the
+-- | which `ownAtLeast` from their own commits. Beginner needs evidence too:
+-- | `beginnerNeeds` of weight missed at junior or below. Evidence for no level
+-- | at all is no level (the owner, 2026-10-05: two toy commits of eight lines
+-- | called a devops engineer of years a beginner). The score is the level times
+-- | a hundred plus how far they are toward the next: 162 is a junior 62 of the
 -- | way to mid. Nothing is placed before `placeObservations` observations from
--- | `placeCommits` commits, as with the progress record.
+-- | `placeCommits` commits and `placeLines` of their own lines read, as with the
+-- | progress record.
 -- |
 -- | What to work on, where they needed help, what they improved and what
 -- | would raise the score are picked here too, as plain items. The wording is
@@ -46,6 +50,8 @@ module Kernel.Growth
   , recurringTimes
   , placeObservations
   , placeCommits
+  , placeLines
+  , beginnerNeeds
   , GrowthFactsWire
   , GrowthWire
   , growthWire
@@ -56,7 +62,7 @@ import Prelude
 import Data.Array (any, elem, filter, find, foldl, length, mapMaybe, nub, reverse, snoc, sortBy, take)
 import Data.Foldable (sum)
 import Data.Int (floor, toNumber)
-import Data.Maybe (Maybe(..), fromMaybe)
+import Data.Maybe (Maybe(..))
 
 data Rank = Beginner | Junior | Mid | Senior
 
@@ -120,6 +126,8 @@ type Facts =
   { seen :: Array Seen
   , lessons :: Array LessonFact
   , topics :: Array TopicFact
+  -- | The person's own added lines the assessments have read, in all.
+  , linesRead :: Int
   }
 
 -- | One line of the Growth tab, before it is worded: what kind of thing, about
@@ -170,10 +178,18 @@ recurringTimes :: Int
 recurringTimes = 3
 
 placeObservations :: Int
-placeObservations = 5
+placeObservations = 8
 
 placeCommits :: Int
-placeCommits = 2
+placeCommits = 3
+
+-- | Of their own added lines read: eight lines of a toy script are no basis for a level.
+placeLines :: Int
+placeLines = 80
+
+-- | Beginner needs evidence as the other levels do: this much weight missed at junior or below.
+beginnerNeeds :: Number
+beginnerNeeds = 2.0
 
 -- | How much of the way to the next level the evidence at that level can carry. Habits carry the rest.
 evidenceSpan :: Number
@@ -210,12 +226,18 @@ holds :: Facts -> Rank -> Boolean
 holds facts rank = evidenceAt facts rank >= reach && ownAt facts rank >= ownAtLeast
 
 isPlaced :: Facts -> Boolean
-isPlaced facts = length facts.seen >= placeObservations && commitCount facts.seen >= placeCommits
+isPlaced facts = length facts.seen >= placeObservations && commitCount facts.seen >= placeCommits && facts.linesRead >= placeLines
+
+-- | What their commits missed at junior or below: the evidence for beginner.
+missedLow :: Facts -> Number
+missedLow facts = sum (map _.weight (filter (\seen -> not seen.isShown && seen.rank <= Junior) facts.seen))
 
 levelOf :: Facts -> Maybe Rank
 levelOf facts
   | not (isPlaced facts) = Nothing
-  | otherwise = Just (fromMaybe Beginner (find (holds facts) [ Senior, Mid, Junior ]))
+  | otherwise = case find (holds facts) [ Senior, Mid, Junior ] of
+      Just rank -> Just rank
+      Nothing -> if missedLow facts >= beginnerNeeds then Just Beginner else Nothing
 
 -- | A skill as the latest commit that touched it left it.
 type SkillState = { skill :: String, commit :: String, rank :: Rank, shownNow :: Boolean, missedNow :: Boolean, shownBefore :: Boolean, missedBefore :: Boolean }
@@ -360,8 +382,12 @@ growthOf facts =
     _ -> []
 
   placeItem =
-    if isPlaced facts then []
-    else [ item "place" "" (max 0 (placeObservations - length facts.seen)) (max 0 (placeCommits - commitCount facts.seen)) ]
+    if isPlaced facts then
+      -- Placed by the counts and still no level: nothing shows one either way.
+      if level == Nothing then [ item "evidence" "" 0 0 ] else []
+    else
+      [ item "place" "" (max 0 (placeObservations - length facts.seen)) (max 0 (placeCommits - commitCount facts.seen)) ]
+        <> (if facts.linesRead < placeLines then [ item "lines" "" (placeLines - facts.linesRead) placeLines ] else [])
 
   toRaise = take 5 (placeItem <> nextSkills <> ownItem <> lessonItems)
 
@@ -379,6 +405,7 @@ type GrowthFactsWire =
   { seen :: Array { commit :: String, skill :: String, rank :: Int, isShown :: Boolean, weight :: Number }
   , lessons :: Array { id :: String, title :: String, rank :: Int, steps :: Int, done :: Int, checked :: Int, helped :: Int, isCounted :: Boolean, skills :: Array String }
   , topics :: Array TopicFact
+  , linesRead :: Int
   }
 
 type GrowthWire =
@@ -404,6 +431,7 @@ growthWire wire =
       { seen: map (\seen -> seen { rank = rankOf seen.rank, weight = clamp' 0.0 1.0 seen.weight }) wire.seen
       , lessons: map (\lesson -> lesson { rank = rankOf lesson.rank, done = min lesson.steps (max 0 lesson.done), checked = max 0 (min lesson.done lesson.checked) }) wire.lessons
       , topics: wire.topics
+      , linesRead: max 0 wire.linesRead
       }
   in
     { rank: maybe' (-1) rankNumber grown.level

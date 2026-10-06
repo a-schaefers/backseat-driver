@@ -34,6 +34,8 @@ export type GrowthFacts = {
   seen: { commit: string; skill: string; level: Level; isShown: boolean; weight: number }[]
   lessons: { id: string; title: string; level: Level; steps: number; done: number; checked: number; helped: number; isCounted: boolean; skills: string[] }[]
   topics: { topic: string; flagged: number; explained: number; sinceLooks: number }[]
+  /** The person's own added lines the assessments have read. */
+  linesRead: number
 }
 
 /** The facts for one language: its progress record, its profile, and the lessons of that language and of no one language. */
@@ -69,6 +71,7 @@ export function growthFacts(record: ProgressRecord, profile: Profile | undefined
       explained: stats.explained,
       sinceLooks: Math.max(0, (profile?.looks ?? 0) - stats.lastLook),
     })),
+    linesRead: record.linesRead,
   }
 }
 
@@ -190,6 +193,10 @@ export function raiseLine(item: GrowthItem): string {
   switch (item.kind) {
     case 'place':
       return `Commit work of your own. A level needs ${item.count} more observations from ${item.total} more commits.`
+    case 'lines':
+      return `A level also needs ${item.count} more lines of your own read: ${item.total} in all, from real work, not a toy script.`
+    case 'evidence':
+      return 'Nothing yet shows a level either way: more of your own work, and the first one shows.'
     case 'skill':
       return `Show ${words(item.what)} in your own commits: it is ${LEVEL_NAMES[item.count] ?? 'next-level'} work you missed`
     case 'own':

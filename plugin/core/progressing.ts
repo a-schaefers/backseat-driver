@@ -257,7 +257,7 @@ export async function assessCommit(ports: ProgressPorts, state: ProgressState, h
   }
   let isSettled = true
   for (const [language, group] of languages) {
-    if (!(await assess(ports, state, language, [{ hash: info.hash, short, weight, title, files: group }], review))) isSettled = false
+    if (!(await assess(ports, state, language, [{ hash: info.hash, short, weight, lines: sizeOf(group), title, files: group }], review))) isSettled = false
   }
   // Kept until the commit is settled, so that another try weighs it the same.
   if (isSettled) await forgetWatched(ports, state, verdict.files.map(file => file.path))
@@ -297,7 +297,7 @@ export async function placeFirst(ports: ProgressPorts, state: ProgressState, run
       const verdict = judge(info, state.identity, addedLines((await ports.git(commitPatchArgs(commit.hash))).stdout))
       const group = verdict.isYours ? byLanguage(verdict.files).get(language) : undefined
       if (group === undefined || sizeOf(group) < MIN_LINES) continue
-      picked.push({ hash: info.hash, short: shortHash(info.hash), weight: 0.5, title: info.message.split('\n')[0] ?? '', files: group })
+      picked.push({ hash: info.hash, short: shortHash(info.hash), weight: 0.5, lines: sizeOf(group), title: info.message.split('\n')[0] ?? '', files: group })
     }
     // Read newest first from git log; assessed oldest first, so that the record runs in time order.
     if (picked.length > 0 && run === ports.engagement()) await assess(ports, state, language, picked.reverse(), '')
