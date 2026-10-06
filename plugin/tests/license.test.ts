@@ -184,7 +184,7 @@ test('license.json reads back, and anything else is nothing chosen', async () =>
   expect(withKey(record, 'BSD1.c.d', 9)).toEqual({ ...record, key: 'BSD1.c.d', keySince: 9, answer: null, answeredAt: 0, triedAt: 0 })
 })
 
-test('/bsd license words', async () => {
+test('/backseat license words', async () => {
   expect(parseLicenseRequest('')).toEqual({ kind: 'status' })
   expect(parseLicenseRequest(' Personal ')).toEqual({ kind: 'use', use: 'personal' })
   expect(parseLicenseRequest('commercial')).toEqual({ kind: 'use', use: 'commercial' })
@@ -204,7 +204,7 @@ test('what the server says, and what counts as no answer', async () => {
 test('the pane says nothing unless something needs saying', async () => {
   const check = await checkKey(KEYS.ending, [TEST_KEY])
   for (const quiet of ['unchosen', 'personal', 'licensed'] as const) expect(licenseLine(quiet, check, NO_LICENSE)).toBe('')
-  expect(licenseLine('needs-key', null, NO_LICENSE)).toMatch('/bsd license <key>')
+  expect(licenseLine('needs-key', null, NO_LICENSE)).toMatch('/backseat license <key>')
   expect(licenseLine('expired', check, NO_LICENSE)).toMatch('2027-01-01')
   expect(licenseLine('unchecked', check, { ...NO_LICENSE, keySince: Date.UTC(2026, 9, 5) })).toMatch('since 2026-10-05')
   expect(licenseFacts(NO_LICENSE, null, 5, false)).toEqual({ use: '', key: 'none', expiresAt: 0, keySince: 0, hasServer: false, answer: '', answeredAt: 0, triedAt: 0, now: 5 })
@@ -218,28 +218,28 @@ sessionTest('the first switch-on asks once how it is used; personal is remembere
   const session = stubSession(on, { data: KNOWN })
   session.answers.push(PERSONAL_CHOICE)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   expect(session.asked).toEqual(['How are you using Backseat Driver?'])
   expect(session.data('license.json')).toMatchObject({ use: 'personal', isAsked: true })
-  await $.command.run(typed('bsd', 'off'))
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat', 'off'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(session.asked.length).toBe(1)
-  expect((await $.command.run(typed('bsd', 'license'))).text).toMatch('Personal use: free.')
+  expect((await $.command.run(typed('backseat', 'license'))).text).toMatch('Personal use: free.')
 })
 
 sessionTest('dismissing the question chooses nothing, asks nothing again, and the tutor works', async ($, on) => {
   const session = stubSession(on, { data: KNOWN })
   await $.session.start(SESSION)
-  const started = await $.command.run(typed('bsd'))
+  const started = await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   expect(started.text).toMatch(/^Backseat Driver is on. You drive./)
   expect(session.data('license.json')).toMatchObject({ use: null, isAsked: true })
-  await $.command.run(typed('bsd', 'off'))
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat', 'off'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(session.asked.length).toBe(1)
 })
@@ -248,7 +248,7 @@ sessionTest('commercial asks for the key; without one the pane says how to add i
   const session = stubSession(on, { data: KNOWN })
   session.answers.push(COMMERCIAL_CHOICE, LATER_CHOICE)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   expect(session.asked).toEqual(['How are you using Backseat Driver?', 'Paste your commercial license key, or pick an answer.'])
@@ -256,32 +256,32 @@ sessionTest('commercial asks for the key; without one the pane says how to add i
   expect(await ui.find({ type: 'Text', text: /Commercial use: add your license key/ })).toBeDefined()
 
   // The shipped plugin carries no public key yet, so a well-formed key is taken on trust.
-  const answer = await $.command.run(typed('bsd', `license ${KEYS.valid}`))
+  const answer = await $.command.run(typed('backseat', `license ${KEYS.valid}`))
   expect(answer.text).toBe('Commercial use, licensed for Acme Ltd, 5 seats. Thank you.')
   expect(String((session.data('license.json') as { key: string }).key).startsWith('BSD1.')).toBe(true)
   expect(await ui.find({ type: 'Text', text: /license key/ })).toBeUndefined()
   await ui.unmount()
 
-  expect((await $.command.run(typed('bsd', 'license not-a-key'))).text).toMatch('That is not a license key')
-  expect((await $.command.run(typed('bsd', 'license personal'))).text).toMatch('Personal use')
+  expect((await $.command.run(typed('backseat', 'license not-a-key'))).text).toMatch('That is not a license key')
+  expect((await $.command.run(typed('backseat', 'license personal'))).text).toMatch('Personal use')
 })
 
 sessionTest('a key pasted into the first question is taken as commercial use with that key', async ($, on) => {
   const session = stubSession(on, { data: KNOWN })
   session.answers.push(KEYS.valid)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   expect(session.asked.length).toBe(1)
   expect(session.data('license.json')).toMatchObject({ use: 'commercial', isAsked: true })
 })
 
-sessionTest('/bsd license works while the tutor is off, and asks nothing', async ($, on) => {
+sessionTest('/backseat license works while the tutor is off, and asks nothing', async ($, on) => {
   const session = stubSession(on, { data: KNOWN })
   await $.session.start(SESSION)
-  expect((await $.command.run(typed('bsd', 'license'))).text).toMatch('Not chosen yet.')
-  expect((await $.command.run(typed('bsd', 'license commercial'))).text).toMatch('no key yet')
+  expect((await $.command.run(typed('backseat', 'license'))).text).toMatch('Not chosen yet.')
+  expect((await $.command.run(typed('backseat', 'license commercial'))).text).toMatch('no key yet')
   expect(session.asked).toEqual([])
   expect(session.data('license.json')).toMatchObject({ use: 'commercial', isAsked: true })
 })

@@ -49,7 +49,7 @@ sessionTest('the notes are kept in the project folder after every look', async (
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   session.reply(EVEN)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', MEDIAN)
@@ -77,7 +77,7 @@ sessionTest('after a restart the pane shows the notes that still hold and the la
     },
   })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })

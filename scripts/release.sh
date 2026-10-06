@@ -8,7 +8,7 @@
 #   scripts/release.sh ... --push           also push the commit and the tag
 #
 # A running tutor notices the new tag within six hours and offers
-# /bsd update. Installed copies are pinned to the version in plugin.json, so
+# /backseat update. Installed copies are pinned to the version in plugin.json, so
 # nothing reaches them until a release changes it.
 set -euo pipefail
 

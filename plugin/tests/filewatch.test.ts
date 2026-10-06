@@ -82,7 +82,7 @@ test('output is read in whole lines, whatever pieces it arrives in', async () =>
 sessionTest('without a file watcher on PATH, the scan does it all, as before', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   await session.clock.advance(2000)
 
@@ -99,7 +99,7 @@ sessionTest('with inotifywait, a save is pushed and the scan becomes a safety ne
   const session = stubSession(on, { hasInotify: true, ignored: ['node_modules'] })
   session.reply({ resolved: [], notes: [{ file: 'stats.py', line: 2, kind: 'bug', topic: 'empty-input', note: 'What does this do for an empty list?' }] })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   await session.clock.advance(1000)
   await session.clock.settle()
@@ -133,7 +133,7 @@ sessionTest('with inotifywait, a save is pushed and the scan becomes a safety ne
   await ui.unmount()
 
   // Switched off, the watchers end with it: at once in Claude Code, and in the kit at their next piece of output.
-  await $.command.run(typed('bsd', 'off'))
+  await $.command.run(typed('backseat', 'off'))
   await session.clock.settle()
   const off = session.scans
   tree?.report(`${ROOT}/stats.py`)
@@ -148,7 +148,7 @@ sessionTest('with inotifywait, a save is pushed and the scan becomes a safety ne
 sessionTest('with inotifywait, a commit is reviewed the moment HEAD moves', async ($, on) => {
   const session = stubSession(on, { hasInotify: true })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   await session.clock.advance(1000)
   await session.clock.settle()
@@ -166,7 +166,7 @@ sessionTest('with inotifywait, a commit is reviewed the moment HEAD moves', asyn
 sessionTest('a watcher that gives up hands the work back to the scan', async ($, on) => {
   const session = stubSession(on, { hasInotify: true })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   await session.clock.advance(1000)
   await session.clock.settle()

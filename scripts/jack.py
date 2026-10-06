@@ -36,7 +36,7 @@ where to look.
                                     copy (local/live/plugin), when the tutor is between things, and
                                     watch them come back up. A save under plugin/ alone reloads nothing of theirs
     scripts/jack.py tour [S]        drive a session in tmux as a person would, and check after every step
-    scripts/jack.py keys S <keys>   type into a session in tmux (`keys bsd /bsd Enter`). Only when asked to.
+    scripts/jack.py keys S <keys>   type into a session in tmux (`keys bsd /backseat Enter`). Only when asked to.
 
 S names a session: the start of its id, its tmux session's name, or the short
 id `claude agents` gives a background one. Left out, it is the one session
@@ -49,7 +49,7 @@ again). A session in a plain terminal cannot be seen from outside: this says
 so and checks the rest.
 
 Reading is free and changes nothing. `in` and `out` write one small file in
-the data folder, the same one `/bsd debug on` writes. `keys` types into
+the data folder, the same one `/backseat debug on` writes. `keys` types into
 somebody's session: never without being asked. Nothing here calls a model.
 """
 
@@ -908,7 +908,7 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
         if rows is not None and mode == "off" and any("1: Play" in row for row in rows):
             if cannot_say(s):
                 out.append((NOTE, f"{who} has the tutor's pane on its screen and runs {copy_label(s)}, from before the tutor could say what it believes: "
-                                  f"jack sees its screen and its files, not its state. /bsd debug on typed into it, or /reload-plugins there while the switch is on, starts its log"))
+                                  f"jack sees its screen and its files, not its state. /backseat debug on typed into it, or /reload-plugins there while the switch is on, starts its log"))
             else:
                 out.append((BAD, f"{who} has the tutor's pane on its screen, and nothing says the tutor is on in it"))
         return out
@@ -989,7 +989,7 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
             out.append((FINE, f"{who}'s editors light is {'green: ' + light if light else 'red: no editor connected'}"))
 
     # The notes. notes.json may keep more than the pane shows: a note about text changed since is kept there and
-    # never shown again (seen live after /bsd off and on). A note in the pane that notes.json lacks is lost at a restart.
+    # never shown again (seen live after /backseat off and on). A note in the pane that notes.json lacks is lost at a restart.
     notes = dig(state, "pane.notes")
     if mode != "off" and is_driver is True and project is not None and isinstance(notes, list):
         kept = {n.get("id") for n in project["notes"] if isinstance(n, dict)}
@@ -1011,11 +1011,11 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
         mine = next((p for p in panes if isinstance(p, dict) and p.get("id") == PANE_ID), None) if isinstance(panes, list) else None
         closed = shown.get("closed") if isinstance(shown.get("closed"), dict) else None
         if isinstance(panes, list) and mine is None and closed is not None and closed.get("origin") == "person":
-            out.append((NOTE, f"{who}'s pane was closed by the person {ago(now - (closed.get('at') or now))} ago: nothing of the tutor is on screen until /bsd"))
+            out.append((NOTE, f"{who}'s pane was closed by the person {ago(now - (closed.get('at') or now))} ago: nothing of the tutor is on screen until /backseat"))
         elif isinstance(panes, list) and mine is None:
             out.append((BAD, f"{who} has the tutor {mode} in the vertical layout, and Claude Code lists no pane of its own: nothing is on screen"))
         elif isinstance(opened, dict) and opened.get("isPlaced") is False:
-            out.append((BAD, f"{who}'s pane is open and not drawn: {opened.get('reason') or 'no reason given'}. /bsd in that session draws it"))
+            out.append((BAD, f"{who}'s pane is open and not drawn: {opened.get('reason') or 'no reason given'}. /backseat in that session draws it"))
     width = (s["eyes"] or {}).get("cols") if isinstance(s["eyes"], dict) else None
     if rows is None:
         out.append((NOTE, f"{who}'s screen cannot be seen ({eyes_label(s['eyes'])}): what it says it shows is not checked"))
@@ -1073,7 +1073,7 @@ def is_said_on_screen(text: str, rows: list[str]) -> bool:
 
 
 def check_said(w: dict, s: dict, rows: list[str] | None) -> list[tuple[str, str]]:
-    """What the tutor told the person outside its pane (a toast, a line in the transcript, the answer to /bsd, a
+    """What the tutor told the person outside its pane (a toast, a line in the transcript, the answer to /backseat, a
     prompt sent in their name, a question in a dialog), against the screen."""
     out: list[tuple[str, str]] = []
     state = s["state"]
@@ -1627,7 +1627,7 @@ def cmd_in(args) -> int:
     started = now_ms()
     homes = [home for home in w["homes"] if marked(home)]
     if not homes:
-        print("There is no data folder of the tutor's yet. Switch it on once (/bsd) and jack in again.")
+        print("There is no data folder of the tutor's yet. Switch it on once (/backseat) and jack in again.")
         return 2
     for home in homes:
         switch = read_json(home / "debug.json") or {}
@@ -1649,7 +1649,7 @@ def cmd_in(args) -> int:
                 heard.add(s["id"])
     for s in waiting:
         if s["id"] not in heard:
-            print(f"  {BAD} {s['short']} did not start its log: it draws nowhere and its timers do not run, or it runs a copy of the plugin from before this. /bsd debug on in that session does it by hand")
+            print(f"  {BAD} {s['short']} did not start its log: it draws nowhere and its timers do not run, or it runs a copy of the plugin from before this. /backseat debug on in that session does it by hand")
     print()
     return cmd_status(args)
 
@@ -1662,9 +1662,9 @@ def cmd_out(args) -> int:
             print(f"the debug log is off in {tilde(str(home))}")
         elif switch.get("by") == "jack" and switch.get("was") is False:
             (home / "debug.json").write_text(json.dumps({"on": False, "since": now_ms()}) + "\n")
-            print(f"switched the debug log off in {tilde(str(home))}. What was logged is kept in {tilde(str(home / 'debug'))}; /bsd debug clear deletes it")
+            print(f"switched the debug log off in {tilde(str(home))}. What was logged is kept in {tilde(str(home / 'debug'))}; /backseat debug clear deletes it")
         else:
-            print(f"the debug log in {tilde(str(home))} was on before jack came: left on. /bsd debug off switches it off")
+            print(f"the debug log in {tilde(str(home))} was on before jack came: left on. /backseat debug off switches it off")
     return 0
 
 
@@ -1852,7 +1852,7 @@ def cmd_tour(args) -> int:
     if unknown:
         sys.exit(f"no such step: {', '.join(unknown)}. The steps: {', '.join(TOUR_STEPS)}")
     if s["home"] is None or not marked(s["home"]):
-        print("The tutor has no data folder yet: run the `on` step by hand once (/bsd), then the tour.")
+        print("The tutor has no data folder yet: run the `on` step by hand once (/backseat), then the tour.")
         return 2
     switch = read_json(s["home"] / "debug.json") or {}
     if switch.get("on") is not True:
@@ -1865,7 +1865,7 @@ def cmd_tour(args) -> int:
         state = fresh_state(s) or {}
         if step == "on":
             if state.get("mode") != "on":
-                tour_command(s, "/bsd")
+                tour_command(s, "/backseat")
             bad += 0 if wait_for(s, "the tutor says it is on", lambda st: st["mode"] == "on" and dig(st, "pane.mode") == "on", 25) else 1
             # The first switch-on asks questions. Esc skips them, as a person may.
             for _ in range(4):
@@ -1885,9 +1885,9 @@ def cmd_tour(args) -> int:
             tour_keys(s, "C-x", "Tab", "1", "Escape")
         elif step == "status":
             asked_at = now_ms()
-            tour_command(s, "/bsd status")
+            tour_command(s, "/backseat status")
             answered = lambda st: any(i.get("how") == "command" and "Voice" in i.get("text", "") and (i.get("at") or 0) >= asked_at for i in st.get("said", []))
-            bad += 0 if wait_for(s, "the tutor answered /bsd status", answered, 8) else 1
+            bad += 0 if wait_for(s, "the tutor answered /backseat status", answered, 8) else 1
             time.sleep(SAID_SETTLE_MS / 1000)
         elif step in ("save", "commit"):
             root = state.get("repoRoot") or ""
@@ -1917,14 +1917,14 @@ def cmd_tour(args) -> int:
                 reviewed = lambda st: head[:7] in str(dig(st, "pane.review.subject") or "") and dig(st, "pane.review.state") in ("done", "failed")
                 bad += 0 if wait_for(s, "its deep review came back", reviewed, 240) else 1
         elif step == "pause":
-            tour_command(s, "/bsd pause")
+            tour_command(s, "/backseat pause")
             bad += 0 if wait_for(s, "the tutor says it is paused", lambda st: st["mode"] == "paused", 10) else 1
             time.sleep(1)
             bad += tour_truth(s, args.home)
-            tour_command(s, "/bsd resume")
+            tour_command(s, "/backseat resume")
             bad += 0 if wait_for(s, "the tutor says it is on again", lambda st: st["mode"] == "on", 10) else 1
         elif step == "off":
-            tour_command(s, "/bsd off")
+            tour_command(s, "/backseat off")
             time.sleep(2)
             rows = screen_of(s["eyes"]) or []
             if any("Play-by-play" in row and "Deep review" in row for row in rows) or any("1: Play" in row for row in rows):

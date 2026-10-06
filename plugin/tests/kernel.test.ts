@@ -448,7 +448,7 @@ test('when to come back for a look, and whether it may start', async () => {
 test('the status line says what is happening, and when a wait ends', async () => {
   expect(playLine({ at: 'starting' })).toBe('On. Getting ready.')
   expect(playLine({ at: 'no-git' })).toBe('On. This folder is not a git repository, so there is no play-by-play.')
-  expect(playLine({ at: 'paused' })).toBe('Paused. /bsd resume to continue.')
+  expect(playLine({ at: 'paused' })).toBe('Paused. /backseat resume to continue.')
   expect(playLine({ at: 'watching' })).toBe('On. Watching for your next save.')
   expect(playLine({ at: 'on-request' })).toBe('On. Looking only when you ask.')
   expect(playLine({ at: 'looking' })).toBe('On. Looking at your changes.')
@@ -498,7 +498,7 @@ test('the row under the status line says what keeps going wrong, and not what th
     'You are close to your plan limit. Nothing runs in the background until 12:07 unless you ask.',
   )
   expect(healthLine({ ...quiet, lastScanMs: 3200 })).toBe('git is slow here: the last look at the working tree took 3.2 s.')
-  expect(healthLine({ ...quiet, failing: ['could not write the journal'] })).toBe('Keeps failing: could not write the journal. /bsd debug dump saves the details.')
+  expect(healthLine({ ...quiet, failing: ['could not write the journal'] })).toBe('Keeps failing: could not write the journal. /backseat debug dump saves the details.')
   // Paused, or with another session driving, there is nothing in the background to speak of.
   expect(healthLine({ ...quiet, health: waiting, play: { at: 'paused' } })).toBe('')
   expect(healthLine({ ...quiet, health: waiting, play: { at: 'following' } })).toBe('')

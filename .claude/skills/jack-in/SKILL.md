@@ -16,7 +16,7 @@ Three accounts of one session, side by side:
 - **SAYS**: what the tutor believes. Its state, written beside its debug log and
   never more than ten seconds old while the log is on: mode, lease, deadlines,
   the pieces of text it last drew and where, everything it told the person
-  outside its pane (toasts, lines in the transcript, `/bsd` answers, dialogs),
+  outside its pane (toasts, lines in the transcript, `/backseat` answers, dialogs),
   the code and settings it runs with, what it thinks changed in the working
   tree, HEAD, and the editor's caret. And what it tells the other sessions in
   the data folder (`sessions.json`, `lease.json`).
@@ -50,7 +50,7 @@ checks that passed too: a check that did not run proves nothing.
 | `screen [S]` | the session's screen right now, as the owner sees it |
 | `truth [S]` | every check, passed or not. Exit 1 when anything disagrees |
 | `watch [S]` | follows a session: new log records, screen rows that changed (the conversation and the pane apart), disagreements as they appear and go, and each thing the tutor told the person, until it shows on the screen or should have. Run it in the background or under Monitor while the owner works |
-| `tour [S] [--steps …]` | drives a session in tmux as a person would (switch on, every tab, `/bsd status`, a save with a bug, a commit, pause, off) and runs every check after each step. Real model calls. Writes only into a scratch repository unless `--write` |
+| `tour [S] [--steps …]` | drives a session in tmux as a person would (switch on, every tab, `/backseat status`, a save with a bug, a commit, pause, off) and runs every check after each step. Real model calls. Writes only into a scratch repository unless `--write` |
 | `log [S] [-k kinds] [-n N] [--grep text] [--full]` | the debug log. Kinds: `cmd hook state look watch model agent tool guard ui shown said heard start push git fs store error meta`. `said` is what the person was told; `heard` what Claude Code and other plugins told them |
 | `model [S] [last\|list\|N] [--job play-by-play\|explain\|progress] [--full]` | exactly what a model call was given and exactly what it answered. Start here for any "why did it say that" |
 | `state [S] [path]` | the tutor's own state, or a part: `state lease`, `state deadlines`, `state shown.pane.texts`, `state session` |
@@ -78,7 +78,7 @@ that is gone is still readable by id: `log 1788da52`.
 ## Driving
 
 `scripts/jack.py keys <S> <keys…>` types into a tmux session:
-`keys bsd /bsd Enter`, `keys bsd C-x Tab`, `keys bsd Left`. Into your own dev
+`keys bsd /backseat Enter`, `keys bsd C-x Tab`, `keys bsd Left`. Into your own dev
 session, freely. Into a session the owner is working in, only when they ask:
 it is their keyboard.
 
@@ -108,7 +108,7 @@ when they ask (it types, saves and commits).
 BSD_SESSION=jack BSD_RIDE_DIR=/tmp/bsd-jack-ride BSD_DATA_DIR=/tmp/bsd-jack-home BSD_FULLSCREEN=1 \
   scripts/dev-session.sh --model haiku --settings '{"enabledPlugins":{"backseat-driver@backseat-driver":false},"pluginConfigs":{"backseat-driver@inline":{"options":{"play_by_play_model":"haiku","play_by_play_thinking":"low","deep_review_model":"haiku","deep_review_thinking":"low","quiet_time":"5 seconds","minimum_gap":"none"}}}}'
 scripts/jack.py --home /tmp/bsd-jack-home in
-scripts/jack.py keys jack /bsd Enter
+scripts/jack.py keys jack /backseat Enter
 ```
 
 - The owner's own `claude` is a shell function that adds `--plugin-dir` for
@@ -133,7 +133,7 @@ scripts/jack.py keys jack /bsd Enter
 ## Ground rules
 
 - Reading is free and changes nothing. `in` and `out` write one small file, the
-  one `/bsd debug on` writes. Nothing here calls a model.
+  one `/backseat debug on` writes. Nothing here calls a model.
 - A `!!` is a finding to explain, not to silence. If a check is wrong, fix the
   check in `scripts/jack.py` and its test in `scripts/test_jack.py`, in the same commit.
 - When the mod gains something it believes about the screen or the world, it

@@ -67,7 +67,7 @@ sessionTest('a conversation sent to the background keeps its tutor: the new proc
   expect(sessionsIn(session).sessions.map(one => one.session)).toEqual([SESSION_ID])
 
   // Switched off here, the conversation has no tutor: another process forked from it within the minute starts off.
-  await $.command.run(typed('bsd', 'off'))
+  await $.command.run(typed('backseat', 'off'))
   await session.clock.settle()
   expect(sessionsIn(session).sessions).toEqual([])
 })
@@ -78,7 +78,7 @@ sessionTest('a paused tutor comes along paused', QUIET, async ($, on) => {
   await $.session.start(SESSION)
   await $.classic.SessionStart({ source: 'fork' })
   await session.clock.settle()
-  expect(await shows($, 'Paused. /bsd resume to continue.')).toBe(true)
+  expect(await shows($, 'Paused. /backseat resume to continue.')).toBe(true)
   expect(sessionsIn(session).sessions.find(one => one.session === SESSION_ID)?.mode).toBe('paused')
 })
 
@@ -119,7 +119,7 @@ sessionTest('the process a conversation left draws nowhere, and lays the tutor d
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { ...LICENSE_ANSWERED } })
   session.born = BORN
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(leaseIn(session).session).toBe(SESSION_ID)
   expect(sessionsIn(session).sessions).toEqual([{ session: SESSION_ID, born: BORN, cwd: ROOT, mode: 'on', at: session.clock.now(), leftAt: 0 }])
@@ -152,7 +152,7 @@ sessionTest('the process a conversation left draws nowhere, and lays the tutor d
 sessionTest('a turn cut short is looked into at once, without waiting for the next look at itself', QUIET, async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { ...LICENSE_ANSWERED } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.surfaces = []
@@ -166,7 +166,7 @@ sessionTest('a turn cut short is looked into at once, without waiting for the ne
 sessionTest('a session that still draws carries on, however long, and says every five minutes that the tutor is on', QUIET, async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { ...LICENSE_ANSWERED } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   const first = sessionsIn(session).sessions[0]?.at ?? -1
 
@@ -183,21 +183,21 @@ sessionTest('a session that still draws carries on, however long, and says every
 sessionTest('switching off takes back what the session said, a pause is said at once, and leaving is a goodbye', QUIET, async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { ...LICENSE_ANSWERED } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
-  await $.command.run(typed('bsd', 'pause'))
+  await $.command.run(typed('backseat', 'pause'))
   await session.clock.settle()
   expect(sessionsIn(session).sessions[0]?.mode).toBe('paused')
-  await $.command.run(typed('bsd', 'resume'))
+  await $.command.run(typed('backseat', 'resume'))
   await session.clock.settle()
   expect(sessionsIn(session).sessions[0]?.mode).toBe('on')
 
-  await $.command.run(typed('bsd', 'off'))
+  await $.command.run(typed('backseat', 'off'))
   await session.clock.settle()
   expect(sessionsIn(session).sessions).toEqual([])
 
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   await session.clock.advance(1000)
   await $.session.end({ reason: 'prompt_input_exit', sessionId: SESSION_ID, resume: { id: SESSION_ID } })
@@ -212,12 +212,12 @@ sessionTest('a pane that Claude Code opens without drawing it is said, once, wit
   await $.session.start(SESSION)
   await $.classic.SessionStart({ source: 'fork' })
   await session.clock.settle()
-  const waits = 'Backseat Driver is on. Its pane waits for a wider terminal: /bsd opens it now.'
+  const waits = 'Backseat Driver is on. Its pane waits for a wider terminal: /backseat opens it now.'
   expect(session.logs.filter(line => line === waits).length).toBe(1)
 
   // Asked for, it is drawn at any width, and nothing more is said.
   session.paneWaits = ''
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(session.logs.filter(line => line === waits).length).toBe(1)
 })
@@ -228,7 +228,7 @@ sessionTest('a session that took over a project shows what the pane held for the
     data: { [LEASE]: { v: 1, session: PARENT, at: 0 }, [NOTES]: KEPT, ...LICENSE_ANSWERED },
   })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   // While another session drives, its notes are its own.
   expect(await shows($, NOTE.text)).toBe(false)

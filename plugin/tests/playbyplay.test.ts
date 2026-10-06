@@ -12,7 +12,7 @@ sessionTest('a save becomes a note only after the tree has been quiet', async ($
   const session = stubSession(on)
   session.reply(EMPTY_LIST)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', MEAN)
@@ -44,7 +44,7 @@ sessionTest('a save becomes a note only after the tree has been quiet', async ($
 sessionTest('saving again while typing restarts the quiet time, and a burst of saves is one look', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', 'def mean(xs):\n')
@@ -62,7 +62,7 @@ sessionTest('saving again while typing restarts the quiet time, and a burst of s
 sessionTest('the minimum gap holds a second look back', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', MEAN)
@@ -85,7 +85,7 @@ sessionTest('work already uncommitted when the tutor is switched on is not revie
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   session.write('stats.py', `${MEAN}# half-finished\n`)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   await session.clock.advance(120_000)
@@ -97,7 +97,7 @@ sessionTest('a note the reviewer marks resolved leaves the pane', async ($, on) 
   session.reply(EMPTY_LIST)
   session.reply({ resolved: [1], notes: [] })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', MEAN)
@@ -117,7 +117,7 @@ sessionTest('a reply that is not the JSON asked for shows nothing and is not ret
   const session = stubSession(on)
   session.reply('I think the code looks fine!')
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', MEAN)
@@ -134,7 +134,7 @@ sessionTest('explain sends the note into the conversation, dismiss removes it', 
   const session = stubSession(on)
   session.reply(EMPTY_LIST)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', MEAN)
   await session.clock.advance(14_000)
@@ -154,7 +154,7 @@ sessionTest('the conversation is told which notes are open', async ($, on) => {
   const session = stubSession(on)
   session.reply(EMPTY_LIST)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   await $.prompt.submit({ text: 'hello', wait: false, origin: { kind: 'composer' } })
@@ -173,15 +173,15 @@ sessionTest('the conversation is told which notes are open', async ($, on) => {
 sessionTest('a paused tutor does not look, and catches up when resumed', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
-  await $.command.run(typed('bsd', 'pause'))
+  await $.command.run(typed('backseat', 'pause'))
 
   session.write('stats.py', MEAN)
   await session.clock.advance(120_000)
   expect(session.requests.length).toBe(0)
 
-  await $.command.run(typed('bsd', 'resume'))
+  await $.command.run(typed('backseat', 'resume'))
   await session.clock.advance(14_000)
   expect(session.requests.length).toBe(1)
 })
@@ -190,7 +190,7 @@ sessionTest('"on request" looks only when asked from the pane', { options: { pla
   const session = stubSession(on)
   session.reply(EMPTY_LIST)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', MEAN)
@@ -208,7 +208,7 @@ sessionTest('"on request" looks only when asked from the pane', { options: { pla
 sessionTest('the chosen model and thinking level are what the look uses', { options: { play_by_play_model: 'haiku', play_by_play_thinking: 'low', quiet_time: '5 seconds', engineering: 'knuth' } }, async ($, on) => {
   const session = stubSession(on, { pluginFiles: { '/personas/engineering/knuth.md': '# Engineering: knuth\n' } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', MEAN)
@@ -222,7 +222,7 @@ sessionTest('the chosen model and thinking level are what the look uses', { opti
 sessionTest('outside a git repository the pane says why there is no play-by-play', async ($, on) => {
   const session = stubSession(on, { isRepository: false })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', MEAN)
   await session.clock.advance(60_000)
@@ -237,18 +237,18 @@ sessionTest('switching the tutor off stops the watcher and clears the notes', as
   const session = stubSession(on)
   session.reply(EMPTY_LIST)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', MEAN)
   await session.clock.advance(14_000)
   expect(session.requests.length).toBe(1)
 
-  await $.command.run(typed('bsd', 'off'))
+  await $.command.run(typed('backseat', 'off'))
   session.write('stats.py', `${MEAN}# more\n`)
   await session.clock.advance(300_000)
   expect(session.requests.length).toBe(1)
 
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: 'No notes. Keep going.' })).toBeDefined()
@@ -259,7 +259,7 @@ sessionTest('close to the plan limit, looks are spaced further apart', async ($,
   const session = stubSession(on)
   session.limits.push({ kind: 'five_hour', percentUsed: 85 })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', MEAN)
@@ -279,7 +279,7 @@ sessionTest('at the plan limit, the play-by-play waits to be asked', async ($, o
   session.limits.push({ kind: 'five_hour', percentUsed: 40 }, { kind: 'seven_day', percentUsed: 97 })
   session.reply(EMPTY_LIST)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', MEAN)
@@ -298,7 +298,7 @@ sessionTest('at the plan limit, the play-by-play waits to be asked', async ($, o
 sessionTest('"look now" with nothing new says so', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -311,7 +311,7 @@ sessionTest('"look now" with nothing new says so', async ($, on) => {
 sessionTest('the reviewer is told which language each file is in', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', MEAN)
   session.write('notes.txt', 'plain text\n')
@@ -333,7 +333,7 @@ sessionTest('a dismissed note does not come back on the next save', async ($, on
     ],
   })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', MEAN)
   await session.clock.advance(14_000)

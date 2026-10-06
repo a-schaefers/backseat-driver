@@ -5,7 +5,7 @@ import { backupPath, brokenPath } from './store'
 /** What can be forgotten: one project's cache, one language's record of the person, or all of it. */
 export type Scope = { kind: 'project' } | { kind: 'language'; language: string } | { kind: 'everything' }
 
-/** What `/bsd forget <rest>` names, or null when it names nothing and the person has to be asked. */
+/** What `/backseat forget <rest>` names, or null when it names nothing and the person has to be asked. */
 export function parseScope(rest: string): Scope | null {
   const word = rest.trim().toLowerCase()
   if (word === '') return null

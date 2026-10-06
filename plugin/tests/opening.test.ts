@@ -28,7 +28,7 @@ test('editorArgv fills the placeholders inside their words, and gives a bare com
 sessionTest('with an editor command set, a place a review names opens in the editor instead of the Explain tab', { options: { editor_command: 'emacsclient -n +{line} {file}' } }, async ($, on) => {
   const session = stubSession(on, { allowProcesses: ['emacsclient'] })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', MEAN)
   session.commit('Add mean')

@@ -20,7 +20,7 @@ sessionTest('while the tutor is off, the plugin changes nothing', async ($, on) 
 sessionTest('while the tutor is on, the system prompt carries the contract', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   const { sections } = await $.prompt.compose(COMPOSE)
@@ -41,21 +41,21 @@ const PERSONA_FILES = {
 sessionTest('the persona follows the contract: its engineering half, then its voice', { options: { voice: 'eli5-tldr-kiss-terse', engineering: 'knuth' } }, async ($, on) => {
   const session = stubSession(on, { pluginFiles: PERSONA_FILES })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   const { sections } = await $.prompt.compose(COMPOSE)
   expect(sections[sections.length - 1]?.text).toBe(
     `# Contract\n\nThe user writes the code.\n\n${SESSION_NOTES}\n\n# Engineering: knuth\n\nThe edges, every time.\n\n# Voice: eli5-tldr-kiss-terse\n\nShort and plain.`,
   )
-  const status = await $.command.run(typed('bsd', 'status'))
+  const status = await $.command.run(typed('backseat', 'status'))
   expect(status.text).toBe('Backseat Driver is on. Voice: eli5-tldr-kiss-terse. Engineering: knuth.')
 })
 
 sessionTest("a voice alone leaves the engineering judgment Claude's own", { options: { voice: 'knuth' } }, async ($, on) => {
   const session = stubSession(on, { pluginFiles: PERSONA_FILES })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   const { sections } = await $.prompt.compose(COMPOSE)
@@ -67,7 +67,7 @@ sessionTest("a voice alone leaves the engineering judgment Claude's own", { opti
 sessionTest('a persona half whose file is missing is left out, and the debug log says so', { options: { voice: 'torvalds', engineering: 'knuth' } }, async ($, on) => {
   const session = stubSession(on, { pluginFiles: PERSONA_FILES })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   const { sections } = await $.prompt.compose(COMPOSE)
@@ -80,7 +80,7 @@ sessionTest('a persona half whose file is missing is left out, and the debug log
 sessionTest('while the tutor is on, instruction files yield to the contract', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   const { blocks } = await $.prompt.context({ blocks: [] })
@@ -92,7 +92,7 @@ sessionTest('while the tutor is on, instruction files yield to the contract', as
 sessionTest("while the tutor is on, Claude cannot edit the user's files", async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   expect(await $.tool.call(EDIT)).toEqual({ deny: DENIAL })
@@ -109,12 +109,12 @@ sessionTest("while the tutor is on, Claude cannot edit the user's files", async 
 sessionTest('a paused tutor still does not edit, and switching off restores everything', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
-  await $.command.run(typed('bsd', 'pause'))
+  await $.command.run(typed('backseat', 'pause'))
   expect(await $.tool.call(EDIT)).toEqual({ deny: DENIAL })
 
-  await $.command.run(typed('bsd', 'off'))
+  await $.command.run(typed('backseat', 'off'))
   expect(await $.tool.call(EDIT)).toEqual({ result: 'edited' })
   expect(await $.prompt.compose(COMPOSE)).toEqual({ sections: [...ENGINE_SECTIONS] })
   const context = await $.prompt.context({ blocks: [] })

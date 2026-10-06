@@ -20,7 +20,7 @@ const RECORD = { tool: 'mcp__backseat-driver__record', about: 'goals', language:
 /** Starts a session and switches the tutor on. */
 async function on$(session: ReturnType<typeof stubSession>, $: Parameters<TestBody>[0]): Promise<void> {
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 }
 
@@ -61,7 +61,7 @@ sessionTest('a profile that stays broken is kept aside and its backup is used', 
   session.disk.set(PYTHON, '{"answers": {"level": "Years of')
   session.disk.set(`${PYTHON}.bak`, JSON.stringify(HUSHED))
   await $.session.start(SESSION)
-  const start = $.command.run(typed('bsd'))
+  const start = $.command.run(typed('backseat'))
   // Each look at the broken file waits a moment and looks again before giving up on it.
   for (let waits = 0; waits < 30; waits += 1) await session.clock.advance(READ_RETRY_MS)
   await start
@@ -115,13 +115,13 @@ sessionTest('forgetting a language takes the copies beside its files, and forget
   expect(session.disk.has(`${PYTHON}.bak`)).toBe(true)
 
   session.answers.push(FORGET)
-  await $.command.run(typed('bsd', 'forget python'))
+  await $.command.run(typed('backseat', 'forget python'))
   await session.clock.settle()
   expect(session.removed).toEqual([PYTHON, `${PYTHON}.bak`])
   expect(session.disk.has(`${PYTHON}.bak`)).toBe(false)
 
   session.answers.push(SCOPE_EVERYTHING, FORGET, PHRASE)
-  await $.command.run(typed('bsd', 'forget'))
+  await $.command.run(typed('backseat', 'forget'))
   await session.clock.settle()
   expect(session.removed.includes(`${DATA_HOME}/locks.git`)).toBe(true)
   expect([...session.disk.keys()].filter(path => path.startsWith(`${DATA_HOME}/locks.git`))).toEqual([])

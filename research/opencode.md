@@ -53,7 +53,7 @@ plugin/                         the Claude Code plugin; still the only folder Cl
 clients/opencode/               the OpenCode client (dev side of the repo; not in plugin/)
   package.json                  name backseat-driver-opencode, exports ./server and ./tui
   src/server.ts                 server plugin: Host built from the SDK client and Bun
-  src/tui.tsx                   TUI plugin: sidebar, Backseat route, dialogs, /bsd
+  src/tui.tsx                   TUI plugin: sidebar, Backseat route, dialogs, /backseat
   build.ts                      bundles src + ../../plugin/core and copies prompts, personas, SKILL.md
 editors/                        the editor plugins (on claude/editor-plugins), unchanged
 ```
@@ -86,9 +86,9 @@ What is not a port, because it is how a client is wired into its host and nothin
 | Notes attached to a typed prompt | `prompt.submit` | `chat.message` adds a text part |
 | Never edit the user's files | `tool.call` on `Edit`, `Write`, `NotebookEdit` | `tool.execute.before` throws on `edit`, `write`, `patch`; `permission.ask` answers `deny` for them |
 | The eight tools | `$.tool.register` + `tool.call` | `tool({ description, args, execute })` |
-| `/bsd` and its words | `$.command.register` | a slash command in the TUI keymap |
+| `/backseat` and its words | `$.command.register` | a slash command in the TUI keymap |
 | Settings | `userConfig` in `plugin.json`, `/config` | plugin options in `opencode.json`, defaults from `plugin.json` |
-| Update and uninstall | `claude plugin`, `update.ts` | OpenCode installs npm plugins by itself; `/bsd update` says so |
+| Update and uninstall | `claude plugin`, `update.ts` | OpenCode installs npm plugins by itself; `/backseat update` says so |
 
 What stays exactly one copy: the contract (`SKILL.md`), the prompts, the personas and their art, the kernel, every reply parser, the scan cadence, the play-by-play's pacing, the review queue, Explain's freshness rule, the journal, progress levels, profiles, hushes, the store and its locks, the lease, the debug log, and the status lines. The tool bodies are shared too: `tools.ts` turns an input into an answer, and each adapter only declares the tool.
 
@@ -100,7 +100,7 @@ The core already builds a plain `PaneView`. `pane.tsx` turns it into Claude Code
 - `hooks/pane.tsx` turns the rows into `Text`, `Button`, `Box`. It gets thin.
 - `clients/opencode/src/tui.tsx` turns the same rows into opentui `<text>` and boxes, in two places:
   - the `sidebar_content` slot: the status line, the play-by-play notes and the persona, the part that should always be in sight
-  - a `backseat` route opened from `/bsd` or a key: the four tabs at full size
+  - a `backseat` route opened from `/backseat` or a key: the four tabs at full size
 
 The server plugin writes `pane.json` beside `view.json` in the data folder whenever the view changes, and the TUI plugin watches it. Same-machine files are already how the tutor talks to editors, and the store's locks and the lease already make the folder safe for several writers. If O0 finds a direct channel from a server plugin to its TUI half, use that instead and keep `pane.json` for editors.
 
@@ -133,7 +133,7 @@ Each one ends green on `npm run check` and, for Claude Code, a live check in `sc
 
 **O3. OpenCode server plugin.** `clients/opencode/src/server.ts`: the `Host` from the SDK client and Bun, the contract, the edit guard, the eight tools, the `config` hook (the reviewer agent), the scan, and `pane.json`. Tests with `bun test` against a fake SDK client. A live check in OpenCode with `ollama/qwen3-coder`.
 
-**O4. OpenCode TUI plugin.** The sidebar, the Backseat route with the four tabs and their keys, the first-run questions as `DialogSelect`, `/bsd` and its words, the OpenCode default character, toasts.
+**O4. OpenCode TUI plugin.** The sidebar, the Backseat route with the four tabs and their keys, the first-run questions as `DialogSelect`, `/backseat` and its words, the OpenCode default character, toasts.
 
 **O5. Ship.** `build.ts` bundles to one file per entry, with prompts, personas and `SKILL.md` copied in. Publish `backseat-driver-opencode` to npm. Add a CI job that runs the OpenCode tests against a pinned OpenCode version (the `experimental.` hooks can move), plus a nightly on the newest, the way `check.yml` and `nightly.yml` do for Claude Code. Add one line and the install steps to the README, and CLAUDE.md sections for the core, the `Host` and the OpenCode client.
 

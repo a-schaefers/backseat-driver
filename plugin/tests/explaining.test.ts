@@ -145,7 +145,7 @@ sessionTest('saving a file maps it once it has settled, and the Explain tab foll
   const session = stubSession(on, { head: { 'stats.py': 'x = 1\n' } })
   answers(session)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', STATS)
@@ -192,18 +192,18 @@ sessionTest('saving a file maps it once it has settled, and the Explain tab foll
   expect(entries[0]).toMatch(/-stats\.py\.json$/)
 })
 
-sessionTest('/bsd explain turns the pane to a spot and looks it up', async ($, on) => {
+sessionTest('/backseat explain turns the pane to a spot and looks it up', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': STATS } })
   answers(session)
   await $.session.start(SESSION)
-  expect((await $.command.run(typed('bsd', 'explain stats.py:6'))).text).toBe('Backseat Driver is off. Run /bsd to start it.')
-  await $.command.run(typed('bsd'))
+  expect((await $.command.run(typed('backseat', 'explain stats.py:6'))).text).toBe('Backseat Driver is off. Run /backseat to start it.')
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
-  expect((await $.command.run(typed('bsd', 'explain nowhere/../../x.py'))).text).toBe('That is not a file in this project: nowhere/../../x.py')
-  expect((await $.command.run(typed('bsd', 'explain'))).text).toBe('Name a file and a line: /bsd explain src/app.py:42')
+  expect((await $.command.run(typed('backseat', 'explain nowhere/../../x.py'))).text).toBe('That is not a file in this project: nowhere/../../x.py')
+  expect((await $.command.run(typed('backseat', 'explain'))).text).toBe('Name a file and a line: /backseat explain src/app.py:42')
 
-  const answer = await $.command.run(typed('bsd', 'explain stats.py:6'))
+  const answer = await $.command.run(typed('backseat', 'explain stats.py:6'))
   expect(answer.text).toBe('Explaining stats.py, line 6 in the pane.')
   await session.clock.settle()
 
@@ -218,7 +218,7 @@ sessionTest('an editor moves the focus by writing a file, and the tutor answers 
   const session = stubSession(on, { head: { 'stats.py': STATS } })
   answers(session)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.editor(`${ROOT}/stats.py`, 6)
@@ -253,7 +253,7 @@ sessionTest('the lookup tool answers from the same cache, and turns the tab to t
   const session = stubSession(on, { head: { 'stats.py': STATS } })
   answers(session)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   expect(session.tools.map(tool => tool.name)).toContain('lookup')
 
@@ -279,13 +279,13 @@ sessionTest('the lookup tool answers from the same cache, and turns the tab to t
 sessionTest('with Explain off, nothing is looked up and the tab says so', { options: { explain: 'off' } }, async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': STATS } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', `${STATS}# more\n`)
   await session.clock.advance(SETTLE_MS + 4000)
 
   expect(session.lookups).toEqual([])
-  expect((await $.command.run(typed('bsd', 'explain stats.py:6'))).text).toBe('Explain is switched off. Its setting is in /config.')
+  expect((await $.command.run(typed('backseat', 'explain stats.py:6'))).text).toBe('Explain is switched off. Its setting is in /config.')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-explain' })
   expect(await ui.find({ type: 'Text', text: 'Nothing in focus yet.' })).toBeDefined()
@@ -296,7 +296,7 @@ sessionTest('on request, a save is shown but not looked up until f is pressed', 
   const session = stubSession(on, { head: { 'stats.py': 'x = 1\n' } })
   answers(session)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   session.write('stats.py', STATS)
   await session.clock.advance(SETTLE_MS + 4000)
@@ -317,7 +317,7 @@ sessionTest('near the plan limit, a saved file is not mapped until someone asks 
   session.limits.push({ kind: 'five_hour', percentUsed: 85 })
   answers(session)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', STATS)
@@ -330,7 +330,7 @@ sessionTest('near the plan limit, a saved file is not mapped until someone asks 
   await ui.unmount()
 
   // Asking is: the file is mapped and the spot explained. Nothing else is explained ahead.
-  await $.command.run(typed('bsd', 'explain stats.py:6'))
+  await $.command.run(typed('backseat', 'explain stats.py:6'))
   await session.clock.settle()
   expect(asked(session)).toEqual(['Map this file.', 'Explain variance'])
 })
@@ -339,21 +339,21 @@ sessionTest('forgetting this project empties what Explain knows about it', async
   const session = stubSession(on, { head: { 'stats.py': STATS } })
   answers(session)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
-  await $.command.run(typed('bsd', 'explain stats.py:6'))
+  await $.command.run(typed('backseat', 'explain stats.py:6'))
   await session.clock.settle()
   const files = `${DATA_HOME}/projects/${projectId(ROOT)}/files/`
   expect([...session.disk.keys()].some(path => path.startsWith(files))).toBe(true)
 
   session.answers.push(SCOPE_PROJECT, FORGET)
-  await $.command.run(typed('bsd', 'forget'))
+  await $.command.run(typed('backseat', 'forget'))
   await session.clock.settle()
   expect([...session.disk.keys()].some(path => path.startsWith(files))).toBe(false)
 
   // Asked again, it starts from nothing: the file is mapped anew.
   const before = session.lookups.length
-  await $.command.run(typed('bsd', 'explain stats.py:6'))
+  await $.command.run(typed('backseat', 'explain stats.py:6'))
   await session.clock.settle()
   expect(session.lookups[before]?.prompt).toMatch('Map this file.')
 })
@@ -362,9 +362,9 @@ sessionTest('with the Explain tab open, an edit takes the old explanation off th
   const session = stubSession(on, { head: { 'stats.py': STATS } })
   answers(session)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
-  await $.command.run(typed('bsd', 'explain stats.py:6'))
+  await $.command.run(typed('backseat', 'explain stats.py:6'))
   await session.clock.settle()
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -393,9 +393,9 @@ sessionTest('after a reload the Explain tab is still on the spot it was showing'
   const session = stubSession(on, { head: { 'stats.py': STATS } })
   answers(session)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
-  await $.command.run(typed('bsd', 'explain stats.py:6'))
+  await $.command.run(typed('backseat', 'explain stats.py:6'))
   await session.clock.settle()
   const before = session.lookups.length
 
@@ -415,7 +415,7 @@ sessionTest('a saved file is mapped the moment it has stayed unchanged long enou
   const session = stubSession(on, { head: { 'stats.py': STATS } })
   answers(session)
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
   const mapped = (): number => asked(session).filter(what => what === 'Map this file.').length
   const before = mapped()
@@ -434,7 +434,7 @@ sessionTest('the lookup tool gives up waiting after six seconds and says more is
   // No answer is ready for the model: its lookups stay open.
   session.stall('explain')
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   let answer = ''

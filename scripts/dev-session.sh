@@ -4,7 +4,7 @@
 #
 #   scripts/dev-session.sh [claude arguments]   start or restart the session
 #   tmux attach -t bsd                          watch it, or drive it yourself
-#   tmux send-keys -t bsd '/bsd' Enter          type into it from a script
+#   tmux send-keys -t bsd '/backseat' Enter     type into it from a script
 #   tmux capture-pane -p -t bsd                 read the screen back
 #   tmux kill-session -t bsd                    stop it
 #

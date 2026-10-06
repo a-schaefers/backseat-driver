@@ -79,7 +79,7 @@ export async function loadRecord(ports: Pick<ProgressPorts, 'store' | 'dataRoot'
 /**
  * Whose commits count: the repository's `user.email`, and the global one when
  * it differs. Read again before every use, not once at switch-on: the person
- * may set it after the tutor is on (seen 2026-10-05: set between `/bsd` and
+ * may set it after the tutor is on (seen 2026-10-05: set between `/backseat` and
  * the first commit, which then counted for nothing). Resolves whether it changed.
  */
 export async function readIdentity(ports: Pick<ProgressPorts, 'git'>, state: ProgressState): Promise<boolean> {

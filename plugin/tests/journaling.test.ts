@@ -19,7 +19,7 @@ sessionTest('saves go into the journal, and the play-by-play reads it with the c
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   session.reply({ resolved: [], notes: [], working_on: 'adding a total' })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', WITH_TOTAL)
@@ -45,13 +45,13 @@ sessionTest('saves go into the journal, and the play-by-play reads it with the c
   expect(parseJournal(session.data(JOURNAL)).inferred?.text).toBe('adding a total')
 })
 
-sessionTest('/bsd working says it in their words, and "clear" leaves it to the tutor again', async ($, on) => {
+sessionTest('/backseat working says it in their words, and "clear" leaves it to the tutor again', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
-  const said = await $.command.run(typed('bsd', 'working on the median'))
+  const said = await $.command.run(typed('backseat', 'working on the median'))
   expect(said.text).toBe('Noted. Working on: the median')
   await session.clock.settle()
   // Saved at once: it is the one thing they typed.
@@ -66,7 +66,7 @@ sessionTest('/bsd working says it in their words, and "clear" leaves it to the t
   await session.clock.advance(14_000)
   expect(session.requests[0]?.prompt).toMatch('Working on, in their own words (said just now): the median')
 
-  const cleared = await $.command.run(typed('bsd', 'working clear'))
+  const cleared = await $.command.run(typed('backseat', 'working clear'))
   expect(cleared.text).toBe('Cleared. The tutor goes by your activity again.')
   await session.clock.settle()
   expect(await ui.find({ type: 'Text', text: 'stats.py, in total' })).toBeDefined()
@@ -77,7 +77,7 @@ sessionTest('/bsd working says it in their words, and "clear" leaves it to the t
 sessionTest('w asks the one question: Esc changes nothing, free text is theirs, and they can take it back', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -104,7 +104,7 @@ sessionTest('w asks the one question: Esc changes nothing, free text is theirs, 
 sessionTest('the tutor can record what they say they are working on, and read the whole journal', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   // Nothing has happened yet, and the tool says so.
@@ -142,7 +142,7 @@ const EDITOR_REPORT = {
 sessionTest("one read of the editor's focus file moves Explain and tells the conversation where the caret is", async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN, 'test_stats.py': 'import stats\n' } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.editor(`${ROOT}/stats.py`, 2, undefined, EDITOR_REPORT)
@@ -164,7 +164,7 @@ sessionTest("one read of the editor's focus file moves Explain and tells the con
 sessionTest("an editor's time goes into the journal: where the caret stayed, and what was on screen beside it", { options: { explain: 'off' } }, async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN, 'test_stats.py': 'import stats\n' } })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.editor(`${ROOT}/stats.py`, 2, undefined, EDITOR_REPORT)
@@ -193,7 +193,7 @@ sessionTest('notes, dismissals and commits are in the journal, and switching off
     notes: [{ file: 'stats.py', line: 2, kind: 'bug', topic: 'empty-input', note: 'What does this do for an empty list?' }],
   })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   session.write('stats.py', WITH_TOTAL)
@@ -204,7 +204,7 @@ sessionTest('notes, dismissals and commits are in the journal, and switching off
   session.commit('Add a total')
   await session.clock.advance(2000)
 
-  await $.command.run(typed('bsd', 'off'))
+  await $.command.run(typed('backseat', 'off'))
   await session.clock.settle()
   const kinds = parseJournal(session.data(JOURNAL)).entries.map(entry => entry.kind)
   expect(kinds).toEqual(['on', 'save', 'note', 'dismissed', 'commit'])
@@ -225,14 +225,14 @@ sessionTest('forgetting this project takes the journal with it, and nothing held
   const session = stubSession(on, { head: { 'stats.py': MEAN } })
   session.disk.set(`${DATA_HOME}/${MARKER}`, 'marker')
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
-  await $.command.run(typed('bsd', 'working on the parser'))
+  await $.command.run(typed('backseat', 'working on the parser'))
   await session.clock.settle()
   expect(session.data(JOURNAL)).toBeDefined()
 
   session.answers.push(FORGET)
-  await $.command.run(typed('bsd', 'forget project'))
+  await $.command.run(typed('backseat', 'forget project'))
   await session.clock.settle()
   expect(session.data(JOURNAL)).toBeUndefined()
   expect(session.logs.some(line => line.startsWith('Forgot the journal and cache of this project'))).toBe(true)
@@ -247,12 +247,12 @@ sessionTest('forgetting this project takes the journal with it, and nothing held
 sessionTest('outside a git repository there is no journal, and the pane does not offer one', async ($, on) => {
   const session = stubSession(on, { isRepository: false })
   await $.session.start(SESSION)
-  await $.command.run(typed('bsd'))
+  await $.command.run(typed('backseat'))
   await session.clock.settle()
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.findAll({ key: 'working' })).length).toBe(0)
   await ui.unmount()
-  const answered = await $.command.run(typed('bsd', 'working on the parser'))
+  const answered = await $.command.run(typed('backseat', 'working on the parser'))
   expect(answered.text).toMatch('There is no journal to put that in')
 })

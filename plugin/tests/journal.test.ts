@@ -443,7 +443,7 @@ test('the one question: what Enter gives never loses anything, and free text is 
   expect(chosen('  the   lexer ', NOTHING)).toBe('the lexer')
 })
 
-test('/bsd working: what follows is what they are working on, and "clear" takes it back', async () => {
+test('/backseat working: what follows is what they are working on, and "clear" takes it back', async () => {
   expect(parseWorking('on the parser')).toBe('the parser')
   expect(parseWorking('the parser')).toBe('the parser')
   expect(parseWorking('online checkout')).toBe('online checkout')
