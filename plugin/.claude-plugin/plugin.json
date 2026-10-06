@@ -80,6 +80,12 @@
       "description": "Review each commit in depth as soon as you make it.",
       "default": true
     },
+    "burn_tokens": {
+      "type": "boolean",
+      "title": "Burn token mode",
+      "description": "WARNING: burns your plan's tokens on purpose. Everything works as before, and every play-by-play, Explain and progress request is also sent to the most capable model available (fable, else opus) at maximum thinking, with the answer thrown away. For token-usage requirements at work. User discretion advised; no warranty.",
+      "default": false
+    },
     "deep_review_every": {
       "type": "string",
       "title": "Deep review every",

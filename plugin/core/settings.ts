@@ -47,6 +47,8 @@ export type Settings = {
   isProgressOn: boolean
   /** Whether the tutor asks the upstream repository for a newer release, at most every six hours. */
   isUpdateCheckOn: boolean
+  /** Burn token mode: every model request is also sent to the most capable model at maximum thinking, and the answer dropped. */
+  isBurning: boolean
   playByPlay: {
     isAutomatic: boolean
     quietMs: number
@@ -107,6 +109,7 @@ export function readSettings(options: Options): Settings {
     isAnimated: options.animated_persona !== false,
     isProgressOn: options.progress_report !== false,
     isUpdateCheckOn: options.update_check !== false,
+    isBurning: options.burn_tokens === true,
     playByPlay: {
       isAutomatic: options.play_by_play !== 'on request',
       // Quick by default (owner, 2026-10-05: "make this app as quick as possible"): a look five seconds after the
@@ -201,6 +204,7 @@ export const SETTING_EFFECTS = {
   explain_thinking: 'next lookup',
   progress_report: 'now',
   update_check: 'now',
+  burn_tokens: 'now',
 } as const satisfies Record<string, SettingEffect>
 
 export type SettingEffect = 'now' | 'next look' | 'next review' | 'next lookup'

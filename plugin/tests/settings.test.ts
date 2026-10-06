@@ -39,6 +39,7 @@ test('readSettings applies the documented defaults to empty options', async () =
     isAnimated: true,
     isProgressOn: true,
     isUpdateCheckOn: true,
+    isBurning: false,
     playByPlay: {
       isAutomatic: true,
       quietMs: 5_000,

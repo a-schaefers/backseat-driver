@@ -826,8 +826,51 @@ async function callModel(
   // Cut short by the tutor itself, as a lookup is when its file is saved again: that says nothing about Claude.
   if (signal?.aborted !== true) await noteOutcome($, settings, job, outcomeOf(result))
   else await probeEnded($, settings)
+  // Burn token mode: the same request once more, to the most capable model at maximum thinking, after the real one
+  // has answered, and nothing is done with what comes back.
+  if (settings.isBurning && burnModel !== '') void burn($, job, request)
 
   return result
+}
+
+/** The models burn token mode tries at switch-on, most capable first. The first one the plan has is used. */
+const BURN_MODELS = ['fable', 'opus'] as const
+const BURN_EFFORT = 'max'
+/** The most capable model available, found at switch-on while burn token mode is on; '' while it is off or not yet found. */
+let burnModel = ''
+
+/**
+ * Finds the most capable model the plan has, with one small request per
+ * model tried: a model the plan does not have answers `model_not_found`,
+ * and anything else (an answer, a limit, an outage) says it exists.
+ */
+async function findBurnModel($: EngineInterface): Promise<void> {
+  for (const model of BURN_MODELS) {
+    const started = Date.now()
+    try {
+      const result = await $.model.complete({ model, effort: 'low', prompt: 'Reply with one word: ok.', maxTokens: 5 })
+      trace($, 'model', 'burn-probe', () => ({ model, result }), Date.now() - started)
+      if (result.isAnswered || result.reason !== 'api-error' || result.error !== 'model_not_found') {
+        burnModel = model
+
+        return
+      }
+    } catch (error) {
+      trace($, 'model', 'burn-probe', () => ({ model, error: String(error) }), Date.now() - started)
+    }
+  }
+  burnModel = ''
+}
+
+/** One burn: the request as it was, to the burn model at maximum thinking. The answer goes nowhere, and so does any failure. */
+async function burn($: EngineInterface, job: string, request: ModelCompleteRequest): Promise<void> {
+  const started = Date.now()
+  try {
+    const result = await $.model.complete({ ...request, model: burnModel, effort: BURN_EFFORT })
+    trace($, 'model', 'burn', () => ({ of: job, model: burnModel, effort: BURN_EFFORT, isAnswered: result.isAnswered, usage: result.usage }), Date.now() - started)
+  } catch (error) {
+    trace($, 'model', 'burn', () => ({ of: job, model: burnModel, error: String(error) }), Date.now() - started)
+  }
 }
 
 /** The one scheduler, made the first time something has to be done later. */
@@ -3477,6 +3520,9 @@ async function engage(
     const started = Date.now()
     await startDebug($, settings)
     trace($, 'start', 'engaging', () => ({ run, isFresh, takesUp }))
+    // Burn token mode: find the most capable model first, so that the burns of this switch-on have one to go to.
+    burnModel = ''
+    if (settings.isBurning) await findBurnModel($)
     await startAnimating($, settings, isFresh)
     if (run !== engagement) return
     await startWatching($, settings, run)

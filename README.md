@@ -95,6 +95,8 @@ Type `/bsd` in Claude Code. The first time you work in a language, it asks a few
 
 Models, thinking levels, pacing and personas live in tab `6`, Settings, or `/bsd settings`. They're in `/config` too.
 
+Burn token mode, off by default, is for people with token-usage requirements at work. Switch it on and everything works as before, except that every request also goes to Fable or Opus at maximum thinking and the answer is thrown away. You meet the quota. You still write your own code. User discretion advised. No warranty.
+
 ### Editors
 
 Plugins for Emacs, Neovim and VS Code live in [`editors/`](editors). They tell the tutor where your cursor is, what you've selected and what's open, so Explain follows your cursor and the tutor knows where you've been. A light in the tutor goes green when your editor connects and red when it's gone. Nothing to configure.
