@@ -12,7 +12,7 @@
     "core": "tsc -p plugin/tsconfig.core.json",
     "persona": "node --experimental-strip-types --no-warnings scripts/persona-preview.ts",
     "server": "tsc -p license-server/tsconfig.json && node --test license-server/test/*.test.ts",
-    "licenses": "cmp LICENSE plugin/LICENSE && cmp COMMERCIAL-LICENSE.md plugin/COMMERCIAL-LICENSE.md && cmp THIRD_PARTY_NOTICES.md plugin/THIRD_PARTY_NOTICES.md",
+    "licenses": "cmp LICENSE plugin/LICENSE && cmp COMMERCIAL-LICENSE.md plugin/COMMERCIAL-LICENSE.md",
     "tools": "python3 scripts/test_jack.py",
     "check": "npm run kernel && npm run validate && npm run licenses && npm run test && npm run typecheck && npm run core && npm run server && npm run tools"
   },

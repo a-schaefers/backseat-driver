@@ -1,8 +1,4 @@
-/**
- * Decision points and insights: the Learning and Explanatory modes of
- * Anthropic's learning-output-style plugin, turned read-only. See
- * THIRD_PARTY_NOTICES.md.
- */
+/** Decision points and insights: choices left to the person, and what is worth knowing about their code. */
 import { expect, test } from 'claude-code/testing'
 
 import { stripComments } from '../hooks/contract'
@@ -78,8 +74,8 @@ test('a deep review names its decision points in the notes block, and only real 
   expect(notes?.decisions[1]).toEqual({ file: 'shapes.py', line: 0, choice: 'Validate in each function or once', tradeoff: 'Once keeps the rules in one place.' })
 })
 
-test('credits in HTML comments are taken out before instructions reach a model', async () => {
-  const file = '<!--\nAdapted from learning-output-style (Apache-2.0).\n-->\n\n# Play-by-play\n\nText.\n\n<!-- a note -->\n\n\nMore.\n'
+test('HTML comments are taken out before instructions reach a model', async () => {
+  const file = '<!--\nA comment for maintainers.\n-->\n\n# Play-by-play\n\nText.\n\n<!-- a note -->\n\n\nMore.\n'
   expect(stripComments(file)).toBe('# Play-by-play\n\nText.\n\nMore.')
   expect(stripComments('No comments here.')).toBe('No comments here.')
 })

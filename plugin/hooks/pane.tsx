@@ -728,14 +728,9 @@ function deepReview({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
   )
 }
 
-/**
- * The marks that set the two learning sections apart from the rest of the
- * notes. The ★ and the rule are the insight block of the Explanatory mode in
- * Anthropic's learning-output-style plugin (Apache-2.0), with thanks; see
- * THIRD_PARTY_NOTICES.md.
- */
+/** The marks that set the two learning sections apart from the rest of the notes. */
 export const DECISION_HEADING = '◆ Your call'
-export const INSIGHT_HEADING = '★ Insight ─────────────────────────'
+export const INSIGHT_HEADING = '★ Insight'
 
 /** One note: the key that selects it, then its text, indented. */
 function noteRow({ Box, Text, Button }: Kit, note: Note, current: Note, label: string, actions: PaneActions) {

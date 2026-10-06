@@ -14,27 +14,21 @@
 
 **A coding tutor that lives inside [Claude Code](https://claude.com/claude-code) and never writes your code.**
 
-You write every line. It reads over your shoulder, comments on what you just saved, reviews every commit, explains the code you point at, and tells you honestly how good you're getting. Claude stays in the passenger seat.
+You write every line. It reads over your shoulder, comments on what you just saved, reviews every commit, explains the code you point at, and tells you how good you're getting. Claude stays in the passenger seat.
 
 Inspired by the ideas discussed in the [Enchant Games Journal](https://enchant.games/?slug=journal).
 
 ## Why
 
-> We built machines to obey us.
->
-> Now we ask them to think for us.
+Hand your work to an agent and the skill fades. You think you're driving. The LLM is.
 
-Backseat Driver reverses course.
+> If it takes me longer but I grok it, I win.
 
-Hand your work to an agent and the skill fades. People who did report losing it within months. You think you're in the driver's seat. The machine is doing the thinking.
-
-It's not about speed. If it takes me longer but I grok it, I win. **It's about owning your understanding.**
-
-So the machine goes where it belongs: the back seat. You drive. It watches the road and speaks up when it matters.
+So the LLM goes in the back seat. You drive, it watches the road.
 
 ## What it is
 
-Type `/bsd`. A pane opens beside your conversation, with six tabs.
+Type `/backseat`. A pane opens beside your conversation, with six tabs.
 
 **1. Play-by-play.** Live commentary on your code as you write it. Save, pause for a few seconds, and a fast model reads what changed. Worth saying? A short note lands in the pane: a bug, a risky pattern, a better idiom for that language. One idea per note. A hint, never a fix. Fix the code and the note goes away on its own. Nothing worth saying, it says nothing.
 
@@ -43,9 +37,9 @@ Type `/bsd`. A pane opens beside your conversation, with six tabs.
 
 **2. Deep review.** Commit, and a stronger model reviews the commit in the context of the whole project: design, correctness, what to do next. In its own tab, not in your chat. Commits made while Claude is down or you're at your plan limit get reviewed when it's back.
 
-**3. Explain.** Move your cursor (with an editor plugin, below), point at a line (`/bsd explain src/app.py:42`), or just save, and it tells you what that code does, how, why it's there, what to watch out for and what it relies on. Step through a file symbol by symbol with `n` and `p`. Change the code and the old explanation disappears before it can lie to you.
+**3. Explain.** Move your cursor (with an editor plugin, below), point at a line (`/backseat explain src/app.py:42`), or just save, and it tells you what that code does, how, why it's there, what to watch out for and what it relies on. Step through a file symbol by symbol with `n` and `p`. Change the code and the old explanation disappears before it can lie to you.
 
-**4. Growth.** An honest level and a score per language, from beginner to senior. Your own commits count most: not imports, not generated code, not anything co-written with an AI. Lessons you finish, help you needed and habits you fixed count too. It says what to work on, where you needed help, what would raise the score and what you've already improved. It follows you across projects. It can go down. No flattery.
+**4. Growth.** A level and a score per language, from beginner to senior. Your own commits count most: not imports, not generated code, not anything co-written with an AI. Lessons you finish, help you needed and habits you fixed count too. It says what to work on, where you needed help, what would raise the score and what you've already improved. It follows you across projects. It can go down. No flattery.
 
 **5. Lessons.** Learning paths, done in your own code, one step at a time. Start a step and the tutor teaches it in chat; you write it. Skip them all and it costs you nothing. Each path is a markdown file in the plugin's `lessons` folder: merge a new one and everyone has it.
 
@@ -61,12 +55,14 @@ While it's on, a hook blocks Claude's editing tools, so your code stays yours no
 
 ## Who it's for
 
-- **Anyone who writes their own code** and wants to get better at it.
-- **Learners.** It's a great time to learn the art of programming. Your own project is the lesson.
-- **Seniors** who want a sparring partner, not a robot-babysitting job.
+Anyone who writes their own code and means to keep getting better at it. Beginner's mind, sharp tools, always learning.
+
+- **Beginners.** Your own project is the lesson.
+- **Juniors.** Find out where you stand and what gets you to the next level, from your own commits.
+- **Seniors.** A sparring partner, not a robot-babysitting job. Iron sharpens iron.
 - **Teams.** Juniors get a reviewer on every save and every commit, without pulling a senior off their own work. Everyone keeps the skills you hired them for. Your code goes only to the Claude your company already uses, and everything the tutor remembers stays on each developer's machine. Models and thinking levels are set per job, so you decide what each review costs. Commercial use needs a license, below.
 
-Want the machine to write it for you? That's fine. Be you. `/bsd off` gives you Claude Code back.
+Want the LLM to write it for you? That's fine. Be you. `/backseat off` gives you Claude Code back.
 
 ## How to use it
 
@@ -77,22 +73,22 @@ claude plugin marketplace add a-schaefers/backseat-driver
 claude plugin install backseat-driver@backseat-driver
 ```
 
-Type `/bsd` in Claude Code. The first time you work in a language, it asks a few one-keypress questions: your level, your goals, what to focus on. Esc skips them. Every setting has a default.
+Type `/backseat` in Claude Code. The first time you work in a language, it asks a few one-keypress questions: your level, your goals, what to focus on. Esc skips them. Every setting has a default.
 
 | Command | |
 | --- | --- |
-| `/bsd`, `/bsd pause`, `/bsd off` | Switch it on, quiet it, or switch it off |
-| `/bsd explain src/app.py:42` | Explain a spot in the code |
-| `/bsd working on the parser` | Tell it what you're working on |
-| `/bsd settings` | Open the Settings tab |
-| `/bsd forget` | Erase what it remembers: one project, one language, or everything |
-| `/bsd license` | Switch between personal and commercial use, or add a key |
-| `/bsd update`, `/bsd uninstall` | Fetch a newer release when it announces one, or remove the plugin |
-| `/bsd help` | Every command and key |
+| `/backseat`, `/backseat pause`, `/backseat off` | Switch it on, quiet it, or switch it off |
+| `/backseat explain src/app.py:42` | Explain a spot in the code |
+| `/backseat working on the parser` | Tell it what you're working on |
+| `/backseat settings` | Open the Settings tab |
+| `/backseat forget` | Erase what it remembers: one project, one language, or everything |
+| `/backseat license` | Switch between personal and commercial use, or add a key |
+| `/backseat update`, `/backseat uninstall` | Fetch a newer release when it announces one, or remove the plugin |
+| `/backseat help` | Every command and key |
 
-`Ctrl+X Tab` hands it the keyboard, and `Esc` takes it back. `1` to `6` open the tabs. `x`, or the pane's own ×, puts it away as a strip above the prompt; a click on the strip brings it back, and only `/bsd off` switches it off. On a note, `e` explains it, `d` dismisses it, `m` mutes that topic for good. `l` looks at your changes now, `r` reviews now. It draws in the terminal and in the desktop app's Code tab. Send the conversation to the background and the tutor goes with it.
+`Ctrl+X Tab` hands it the keyboard, and `Esc` takes it back. `1` to `6` open the tabs. `x`, or the pane's own ×, puts it away as a strip above the prompt; a click on the strip brings it back, and only `/backseat off` switches it off. On a note, `e` explains it, `d` dismisses it, `m` mutes that topic for good. `l` looks at your changes now, `r` reviews now. It draws in the terminal and in the desktop app's Code tab. Send the conversation to the background and the tutor goes with it.
 
-Models, thinking levels, pacing and personas live in tab `6`, Settings, or `/bsd settings`. They're in `/config` too.
+Models, thinking levels, pacing and personas live in tab `6`, Settings, or `/backseat settings`. They're in `/config` too.
 
 ### Editors
 
@@ -104,9 +100,9 @@ Plugins for Emacs, Neovim and VS Code live in [`editors/`](editors). They tell t
 
 ## License
 
-Source-available, not open source. Read it, change it, share it.
+Source-available. Read it, change it, share it.
 
 - **Personal use is free.** Learning, hobby projects, unpaid open source. Schools and charities too.
-- **Commercial use is paid.** Using it for a business needs a [commercial license](COMMERCIAL-LICENSE.md). You pick personal or commercial the first time you switch it on, and `/bsd license` changes it. No lockouts. A missing key gets a note in the tutor, nothing more.
+- **Commercial use is paid.** Using it for a business needs a [commercial license](COMMERCIAL-LICENSE.md). You pick personal or commercial the first time you switch it on, and `/backseat license` changes it. No lockouts. A missing key gets a note in the tutor, nothing more.
 
-The terms are the [PolyForm Noncommercial License 1.0.0](LICENSE). Commits that carry the MIT license stay MIT. The decision points and insights are adapted, with thanks, from Anthropic's [learning-output-style](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/learning-output-style) plugin, under its Apache 2.0 license. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+The terms are the [PolyForm Noncommercial License 1.0.0](LICENSE).
