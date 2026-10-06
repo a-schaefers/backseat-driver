@@ -982,6 +982,7 @@ The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above mem
 - State-driven redraws and `$.ui.invalidate` are capped at 30/s in the terminal. The persona ticks about 7/s while talking, zero at rest.
 - `e.props.isFocused` in the pane's `ui.render` says whether it has the keyboard; hotkeys are dead until then, and the pane says how to focus.
 - `Text` takes no `key`. Keys go on `Button`, `Input`, `Select`, `Markdown`. Find text via `ui.find({ type: 'Text', text })`; an undefined result after a clean mount usually means this.
+- Claude Code's tmux hints (2.1.292, 2026-10-06, the owner: "a message about tmux mouse mode" that "scrolls oddly"): at its own start, under the banner, right-aligned, it prints `tmux detected · scroll with PgUp/PgDn · or add 'set -g mouse on' to ~/.tmux.conf for wheel scroll` while tmux's `mouse` option is off, and `tmux focus-events off · add 'set -g focus-events on' …` while that one is. Both are Claude Code's, written before any `/bsd`, and neither reaches the mod's `ui.log` or `ui.toast` hook (no `heard` record with the tutor on afterwards), so the mod cannot move them into a toast. With both options on in `~/.tmux.conf` neither is printed. The dev session (`env -i`) drops `TMUX`, so it never shows them: start `claude` under tmux without `env -i` to see them.
 
 ### Probed live (2.1.289, 2026-10-04, a scratch mod; the event-driven plan's M0)
 
