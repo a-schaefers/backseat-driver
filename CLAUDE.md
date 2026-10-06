@@ -910,7 +910,7 @@ For whoever develops Backseat Driver with the owner at the keyboard: `scripts/ja
 - Checks (`check_homes`, `check_session`), each something the tutor says against something read from outside:
   - a lease held by a session that is not running, by one that says it does not drive, or by one that draws nowhere (the owner's afternoon of 2026-10-05, as it would have read)
   - a session that said it has the tutor on and is not running, with no goodbye; one that is running and stopped saying so
-  - a state file older than 30 s with the log on: its timers do not run
+  - a state file older than 30 s with the log on: its timers do not run (a session that is gone, read by its id, is a record instead, a `··` note: seen as a false `!!` after the owner closed their session, 2026-10-05)
   - the mode held twice (the module's and `$.state`'s) and differing; on, and not in `sessions.json`
   - on, and drawing nowhere; a vertical layout with no pane in Claude Code's list; a pane open and not drawn
   - a deadline more than 15 s past its time

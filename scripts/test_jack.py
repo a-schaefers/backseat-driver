@@ -320,6 +320,13 @@ class Disagreements(unittest.TestCase):
         settled = session(pid=4242, state=state(self.now, loaded={"at": self.now - 60_000, "options": {}}, **live))
         self.assertTrue(any("inotifywait run under it" in text for text in bad(jack.check_session(world([settled], now=self.now), settled, DOCKED))))
 
+    def test_a_session_that_ended_is_read_as_a_record_and_not_as_stuck(self):
+        # `truth <id>` on a session that said goodbye (the owner closed it, 2026-10-05) read its last state as timers that do not run.
+        gone = session(kind="gone", state=state(self.now, at=self.now - 900_000), entry={"session": "aaaaaaaa-1111-4000-8000-000000000001", "mode": "on", "at": self.now - 960_000, "leftAt": self.now - 900_000})
+        found = jack.check_session(world([gone], now=self.now), gone, None)
+        self.assertEqual(bad(found), [])
+        self.assertTrue(any(level == jack.NOTE and "is not running" in text for level, text in found), found)
+
     def test_a_screen_that_cannot_be_seen_is_said_and_not_counted(self):
         s = session(state=state(self.now))
         found = jack.check_session(world([s], now=self.now), s, None)

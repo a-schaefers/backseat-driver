@@ -915,6 +915,11 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
 
     at = state.get("at")
     stale = now - at if isinstance(at, (int, float)) else None
+    if s.get("kind") == "gone":
+        # Read by id after the fact: its state is as it was, and says nothing about now.
+        left = (s.get("entry") or {}).get("leftAt")
+        out.append((NOTE, f"{who} is not running (it said goodbye {ago(now - left) if left else 'at some point'} ago): its state is from {ago(stale) if stale is not None else '?'} ago, read as a record"))
+        return out
     if mode != "off" and stale is not None and stale > STATE_STALE_MS:
         out.append((BAD, f"{who} last wrote its state {ago(stale)} ago and writes it every ten seconds with the log on: its timers do not run (stopped, asleep, or the log went off)"))
         return out
