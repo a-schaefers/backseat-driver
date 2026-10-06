@@ -536,6 +536,22 @@ class ToldAndBelieved(unittest.TestCase):
         self.assertEqual(bad(found), [])
         self.assertTrue(any(level == jack.NOTE and "closed by the person" in text for level, text in found))
 
+    def test_a_minimized_pane_is_a_note_and_its_strip_is_what_is_held_against_the_screen(self):
+        told = state(self.now)
+        told["session"]["panes"] = []
+        told["shown"]["minimized"] = True
+        told["shown"]["pane"] = None
+        strip = ["▸ Backseat", "Play (2)", "Review", "Explain", "Growth", "Lessons", "Settings"]
+        told["shown"]["band"] = {"at": self.now - 3000, "placement": "", "columns": 120, "texts": strip}
+        s = session(state=told)
+        found = jack.check_session(world([s], now=self.now), s, None)
+        self.assertEqual(bad(found), [])
+        self.assertTrue(any(level == jack.NOTE and "minimized" in text for level, text in found))
+        # The strip is looked for on the screen, not the pane that is no longer there.
+        on_screen = ["  ▸ Backseat  Play (2)  Review  Explain  Growth  Lessons  Settings  minimized", "❯ "]
+        self.assertEqual(bad(jack.check_session(world([s], now=self.now), s, on_screen)), [])
+        self.assertTrue(any("not on its screen" in text or "is not" in text for text in bad(jack.check_session(world([s], now=self.now), s, ["❯ "]))))
+
     def test_a_session_that_runs_code_older_than_the_working_copy(self):
         plugin = self.dir / "plugin"
         (plugin / "hooks").mkdir(parents=True)

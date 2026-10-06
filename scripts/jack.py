@@ -1001,8 +1001,12 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
     shown = state.get("shown") if isinstance(state.get("shown"), dict) else {}
     opened = shown.get("opened")
     layout = dig(state, "session.layout") or "vertical"
-    drawing = shown.get("pane") if layout == "vertical" else shown.get("band")
-    if mode != "off" and layout == "vertical":
+    # Minimized, the pane is closed on purpose and a strip above the prompt stands in for it: that is what is on the screen.
+    minimized = shown.get("minimized") is True
+    drawing = shown.get("band") if minimized or layout != "vertical" else shown.get("pane")
+    if mode != "off" and minimized:
+        out.append((NOTE, f"{who}'s pane is minimized: a strip above the prompt brings it back, and the tutor stays {mode}"))
+    elif mode != "off" and layout == "vertical":
         panes = dig(state, "session.panes")
         mine = next((p for p in panes if isinstance(p, dict) and p.get("id") == PANE_ID), None) if isinstance(panes, list) else None
         closed = shown.get("closed") if isinstance(shown.get("closed"), dict) else None
@@ -1022,7 +1026,7 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
     elif mode != "off" and isinstance(drawing, dict) and isinstance(drawing.get("texts"), list):
         texts = [t for t in drawing["texts"] if isinstance(t, str)]
         head, rest = missing_pieces(texts, rows)
-        where = "pane" if layout == "vertical" else "lines above the prompt"
+        where = "strip above the prompt" if minimized else "pane" if layout == "vertical" else "lines above the prompt"
         below = pieces_below(texts, rows)
         if head and below > 0:
             # The top is missing and the rest is there: the person scrolled the pane down to read (the owner, 2026-10-05,

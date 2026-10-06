@@ -359,6 +359,8 @@ declare module 'claude-code' {
       working: Working
       /** Which list opened downward is open: `jump:<subject>` or `setting:<key>`, or '' while every one is folded. */
       openList: string
+      /** True while the pane is put away as a strip above the prompt: the tutor on, its pane closed. */
+      minimized: boolean
       /** The plugin's own `/config` rows, for the Settings tab. Read again whenever the tab is opened. */
       settings: SettingRow[]
       /** The `userConfig` values this module was last loaded with, so that a reload can tell which of them changed. */

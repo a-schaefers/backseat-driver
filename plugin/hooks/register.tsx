@@ -153,7 +153,7 @@ import { isNoiseFile } from '../core/noise'
 import { isLookDue, playOf, wakeAt } from '../core/play'
 import type { Play, PlayFacts } from '../core/play'
 import { isProblem, keepNotes, parseKeptNotes, stillOpen, withDismissed } from '../core/notes'
-import { renderPane, reviewSchedule, steppedNote } from './pane'
+import { renderMinimized, renderPane, reviewSchedule, steppedNote } from './pane'
 import type { Kit, PaneView } from './pane'
 import {
   ANSWER_LABELS,
@@ -321,6 +321,10 @@ const speechAtom = atom({ plugin: 'backseat-driver', key: 'speech' } as const, S
 const workingAtom = atom({ plugin: 'backseat-driver', key: 'working' } as const, NO_WORKING)
 /** Which list opened downward is open: `jump:<subject>` in the Deep review tab, `setting:<key>` in Settings, or '' while every one is folded. */
 const openListAtom = atom({ plugin: 'backseat-driver', key: 'openList' } as const, '' as string)
+/** True while the pane is minimized: closed, with a strip above the prompt to bring it back. The tutor stays on. */
+const minimizedAtom = atom({ plugin: 'backseat-driver', key: 'minimized' } as const, false)
+/** The same, kept beside the state for when the state is emptied (`/clear`). A reload reads it back from the state. */
+let isMinimized = false
 
 /** The pane's id. */
 const PANE_ID = 'backseat-driver'
@@ -460,12 +464,15 @@ const shown: {
   opened: { at: number; isPlaced: boolean; reason: string } | null
   /** When the pane was last closed, and by whom: the person (its mark, or Esc), the plugin, or an unload. */
   closed: { at: number; origin: string } | null
+  /** True while the pane is put away: what is on the screen is then the strip above the prompt (`band`). */
+  minimized: boolean
 } = {
   pane: null,
   band: null,
   hint: '',
   opened: null,
   closed: null,
+  minimized: false,
 }
 /** The drawings as the debug log last recorded them, and the timer that records the next. */
 const shownLogged: { pane: Shown | null; band: Shown | null } = { pane: null, band: null }
@@ -1344,8 +1351,42 @@ async function closePane($: EngineInterface): Promise<void> {
 async function showPane($: EngineInterface): Promise<void> {
   // Not awaited: the Settings tab can wait for its rows, switching on cannot.
   if (mode !== 'off') void showSettings($)
-  if (mode !== 'off') await openPane($)
-  else await closePane($)
+  if (mode === 'off') await closePane($)
+  // Put away, it stays put away until the person brings it back.
+  else if (!isMinimized) await openPane($)
+}
+
+/**
+ * Puts the pane away: it closes, and a strip above the prompt stands in for
+ * it. The tutor stays on (owner, 2026-10-06: only /bsd off shuts it down).
+ * The person's own close arrives here from `ui.close`, already under way.
+ */
+async function minimizePane($: EngineInterface, origin: 'person' | 'plugin'): Promise<void> {
+  isMinimized = true
+  shown.minimized = true
+  await update($, minimizedAtom, () => true)
+  trace($, 'ui', 'pane minimized', () => ({ origin }))
+  if (origin === 'plugin') await closePane($)
+  // The band's hook had read nothing of the state until now, so nothing else asks it again.
+  $.ui.invalidate('ui.render')
+}
+
+/** Brings the pane back from the strip, on the tab asked for when one was. */
+async function restoreFromStrip($: EngineInterface, tab: Tab | null): Promise<void> {
+  isMinimized = false
+  shown.minimized = false
+  shown.band = null
+  await update($, minimizedAtom, () => false)
+  if (tab !== null) await showTab($, tab)
+  trace($, 'ui', 'pane restored', () => ({ tab }))
+  await openPane($)
+  $.ui.invalidate('ui.render')
+}
+
+/** Shows the pane because the person asked for the tutor by name: one that was put away comes back. */
+async function bringBack($: EngineInterface): Promise<void> {
+  if (isMinimized) await restoreFromStrip($, null)
+  else await showPane($)
 }
 
 /** Reads the plugin's own `/config` rows again, for the Settings tab. */
@@ -3636,6 +3677,11 @@ async function switchTo(
     await update($, explainAtom, () => NO_VIEW)
     profiles = NO_PROFILES
     await update($, profilesAtom, () => NO_PROFILES)
+    // Off, nothing of it stays above the prompt either.
+    isMinimized = false
+    shown.minimized = false
+    shown.band = null
+    await update($, minimizedAtom, () => false)
     await showPane($)
     // Switched off, the session takes back what it said of itself. Left behind by its conversation, it has said goodbye instead.
     if (how.isStandingDown !== true) await sayOffOf(carryPortsOf($, settings), carryState)
@@ -3805,6 +3851,10 @@ async function drawTutor(
       // Read again each time: a change made in /config meanwhile shows.
       if (tab === 'settings') void showSettings($)
       void showTab($, tab)
+    },
+    onMinimize: () => {
+      touched($, settings, 'minimize')
+      void minimizePane($, 'plugin')
     },
     onSettingFold: (key: string) => {
       touched($, settings, 'setting fold', () => key)
@@ -4006,8 +4056,8 @@ async function bsdCommand($: EngineInterface, settings: Settings, args: string):
   if (request === 'settings') {
     if (mode === 'off') return { text: SETTINGS_OFF }
     await update($, tabAtom, () => 'settings')
-    // Asking again brings back a pane the user closed by hand, and reads the rows again.
-    await showPane($)
+    // Asking again brings back a pane that was put away, and reads the rows again.
+    await bringBack($)
 
     return { text: 'The settings are in the pane. Click a row to see its options, or Ctrl+X Tab, then Tab to it and Enter.' }
   }
@@ -4016,6 +4066,8 @@ async function bsdCommand($: EngineInterface, settings: Settings, args: string):
     if (settings.explain.mode === 'off') return { text: 'Explain is switched off. Its setting is in /config.' }
     if (followState.explainer === null) return { text: 'Explain needs a git repository, and a moment after /bsd to get ready.' }
     await update($, tabAtom, () => 'explain')
+    // The answer lands in the pane: one that was put away comes back for it.
+    if (isMinimized) await restoreFromStrip($, null)
     watchClosely($)
     const spot = rest.trim() === '' ? followState.focus : parseTarget(rest, repoRoot)
     if (spot === null) {
@@ -4063,8 +4115,8 @@ async function bsdCommand($: EngineInterface, settings: Settings, args: string):
   const { to, text } = transition(mode, request)
   const wasOff = mode === 'off'
   if (to !== mode) await switchTo($, to, settings)
-  // Asking for "on" again brings back a pane the user closed by hand.
-  else if (request === 'on') await showPane($)
+  // Asking for "on" again brings back a pane that was put away.
+  else if (request === 'on') await bringBack($)
   if (request !== 'status') return { text }
 
   return { text: `${text} Voice: ${settings.persona.voice}. Engineering: ${settings.persona.engineering}.` }
@@ -4091,7 +4143,9 @@ export const register: Register = (on, options) => {
       const open = await read($, notesAtom)
       lookState.nextNoteId = open.reduce((highest, note) => Math.max(highest, note.id), 0) + 1
       await loadTutor($, settings.persona)
-      // A reload opens the pane again, or closes it when the tutor is off.
+      // A reload opens the pane again, unless it was put away: the state outlives the module, its variables do not.
+      isMinimized = await read($, minimizedAtom)
+      shown.minimized = isMinimized
       await showPane($)
       engagement += 1
       await engage($, settings, engagement, false, before)
@@ -4127,7 +4181,8 @@ export const register: Register = (on, options) => {
     // The pane's "Working on" line was reset with the rest of the state. The journal behind it was not.
     if (mode !== 'off') {
       trace($, 'hook', 'classic.SessionStart', () => ({ source: e.source }))
-      // The notes, the review and the rest of the pane were emptied with the state. They come back.
+      // The notes, the review and the rest of the pane were emptied with the state. They come back, and so does whether the pane is put away.
+      await update($, minimizedAtom, () => isMinimized)
       await restorePane($, settings)
       journalState.workingShown = ''
       await showWorking($, await $.clock.now())
@@ -4466,15 +4521,47 @@ export const register: Register = (on, options) => {
 
   // The person closing the pane (its mark, or Esc) is something only Claude Code sees. The tutor writes it down,
   // so that a pane missing from the screen reads as their choice and not as a fault.
-  on('ui.close', ($, e, next) => {
+  on('ui.close', async ($, e, next) => {
     if (e.id === PANE_ID && mode !== 'off') {
       const origin = e.origin.kind
       shown.closed = { at: Date.now(), origin }
       if (origin !== 'plugin') shown.opened = null
+      // Whoever closed it, nothing of the pane is on the screen any more.
+      shown.pane = null
       trace($, 'ui', 'pane closed', () => ({ origin }))
+      // The person's own close (the pane's mark, Ctrl+X X) puts the pane away and leaves the tutor on.
+      if (origin === 'person') await minimizePane($, 'person')
     }
 
     return next(e)
+  })
+
+  // Minimized, the pane is a strip above the prompt: its name and its tabs, each a way back. A survey there comes first.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (mode === 'off' || e.props.hasSurvey) return next(e)
+    if (!(await read($, minimizedAtom))) return next(e)
+    const [notes, review, explain, progress] = await Promise.all([read($, notesAtom), read($, reviewAtom), read($, explainAtom), read($, progressAtom)])
+    const tree = renderMinimized(
+      $.ui.resolve(e),
+      { notes, review, explain, progress },
+      {
+        onRestore: (tab: Tab | null) => {
+          touched($, settings, 'restore', () => tab)
+          void restoreFromStrip($, tab)
+        },
+      },
+    )
+    noteShown($, 'band', {
+      at: Date.now(),
+      placement: '',
+      columns: e.props.bodyColumns,
+      rows: e.viewport?.rows ?? 48,
+      isFocused: false,
+      isCompact: true,
+      texts: textsOf(tree),
+    })
+
+    return tree
   })
 
   // A surface joining or leaving the session: a terminal attached to a background session, or one that left it.

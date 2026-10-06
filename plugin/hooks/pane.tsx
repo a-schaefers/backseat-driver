@@ -102,6 +102,8 @@ export type PaneActions = {
   onJumpFold?: (subject: string) => void
   /** Open a setting's options under its row, or fold them again. */
   onSettingFold?: (key: string) => void
+  /** Put the pane away as a strip above the prompt. The tutor stays on. */
+  onMinimize?: () => void
   /** Explain: put the symbol that starts at this line in focus. */
   onExplainPick?: (line: number) => void
   /** Open a place in the person's own editor. Present only while `editor_command` is set. */
@@ -208,15 +210,22 @@ function controlsRow({ Box, Text }: Pick<Kit, 'Box' | 'Text'>, view: Pick<PaneVi
 }
 
 /** The last row: whether the keys work now, and how the pane is driven. On every tab, since nothing else says it. */
-function keysRow({ Box, Text }: Pick<Kit, 'Box' | 'Text'>, view: Pick<PaneView, 'isFocused'>) {
+function keysRow({ Box, Text, Button }: Pick<Kit, 'Box' | 'Text' | 'Button'>, view: Pick<PaneView, 'isFocused'>, actions: Pick<PaneActions, 'onMinimize'>) {
   return (
-    <Box flexDirection="row" columnGap={1}>
-      <Text bold color={view.isFocused ? 'green' : 'yellow'}>
-        {view.isFocused ? 'Keys on' : 'Keys off'}
-      </Text>
-      <Text dimColor wrap="truncate-end">
-        {view.isFocused ? FOCUSED_HINT : KEYBOARD_HINT}
-      </Text>
+    <Box flexDirection="row" columnGap={2}>
+      {actions.onMinimize !== undefined && (
+        <Box flexShrink={0}>
+          <Button key="minimize" label="minimize" hotkey="x" plain onPress={() => actions.onMinimize?.()} />
+        </Box>
+      )}
+      <Box flexDirection="row" columnGap={1} flexShrink={1}>
+        <Text bold color={view.isFocused ? 'green' : 'yellow'}>
+          {view.isFocused ? 'Keys on' : 'Keys off'}
+        </Text>
+        <Text dimColor wrap="truncate-end">
+          {view.isFocused ? FOCUSED_HINT : KEYBOARD_HINT}
+        </Text>
+      </Box>
     </Box>
   )
 }
@@ -1155,7 +1164,7 @@ function renderStacked(kit: Kit, view: PaneView, actions: PaneActions) {
       {character !== null && characterRow(kit, view, character)}
       {character !== null && <Text> </Text>}
       {tabBody(kit, view, actions)}
-      {keysRow(kit, view)}
+      {keysRow(kit, view, actions)}
     </Box>
   )
 }
@@ -1174,6 +1183,39 @@ export function noteMark(note: Pick<Note, 'kind'>): { mark: string; color: strin
     default:
       return { mark: '·', color: undefined }
   }
+}
+
+/** What the strip says after the tabs: that the pane is put away, and how it comes back. */
+export const STRIP_HINT = 'minimized · click a name, or Ctrl+X Tab then Enter, to bring it back'
+
+/**
+ * The pane put away (owner, 2026-10-06: the pane's close should minimize, and
+ * only /bsd off shut the tutor down): one row above the prompt with the
+ * tutor's name and its tabs, each a button that brings the pane back, the
+ * name on the tab it was on and a tab on itself. The name takes the focus
+ * ring, so Ctrl+X Tab then Enter is the way back from the keyboard. No button
+ * has a key: a bare digit typed into an empty prompt presses a keyed button here.
+ */
+export function renderMinimized(
+  { Box, Text, Button }: Pick<Kit, 'Box' | 'Text' | 'Button'>,
+  view: Partial<Pick<PaneView, 'notes' | 'review' | 'explain' | 'progress'>>,
+  actions: { onRestore: (tab: Tab | null) => void },
+) {
+  return (
+    <Box flexDirection="row" columnGap={2}>
+      <Box flexShrink={0}>
+        <Button key="restore" label="▸ Backseat" plain autoFocus onPress={() => actions.onRestore(null)} />
+      </Box>
+      {TABS.map(({ tab, short }) => (
+        <Box flexShrink={0}>
+          <Button key={`restore-${tab}`} label={`${short}${tabBadge(tab, view)}`} plain dimColor onPress={() => actions.onRestore(tab)} />
+        </Box>
+      ))}
+      <Text dimColor wrap="truncate-end">
+        {STRIP_HINT}
+      </Text>
+    </Box>
+  )
 }
 
 export function renderPane(kit: Kit, view: PaneView, actions: PaneActions) {

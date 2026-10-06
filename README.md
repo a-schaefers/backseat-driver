@@ -90,7 +90,7 @@ Type `/bsd` in Claude Code. The first time you work in a language, it asks a few
 | `/bsd update`, `/bsd uninstall` | Fetch a newer release when it announces one, or remove the plugin |
 | `/bsd help` | Every command and key |
 
-`Ctrl+X Tab` hands it the keyboard, and `Esc` takes it back. `1` to `6` open the tabs. On a note, `e` explains it, `d` dismisses it, `m` mutes that topic for good. `l` looks at your changes now, `r` reviews now. It draws in the terminal and in the desktop app's Code tab. Send the conversation to the background and the tutor goes with it.
+`Ctrl+X Tab` hands it the keyboard, and `Esc` takes it back. `1` to `6` open the tabs. `x`, or the pane's own ×, puts it away as a strip above the prompt; a click on the strip brings it back, and only `/bsd off` switches it off. On a note, `e` explains it, `d` dismisses it, `m` mutes that topic for good. `l` looks at your changes now, `r` reviews now. It draws in the terminal and in the desktop app's Code tab. Send the conversation to the background and the tutor goes with it.
 
 Models, thinking levels, pacing and personas live in tab `6`, Settings, or `/bsd settings`. They're in `/config` too.
 
