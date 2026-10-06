@@ -76,12 +76,26 @@ export async function loadRecord(ports: Pick<ProgressPorts, 'store' | 'dataRoot'
   return parseRecord(await ports.store().read(progressPath(ports.dataRoot(), language)), language)
 }
 
-/** Whose commits count, and the records of the languages in play. */
-export async function setUpProgress(ports: ProgressPorts, state: ProgressState): Promise<void> {
+/**
+ * Whose commits count: the repository's `user.email`, and the global one when
+ * it differs. Read again before every use, not once at switch-on: the person
+ * may set it after the tutor is on (seen 2026-10-05: set between `/bsd` and
+ * the first commit, which then counted for nothing). Resolves whether it changed.
+ */
+export async function readIdentity(ports: Pick<ProgressPorts, 'git'>, state: ProgressState): Promise<boolean> {
   // `git config` answers the repository's own setting, else the global one in ~/.gitconfig.
   const effective = (await ports.git(['config', '--get', 'user.email'])).stdout
   const global = (await ports.git(['config', '--global', '--get', 'user.email'])).stdout
-  state.identity = identityOf(effective, global)
+  const identity = identityOf(effective, global)
+  const isChanged = identity.join(' ') !== state.identity.join(' ')
+  state.identity = identity
+
+  return isChanged
+}
+
+/** Whose commits count, and the records of the languages in play. */
+export async function setUpProgress(ports: ProgressPorts, state: ProgressState): Promise<void> {
+  await readIdentity(ports, state)
   state.records.clear()
   for (const language of ports.profiles().languages) state.records.set(language, await loadRecord(ports, language))
   await showProgress(ports, state)
@@ -173,6 +187,7 @@ export async function assess(
  */
 export async function assessCommit(ports: ProgressPorts, state: ProgressState, hash: string, review: string): Promise<boolean> {
   if (!ports.settings.isProgressOn || ports.repoRoot() === '' || ports.dataRoot() === '' || !ports.isOn()) return true
+  if (await readIdentity(ports, state)) await showProgress(ports, state)
   const asked = await ports.git(commitInfoArgs(hash))
   // Git did not answer: worth another try. A commit git says it does not have is let go.
   if (asked.exitCode === -1) return false
@@ -217,7 +232,9 @@ const PLACEMENT_COMMITS = 5
  * half, because the tutor did not watch that work arrive.
  */
 export async function placeFirst(ports: ProgressPorts, state: ProgressState, run: number): Promise<void> {
-  if (!ports.settings.isProgressOn || state.identity.length === 0 || ports.repoRoot() === '' || ports.dataRoot() === '' || !ports.isDriver()) return
+  if (!ports.settings.isProgressOn || ports.repoRoot() === '' || ports.dataRoot() === '' || !ports.isDriver()) return
+  if (await readIdentity(ports, state)) await showProgress(ports, state)
+  if (state.identity.length === 0) return
   const held = await ports.readPressure()
   if (held.level !== 'none' || !ports.mayAsk()) return
   const mine = parseRecent((await ports.git([...RECENT_COMMITS_ARGS])).stdout)

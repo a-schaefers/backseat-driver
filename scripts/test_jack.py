@@ -51,6 +51,7 @@ def session(**over) -> dict:
     base = {
         "id": "aaaaaaaa-1111-4000-8000-000000000001", "short": "aaaaaaaa", "bg": "", "pid": 0, "kind": "interactive", "status": "idle",
         "name": "", "cwd": "/tmp/ride", "home": None, "plugin": "installed", "eyes": None, "entry": None, "debug": None, "state": None, "is_me": False,
+        "copy": {"folder": "", "version": "", "commit": "", "can_say": True},
     }
     made = {**base, **over}
     # A session that says the tutor is on has said so where the others read it, unless a test says otherwise.
@@ -112,6 +113,60 @@ class Numbers(unittest.TestCase):
         self.assertEqual(jack.plugin_source(["claude"]), "installed")
         self.assertEqual(jack.plugin_source(["claude", "--plugin-dir", str(REPO / "plugin")]), str(REPO / "plugin"))
 
+    def test_which_copy_of_the_plugin_a_session_runs_and_whether_it_can_say(self):
+        # The working copy follows the debug switch under the name the tool looks for.
+        self.assertIn(f"export async function {jack.FOLLOWS_SWITCH}(", (REPO / "plugin" / "core" / "debugging.ts").read_text())
+        working = jack.plugin_copy(str(REPO / "plugin"), "")
+        self.assertEqual(working["folder"], str(REPO / "plugin"))
+        self.assertTrue(working["can_say"])
+        self.assertEqual(working["version"], json.loads((REPO / "plugin" / ".claude-plugin" / "plugin.json").read_text())["version"])
+        with tempfile.TemporaryDirectory() as tmp:
+            # An installed copy from before the switch could be followed: found through its config folder's book.
+            old = pathlib.Path(tmp) / "cache" / "backseat-driver" / "0.1.0"
+            (old / ".claude-plugin").mkdir(parents=True)
+            (old / "core").mkdir()
+            (old / "hooks").mkdir()
+            (old / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "backseat-driver", "version": "0.1.0"}))
+            (old / "core" / "debugging.ts").write_text("export async function startDebug() {}\n")
+            (old / "hooks" / "register.tsx").write_text("// nothing follows the switch here\n")
+            config = pathlib.Path(tmp) / "config"
+            (config / "plugins").mkdir(parents=True)
+            (config / "plugins" / "installed_plugins.json").write_text(json.dumps({"version": 2, "plugins": {
+                "backseat-driver@backseat-driver": [{"scope": "user", "installPath": str(old), "version": "0.1.0", "gitCommitSha": "46ce6bb0c253702bb443c9ecec6ae98952177630"}]}}))
+            installed = jack.plugin_copy("installed", str(config))
+            self.assertEqual(installed, {"folder": str(old), "version": "0.1.0", "commit": "46ce6bb", "can_say": False})
+            s = session(copy=installed)
+            self.assertTrue(jack.cannot_say(s))
+            self.assertEqual(jack.copy_label(s), "installed 0.1.0 (46ce6bb)")
+            # With nothing installed, nothing is known of the copy.
+            (config / "plugins" / "installed_plugins.json").write_text(json.dumps({"version": 2, "plugins": {}}))
+            self.assertEqual(jack.plugin_copy("installed", str(config)), {"folder": "", "version": "", "commit": "", "can_say": None})
+        self.assertEqual(jack.copy_label(session(plugin=str(REPO / "plugin"))), "working copy")
+        self.assertEqual(jack.copy_label(session(plugin=str(jack.LIVE))), "live copy")
+
+    def test_the_live_copy_is_compared_with_the_working_copy_file_by_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, live = pathlib.Path(tmp) / "plugin", pathlib.Path(tmp) / "live"
+            for root in (src, live):
+                (root / "hooks").mkdir(parents=True)
+                (root / "hooks" / "register.tsx").write_text("same\n")
+                (root / "core").mkdir()
+            (src / "core" / "look.ts").write_text("new\n")
+            (live / "core" / "look.ts").write_text("old\n")
+            (live / "core" / "gone.ts").write_text("removed from the working copy\n")
+            (src / "core" / "added.ts").write_text("not yet synced\n")
+            # Tests and the types Claude Code writes are never part of it.
+            (src / "tests").mkdir()
+            (src / "tests" / "x.test.ts").write_text("test\n")
+            (live / ".claude-plugin" / "types").mkdir(parents=True)
+            (live / ".claude-plugin" / "types" / "index.d.ts").write_text("types\n")
+            self.assertEqual(jack.live_diff(src, live), ["core/added.ts", "core/gone.ts", "core/look.ts"])
+            self.assertEqual(jack.live_diff(src, pathlib.Path(tmp) / "nowhere"), ["core/added.ts", "core/look.ts", "hooks/register.tsx"])
+        self.assertEqual(jack.is_busy(None), "")
+        self.assertEqual(jack.is_busy({"pane": {"watch": {"state": "watching"}, "review": {"state": "done"}}}), "")
+        self.assertEqual(jack.is_busy({"pane": {"watch": {"state": "looking"}}}), "a look is running")
+        self.assertEqual(jack.is_busy({"pane": {"watch": {"state": "watching"}, "review": {"state": "running"}}}), "a deep review is running")
+
 
 class Screen(unittest.TestCase):
     def test_a_docked_pane_is_told_from_the_conversation_beside_it(self):
@@ -158,6 +213,8 @@ class Screen(unittest.TestCase):
         raw = b"first\r\nsecond\r\n\x1b[1;1Hfirst row, rewritten\x1b[3;1Hthird"
         rows = jack.replay(raw, 40, 6)
         self.assertEqual([row.rstrip() for row in rows[:3]], ["first row, rewritten", "second", "third"])
+        # tmux leaves the server's socket behind after kill-server; the tool does not.
+        self.assertFalse((jack.tmux_folder() / f"bsd-jack-replay-{os.getpid()}").exists())
 
 
 class Log(unittest.TestCase):
@@ -233,6 +290,17 @@ class Disagreements(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertIn("not on its screen", found[0])
         self.assertIn("“1: Play (1)”", found[0])
+
+    def test_a_pane_drawn_docked_in_a_terminal_made_too_narrow_for_a_dock_is_a_move_and_not_a_fault(self):
+        # The owner resized the terminal (2026-10-05): the drawing on record is from the side, the screen is already
+        # the agents view or the pane above the prompt, and the next drawing is the one to check.
+        narrow = session(state=state(self.now), eyes={"kind": "tmux", "name": "0", "sock": "/x", "pane": "%0", "cols": 89, "rows": 30})
+        found = jack.check_session(world([narrow], now=self.now), narrow, ["❯ ", "  ⏵⏵ bypass permissions on"])
+        self.assertEqual(bad(found), [])
+        self.assertTrue(any(level == jack.NOTE and "moving above the prompt" in text for level, text in found))
+        # Wide enough for a dock and the pane still missing: a fault, as before.
+        wide = session(state=state(self.now), eyes={"kind": "tmux", "name": "0", "sock": "/x", "pane": "%0", "cols": 170, "rows": 40})
+        self.assertTrue(any("not on its screen" in text for text in bad(jack.check_session(world([wide], now=self.now), wide, ["❯ "]))))
 
     def test_a_screen_that_cannot_be_seen_is_said_and_not_counted(self):
         s = session(state=state(self.now))
@@ -353,6 +421,23 @@ class Disagreements(unittest.TestCase):
         self.assertEqual(jack.tutor_mode(session(entry={"mode": "paused", "leftAt": 0})), "paused")
         self.assertEqual(jack.tutor_mode(session(entry={"mode": "on", "leftAt": 5})), "off")
         self.assertEqual(jack.tutor_mode(session(state={"mode": "on"}, entry=None)), "on")
+
+    def test_a_pane_on_the_screen_of_a_session_that_says_nothing(self):
+        # A copy that could say it is on, and says nothing: a fault.
+        quiet = session()
+        found = jack.check_session(world([quiet], now=self.now), quiet, DOCKED)
+        self.assertEqual(len(bad(found)), 1)
+        self.assertIn("nothing says the tutor is on in it", bad(found)[0])
+        # A copy from before the tutor could say: the pane is on screen, and that is all jack can know of it.
+        old = session(copy={"folder": "/x/0.1.0", "version": "0.1.0", "commit": "46ce6bb", "can_say": False})
+        found = jack.check_session(world([old], now=self.now), old, DOCKED)
+        self.assertEqual(bad(found), [])
+        notes = [text for level, text in found if level == jack.NOTE]
+        self.assertEqual(len(notes), 1)
+        self.assertIn("installed 0.1.0 (46ce6bb)", notes[0])
+        self.assertIn("/reload-plugins", notes[0])
+        # No pane on the screen: nothing to say either way.
+        self.assertEqual(jack.check_session(world([old], now=self.now), old, ["❯ "]), [])
 
     def test_the_session_to_look_at_is_the_one_with_the_tutor_on(self):
         me = session(id="me000000-0", short="me000000", is_me=True, state={"mode": "on"})

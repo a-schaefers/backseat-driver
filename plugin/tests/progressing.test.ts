@@ -48,14 +48,19 @@ test('setting up reads the person\'s email, then the records in play, and shows 
 })
 
 test('a first placement does nothing without the person\'s email or while the plan is held back', async () => {
+  // The identity is read again first, whatever was known: an email set after switch-on counts from then on.
+  const IDENTITY = ['git config --get user.email', 'git config --global --get user.email']
   const w = world()
   const state = freshProgressState()
-  await placeFirst(w.ports, state, 1)
-  expect(w.log).toEqual([])
+  await placeFirst({ ...w.ports, git: async args => (w.log.push(`git ${args.join(' ')}`), { exitCode: 1, stdout: '' }) }, state, 1)
+  expect(w.log).toEqual(IDENTITY)
+  expect(state.identity).toEqual([])
 
-  state.identity = ['me@example.com']
+  w.log.length = 0
   await placeFirst({ ...w.ports, mayAsk: () => false }, state, 1)
-  expect(w.log).toEqual([])
+  // The email found is news for the Growth tab, and the plan's limit stops the rest.
+  expect(w.log).toEqual([...IDENTITY, 'progress isOn,identity,records'])
+  expect(state.identity).toEqual(['me@example.com'])
 })
 
 test('progress work runs one piece after the other, and a failure does not stop the next', async () => {

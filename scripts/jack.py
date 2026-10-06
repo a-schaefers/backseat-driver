@@ -32,6 +32,9 @@ where to look.
     scripts/jack.py state [S] [path]  the tutor's own state, or one part: `state lease`, `state shown.pane.texts`
     scripts/jack.py files           the data folder, with ages
     scripts/jack.py ps              every process that matters, and whose it is
+    scripts/jack.py sync            bring the live copy the owner's sessions load up to the working
+                                    copy (local/live/plugin), when the tutor is between things, and
+                                    watch them come back up. A save under plugin/ alone reloads nothing of theirs
     scripts/jack.py tour [S]        drive a session in tmux as a person would, and check after every step
     scripts/jack.py keys S <keys>   type into a session in tmux (`keys bsd /bsd Enter`). Only when asked to.
 
@@ -84,6 +87,13 @@ STATE_STALE_MS = 3 * SELF_CHECK_MS
 OVERDUE_MS = 15_000
 # The first pieces of a drawing are the tabs and the status line: the top of the pane, which is never below the fold.
 HEAD_PIECES = 6
+# Claude Code docks a pane at the side from this many columns (CLAUDE.md, "Handoff"); under it the pane goes above the prompt.
+DOCK_COLUMNS = 110
+# The owner's sessions load this copy of `plugin/` (their `claude` adds `--plugin-dir` for it), which `sync` brings up
+# to the working copy when a change is ready: a save in `plugin/` alone reloads nothing of theirs. Git-ignored (local/).
+LIVE = REPO / "local" / "live" / "plugin"
+# What the live copy does without: never loaded, or written by Claude Code itself.
+LIVE_SKIP = ("tests", "node_modules", ".claude-plugin/types")
 
 BAD = "!!"
 FINE = "ok"
@@ -451,8 +461,122 @@ def plugin_source(argv: list[str]) -> str:
     return "installed"
 
 
+# The tutor reads the debug switch every ten seconds under this name (plugin/core/debugging.ts), which is what lets
+# `in` start a session's log from outside. A copy of the plugin without it (0.1.0 as installed on 2026-10-05) reads
+# the switch only at switch-on and on a reload, writes no state before that, and says nothing in sessions.json: of
+# such a session jack sees the screen and the files, and not what it believes. scripts/test_jack.py holds the name.
+FOLLOWS_SWITCH = "followSwitch"
+
+
+def plugin_copy(source: str, config: str) -> dict:
+    """The copy of the plugin a session runs: its folder, version and commit, and whether it can say what it
+    believes (`can_say`: it follows the debug switch; None when its folder is not known). `source` is a working
+    copy's folder, or "installed", whose folder is in the config folder's installed_plugins.json."""
+    folder, version, commit = "", "", ""
+    if source not in ("installed", "?", ""):
+        folder = source
+    else:
+        book = read_json(pathlib.Path(config or default_config()) / "plugins" / "installed_plugins.json") or {}
+        for key, entries in (book.get("plugins") or {}).items() if isinstance(book.get("plugins"), dict) else []:
+            if str(key).partition("@")[0] == PLUGIN and isinstance(entries, list) and entries and isinstance(entries[0], dict):
+                folder = str(entries[0].get("installPath") or "")
+                version = str(entries[0].get("version") or "")
+                commit = str(entries[0].get("gitCommitSha") or "")[:7]
+                break
+    if folder and not version:
+        version = str((read_json(pathlib.Path(folder) / ".claude-plugin" / "plugin.json") or {}).get("version") or "")
+    can_say = None
+    if folder:
+        sources = [pathlib.Path(folder) / "core" / "debugging.ts", pathlib.Path(folder) / "hooks" / "register.tsx"]
+        can_say = any(FOLLOWS_SWITCH in p.read_text(errors="replace") for p in sources if p.is_file())
+    return {"folder": folder, "version": version, "commit": commit, "can_say": can_say}
+
+
+def live_files(root: pathlib.Path) -> dict[str, pathlib.Path]:
+    """The files of a plugin folder that a session loads, by their path inside it."""
+    found: dict[str, pathlib.Path] = {}
+    for path in root.rglob("*") if root.is_dir() else []:
+        rel = path.relative_to(root).as_posix()
+        if path.is_file() and not any(rel == skip or rel.startswith(skip + "/") for skip in LIVE_SKIP):
+            found[rel] = path
+    return found
+
+
+def live_diff(source: pathlib.Path, live: pathlib.Path) -> list[str]:
+    """The files in which a live copy differs from the working copy's `plugin/`: changed, new, or gone."""
+    ours, theirs = live_files(source), live_files(live)
+    differing = []
+    for rel in sorted(set(ours) | set(theirs)):
+        a, b = ours.get(rel), theirs.get(rel)
+        if a is None or b is None or a.stat().st_size != b.stat().st_size or a.read_bytes() != b.read_bytes():
+            differing.append(rel)
+    return differing
+
+
+def is_busy(state: dict | None) -> str:
+    """What a session's tutor is in the middle of that a reload would cut short, or '' when nothing."""
+    if not isinstance(state, dict):
+        return ""
+    play = dig(state, "pane.watch.state")
+    if play in ("looking", "settling"):
+        return "a look is " + ("running" if play == "looking" else "about to start")
+    if dig(state, "pane.review.state") == "running":
+        return "a deep review is running"
+    if dig(state, "pane.progress.busy"):
+        return "a look at progress is running"
+    return ""
+
+
+def copy_label(s: dict) -> str:
+    """The copy a session runs, in a few words: `working copy`, `live copy`, or `installed 0.1.0 (46ce6bb)`."""
+    if s.get("plugin") == "?":
+        return "an unknown copy"
+    if s.get("plugin") not in (None, "installed"):
+        return "live copy" if pathlib.Path(str(s["plugin"])) == LIVE else "working copy"
+    copy = s.get("copy") or {}
+    words = ["installed", copy.get("version") or "", f"({copy['commit']})" if copy.get("commit") else ""]
+    return " ".join(w for w in words if w)
+
+
+def cannot_say(s: dict) -> bool:
+    """Whether a session runs a copy of the plugin from before the tutor could be asked what it believes."""
+    return (s.get("copy") or {}).get("can_say") is False
+
+
+def behind(commit: str) -> int | None:
+    """How many commits of this working copy an installed copy's commit is behind, when it is known here."""
+    if not commit:
+        return None
+    code, out, _ = run(["git", "-C", str(REPO), "rev-list", "--count", f"{commit}..HEAD"], timeout=5)
+    return int(out.strip()) if code == 0 and out.strip().isdigit() else None
+
+
+def tmux_folder() -> pathlib.Path:
+    return pathlib.Path(os.environ.get("TMUX_TMPDIR") or "/tmp") / f"tmux-{os.getuid()}"
+
+
+def sweep_replays() -> None:
+    """Removes the sockets of replay servers (`bsd-jack-replay-<pid>`) whose run of the tool is gone: tmux leaves
+    the socket behind when its server is killed, and a run that was killed itself never got to remove it."""
+    folder = tmux_folder()
+    for p in folder.glob("bsd-jack-replay-*") if folder.is_dir() else []:
+        pid = p.name.rsplit("-", 1)[-1]
+        if not pid.isdigit() or int(pid) == os.getpid():
+            continue
+        try:
+            os.kill(int(pid), 0)
+        except ProcessLookupError:
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        except OSError:
+            pass
+
+
 def tmux_sockets() -> list[str]:
-    folder = pathlib.Path(os.environ.get("TMUX_TMPDIR") or "/tmp") / f"tmux-{os.getuid()}"
+    sweep_replays()
+    folder = tmux_folder()
     found = [str(p) for p in folder.glob("*") if p.is_socket()] if folder.is_dir() else []
     return sorted(found)
 
@@ -509,10 +633,12 @@ def replay(raw: bytes, cols: int, rows: int) -> list[str]:
         return out.split("\n")
     finally:
         run(["tmux", "-L", sock, "kill-server"], timeout=5)
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
+        # tmux 3.6 leaves the socket behind after kill-server.
+        for leftover in (path, str(tmux_folder() / sock)):
+            try:
+                os.unlink(leftover)
+            except OSError:
+                pass
 
 
 def screen_of(eyes: dict | None) -> list[str] | None:
@@ -637,6 +763,7 @@ def world(home_override: str | None = None) -> dict:
             "cwd": row.get("cwd") or cwd_of(pid),
             "home": home,
             "plugin": plugin_source(argv),
+            "copy": plugin_copy(plugin_source(argv), row.get("config", "")),
             "eyes": eyes,
             "entry": entry,
             "debug": folder,
@@ -664,7 +791,7 @@ def ghost(home: pathlib.Path, session_id: str, entry: dict | None) -> dict:
     state = read_json(folder / "state.json") if folder else None
     return {
         "id": session_id, "short": short(session_id), "bg": "", "pid": 0, "kind": "gone", "status": "—", "name": "",
-        "cwd": str((entry or {}).get("cwd", "")), "home": home, "plugin": "?", "eyes": None, "entry": entry,
+        "cwd": str((entry or {}).get("cwd", "")), "home": home, "plugin": "?", "copy": {"folder": "", "version": "", "commit": "", "can_say": None}, "eyes": None, "entry": entry,
         "debug": folder, "state": state if isinstance(state, dict) else None, "is_me": False, "config": "", "argv": [],
     }
 
@@ -765,7 +892,11 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
         if mode != "off":
             out.append((NOTE, f"{who} says the tutor is {mode} and writes no state: its debug log is off (jack.py in), or it runs a copy of the plugin from before the log could be switched from outside"))
         if rows is not None and mode == "off" and any("1: Play" in row for row in rows):
-            out.append((BAD, f"{who} has the tutor's pane on its screen, and nothing says the tutor is on in it"))
+            if cannot_say(s):
+                out.append((NOTE, f"{who} has the tutor's pane on its screen and runs {copy_label(s)}, from before the tutor could say what it believes: "
+                                  f"jack sees its screen and its files, not its state. /bsd debug on typed into it, or /reload-plugins there while the switch is on, starts its log"))
+            else:
+                out.append((BAD, f"{who} has the tutor's pane on its screen, and nothing says the tutor is on in it"))
         return out
 
     at = state.get("at")
@@ -857,8 +988,13 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
             out.append((BAD, f"{who} has the tutor {mode} in the vertical layout, and Claude Code lists no pane of its own: nothing is on screen"))
         elif isinstance(opened, dict) and opened.get("isPlaced") is False:
             out.append((BAD, f"{who}'s pane is open and not drawn: {opened.get('reason') or 'no reason given'}. /bsd in that session draws it"))
+    width = (s["eyes"] or {}).get("cols") if isinstance(s["eyes"], dict) else None
     if rows is None:
         out.append((NOTE, f"{who}'s screen cannot be seen ({eyes_label(s['eyes'])}): what it says it shows is not checked"))
+    elif mode != "off" and isinstance(drawing, dict) and drawing.get("placement") == "dock" and isinstance(width, int) and width < DOCK_COLUMNS:
+        # The terminal was made narrower than a dock takes: the drawing on record is from the side, and the pane is
+        # being moved above the prompt. The next drawing is the one to hold against the screen.
+        out.append((NOTE, f"{who}'s pane was drawn docked ({drawing.get('columns')} columns) and its terminal is now {width} wide, under the {DOCK_COLUMNS} a dock takes: the pane is moving above the prompt (a resize), and is checked again next time"))
     elif mode != "off" and isinstance(drawing, dict) and isinstance(drawing.get("texts"), list):
         texts = [t for t in drawing["texts"] if isinstance(t, str)]
         head, rest = missing_pieces(texts, rows)
@@ -1193,9 +1329,11 @@ def cmd_status(args) -> int:
             says += f" · {'drives' if drives else 'does not drive'} · {dig(s['state'], 'session.layout')}"
         elif mode != "off":
             says += " · no state written"
+        elif cannot_say(s):
+            says = f"cannot say: {copy_label(s)} is from before the tutor could"
         where = tilde(s["cwd"])[-26:]
         mark = " · this session" if s["is_me"] else ""
-        copy = "" if s["plugin"] == "installed" else " · working copy"
+        copy = "" if s["plugin"] == "installed" or cannot_say(s) else f" · {copy_label(s)}"
         print(f"  {s['short']}  {s['kind'][:11]:11} {s['status'][:5]:5} {where:26}  {eyes_label(s['eyes'])[:28]:28}  {says}{copy}{mark}")
     for s in w["gone"]:
         entry = s["entry"] or {}
@@ -1204,11 +1342,9 @@ def cmd_status(args) -> int:
         print(f"  {s['short']}  {'not running':17} {tilde(s['cwd'])[-26:]:26}  {'':28}  {told}")
     print()
     found = check_homes(w)
+    # The same sessions `truth` checks: one that says nothing is still looked at, for a pane on its screen.
     for s in w["sessions"]:
         if s["is_me"]:
-            continue
-        mode = tutor_mode(s)
-        if mode == "off" and s["state"] is None:
             continue
         screens[s["id"]] = screen_of(s["eyes"])
         found += check_session(w, s, screens[s["id"]])
@@ -1350,7 +1486,21 @@ def cmd_ps(args) -> int:
     for s in w["sessions"]:
         info = procs.get(s["pid"], {})
         print(f"{s['pid']:>7} session {s['short']} {s['kind']} {s['status']} · state {info.get('state', '?')} · tty {tty_of(s['pid']) or 'none'} · {eyes_label(s['eyes'])}")
-        print(f"        plugin: {tilde(s['plugin'])} · data: {tilde(str(s['home']))}")
+        copy = s.get("copy") or {}
+        lag = behind(copy.get("commit") or "") if s["plugin"] == "installed" else None
+        words = [copy_label(s)]
+        if s["plugin"] == "installed" and copy.get("folder"):
+            words.append(tilde(copy["folder"]))
+        elif s["plugin"] not in ("installed", "?"):
+            words.append(tilde(s["plugin"]))
+        if lag:
+            words.append(f"{lag} commit{'s' if lag != 1 else ''} behind this working copy")
+        if copy_label(s) == "live copy":
+            stale = live_diff(REPO / "plugin", LIVE)
+            words.append(f"{len(stale)} file(s) behind the working copy (jack.py sync)" if stale else "as the working copy")
+        if cannot_say(s):
+            words.append("from before the tutor could say what it believes")
+        print(f"        plugin: {' · '.join(words)} · data: {tilde(str(s['home']))}")
         for kid in children(s["pid"], procs):
             print(f"{kid:>7}   └ {' '.join(procs[kid]['argv'])[:120]}")
     for pid, info in sorted(procs.items()):
@@ -1365,6 +1515,71 @@ def cmd_ps(args) -> int:
 
 def marked(home: pathlib.Path) -> bool:
     return (home / ".backseat-driver").exists()
+
+
+# How long a session is given to notice a synced live copy: Claude Code looks every 30 s while idle.
+SYNC_WAIT_S = 50
+# How long `sync` waits for a tutor to finish what it is in the middle of before it is reloaded.
+BUSY_WAIT_S = 90
+
+
+def cmd_sync(args) -> int:
+    """Brings the live copy up to the working copy, at a moment the tutor is not in the middle of something, and
+    waits for the sessions that run it to come back up. The owner (2026-10-05): "you might save several files and
+    should not update my running session until you're ready"."""
+    differing = live_diff(REPO / "plugin", LIVE)
+    w = world(args.home)
+    running = [s for s in w["sessions"] if not s["is_me"] and s["plugin"] not in ("installed", "?") and pathlib.Path(str(s["plugin"])) == LIVE]
+    if not differing:
+        print(f"the live copy ({tilde(str(LIVE))}) is the working copy already; {len(running)} session(s) run it")
+        return 0
+    print(f"{len(differing)} file(s) differ from the working copy: {', '.join(differing[:12])}{' …' if len(differing) > 12 else ''}")
+    # Not in the middle of a look or a review, which a reload would cut short.
+    if not args.now:
+        waited = time.time()
+        while time.time() - waited < BUSY_WAIT_S:
+            busy = [(s, is_busy(fresh_state(s))) for s in running if tutor_mode(s) != "off"]
+            busy = [(s, why) for s, why in busy if why]
+            if not busy:
+                break
+            print(f"  waiting: {'; '.join(f'{s['short']}: {why}' for s, why in busy)}", flush=True)
+            time.sleep(3)
+        else:
+            print(f"  still busy after {BUSY_WAIT_S} s: syncing anyway (--now skips the wait)")
+    LIVE.mkdir(parents=True, exist_ok=True)
+    started = now_ms()
+    excludes = [arg for skip in LIVE_SKIP for arg in ("--exclude", skip + "/")]
+    code, _, err = run(["rsync", "-a", "--delete", *excludes, str(REPO / "plugin") + "/", str(LIVE) + "/"], timeout=60)
+    if code != 0:
+        print(f"{BAD} rsync failed: {err.strip()}")
+        return 1
+    print(f"synced the live copy at {clock(started)}")
+    if not running:
+        print("no running session loads the live copy: the next `claude` the owner starts gets it")
+        return 0
+    seen: set[str] = set()
+    deadline = time.time() + SYNC_WAIT_S
+    while time.time() < deadline and len(seen) < len(running):
+        time.sleep(1)
+        for s in running:
+            if s["id"] in seen:
+                continue
+            state = fresh_state(s)
+            loaded_at = dig(state, "loaded.at") if state else None
+            if isinstance(loaded_at, (int, float)) and loaded_at >= started:
+                seen.add(s["id"])
+                print(f"  {FINE} {s['short']} loaded the live copy {(loaded_at - started) / 1000:.1f} s after the sync (tutor {state.get('mode')})")
+    for s in running:
+        if s["id"] not in seen:
+            print(f"  {BAD if tutor_mode(s) != 'off' else NOTE} {s['short']} has not loaded the live copy within {SYNC_WAIT_S} s"
+                  + (" (its debug log is off, so this cannot be seen: jack.py in)" if s["state"] is None else ": /reload-plugins in it"))
+    print()
+    found = check_homes(w)
+    for s in running:
+        if tutor_mode(s) != "off":
+            found += check_session(w, s, screen_of(s["eyes"]))
+    bad = print_findings(found, False)
+    return 1 if bad or len(seen) < len([s for s in running if tutor_mode(s) != "off"]) else 0
 
 
 def cmd_in(args) -> int:
@@ -1724,6 +1939,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("path", nargs="?", help="one part of it: lease, deadlines, shown.pane.texts, pane.watch")
     add("files", cmd_files, session=False)
     add("ps", cmd_ps, session=False)
+    p = add("sync", cmd_sync, session=False, help="bring the live copy the owner's sessions load up to the working copy, and watch them reload")
+    p.add_argument("--now", action="store_true", help="do not wait for a look or a review to finish first")
     p = add("tour", cmd_tour)
     p.add_argument("--steps", help=f"which steps, in order (default all): {','.join(TOUR_STEPS)}")
     p.add_argument("--write", action="store_true", help="let the save and commit steps write into a repository outside the temp folder")

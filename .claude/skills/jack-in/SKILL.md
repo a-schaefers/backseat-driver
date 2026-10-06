@@ -56,6 +56,7 @@ checks that passed too: a check that did not run proves nothing.
 | `state [S] [path]` | the tutor's own state, or a part: `state lease`, `state deadlines`, `state shown.pane.texts`, `state session` |
 | `files` | the data folder, with ages |
 | `ps` | every session's process, its terminal, which copy of the plugin it runs, its data folder, its children |
+| `sync` | bring the live copy the owner's sessions load (`local/live/plugin`) up to `plugin/`, once a look or review under way is over, and watch those sessions reload. The only way a change reaches the owner's running session: a save under `plugin/` alone does nothing there. `--now` skips the wait |
 
 `S` is the start of a session id, a tmux session's name, or a background
 session's short id. Left out, it is the one session with the tutor on. A session
@@ -110,8 +111,16 @@ scripts/jack.py --home /tmp/bsd-jack-home in
 scripts/jack.py keys jack /bsd Enter
 ```
 
-- The owner has the plugin installed. A session on the working copy has to
-  switch the installed one off (`enabledPlugins` above), or both load.
+- The owner's own `claude` is a shell function that adds `--plugin-dir` for
+  the live copy (`local/live/plugin`, git-ignored), and nothing is installed.
+  Edit `plugin/` freely; run `scripts/jack.py sync` when the change is whole
+  and checked, and never write into `local/live/` by hand. Were a marketplace copy
+  installed again, a session on the working copy would have to switch it off
+  (`enabledPlugins` above), or both load.
+- `ps` says which copy each session runs. One from before the tutor followed
+  the debug switch (`cannot say` in the status table) shows its screen and its
+  files and nothing of what it believes: `/reload-plugins` in it, with the
+  switch on, starts its log.
 - `--home` keeps `in` and `out` to the scratch folder. Without it they also
   switch the log in the owner's real one.
 - Real model calls are made on the owner's plan: haiku, short, and say what you spent.

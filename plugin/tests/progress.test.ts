@@ -385,6 +385,32 @@ sessionTest('with no email in git, nothing can be confirmed as yours', { options
   await ui.unmount()
 })
 
+sessionTest('an email set in git after switch-on counts from the next commit', async ($, on) => {
+  // The owner (2026-10-05) set user.email between /bsd and their first commit, and the commit counted for nothing:
+  // the identity was read once, at switch-on.
+  const options = { head: { 'stats.py': MEAN }, email: '' }
+  const session = stubSession(on, options)
+  await $.session.start(SESSION)
+  await $.command.run(typed('bsd'))
+  await session.clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-profile' })
+  expect(await ui.find({ type: 'Text', text: 'Git has no user.email here, so no commit can be confirmed as yours and nothing is scored.' })).toBeDefined()
+
+  session.write('stats.py', `${MEAN}\n\ndef total(xs):\n    result = sum(xs)\n    return result\n`)
+  await session.clock.advance(4000)
+  options.email = 'me@example.com'
+  session.commit('Add total', { author: { name: 'Me', email: 'me@example.com' } })
+  await session.clock.advance(2000)
+  session.assess(OBSERVED(''))
+  await $.turn.complete(session.finish(1, 'Good, small change.'))
+  await session.clock.settle()
+
+  expect(session.assessments.length).toBe(1)
+  expect(await ui.find({ type: 'Text', text: 'Judged only on commits by me@example.com, and only on the lines they add.' })).toBeDefined()
+  await ui.unmount()
+})
+
 sessionTest('forgetting a language forgets its progress too', async ($, on) => {
   const placed = withAssessment(emptyRecord('python'), OBSERVED('aaaaaaa'), [{ hash: 'a'.repeat(40), short: 'aaaaaaa', weight: 1 }], 'stats', 1).record
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { 'progress/python.json': placed } })
