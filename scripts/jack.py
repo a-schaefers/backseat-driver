@@ -728,6 +728,24 @@ def missing_pieces(texts: list[str], rows: list[str]) -> tuple[list[str], list[s
     return head, rest
 
 
+# The last row of the pane says where the keyboard is and how the pane is driven: the word, and how its hint ends
+# (plugin/hooks/pane.tsx `KEYBOARD_HINT`, `FOCUSED_HINT`).
+KEYS_HINTS = {"Keys off": "to use the keys.", "Keys on": "back to the prompt."}
+
+
+def check_keys_row(who: str, texts: list[str], rows: list[str]) -> list[tuple[str, str]]:
+    """The keys row's hint, whole on the screen: a drawing with the word for where the keyboard is must show the end
+    of the hint after it too, wrapped or not. A 46-column dock cut it to "Click here or press Ctr…" and the screen
+    check let it pass, the hint being past the pieces it holds whole (the first ui-truth pass, 2026-10-06)."""
+    where = flows(rows)
+    for word, tail in KEYS_HINTS.items():
+        if word in texts and is_on_screen(word, where):
+            if not any(tail in flow for flow in where):
+                return [(BAD, f"{who}'s keys row is cut: “{word}” is on the screen and the hint after it does not end in “{tail}”: the person is not told how to use the keys")]
+            return [(FINE, f"{who}'s keys row is whole: “{word}” and its hint")]
+    return []
+
+
 def pieces_below(texts: list[str], rows: list[str]) -> int:
     """How many pieces from below the top of the drawing are really on the screen: long enough to be told apart, and found."""
     where = flows(rows)
@@ -1057,6 +1075,8 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
             out.append((BAD, f"{who} says its {where} shows {quoted}{' and more' if len(head) > 3 else ''}: not on its screen (drawn {ago(now - (drawing.get('at') or now))} ago, {drawing.get('placement') or 'above the prompt'}, {drawing.get('columns')} columns).{cut}"))
         else:
             out.append((FINE, f"{who}'s {where} is on its screen as it says ({len(texts) - len(rest)} of {len(texts)} pieces{', the rest below the fold or cut' if rest else ''})"))
+        if not minimized:
+            out += check_keys_row(who, texts, rows)
     elif mode != "off" and rows is not None:
         out.append((BAD, f"{who} has the tutor {mode} and has drawn nothing in the {layout} layout"))
     if rows is not None and mode == "off" and any("1: Play" in row and "2: Review" in row for row in rows):
@@ -1977,7 +1997,9 @@ def cmd_watch(args) -> int:
 
 # ------------------------------------------------------------------ the tour ----
 TOUR_STEPS = ("on", "tabs", "status", "save", "commit", "pause", "off")
-TAB_IDS = {"1": "play", "2": "review", "3": "explain", "4": "profile", "5": "settings"}
+# The pane's tabs by their digits (plugin/hooks/pane.tsx `TABS`): 4 is Growth under its old id. 5 was Settings until
+# Lessons took its place (2026-10-05); the tour pressed 5 and waited for Settings until the first ui-truth pass saw it.
+TAB_IDS = {"1": "play", "2": "review", "3": "explain", "4": "profile", "5": "lessons", "6": "settings"}
 # A deliberate mistake for the play-by-play to find: an average that is off by one.
 TOUR_FILE = "jack_tour.py"
 TOUR_TEXT = "def average(xs):\n    return sum(xs) / len(xs) + 1\n"

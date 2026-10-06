@@ -2594,7 +2594,8 @@ async function stopDriving($: EngineInterface, settings: Settings): Promise<void
 async function followDriver($: EngineInterface, settings: Settings): Promise<void> {
   if (mode === 'off' || leaseState.isDriver) return
   await refreshShared($, settings)
-  await readFocus($)
+  // The editors' files: the light, and the caret for the Explain tab (there is no journal here for it to feed).
+  await pollFocus($)
   await followProject($, settings)
 }
 

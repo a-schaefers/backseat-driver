@@ -129,7 +129,10 @@ export async function refreshView(ports: FollowPorts, state: FollowState, isAske
     if (run !== state.viewRun || engine !== state.explainer) return
     state.viewedStamp = stamp
     await ports.setView(() => view)
-    const text = JSON.stringify(view)
+    // The view and who set the spot, which the file says too: a reload restores the spot as the pane's and writes it, and
+    // the editor's same line (one past the file's end, clamped) was not written again, so the file said `pane` while the
+    // state said `editor` (the first ui-truth pass, 2026-10-06).
+    const text = JSON.stringify([spot.source, view])
     // One file serves every session and every project. It is written by the session that drives this project,
     // and only while an editor's caret is in this project, or no editor is open at all.
     const isOurs = ports.isDriver() && (state.focusText !== null || !state.isAnyEditor)
@@ -200,8 +203,9 @@ export async function followEditor(ports: FollowPorts, state: FollowState, now: 
   const spot = parseFocusFile(state.focusText, ports.repoRoot())
   if (spot === null) return
   state.editorFocusAt = now
-  // An editor is reporting its cursor: from now on its file is checked ten times a second.
-  watchClosely(ports, state)
+  // An editor is reporting its cursor: from now on its file is checked ten times a second. In a session that does not
+  // drive, only its open Explain tab is worth that, and opening the tab starts the fast lane by itself.
+  if (ports.isDriver()) watchClosely(ports, state)
   await setFocus(ports, state, { ...spot, source: 'editor' }, false)
 }
 
@@ -217,8 +221,9 @@ export async function pollFocus(ports: FollowPorts, state: FollowState): Promise
 /** Whether anyone can see the Explain view: the tab is open, or an editor is showing it. */
 export async function isWatched(ports: FollowPorts, state: FollowState): Promise<boolean> {
   if (await ports.isExplainShown()) return true
-
-  return state.focus?.source === 'editor' && (await ports.now()) - state.editorFocusAt < EDITOR_LIVE_MS
+  // A session that does not drive keeps no journal and writes no view.json: with its tab closed, following the caret
+  // ten times a second served nothing (the first ui-truth pass, 2026-10-06). It follows at the lease's beat instead.
+  return ports.isDriver() && state.focus?.source === 'editor' && (await ports.now()) - state.editorFocusAt < EDITOR_LIVE_MS
 }
 
 /**

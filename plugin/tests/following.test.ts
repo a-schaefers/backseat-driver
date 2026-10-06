@@ -66,3 +66,13 @@ test('nobody watches an unseen tab, and a lookup without the engine answers noth
   expect(await isWatched(w.ports, state)).toBe(false)
   expect(await lookUp(w.ports, state, { path: 'a.py', line: 1 })).toBe('')
 })
+
+test('an editor that moved its caret lately is watched by the driver, and by a session that does not drive only through its open tab', async () => {
+  const state = freshFollowState()
+  state.focus = { path: 'a.py', line: 3, source: 'editor' }
+  state.editorFocusAt = 5500
+
+  expect(await isWatched(world().ports, state)).toBe(true)
+  expect(await isWatched(world({ isDriver: () => false }).ports, state)).toBe(false)
+  expect(await isWatched(world({ isDriver: () => false, isExplainShown: async () => true }).ports, state)).toBe(true)
+})

@@ -243,26 +243,48 @@ function controlsRow({ Box, Text }: Pick<Kit, 'Box' | 'Text'>, view: Pick<PaneVi
   )
 }
 
-/** The last row: whether the keys work now, and how the pane is driven. On every tab, since nothing else says it. */
-function keysRow({ Box, Text, Button }: Pick<Kit, 'Box' | 'Text' | 'Button'>, view: Pick<PaneView, 'isFocused'>, actions: Pick<PaneActions, 'onMinimize'>) {
+/** Whether the keys row fits one line of the pane: "x: minimize", the word for where the keyboard is, and the hint after it. */
+export function keysRowFits(view: Pick<PaneView, 'isFocused' | 'columns'>, hasMinimize: boolean): boolean {
+  const hint = view.isFocused ? FOCUSED_HINT : KEYBOARD_HINT
+  const word = view.isFocused ? 'Keys on' : 'Keys off'
+
+  return (hasMinimize ? 'x: minimize'.length + 2 : 0) + word.length + 1 + hint.length <= view.columns
+}
+
+/**
+ * The last row: whether the keys work now, and how the pane is driven. On
+ * every tab, since nothing else says it. Where one line cannot hold it (a
+ * 46-column dock cut the hint to "Click here or press Ctr…", and a 73-column
+ * one cuts the focused hint; the first ui-truth pass, 2026-10-06) the hint
+ * goes on a line of its own under the word, and wraps rather than being cut.
+ */
+function keysRow({ Box, Text, Button }: Pick<Kit, 'Box' | 'Text' | 'Button'>, view: Pick<PaneView, 'isFocused' | 'columns'>, actions: Pick<PaneActions, 'onMinimize'>) {
+  const isOneLine = keysRowFits(view, actions.onMinimize !== undefined)
+  const hint = view.isFocused ? FOCUSED_HINT : KEYBOARD_HINT
+
   return (
-    <Box flexDirection="row" columnGap={2}>
-      {actions.onMinimize !== undefined && (
-        <Box flexShrink={0}>
-          <Button key="minimize" label="minimize" hotkey="x" plain onPress={() => actions.onMinimize?.()} />
+    <Box flexDirection="column">
+      <Box flexDirection="row" columnGap={2}>
+        {actions.onMinimize !== undefined && (
+          <Box flexShrink={0}>
+            <Button key="minimize" label="minimize" hotkey="x" plain onPress={() => actions.onMinimize?.()} />
+          </Box>
+        )}
+        <Box flexDirection="row" columnGap={1} flexShrink={1}>
+          {/* The word that says where the keyboard is keeps its width, and only the hint after it gives way (seen live: "Keys" with the "on" squeezed out). */}
+          <Box flexShrink={0}>
+            <Text bold color={view.isFocused ? 'green' : 'yellow'}>
+              {view.isFocused ? 'Keys on' : 'Keys off'}
+            </Text>
+          </Box>
+          {isOneLine && (
+            <Text dimColor wrap="truncate-end">
+              {hint}
+            </Text>
+          )}
         </Box>
-      )}
-      <Box flexDirection="row" columnGap={1} flexShrink={1}>
-        {/* The word that says where the keyboard is keeps its width, and only the hint after it gives way (seen live: "Keys" with the "on" squeezed out). */}
-        <Box flexShrink={0}>
-          <Text bold color={view.isFocused ? 'green' : 'yellow'}>
-            {view.isFocused ? 'Keys on' : 'Keys off'}
-          </Text>
-        </Box>
-        <Text dimColor wrap="truncate-end">
-          {view.isFocused ? FOCUSED_HINT : KEYBOARD_HINT}
-        </Text>
       </Box>
+      {!isOneLine && <Text dimColor>{hint}</Text>}
     </Box>
   )
 }

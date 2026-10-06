@@ -324,6 +324,21 @@ class Disagreements(unittest.TestCase):
         self.assertIn("“6: Set”", found[0])
         self.assertIn("the row is cut, not scrolled", found[0])
 
+    def test_a_keys_row_cut_short_of_its_hint(self):
+        # The first ui-truth pass, 2026-10-06: a 46-column dock cut the hint to "Click here or press Ctr…".
+        told = state(self.now)
+        told["shown"]["pane"]["texts"] = [*TEXTS, "x: minimize", "Keys off", "Click here or press Ctrl+X Tab to use the keys."]
+        s = session(state=told)
+        cut = [*DOCKED[:-1], "❯                                                   │x: minimize  Keys off Click here or press Ctr…"]
+        found = bad(jack.check_session(world([s], now=self.now), s, cut))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("keys row is cut", found[0])
+        # Wrapped onto a line of its own, it is whole.
+        whole = [*DOCKED[:-1], "❯                                                   │x: minimize  Keys off", "                                                    │Click here or press Ctrl+X Tab to use the keys."]
+        found = jack.check_session(world([s], now=self.now), s, whole)
+        self.assertEqual(bad(found), [])
+        self.assertTrue(any("keys row is whole" in text for _, text in found), found)
+
     def test_watchers_missing_right_after_a_reload_are_being_started_again(self):
         # The procs table has no inotifywait under this fake pid, and the state says two are live.
         live = {"pushers": [{"role": "tree", "isLive": True}, {"role": "focus", "isLive": True}]}

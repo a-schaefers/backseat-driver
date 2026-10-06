@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Note, OutlineRow, Watch } from '../types'
 import { NO_VIEW } from '../core/explainer'
-import { currentNote, detailMarkdown, explainNotice, FOCUSED_HINT, jumpHeading, KEYBOARD_HINT, nameColumns, outlineName, personaLine, reviewBanner, reviewPlace, reviewSpots, stateMark, statusLine, tabBadge, tabRow, tabRows, underlineSpans, waitingLine } from '../hooks/pane'
+import { currentNote, detailMarkdown, explainNotice, FOCUSED_HINT, jumpHeading, KEYBOARD_HINT, keysRowFits, nameColumns, outlineName, personaLine, reviewBanner, reviewPlace, reviewSpots, stateMark, statusLine, tabBadge, tabRow, tabRows, underlineSpans, waitingLine } from '../hooks/pane'
 import type { PaneView } from '../hooks/pane'
 import { paneContext } from '../core/prompts'
 import { readableReview, reviewHistory, shownReview, spotsIn, SURVEY_SUBJECT, withReviewChange } from '../core/review'
@@ -182,6 +182,13 @@ test('the tab row keeps what the tabs say for as long as there is room, and neve
     { from: 3, labels: ['Growth', 'Lessons', 'Settings'], gap: 3 },
   ])
   expect(tabRows({ ...busy, columns: 72 })).toEqual([{ from: 0, labels: ['Play', 'Review (new)', 'Explain', 'Growth', 'Lessons', 'Settings'], gap: 2 }])
+  // The keys row: one line where "x: minimize", the word and the hint fit, else the hint on a line of its own (a
+  // 46-column dock cut it, and a 73-column one cuts the focused hint: the first ui-truth pass, 2026-10-06).
+  expect(keysRowFits({ isFocused: false, columns: 73 }, true)).toBe(true)
+  expect(keysRowFits({ isFocused: false, columns: 46 }, true)).toBe(false)
+  expect(keysRowFits({ isFocused: true, columns: 73 }, true)).toBe(false)
+  expect(keysRowFits({ isFocused: true, columns: 96 }, true)).toBe(true)
+  expect(keysRowFits({ isFocused: false, columns: 56 }, false)).toBe(true)
   expect(tabRow({ ...busy, columns: 67 })).toEqual({ labels: ['Play', 'Review (new)', 'Explain', 'Growth', 'Lessons', 'Settings'], gap: 1 })
   // A docked pane: the longest names give way.
   expect(tabRow({ ...busy, columns: 64 })).toEqual({ labels: ['Play', 'Review (new)', 'Expl', 'Growth', 'Lessons', 'Set'], gap: 1 })
