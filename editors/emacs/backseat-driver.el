@@ -173,7 +173,7 @@
 (define-minor-mode backseat-driver-mode
   "Tell Backseat Driver where you are in your code."
   :global t
-  :lighter nil
+  :lighter " Backseat"
   (if backseat-driver-mode
       (progn
         (backseat-driver--sweep)
