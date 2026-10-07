@@ -471,11 +471,13 @@ class Disagreements(unittest.TestCase):
         write = lambda **record: (home / "progress" / "shell.json").write_text(json.dumps({"v": 1, "language": "shell", "history": placed, **record}))
         # Never placed, with the model's words for the level it proposed: the Growth tab would say "Not placed yet" over them.
         (home / "progress" / "php.json").write_text(json.dumps({"v": 1, "language": "php", "level": None, "history": [], "report": {"why": "", "next": "To reach junior, show more.", "at": 3000}, "withdrawnAt": 0}))
-        words = [text for level, text in jack.check_progress_files(home) if level == jack.BAD and "php.json" in text]
+        words = [text for level, text in jack.check_progress_files(home) if level == jack.NOTE and "php.json" in text]
         self.assertEqual(len(words), 1, words)
-        self.assertIn("the model's words for the level it proposed", words[0])
-        (home / "progress" / "php.json").write_text(json.dumps({"v": 1, "language": "php", "level": None, "history": [], "report": {"why": "", "next": "", "working": ["forms"], "at": 3000}, "withdrawnAt": 0}))
+        self.assertIn("keeps the model's words for the level it proposed", words[0])
+        self.assertIn("a session with php in play mends the file", words[0])
         self.assertEqual([text for level, text in jack.check_progress_files(home) if level == jack.BAD and "php.json" in text], [])
+        (home / "progress" / "php.json").write_text(json.dumps({"v": 1, "language": "php", "level": None, "history": [], "report": {"why": "", "next": "", "working": ["forms"], "at": 3000}, "withdrawnAt": 0}))
+        self.assertEqual([text for level, text in jack.check_progress_files(home) if level != jack.FINE and "php.json" in text], [])
         # Withdrawn by a copy from before withdrawals were marked: the report written under the level is the placement's.
         write(level=None, report={"why": "Gaps keep it at beginner.", "at": 2000}, withdrawnAt=0)
         found = bad(jack.check_progress_files(home))
@@ -488,7 +490,8 @@ class Disagreements(unittest.TestCase):
         write(level=None, report={"why": "", "next": "", "working": ["edge cases"], "at": 4000}, withdrawnAt=3000)
         self.assertEqual(bad(jack.check_progress_files(home)), [])
         write(level=None, report={"why": "No level yet: four of eight observations.", "at": 4000}, withdrawnAt=3000)
-        self.assertIn("the model's words for the level it proposed", bad(jack.check_progress_files(home))[0])
+        self.assertEqual(bad(jack.check_progress_files(home)), [])
+        self.assertTrue(any(level == jack.NOTE and "keeps the model's words" in text for level, text in jack.check_progress_files(home)))
         write(level="junior", report=None)
         self.assertIn("is at junior and its history last reached beginner", bad(jack.check_progress_files(home))[0])
         write(level=None, report=None)

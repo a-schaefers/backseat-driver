@@ -968,7 +968,9 @@ def check_progress_files(home: pathlib.Path) -> list[tuple[str, str]]:
         if is_stale:
             out.append((BAD, f"progress/{file.name} has no level and still the report of the placement withdrawn: the Growth tab would say “Not placed yet” over its words"))
         elif level is None and has_words:
-            out.append((BAD, f"progress/{file.name} has no level and the model's words for the level it proposed (why, and what the next level needs): the Growth tab would say “Not placed yet” over them"))
+            # Nothing draws or tells them since 2026-10-06, and a session with the language in play mends the file at
+            # switch-on: until one does, the file keeps them, which is worth a note and no more.
+            out.append((NOTE, f"progress/{file.name} has no level and keeps the model's words for the level it proposed (why, and what the next level needs): nothing shows them, and a session with {record.get('language') or 'the language'} in play mends the file at switch-on"))
         elif level and history and history[-1].get("to") != level:
             out.append((BAD, f"progress/{file.name} is at {level} and its history last reached {history[-1].get('to')}: a level the history does not account for"))
         else:
