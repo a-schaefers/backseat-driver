@@ -3,6 +3,8 @@ import { expect } from 'claude-code/testing'
 import { PANE, ROOT, SESSION, sessionTest, stubSession, typed } from './kit'
 import { NO_LOOK_YET, NO_NOTES } from '../hooks/pane'
 import { NO_SAVE_YET, NOTHING_NEW } from '../core/look'
+import { REPOSITORY_APPEARED } from '../core/mode'
+import { SELF_CHECK_MS } from '../core/sessions'
 
 const MEAN = 'def mean(xs):\n    return sum(xs) / len(xs)\n'
 const EMPTY_LIST = {
@@ -391,5 +393,24 @@ sessionTest('a look asked for before any save says that the tree at switch-on is
   await ui.press({ key: 'look' })
   await session.clock.settle()
   expect(session.toasts.at(-1)).toBe(NOTHING_NEW)
+  await ui.unmount()
+})
+
+sessionTest('a repository made after switch-on is taken up at the next look at itself', async ($, on) => {
+  // The owner switched on in a folder before `git init`, and the session never noticed the repository (the ninth ui-truth pass, 2026-10-07).
+  const options = { isRepository: false, head: { 'stats.py': 'x = 1\n' } }
+  const session = stubSession(on, options)
+  await $.session.start(SESSION)
+  await $.command.run(typed('backseat'))
+  await session.clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: 'On. This folder is not a git repository, so there is no play-by-play.' })).toBeDefined()
+  options.isRepository = true
+  await session.clock.advance(SELF_CHECK_MS + 100)
+  await session.clock.settle()
+  await session.clock.advance(1000)
+  await session.clock.settle()
+  expect(await ui.find({ type: 'Text', text: 'On. Watching for your next save.' })).toBeDefined()
+  expect(session.toasts).toContain(REPOSITORY_APPEARED)
   await ui.unmount()
 })

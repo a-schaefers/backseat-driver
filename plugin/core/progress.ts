@@ -338,9 +338,13 @@ export function withAssessment(
  * back when there is nothing to drop.
  */
 export function unplaced(record: ProgressRecord): ProgressRecord {
-  if (record.level !== null || record.report === null || (record.report.why === '' && record.report.next === '')) return record
+  if (record.level !== null || record.report === null) return record
+  const { report } = record
+  // Its praise for the commit goes with the level too: it stood under "Not placed yet" about a commit that no longer
+  // existed (the ninth ui-truth pass, 2026-10-07; the owner: "don't flatter them").
+  if (report.why === '' && report.next === '' && report.encouragement === '') return record
 
-  return { ...record, report: { ...record.report, why: '', next: '' } }
+  return { ...record, report: { ...report, why: '', next: '', encouragement: '' } }
 }
 
 /**

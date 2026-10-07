@@ -52,14 +52,15 @@ local function real(path)
   return uv.fs_realpath(path) or path
 end
 
--- The nearest folder upward with a .git (a folder, or a file in a worktree), remembered per folder.
+-- The nearest folder upward with a .git (a folder, or a file in a worktree), remembered per folder once found.
+-- A folder with none is looked at again each time: a repository may be made under the editor (2026-10-06).
 local function repo_root(file)
   local dir = vim.fs.dirname(file)
-  if state.roots[dir] ~= nil then return state.roots[dir] or nil end
+  if state.roots[dir] then return state.roots[dir] end
   local found = vim.fs.find('.git', { path = dir, upward = true, limit = 1 })[1]
-  local root = found and real(vim.fs.dirname(found)) or false
-  state.roots[dir] = root
-  return root or nil
+  local root = found and real(vim.fs.dirname(found)) or nil
+  if root then state.roots[dir] = root end
+  return root
 end
 
 local function file_of(buf)

@@ -519,12 +519,13 @@ test('under no level the report loses the model\'s words for the level it propos
   expect(first.record.report?.why).toBe('')
   expect(first.record.report?.next).toBe('')
   expect(first.record.report?.working).toEqual(SAW.working)
-  expect(first.record.report?.encouragement).toBe(SAW.encouragement)
+  // Its praise for that commit goes with the level too (the owner: "don't flatter them").
+  expect(first.record.report?.encouragement).toBe('')
   expect(recordText(first.record)).not.toMatch('Why:')
   expect(recordText(first.record)).not.toMatch('For the next level:')
   const placed = { ...emptyRecord('python'), level: 'junior' as const, report: { why: 'w', next: 'n', working: [], encouragement: '', at: 1 } }
   expect(unplaced(placed)).toBe(placed)
-  expect(unplaced({ ...placed, level: null }).report).toEqual({ why: '', next: '', working: [], encouragement: '', at: 1 })
-  const clean = { ...placed, level: null, report: { ...placed.report, why: '', next: '' } }
+  expect(unplaced({ ...placed, level: null, report: { ...placed.report, encouragement: 'Nice.' } }).report).toEqual({ why: '', next: '', working: [], encouragement: '', at: 1 })
+  const clean = { ...placed, level: null, report: { ...placed.report, why: '', next: '', encouragement: '' } }
   expect(unplaced(clean)).toBe(clean)
 })

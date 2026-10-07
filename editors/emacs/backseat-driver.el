@@ -72,16 +72,15 @@
       (file-truename name))))
 
 (defun backseat-driver--root (file)
-  "The nearest folder above FILE with a .git, remembered per folder."
+  "The nearest folder above FILE with a .git, remembered per folder once found.
+A folder with none is looked at again each time: a repository may be made
+under the editor (one was, 2026-10-06, and the report said no root for an hour)."
   (let ((dir (file-name-directory file)))
-    (pcase (gethash dir backseat-driver--roots 'unknown)
-      ('unknown
-       (let* ((found (locate-dominating-file dir ".git"))
-              (root (and found (directory-file-name (file-truename found)))))
-         (puthash dir (or root 'none) backseat-driver--roots)
-         root))
-      ('none nil)
-      (root root))))
+    (or (gethash dir backseat-driver--roots)
+        (let* ((found (locate-dominating-file dir ".git"))
+               (root (and found (directory-file-name (file-truename found)))))
+          (when root (puthash dir root backseat-driver--roots))
+          root))))
 
 (defun backseat-driver--report ()
   "What Emacs says about itself, or nil when the selected buffer visits no file."

@@ -264,9 +264,18 @@ export function insightsFor(
   })
 }
 
-/** An insight as one line of text, with the commit it comes from. */
-export function insightLine(insight: KeptInsight): string {
-  return insight.commit === '' ? insight.text : `${insight.text} (deep review of ${insight.commit})`
+/**
+ * An insight as one line of text, with where it comes from: a deep review of
+ * its commit, or the first look around the project, which keeps its insights
+ * under HEAD as it stood (`surveyAt` is that look's time; the Explain tab
+ * credited them to "a deep review of 570e787" that the Deep review tab did
+ * not have: the ninth ui-truth pass, 2026-10-07).
+ */
+export function insightLine(insight: KeptInsight, surveyAt?: number): string {
+  if (insight.commit === '') return insight.text
+  if (surveyAt !== undefined && insight.at === surveyAt) return `${insight.text} (from the first look around, at ${insight.commit})`
+
+  return `${insight.text} (deep review of ${insight.commit})`
 }
 
 /** The overview with the commit it was written at, or '' when there is none. */
@@ -296,7 +305,7 @@ export function projectBrief(
     const role = project.roles[file]
     if (role !== undefined) about.push(`- ${file}: ${role}`)
     for (const insight of project.insights.filter(kept => kept.file === file && isCurrent(kept)).slice(0, 4)) {
-      about.push(`- ${file}${insight.symbol === '' ? '' : `, ${insight.symbol}`}: ${insightLine(insight)}`)
+      about.push(`- ${file}${insight.symbol === '' ? '' : `, ${insight.symbol}`}: ${insightLine(insight, project.survey?.at)}`)
     }
   }
   if (about.length > 0) lines.push('What the deep review has said about these files, where that code has not changed since:', ...about)

@@ -141,7 +141,7 @@ import {
   releaseSkipped as releaseSkippedOf,
 } from '../core/progressing'
 import type { ProgressPorts, ProgressState } from '../core/progressing'
-import { helpText, isModeRequest, parseRequest, SETTINGS_OFF, transition } from '../core/mode'
+import { helpText, isModeRequest, parseRequest, REPOSITORY_APPEARED, SETTINGS_OFF, transition } from '../core/mode'
 import { isNoiseFile } from '../core/noise'
 import { isLookDue, playOf, wakeAt } from '../core/play'
 import type { Play, PlayFacts } from '../core/play'
@@ -2628,7 +2628,40 @@ async function checkBound($: EngineInterface, settings: Settings): Promise<void>
  * it any of the three.
  */
 async function checkSelf($: EngineInterface, settings: Settings, firedAt: number | null = null): Promise<void> {
-  await checkSelfOf(carryPortsOf($, settings), carryState, () => followDebug($, settings), firedAt)
+  await checkSelfOf(
+    carryPortsOf($, settings),
+    carryState,
+    async () => {
+      await followDebug($, settings)
+      await noticeRepository($, settings)
+    },
+    firedAt,
+  )
+}
+
+/** True while a repository that appeared is being taken up, so that two looks at itself do not both start. */
+let isNoticingRepository = false
+
+/**
+ * A folder that becomes a repository while the tutor is on is taken up at
+ * the next look at itself: the owner switched on in `~/repos/php-hello/public_html`
+ * before `git init`, and the session never noticed the repository, the first
+ * commit or the saves (the ninth ui-truth pass, 2026-10-07). Taken up as at
+ * a fresh switch-on, so that the project gets its first look around.
+ */
+async function noticeRepository($: EngineInterface, settings: Settings): Promise<void> {
+  if (mode !== 'on' || repoRoot !== '' || isNoticingRepository) return
+  isNoticingRepository = true
+  try {
+    const top = await git($, await sessionCwd($), ['rev-parse', '--show-toplevel'])
+    if (top.exitCode !== 0 || top.stdout.trim() === '' || mode !== 'on' || repoRoot !== '') return
+    trace($, 'watch', 'repository appeared', () => ({ root: top.stdout.trim() }))
+    engagement += 1
+    await engage($, settings, engagement, true, null, null)
+    toastPerson($, REPOSITORY_APPEARED)
+  } finally {
+    isNoticingRepository = false
+  }
 }
 
 /** What a session that does not drive says when it is asked for a look or a review. */
@@ -3721,7 +3754,7 @@ async function startExplaining($: EngineInterface, settings: Settings, run: numb
           now: () => $.clock.now(),
           project: () => ({ name: projectId(root).replace(/-[0-9a-f]{8}$/, ''), overview: project === null ? '' : overviewLine(project) }),
           insights: (path, name, symbolPrint, filePrint, isMentioned) =>
-            project === null ? [] : insightsFor(project, path, name, symbolPrint, filePrint, isMentioned).map(insightLine),
+            project === null ? [] : insightsFor(project, path, name, symbolPrint, filePrint, isMentioned).map(insight => insightLine(insight, project?.survey?.at)),
           // Paused, or with another session driving this project, nothing is fetched unless it is asked for.
           mode: () => (mode === 'off' ? 'off' : mode === 'paused' || !leaseState.isDriver ? 'on request' : settings.explain.mode),
           // While Claude is not answering, or refuses this job's model, only what the person asks for is tried.

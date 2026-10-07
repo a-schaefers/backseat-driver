@@ -90,6 +90,9 @@ test('insightsFor shows an insight only beside the exact code it was written abo
   expect(insightsFor(project, 'stats.py', 'mean', 'other', 'file')).toEqual([onFile])
   expect(insightsFor(project, 'other.py', 'variance', 'sym', 'file')).toEqual([])
   expect(insightLine(onSymbol)).toBe('Population variance. (deep review of aaa1111)')
+  // The first look around keeps its insights under HEAD as it stood: credited to it, not to a review (the ninth ui-truth pass, 2026-10-07).
+  expect(insightLine(onSymbol, 1)).toBe('Population variance. (from the first look around, at aaa1111)')
+  expect(insightLine(onSymbol, 2)).toBe('Population variance. (deep review of aaa1111)')
 })
 
 test('what the other two jobs are told: a brief for the play-by-play, a digest for the next review', async () => {

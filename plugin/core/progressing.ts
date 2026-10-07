@@ -189,8 +189,12 @@ export async function releaseSkipped(ports: Pick<ProgressPorts, 'git' | 'store' 
  * in a session since closed, before the reason was kept).
  */
 export async function explainUnassessed(ports: ProgressPorts, state: ProgressState): Promise<void> {
-  const short = ports.latestReviewed()
-  if (short === '' || state.skipped !== '' || !ports.settings.isProgressOn || ports.repoRoot() === '' || ports.dataRoot() === '') return
+  if (state.skipped !== '' || !ports.settings.isProgressOn || ports.repoRoot() === '' || ports.dataRoot() === '') return
+  // With no review of a commit, HEAD itself: the owner's first commit in a project, an import of 385 files, was
+  // skipped silently by a first placement and nothing since said why (the ninth ui-truth pass, 2026-10-07).
+  const reviewed = ports.latestReviewed()
+  const short = reviewed !== '' ? reviewed : await headOf(ports)
+  if (short === '') return
   if ([...state.records.values()].some(record => record.assessed.some(hash => hash.startsWith(short))) || ports.isWaiting(short)) return
   const asked = await ports.git(commitInfoArgs(short))
   if (asked.exitCode !== 0) return
@@ -201,7 +205,15 @@ export async function explainUnassessed(ports: ProgressPorts, state: ProgressSta
   if (!verdict.isYours) await noteSkipped(ports, state, `Commit ${named} does not count toward your progress: ${verdict.reason}.`)
   else if ([...byLanguage(verdict.files)].every(([, group]) => sizeOf(group) < MIN_LINES)) {
     await noteSkipped(ports, state, `Commit ${named} is too small to say anything about your progress.`)
-  } else await noteSkipped(ports, state, `Commit ${named} was reviewed and never looked at for your progress.`)
+  } else if (reviewed !== '') await noteSkipped(ports, state, `Commit ${named} was reviewed and never looked at for your progress.`)
+  else await noteSkipped(ports, state, `Commit ${named} has not been looked at for your progress yet.`)
+}
+
+/** HEAD's short hash, or '' outside a repository or when git does not answer. */
+async function headOf(ports: Pick<ProgressPorts, 'git'>): Promise<string> {
+  const asked = await ports.git(['rev-parse', '--short=7', 'HEAD'])
+
+  return asked.exitCode === 0 ? asked.stdout.trim().slice(0, 7) : ''
 }
 
 /**

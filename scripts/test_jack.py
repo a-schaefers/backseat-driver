@@ -532,6 +532,9 @@ class Disagreements(unittest.TestCase):
         self.assertEqual([text for level, text in jack.check_progress_files(home) if level == jack.BAD and "php.json" in text], [])
         (home / "progress" / "php.json").write_text(json.dumps({"v": 1, "language": "php", "level": None, "history": [], "report": {"why": "", "next": "", "working": ["forms"], "at": 3000}, "withdrawnAt": 0}))
         self.assertEqual([text for level, text in jack.check_progress_files(home) if level != jack.FINE and "php.json" in text], [])
+        # Its praise under no level is the same (the ninth ui-truth pass, 2026-10-07).
+        (home / "progress" / "php.json").write_text(json.dumps({"v": 1, "language": "php", "level": None, "history": [], "report": {"why": "", "next": "", "encouragement": "You went straight to splitting code across files.", "at": 3000}, "withdrawnAt": 0}))
+        self.assertTrue(any(level == jack.NOTE and "or its praise" in text for level, text in jack.check_progress_files(home) if "php.json" in text))
         # Withdrawn by a copy from before withdrawals were marked: the report written under the level is the placement's.
         write(level=None, report={"why": "Gaps keep it at beginner.", "at": 2000}, withdrawnAt=0)
         found = bad(jack.check_progress_files(home))
@@ -1019,6 +1022,55 @@ class Cache(unittest.TestCase):
         told["explain"]["focus"]["line"] = 18
         found = jack.check_session(world([s], [self.home], self.now), s, DOCKED)
         self.assertTrue(any("follows emacs's caret: stats.py:18" in text for _, text in found), found)
+
+    def test_head_with_no_review_is_accounted_for_by_the_growth_tab(self):
+        # An import of 385 files, the owner's first commit in a project, skipped silently (the ninth ui-truth pass, 2026-10-07).
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "me@x", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "me@x",
+               "GIT_AUTHOR_DATE": f"@{self.now // 1000 - 3600} +0000", "GIT_COMMITTER_DATE": f"@{self.now // 1000 - 3600} +0000"}
+        subprocess.run(["git", "init", "-q", self.root], check=True, env=env)
+        (pathlib.Path(self.root) / "stats.py").write_text("x = 1\n")
+        subprocess.run(["git", "-C", self.root, "add", "stats.py"], check=True, env=env)
+        subprocess.run(["git", "-C", self.root, "commit", "-q", "-m", "First commit"], check=True, env=env)
+        short = subprocess.run(["git", "-C", self.root, "rev-parse", "--short=7", "HEAD"], check=True, env=env, capture_output=True, text=True).stdout.strip()
+        told = self.told(True, progress={"identity": ["me@x"], "records": [], "skipped": "", "busy": ""})
+        found = bad(self.found(told))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn(f"says nothing of HEAD {short}, the person's own commit of", found[0])
+        told["pane"]["progress"]["skipped"] = f"Commit {short} does not count toward your progress: it adds 143875 lines in 385 files at once."
+        found = self.found(told)
+        self.assertEqual(bad(found), [])
+        self.assertTrue(any(f"accounts for HEAD {short}" in text for _, text in found), found)
+        # Someone else's commit, or one just made: nothing is asked.
+        told["pane"]["progress"] = {"identity": ["other@x"], "records": [], "skipped": "", "busy": ""}
+        self.assertEqual(bad(self.found(told)), [])
+
+    def test_an_insight_credited_to_a_review_the_tab_does_not_have(self):
+        (pathlib.Path(self.root) / "stats.py").write_text("x = 1\n")
+        told = self.told(True, explain={"status": "fresh", "spot": {"path": "stats.py", "line": 1}, "target": None, "detail": None, "insights": ["Table names are built from suffixes. (deep review of 570e787)"]})
+        found = jack.check_explain_insights("aaaaaaaa", told, self.root, jack.projects(self.home)[0])
+        self.assertEqual(bad(found), [])
+        self.assertTrue(any(level == jack.NOTE and "credits an insight to a deep review of 570e787" in text for level, text in found), found)
+        self.write(self.folder / "reviews.json", [{"commit": "570e787", "subject": "commit 570e787: First commit", "at": self.now - 60_000, "text": "Fine."}], 60_000)
+        found = jack.check_explain_insights("aaaaaaaa", told, self.root, jack.projects(self.home)[0])
+        self.assertFalse(any("credits an insight" in text for _, text in found), found)
+
+    def test_an_editors_root_against_gits(self):
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@x"}
+        subprocess.run(["git", "init", "-q", self.root], check=True, env=env)
+        real_root = os.path.realpath(self.root)
+        (pathlib.Path(self.root) / "index.php").write_text("<?php\n")
+        (self.home / "editors").mkdir(exist_ok=True)
+        report = {"v": 1, "editor": "emacs", "pid": 1, "at": self.now - 1000, "changed": self.now - 5000, "file": f"{real_root}/index.php", "line": 1, "buffers": [], "visible": [], "active": True}
+        (self.home / "editors" / "emacs-1.json").write_text(json.dumps(report))
+        found = jack.check_editor_roots(self.home, self.now)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("emacs (pid 1) says no root for", found[0][1])
+        self.assertEqual(found[0][0], jack.NOTE)
+        (self.home / "editors" / "emacs-1.json").write_text(json.dumps({**report, "root": real_root}))
+        self.assertEqual(jack.check_editor_roots(self.home, self.now), [])
+        # A report from an editor that is gone says nothing.
+        (self.home / "editors" / "emacs-1.json").write_text(json.dumps({**report, "at": self.now - 600_000}))
+        self.assertEqual(jack.check_editor_roots(self.home, self.now), [])
 
     def test_a_bundle_reads_as_one_page(self):
         import contextlib

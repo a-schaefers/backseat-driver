@@ -43,6 +43,9 @@ export function isModeRequest(request: Request): request is ModeRequest {
 }
 
 /** Every command and key, as `/backseat help` prints it. */
+/** Said once when the folder the tutor was switched on in becomes a repository (the owner's `git init` after `/backseat`, 2026-10-06). */
+export const REPOSITORY_APPEARED = 'A git repository appeared here. Backseat Driver is watching it now.'
+
 export const HELP = [
   'A tutor that reviews your code while you write it yourself.',
   '',

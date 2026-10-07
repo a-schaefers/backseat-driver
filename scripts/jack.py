@@ -88,6 +88,8 @@ STATE_STALE_MS = 3 * SELF_CHECK_MS
 SELF_GRACE_MS = 15_000
 # A tab opened this long ago has had its pane scrolled back to the top by the tutor.
 TAB_SETTLE_MS = 2_000
+# A commit of the person's own this old with no review must be accounted for by the Growth tab.
+HEAD_GRACE_MS = 20 * 60_000
 # A deadline this far past its time has not been met.
 OVERDUE_MS = 15_000
 # After a reload the watchers are killed and started again: this long, a mismatch with the processes is that.
@@ -978,17 +980,33 @@ def check_progress_files(home: pathlib.Path) -> list[tuple[str, str]]:
         # Under no level, why a level and what the next needs are the model's words for a level the code did not give,
         # whether withdrawn since or never given (the seventh ui-truth pass, 2026-10-06: "To reach junior, …" under
         # "Not placed yet" at a first assessment). The tutor drops them as the record is written and as it is read.
-        has_words = report is not None and bool(report.get("why") or report.get("next"))
+        has_words = report is not None and bool(report.get("why") or report.get("next") or report.get("encouragement"))
         if is_stale:
             out.append((BAD, f"progress/{file.name} has no level and still the report of the placement withdrawn: the Growth tab would say “Not placed yet” over its words"))
         elif level is None and has_words:
             # Nothing draws or tells them since 2026-10-06, and a session with the language in play mends the file at
             # switch-on: until one does, the file keeps them, which is worth a note and no more.
-            out.append((NOTE, f"progress/{file.name} has no level and keeps the model's words for the level it proposed (why, and what the next level needs): nothing shows them, and a session with {record.get('language') or 'the language'} in play mends the file at switch-on"))
+            out.append((NOTE, f"progress/{file.name} has no level and keeps the model's words for the level it proposed (why, what the next level needs, or its praise): nothing shows them, and a session with {record.get('language') or 'the language'} in play mends the file at switch-on"))
         elif level and history and history[-1].get("to") != level:
             out.append((BAD, f"progress/{file.name} is at {level} and its history last reached {history[-1].get('to')}: a level the history does not account for"))
         else:
             out.append((FINE, f"progress/{file.name} is at {level or 'no level'}, as its history and report say"))
+    return out
+
+
+def check_editor_roots(home: pathlib.Path, now: int) -> list[tuple[str, str]]:
+    """Each connected editor's `root` against git's: the Emacs plugin remembered "no repository" for a folder for good,
+    and said no root for an hour after the owner made one under it (the ninth ui-truth pass, 2026-10-07)."""
+    out: list[tuple[str, str]] = []
+    for e in editors(home):
+        d = e["data"]
+        file = str(d.get("file") or "")
+        if not e["alive"] or now - (e["at"] or 0) > EDITOR_TTL_MS or not file or not pathlib.Path(file).exists():
+            continue
+        top = (git_out(str(pathlib.Path(file).parent), "rev-parse", "--show-toplevel") or "").strip()
+        said = str(d.get("root") or "")
+        if top and said != top:
+            out.append((NOTE, f"{d.get('editor')} (pid {d.get('pid')}) says {'no root' if not said else 'root ' + tilde(said)} for {tilde(file)}, and git says {tilde(top)}: the editor plugin remembers a folder's root from before, until it is restarted"))
     return out
 
 
@@ -999,6 +1017,7 @@ def check_homes(w: dict) -> list[tuple[str, str]]:
     live = {s["id"]: s for s in w["sessions"]}
     for home in w["homes"]:
         out += check_progress_files(home)
+        out += check_editor_roots(home, now)
     for home in w["homes"]:
         for entry in (read_json(home / "sessions.json") or {}).get("sessions", []):
             if not isinstance(entry, dict) or entry.get("leftAt"):
@@ -1479,6 +1498,14 @@ def check_explain_insights(who: str, state: dict, root: str, project: dict | Non
     if unreachable:
         quoted = ", ".join(f"“{i['symbol']}”" for i in unreachable[:4])
         out.append((NOTE, f"{who}'s Explain tab can never show {len(unreachable)} insight(s) of the deep reviews on {path}: nothing in the file is named {quoted}"))
+    # An insight credited to a deep review the Deep review tab does not have is the first look around's, kept under
+    # HEAD as it stood (the ninth ui-truth pass, 2026-10-07: "(deep review of 570e787)" with no review of 570e787).
+    reviewed = {str(r.get("commit")) for r in (project.get("reviews") or []) if isinstance(r, dict) and r.get("commit")}
+    for shown_insight in (explain.get("insights") or []):
+        m = re.search(r"\(deep review of ([0-9a-f]{7,40})\)$", str(shown_insight))
+        if m and not any(c.startswith(m.group(1)) or m.group(1).startswith(c) for c in reviewed):
+            out.append((NOTE, f"{who}'s Explain tab credits an insight to a deep review of {m.group(1)}, which the Deep review tab does not have: the first look around's, taken at that commit"))
+            break
     target = explain.get("target") if isinstance(explain.get("target"), dict) else None
     detail = explain.get("detail") if isinstance(explain.get("detail"), dict) else None
     overview_at = known.get("overviewAt") or 0
@@ -1583,6 +1610,23 @@ def check_cache(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]]
             out.append((BAD, f"{who}'s Growth tab says nothing of commit {short}, which the Deep review tab reviewed at {clock(latest.get('at'))}: not assessed, not waiting, and no reason on record"))
         elif not assessed and not waiting:
             out.append((FINE, f"{who}'s Growth tab says why commit {short} did not count"))
+
+    # With no review of any commit, HEAD itself: the person's own, old enough to have been looked at, must be
+    # assessed, waiting, or named in the reason on record (the ninth ui-truth pass, 2026-10-07: an import of 385
+    # files, skipped silently by a first placement under a copy from before the reason was kept, and nothing since said why).
+    identity = [str(x).lower() for x in (dig(state, "pane.progress.identity") or []) if isinstance(x, str)]
+    root_now = state.get("repoRoot") or ""
+    if latest is None and identity and root_now and isinstance(dig(state, "pane.progress"), dict) and (dig(state, "loaded.options.progress_report") is not False) and s["home"] is not None:
+        parts = (git_out(root_now, "log", "-1", "--format=%H%x00%ae%x00%ct") or "").strip().split("\0")
+        if len(parts) == 3 and parts[1].lower() in identity and parts[2].isdigit() and now - int(parts[2]) * 1000 > HEAD_GRACE_MS:
+            short = parts[0][:7]
+            assessed = any(str(h).startswith(short) for file in (s["home"] / "progress").glob("*.json") for h in ((read_json(file) or {}).get("assessed") or []))
+            waiting = any(str(c.get("hash", "")).startswith(short) for c in (dig(project["queue"], "commits") or []) if isinstance(c, dict)) if isinstance(project["queue"], dict) else False
+            said = " ".join(str(x) for x in (dig(state, "pane.progress.skipped"), dig(state, "pane.progress.busy"), (read_json(project["dir"] / "watched.json") or {}).get("skipped")) if x)
+            if not assessed and not waiting and short not in said:
+                out.append((BAD, f"{who}'s Growth tab says nothing of HEAD {short}, the person's own commit of {ago(now - int(parts[2]) * 1000)} ago with no review: not assessed, not waiting, and no reason on record"))
+            else:
+                out.append((FINE, f"{who}'s Growth tab accounts for HEAD {short}, the person's own commit with no review"))
 
     # The watched files of a commit the tab says did not count: they leave with it, as a settled commit's do, or a
     # later commit of the person's own weighs in full for saves the tutor never watched (the fifth ui-truth pass, 2026-10-06).

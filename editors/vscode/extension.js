@@ -41,7 +41,10 @@ function real(file) {
 
 const roots = new Map()
 
-/** The nearest folder upward with a .git (a folder, or a file in a worktree), remembered per folder. */
+/**
+ * The nearest folder upward with a .git (a folder, or a file in a worktree), remembered per folder once found. A
+ * folder with none is looked at again each time: a repository may be made under the editor (2026-10-06).
+ */
 function repoRoot(file) {
   const start = path.dirname(file)
   if (roots.has(start)) return roots.get(start)
@@ -56,7 +59,7 @@ function repoRoot(file) {
     if (up === dir) break
     dir = up
   }
-  roots.set(start, root)
+  if (root !== null) roots.set(start, root)
   return root
 }
 

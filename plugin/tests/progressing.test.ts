@@ -180,7 +180,8 @@ test('a record never placed that keeps the model\'s words for a level is mended 
   const w = world({ store: () => store })
   const state = freshProgressState()
   await setUpProgress(w.ports, state)
-  expect(state.records.get('python')?.report).toEqual({ why: '', next: '', working: ['forms'], encouragement: 'Keep going.', at: 5 })
+  // The model's praise goes with the level too (the ninth ui-truth pass, 2026-10-07).
+  expect(state.records.get('python')?.report).toEqual({ why: '', next: '', working: ['forms'], encouragement: '', at: 5 })
   expect((await store.read(progressPath('/data', 'python')) as { report: { why: string; next: string } }).report).toMatchObject({ why: '', next: '' })
 })
 
@@ -195,4 +196,22 @@ test('a first placement that counts none of their commits says why the newest di
   await placeFirst(w.ports, state, 1)
   expect(state.skipped).toBe('Commit ccccccc does not count toward your progress: it was written by Someone <someone@example.com>.')
   expect((await store.read(watchedPath('/data', '/work')) as { skipped: string }).skipped).toBe(state.skipped)
+})
+
+test('with no review of any commit, HEAD itself is judged and the reason put on record', async () => {
+  // The owner's first commit in a project, an import of 385 files, was skipped silently (the ninth ui-truth pass, 2026-10-07).
+  const info = ['d'.repeat(40), 'p'.repeat(40), 'me@example.com', 'Adam', 'First commit'].join('\0')
+  const git = async (args: readonly string[]) => ({ exitCode: 0, stdout: args[0] === 'rev-parse' ? 'ddddddd\n' : args.includes('-s') ? info : args[0] === 'show' ? '' : 'me@example.com' })
+  const store = plainStore(memoryDisk())
+  const w = world({ store: () => store, git, latestReviewed: () => '' })
+  const state = freshProgressState()
+  state.identity = ['me@example.com']
+  await explainUnassessed(w.ports, state)
+  // Their own, and nothing added: too small to count, said so.
+  expect(state.skipped).toBe('Commit ddddddd does not count toward your progress: it adds no source code.')
+  // Outside a repository, or with git not answering, nothing is judged.
+  const silent = world({ git: async () => ({ exitCode: 128, stdout: '' }), latestReviewed: () => '' })
+  const quiet = freshProgressState()
+  await explainUnassessed(silent.ports, quiet)
+  expect(quiet.skipped).toBe('')
 })
