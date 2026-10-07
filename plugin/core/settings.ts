@@ -125,9 +125,10 @@ export type ConfigRowLike = {
 
 /**
  * This plugin's rows of `/config`, in its order, as the Settings tab shows
- * them. A toggle becomes a pick between `on` and `off`. Every field of the
- * plugin is a toggle or a choice, so a text or number row, should one appear,
- * is left out rather than shown in a form it cannot be changed in.
+ * them. A toggle becomes a pick between `on` and `off`. A typed value (the
+ * editor command) is shown with its value and "set it in /config", since the
+ * tab cannot take typing: until 2026-10-06 it was left out, and the tab
+ * claimed to show the plugin's rows while lacking one (the third ui-truth pass).
  */
 export function settingRows(rows: readonly ConfigRowLike[], plugin: string): SettingRow[] {
   return rows.flatMap((row): SettingRow[] => {
@@ -135,8 +136,8 @@ export function settingRows(rows: readonly ConfigRowLike[], plugin: string): Set
     if (row.provider.plugin.split('@')[0] !== plugin.split('@')[0]) return []
     const shared = { key: row.key, label: row.label, description: row.description ?? '', isLocked: row.isLocked }
     if (row.kind === 'boolean') return [{ ...shared, kind: 'boolean', value: row.value === true ? 'on' : 'off', options: ['on', 'off'] }]
-    if (row.kind !== 'choice' || row.options === undefined || row.options.length === 0) return []
-    const value = typeof row.value === 'string' ? row.value : String(row.value)
+    const value = typeof row.value === 'string' ? row.value : Array.isArray(row.value) ? row.value.join(', ') : String(row.value)
+    if (row.kind !== 'choice' || row.options === undefined || row.options.length === 0) return [{ ...shared, kind: 'text', value, options: [] }]
 
     return [{ ...shared, kind: 'choice', value, options: [...row.options] }]
   })

@@ -754,6 +754,15 @@ def check_keys_row(who: str, texts: list[str], rows: list[str]) -> list[tuple[st
     return []
 
 
+def squeezed_pieces(texts: list[str], rows: list[str]) -> list[str]:
+    """The pieces missing from the screen while a later piece of the same drawing is on it: not below the fold, but
+    squeezed out of the middle. Only pieces long enough to be told apart count, on either side."""
+    where = flows(rows)
+    found = [len(squash(demark(t))) >= 3 and is_on_screen(t, where) for t in texts]
+    last_found = max((i for i, ok in enumerate(found) if ok), default=-1)
+    return [t for i, t in enumerate(texts) if i < last_found and not found[i] and len(squash(demark(t))) >= 3]
+
+
 def pieces_below(texts: list[str], rows: list[str]) -> int:
     """How many pieces from below the top of the drawing are really on the screen: long enough to be told apart, and found."""
     where = flows(rows)
@@ -876,11 +885,33 @@ def pick(w: dict, name: str | None) -> dict | None:
 
 
 # ------------------------------------------------------------------ the checks ----
+def check_progress_files(home: pathlib.Path) -> list[tuple[str, str]]:
+    """Each language's progress record, against itself: a report left under no level (the model's words for a placement
+    since withdrawn stood under "Not placed yet": the third ui-truth pass, 2026-10-06), and a level that is not the one
+    the history last reached (the history records levels reached, never one taken away)."""
+    out: list[tuple[str, str]] = []
+    for file in sorted((home / "progress").glob("*.json")):
+        record = read_json(file)
+        if not isinstance(record, dict):
+            continue
+        level = record.get("level")
+        history = [h for h in (record.get("history") or []) if isinstance(h, dict)]
+        if level is None and record.get("report"):
+            out.append((BAD, f"progress/{file.name} has no level and still a report: the Growth tab would say “Not placed yet” over the words of a placement withdrawn"))
+        elif level and history and history[-1].get("to") != level:
+            out.append((BAD, f"progress/{file.name} is at {level} and its history last reached {history[-1].get('to')}: a level the history does not account for"))
+        else:
+            out.append((FINE, f"progress/{file.name} is at {level or 'no level'}, as its history and report say"))
+    return out
+
+
 def check_homes(w: dict) -> list[tuple[str, str]]:
     """What the data folder says, against which sessions are really there."""
     out: list[tuple[str, str]] = []
     now = w["now"]
     live = {s["id"]: s for s in w["sessions"]}
+    for home in w["homes"]:
+        out += check_progress_files(home)
     for home in w["homes"]:
         for entry in (read_json(home / "sessions.json") or {}).get("sessions", []):
             if not isinstance(entry, dict) or entry.get("leftAt"):
@@ -1010,6 +1041,7 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
         if is_driver is False and offered:
             out.append((BAD, f"{who} does not drive {project['id']} and still offers {', '.join(offered)}, which could only refuse"))
     out += check_speech(who, state)
+    out += check_settings_tab(who, state, s)
 
     # Deadlines that came and went.
     deadlines = state.get("deadlines") if isinstance(state.get("deadlines"), dict) else {}
@@ -1096,7 +1128,17 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
             cut = " The first piece is on the screen, so the row is cut, not scrolled." if is_top_there else ""
             out.append((BAD, f"{who} says its {where} shows {quoted}{' and more' if len(head) > 3 else ''}: not on its screen (drawn {ago(now - (drawing.get('at') or now))} ago, {drawing.get('placement') or 'above the prompt'}, {drawing.get('columns')} columns).{cut}"))
         else:
-            out.append((FINE, f"{who}'s {where} is on its screen as it says ({len(texts) - len(rest)} of {len(texts)} pieces{', the rest below the fold or cut' if rest else ''})"))
+            squeezed = squeezed_pieces(texts, rows)
+            if squeezed:
+                # A piece missing while a later one of the same drawing is on the screen was squeezed out, not cut at the
+                # bottom: the owner's pane was laid out into sixteen rows of a thirty-seven-row terminal for half a
+                # minute, the editors' light and the bubble's mouth row gone from its middle (the third ui-truth pass, 2026-10-06).
+                quoted = "; ".join(f"“{t[:50]}”" for t in squeezed[:3])
+                out.append((BAD, f"{who}'s {where} is squeezed: {len(squeezed)} piece(s) missing from its middle while pieces below them are on the screen ({quoted}{' and more' if len(squeezed) > 3 else ''})"))
+            else:
+                out.append((FINE, f"{who}'s {where} is on its screen as it says ({len(texts) - len(rest)} of {len(texts)} pieces{', the rest below the fold or cut' if rest else ''})"))
+            if rest and not squeezed and not any(word in texts and is_on_screen(word, flows(rows)) for word in KEYS_HINTS):
+                out.append((NOTE, f"{who}'s {where} is cut at the bottom: {len(rest)} piece(s) are below the frame, the keys row among them (a pane taller than its frame, as in a narrow window)"))
         if not minimized:
             out += check_keys_row(who, texts, rows)
     elif mode != "off" and rows is not None:
@@ -1139,6 +1181,33 @@ def hellos_by_voice(source: pathlib.Path = REPO / "plugin" / "core" / "avatar.ts
         if m.group(2) in hellos:
             by_voice[m.group(1)] = hellos[m.group(2)]
     return by_voice
+
+
+def retired_settings(source: pathlib.Path = REPO / "plugin" / "core" / "settings.ts") -> set[str]:
+    """The fields taken out of the manifest, read out of `core/settings.ts` (`RETIRED_SETTINGS`)."""
+    try:
+        m = re.search(r"RETIRED_SETTINGS[^=]*=\s*\[([^\]]*)\]", source.read_text())
+    except OSError:
+        return set()
+    return set(re.findall(r"'([\w-]+)'", m.group(1))) if m else set()
+
+
+def check_settings_tab(who: str, state: dict, s: dict) -> list[tuple[str, str]]:
+    """The Settings tab's rows against the manifest's fields: a field of the plugin's that the tab does not show
+    (the editor command, a typed value, was left out: the third ui-truth pass, 2026-10-06)."""
+    rows = [r for r in (dig(state, "pane.settings") or []) if isinstance(r, dict)]
+    if not rows:
+        return []
+    folder = (s.get("copy") or {}).get("folder") or ""
+    manifest = read_json(pathlib.Path(folder) / ".claude-plugin" / "plugin.json") if folder else None
+    fields = set((manifest or {}).get("userConfig", {}).keys()) - retired_settings()
+    if not fields:
+        return []
+    shown = {str(r.get("key", "")).split(".", 1)[-1] for r in rows}
+    missing = sorted(fields - shown)
+    if missing:
+        return [(BAD, f"{who}'s Settings tab shows {len(rows)} row(s) and the manifest has {len(fields)} field(s): {', '.join(missing)} missing")]
+    return [(FINE, f"{who}'s Settings tab shows every field of the manifest ({len(fields)})")]
 
 
 def check_speech(who: str, state: dict) -> list[tuple[str, str]]:
@@ -1302,8 +1371,8 @@ def print_bundle(w: dict, s: dict) -> None:
     print(f"lessons: {len(lessons.get('paths') or [])} path(s) · selected {lessons.get('selected')} · update notice: {brief(pane.get('update'), 80) or '-'} · license line: {brief(pane.get('license'), 80) or '-'}")
     speech = pane.get("speech") if isinstance(pane.get("speech"), dict) else {}
     print(f"character says: “{speech.get('text', '')}”")
-    rows = [r for r in (pane.get("settings") or []) if isinstance(r, dict)]
-    print("settings tab: " + ("; ".join(f"{r.get('label')}: {r.get('value')}" for r in rows) if rows else "(no rows in the state)"))
+    setting_rows = [r for r in (pane.get("settings") or []) if isinstance(r, dict)]
+    print("settings tab: " + ("; ".join(f"{r.get('label')}: {r.get('value')}" for r in setting_rows) if setting_rows else "(no rows in the state)"))
     root = state.get("repoRoot") or ""
     project = next((p for home in w["homes"] for p in projects(home) if root and (p["root"] == root or p["id"] == project_id(root))), None) if root else None
     print(f"--- THE CACHE ON DISK ({project['id'] if project else 'no project folder'})")
@@ -1597,9 +1666,13 @@ def check_world(w: dict, s: dict) -> list[tuple[str, str]]:
             believed_at = state.get("at") if isinstance(state.get("at"), (int, float)) else now
             if moved > followed + FOLLOW_MS and believed_at - moved > FOLLOW_MS and is_under(str(d.get("file", "")), root):
                 out.append((BAD, f"{who} last followed the editor {ago(now - followed) if followed else 'never'} ago, and {d.get('editor')} moved to {tilde(str(d.get('file')))}:{d.get('line')} {ago(now - moved)} ago"))
-            elif moved:
+            elif moved and is_under(str(d.get("file", "")), root):
                 focus = dig(state, "explain.focus") or {}
                 out.append((FINE, f"{who} follows {d.get('editor')}'s caret: {focus.get('path')}:{focus.get('line')}"))
+            elif moved:
+                # Connected through an open buffer, with its caret in another repository: the spot is not its (the third ui-truth pass, 2026-10-06).
+                focus = dig(state, "explain.focus") or {}
+                out.append((FINE, f"{who}'s Explain spot is {focus.get('source', 'its own')}'s, {focus.get('path')}:{focus.get('line')}: {d.get('editor')}'s caret is in another repository"))
     return out
 
 

@@ -122,6 +122,8 @@ test('settingRows keeps only this plugin\'s rows, toggles as on and off', async 
   expect(rows).toEqual([
     { key: 'backseat-driver.voice', label: 'Voice persona', description: 'How the tutor talks.', kind: 'choice', value: 'knuth', options: ['default', 'knuth'], isLocked: false },
     { key: 'backseat-driver.animated_persona', label: 'Animated persona', description: '', kind: 'boolean', value: 'off', options: ['on', 'off'], isLocked: false },
+    // A typed value is shown, with no options to pick from: the tab says to set it in /config (the editor command, 2026-10-06).
+    { key: 'backseat-driver.note', label: 'Voice persona', description: 'How the tutor talks.', kind: 'text', value: 'hi', options: [], isLocked: false },
   ])
 })
 

@@ -75,8 +75,14 @@ export function textsOf(tree: unknown): string[] {
 }
 
 /** Whether two drawings say the same. */
+/** The spinner behind a tab at work, at any tick, read as the ellipsis it stands for: a drawing a tick later is the same drawing. */
+function despun(text: string): string {
+  return text.replace(/\(([·✢✳✶✻✽…])\)/g, '(…)')
+}
+
 export function isSameShown(one: Shown | null, other: Shown | null): boolean {
   if (one === null || other === null) return one === other
 
-  return one.placement === other.placement && one.columns === other.columns && one.isFocused === other.isFocused && one.texts.join('\n') === other.texts.join('\n')
+  // The spinner's frames apart: logging a `shown` record for every one made forty-five records in half a minute (the third ui-truth pass, 2026-10-06).
+  return one.placement === other.placement && one.columns === other.columns && one.isFocused === other.isFocused && despun(one.texts.join('\n')) === despun(other.texts.join('\n'))
 }

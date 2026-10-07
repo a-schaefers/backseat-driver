@@ -379,6 +379,51 @@ class Disagreements(unittest.TestCase):
         self.assertTrue(jack.is_on_screen("2: Review (✻)", ["1: Play  2: Review (✶)  3: Explain"]))
         self.assertTrue(jack.is_on_screen("3: Explain (…)", ["3: Explain (·)"]))
 
+    def test_a_pane_squeezed_in_the_middle_and_one_cut_at_the_bottom(self):
+        # The owner's pane, 2026-10-06 18:05: laid out into sixteen rows, the editors' light gone from its middle while rows below it showed.
+        told = state(self.now)
+        told["shown"]["pane"]["texts"] = [*TEXTS, "x: minimize", "Keys off", "Click here or press Ctrl+X Tab to use the keys."]
+        squeezed = [row for row in DOCKED if "No editor is connected." not in row]
+        s = session(state=told)
+        found = bad(jack.check_session(world([s], now=self.now), s, squeezed))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("is squeezed: 1 piece(s) missing from its middle", found[0])
+        self.assertIn("“No editor is connected.”", found[0])
+        self.assertEqual(jack.squeezed_pieces(TEXTS, squeezed), ["No editor is connected."])
+        # Cut at the bottom, the keys row among what is below the frame: a note, not a disagreement.
+        found = jack.check_session(world([s], now=self.now), s, DOCKED)
+        self.assertEqual(bad(found), [])
+        self.assertTrue(any(level == jack.NOTE and "cut at the bottom" in text and "the keys row among them" in text for level, text in found), found)
+
+    def test_the_progress_files_against_themselves(self):
+        home = pathlib.Path(self.tmp.name) / "home2"
+        (home / "progress").mkdir(parents=True)
+        (home / "progress" / "shell.json").write_text(json.dumps({"v": 1, "language": "shell", "level": None, "report": {"why": "Gaps keep it at beginner."},
+                                                                  "history": [{"from": None, "to": "beginner"}]}))
+        found = bad(jack.check_progress_files(home))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("has no level and still a report", found[0])
+        (home / "progress" / "shell.json").write_text(json.dumps({"v": 1, "language": "shell", "level": "junior", "report": None, "history": [{"from": None, "to": "beginner"}]}))
+        self.assertIn("is at junior and its history last reached beginner", bad(jack.check_progress_files(home))[0])
+        (home / "progress" / "shell.json").write_text(json.dumps({"v": 1, "language": "shell", "level": None, "report": None, "history": [{"from": None, "to": "beginner"}]}))
+        self.assertEqual(bad(jack.check_progress_files(home)), [])
+        shutil.rmtree(home)
+
+    def test_the_settings_tab_against_the_manifest(self):
+        folder = pathlib.Path(self.tmp.name) / "copy"
+        (folder / ".claude-plugin").mkdir(parents=True)
+        (folder / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "backseat-driver", "userConfig": {"voice": {}, "editor_command": {}, "layout": {}}}))
+        told = state(self.now, loaded={"at": self.now - 60_000, "options": {}})
+        told["pane"]["settings"] = [{"key": "backseat-driver.voice", "label": "Voice persona", "value": "default"}]
+        s = session(state=told, copy={"folder": str(folder), "version": "0.2.0", "commit": "", "can_say": True})
+        found = bad(jack.check_session(world([s], now=self.now), s, DOCKED))
+        self.assertEqual(len(found), 1, found)
+        # `layout` is retired (plugin/core/settings.ts): only the editor command is missing.
+        self.assertIn("Settings tab shows 1 row(s) and the manifest has 2 field(s): editor_command missing", found[0])
+        self.assertIn("layout", jack.retired_settings())
+        told["pane"]["settings"].append({"key": "backseat-driver.editor_command", "label": "Open in the editor", "value": ""})
+        self.assertEqual(bad(jack.check_session(world([s], now=self.now), s, DOCKED)), [])
+
     def test_watchers_missing_right_after_a_reload_are_being_started_again(self):
         # The procs table has no inotifywait under this fake pid, and the state says two are live.
         live = {"pushers": [{"role": "tree", "isLive": True}, {"role": "focus", "isLive": True}]}
@@ -684,12 +729,15 @@ class Cache(unittest.TestCase):
         import contextlib
         import io
         self.write(self.folder / "reviews.json", [{"commit": "abc1234", "subject": "commit abc1234: Add mean", "at": self.now, "text": "Fine."}], 60_000)
-        told = self.told(True, review={"state": "done", "subject": "commit abc1234: Add mean", "text": "Fine.", "older": [{}]})
+        # The Settings tab's rows in the state: they shadowed the screen's rows in the bundle and crashed its checks (the third ui-truth pass).
+        told = self.told(True, review={"state": "done", "subject": "commit abc1234: Add mean", "text": "Fine.", "older": [{}]},
+                         settings=[{"key": "backseat-driver.voice", "label": "Voice persona", "value": "default", "options": ["default"]}])
         s = session(home=self.home, state=told)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             jack.print_bundle(world([s], [self.home], self.now), s)
         page = out.getvalue()
+        self.assertIn("settings tab: Voice persona: default", page)
         for heading in ("=== SESSION aaaaaaaa", "--- SCREEN", "cannot be seen", "--- WHAT IT SAYS IT DRAWS", "--- THE PANE'S STATE", "--- THE CACHE ON DISK", "--- SAID LATELY", "--- CHECKS"):
             self.assertIn(heading, page)
         self.assertIn("review: state done · subject “commit abc1234: Add mean”", page)

@@ -199,7 +199,9 @@ export function withdrawn(record: ProgressRecord): ProgressRecord {
   if (record.level === null || !record.isProvisional || isPlaceable(record)) return record
 
   // The history records levels reached, never one taken away (`LevelChange.to`): the tab's counts say what is short.
-  return { ...record, level: null, isProvisional: true }
+  // The report was the model's words for the placement withdrawn ("keep the record at beginner for now", "To reach
+  // junior…"), and stood under "Not placed yet" (the third ui-truth pass, 2026-10-06): it goes with the level.
+  return { ...record, level: null, isProvisional: true, report: null }
 }
 
 /** Where the level goes after new evidence, and why, under the rules above. */

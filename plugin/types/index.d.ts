@@ -10,10 +10,11 @@ export type SettingRow = {
   key: string
   label: string
   description: string
-  /** A toggle is shown as a pick between `on` and `off`. */
-  kind: 'boolean' | 'choice'
-  /** What it holds now: a choice's option, or `on` or `off`. */
+  /** A toggle is shown as a pick between `on` and `off`. A typed value (`text`) is shown and changed in /config. */
+  kind: 'boolean' | 'choice' | 'text'
+  /** What it holds now: a choice's option, `on` or `off`, or the text typed. */
   value: string
+  /** Empty for a typed value, which the tab shows with "set it in /config". */
   options: string[]
   /** True when managed settings own the value: it is shown and cannot be changed here. */
   isLocked: boolean

@@ -495,10 +495,12 @@ test('observations from several commits are kept oldest commit first, whatever o
 test('a provisional level the bar no longer supports is withdrawn as the record is read, and nothing else is', () => {
   const seen = (commit: string, count: number) =>
     Array.from({ length: count }, (_, index) => ({ commit, project: 'p', at: 1, skill: `skill-${index}`, verdict: 'shown' as const, level: 'beginner' as const, weight: 1, note: '' }))
-  const thin = { ...emptyRecord('shell'), level: 'beginner' as const, isProvisional: true, observations: [...seen('a', 5), ...seen('b', 5), ...seen('c', 5)], assessed: ['a', 'b', 'c'], linesRead: 0 }
-  // The owner's record of 2026-10-05: placed under the old bar, with no lines on record.
+  const report = { why: 'Gaps keep the record at beginner for now.', next: 'To reach junior, handle the error case.', working: [], encouragement: '', at: 1 }
+  const thin = { ...emptyRecord('shell'), level: 'beginner' as const, isProvisional: true, observations: [...seen('a', 5), ...seen('b', 5), ...seen('c', 5)], assessed: ['a', 'b', 'c'], linesRead: 0, report }
+  // The owner's record of 2026-10-05: placed under the old bar, with no lines on record. The report went with the placement.
   expect(withdrawn(thin).level).toBe(null)
   expect(withdrawn(thin).isProvisional).toBe(true)
+  expect(withdrawn(thin).report).toBe(null)
   // Enough lines read, confirmed, or no level: as it is, the same object.
   const read = { ...thin, linesRead: 80 }
   expect(withdrawn(read)).toBe(read)
