@@ -234,3 +234,23 @@ test('a commit whose patch the host cut short is skipped as larger than the tuto
   expect(read.records.get('python')?.level).toBe('beginner')
   expect(read.records.get('python')?.linesRead).toBe(0)
 })
+
+test('a reason on record that counts a cut patch as whole is said again as the floor it is, once', async () => {
+  const git = async (args: readonly string[]) => (args[0] === 'show' && !args.includes('-s') ? { exitCode: 0, stdout: '', isCut: true } : { exitCode: 0, stdout: 'me@example.com' })
+  const store = plainStore(memoryDisk())
+  const w = world({ store: () => store, git })
+  const state = freshProgressState()
+  state.skipped = 'Commit 570e787 does not count toward your progress: it adds 5400 lines in 16 files at once, which reads as an import or generated code.'
+  await explainUnassessed(w.ports, state)
+  expect(state.skipped).toBe('Commit 570e787 does not count toward your progress: it adds more than 5400 lines in 16 files at once, which reads as an import or generated code.')
+  expect((await store.read(watchedPath('/data', '/work')) as { skipped: string }).skipped).toBe(state.skipped)
+  // Said as a floor, it is not asked about again; a patch that is whole leaves its reason as it is.
+  const before = w.log.length
+  await explainUnassessed(w.ports, state)
+  expect(w.log.length).toBe(before)
+  const whole = world({ git: async args => (args[0] === 'show' && !args.includes('-s') ? { exitCode: 0, stdout: '' } : { exitCode: 0, stdout: 'me@example.com' }) })
+  const kept = freshProgressState()
+  kept.skipped = 'Commit 570e787 does not count toward your progress: it adds 700 lines in 3 files at once, which reads as an import or generated code.'
+  await explainUnassessed(whole.ports, kept)
+  expect(kept.skipped).toMatch('it adds 700 lines in 3 files')
+})

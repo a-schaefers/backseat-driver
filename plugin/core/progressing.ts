@@ -189,7 +189,12 @@ export async function releaseSkipped(ports: Pick<ProgressPorts, 'git' | 'store' 
  * in a session since closed, before the reason was kept).
  */
 export async function explainUnassessed(ports: ProgressPorts, state: ProgressState): Promise<void> {
-  if (state.skipped !== '' || !ports.settings.isProgressOn || ports.repoRoot() === '' || ports.dataRoot() === '') return
+  if (!ports.settings.isProgressOn || ports.repoRoot() === '' || ports.dataRoot() === '') return
+  if (state.skipped !== '') {
+    await restateCutReason(ports, state)
+
+    return
+  }
   // With no review of a commit, HEAD itself: the owner's first commit in a project, an import of 385 files, was
   // skipped silently by a first placement and nothing since said why (the ninth ui-truth pass, 2026-10-07).
   const reviewed = ports.latestReviewed()
@@ -208,6 +213,20 @@ export async function explainUnassessed(ports: ProgressPorts, state: ProgressSta
     await noteSkipped(ports, state, `Commit ${named} is too small to say anything about your progress.`)
   } else if (reviewed !== '') await noteSkipped(ports, state, `Commit ${named} was reviewed and never looked at for your progress.`)
   else await noteSkipped(ports, state, `Commit ${named} has not been looked at for your progress yet.`)
+}
+
+/**
+ * A reason on record from before cut patches were told apart (2026-10-07)
+ * counts a cut patch as whole ("it adds 5400 lines in 16 files"): judged
+ * again once, and said as the floor it is. One patch read, only for a
+ * reason of that form, and never again once it is restated.
+ */
+async function restateCutReason(ports: ProgressPorts, state: ProgressState): Promise<void> {
+  const named = /^Commit ([0-9a-f]{7,40}) does not count toward your progress: it adds (\d+) lines in (\d+) files at once/.exec(state.skipped)
+  if (named === null) return
+  const patch = await ports.git(commitPatchArgs(named[1] ?? ''))
+  if (patch.exitCode !== 0 || patch.isCut !== true) return
+  await noteSkipped(ports, state, `Commit ${named[1]} does not count toward your progress: it adds more than ${named[2]} lines in ${named[3]} files at once, which reads as an import or generated code.`)
 }
 
 /** HEAD's short hash, or '' outside a repository or when git does not answer. */
