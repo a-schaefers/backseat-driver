@@ -1371,8 +1371,10 @@ class Cache(unittest.TestCase):
     def test_an_explanation_in_the_first_person(self):
         explain = {"status": "fresh", "spot": {"path": "index.php", "line": 2}, "target": {"name": "Page setup and includes", "kind": "section", "startLine": 2, "endLine": 42},
                    "detail": {"what": "Sets up the page.", "how": "", "why": "", "watch": "The includes are only protected by a constant, which only I can confirm is checked.", "uses": []}}
+        explain["detail"]["watch"] = "Line 31 is spelled with an extra s. The includes are only protected by a constant, which only I can confirm is checked."
         found = jack.check_explain_voice("aaaaaaaa", self.told(True, explain=explain))
-        self.assertTrue(any(level == jack.NOTE and "in the first person" in text for level, text in found), found)
+        # The sentence that says it, not the field's start.
+        self.assertTrue(any(level == jack.NOTE and "in the first person: “The includes are only protected by a constant, which only I can confirm is checked.”" in text for level, text in found), found)
         explain["detail"]["watch"] = "Reading I/O errors are swallowed."
         self.assertEqual(jack.check_explain_voice("aaaaaaaa", self.told(True, explain=explain)), [])
 

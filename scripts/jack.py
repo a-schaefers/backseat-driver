@@ -1619,12 +1619,12 @@ def check_explain_voice(who: str, state: dict) -> list[tuple[str, str]]:
     detail = dig(state, "pane.explain.detail") if isinstance(dig(state, "pane.explain.detail"), dict) else None
     if detail is None:
         return []
-    said = [str(detail.get(field) or "") for field in ("what", "how", "why", "watch")]
-    found = next((line for line in said if FIRST_PERSON.search(line)), None)
+    sentences = [s.strip() for field in ("what", "how", "why", "watch") for s in re.split(r"(?<=[.!?])\s+", str(detail.get(field) or ""))]
+    found = next((sentence for sentence in sentences if FIRST_PERSON.search(sentence)), None)
     if found is None:
         return []
     target = dig(state, "pane.explain.target.name") or dig(state, "pane.explain.spot.path")
-    return [(NOTE, f"{who}'s Explain tab says of “{target}”, in the first person: “{brief(found, 90)}”")]
+    return [(NOTE, f"{who}'s Explain tab says of “{target}”, in the first person: “{brief(found, 110)}”")]
 
 
 def check_pick_kept_page(who: str, records: list[dict], now: int) -> list[tuple[str, str]]:
