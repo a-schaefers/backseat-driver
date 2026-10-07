@@ -261,6 +261,8 @@ export function stubSession(on: On, options: StubOptions = {}) {
     configured: [] as { key: string; value: unknown }[],
     /** Set to refuse the next `$.config.set` with this reason. */
     configDeny: '',
+    /** The directory the session is in, as `$.session.cwd()` answers: the repository's top, or a folder below it. */
+    cwd: ROOT as string,
     opened: [] as string[],
     closed: [] as string[],
     /** Why Claude Code opens a pane without drawing it, as it does unasked on a narrow terminal. '' for a pane that is drawn. */
@@ -458,7 +460,7 @@ export function stubSession(on: On, options: StubOptions = {}) {
   on('session.start', () => ({ cwd: ROOT }))
   on('session.end', () => ({ sessionId: session.sessionId }))
   on('session.id', () => ({ value: session.sessionId }))
-  on('session.cwd', () => ({ value: ROOT }))
+  on('session.cwd', () => ({ value: session.cwd }))
   on('session.surfaces', () => ({ value: session.surfaces }))
   on('session.version', () => ({ value: { version: '2.1.289', base: '2.1.289', builtAt: '2026-10-03T19:21:39Z' } }))
   on('classic.SessionStart', () => ({}))
@@ -720,7 +722,9 @@ export function stubSession(on: On, options: StubOptions = {}) {
     if (options.isRepository === false) return failed
 
     if (args[0] === 'rev-parse') {
-      if (args[1] === '--show-toplevel') return ok(`${ROOT}\n`)
+      // The top is found only from inside the repository: a run with no directory is where the process was started,
+      // which is not the session's directory (the owner's session below its repository's top, 2026-10-06).
+      if (args[1] === '--show-toplevel') return e.init?.cwd !== undefined && (e.init.cwd === ROOT || e.init.cwd.startsWith(`${ROOT}/`)) ? ok(`${ROOT}\n`) : failed
       if (args[1] === '--absolute-git-dir') return ok(`${ROOT}/.git\n`)
       if (args[1] === '--abbrev-ref') return ok('main\n')
 

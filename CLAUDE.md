@@ -472,6 +472,7 @@ The owner wants the logic functional where it can be, "to detect, prevent and re
   - a real change (not whitespace-only; not only ignored, binary, generated or lock files)
   - no look in flight
   - Claude answering, the plan not at its limit, and the play-by-play's own model accepted
+- The repository is the one the session's directory is in (`sessionCwd`: `$.session.cwd()`, handed to `git rev-parse --show-toplevel` as its directory, at switch-on and for `/backseat forget`): the owner's session in `~/repos/php-hello/public_html`, where `.git` is, was told "This folder is not a git repository" (2026-10-06, found by jack after the seventh pass), since git had been run with no directory, which is where the process was started and not where the session is. The kit answers the top only from inside the repository since, and the session's directory is settable (`session.cwd`).
 - A look sends the net change since the last look. Work already uncommitted at switch-on is the baseline, not reviewed.
 - `watcher.ts` fingerprints (size, mtime) every changed file at the last poll and at the last look; what differs is pending. It keeps each file's text at the last look as the next diff base. A file never seen dirty diffs against `git show HEAD:path`.
 - A file the last look saw changed, and that is clean again with other text than that look saw (`returned`), is still pending: it was changed once more and committed, or put back, between two polls, and git no longer lists it. `poll()` reads such a file once, when it turns clean. Until M7 it was dropped, and a note about code that had been fixed and committed in one breath stayed in the pane (seen live).
@@ -989,6 +990,7 @@ The authority is `plugin/.claude-plugin/types/claude-code/index.d.ts`, above mem
 - `$.store`: 4 MiB total, per install, expires (unused now). `get`, `set`, `delete`, `keys`.
 - `$.fs`: `read` (≤4 MiB), `write` (makes folders), `list`, `exists`, `stat`, `ancestors`. No delete or rename. `list`/`read` reject on missing. Absolute paths outside the project work without a prompt.
 - `$.env.get` takes a string literal; the validator lists the names.
+- `$.process.run` with no `cwd` runs where the process was started, which is not `$.session.cwd()` when the session is in another folder (2.1.292, 2026-10-06: a session in a subfolder that holds the `.git` was told there was no repository). Hand it the session's directory.
 - A hook gets 10 s of its own time per dispatch. Time inside `$` calls doesn't count, except `$.clock.sleep` and awaited plain promises. So the `lookup` tool waits ≤6 s, then answers with what it has.
 - A mod's `$` calls go through other plugins' hooks, never its own. `$.prompt.submit` bypasses its own `prompt.submit` hook, so put needed context in the text or a tool.
 - `$.clock.after` is one-shot; `$.clock.every` repeats. Both return a `Timer` with `cancel()`. A reload cancels all.

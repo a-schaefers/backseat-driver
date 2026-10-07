@@ -1599,6 +1599,24 @@ async function fileStamp($: EngineInterface, path: string): Promise<string> {
 }
 
 /** Git in `cwd`, never taking the index lock that the user's own git commands need. */
+/**
+ * The directory the session is in, as Claude Code says: where git is asked
+ * for the repository. A process run with no directory runs where the
+ * process was started, which is not the session's directory when they
+ * differ: the owner's session in `~/repos/php-hello/public_html`, where
+ * `.git` is, was told the folder was not a repository (2026-10-06).
+ * Undefined when the session cannot say, and git then runs where the process does.
+ */
+async function sessionCwd($: EngineInterface): Promise<string | undefined> {
+  try {
+    const cwd = await $.session.cwd()
+
+    return cwd === '' ? undefined : cwd
+  } catch {
+    return undefined
+  }
+}
+
 async function git(
   $: EngineInterface,
   cwd: string | undefined,
@@ -3538,7 +3556,7 @@ async function startWatching($: EngineInterface, settings: Settings, run: number
   lastScanAt = 0
   pressure = NO_PRESSURE
 
-  const top = await git($, undefined, ['rev-parse', '--show-toplevel'])
+  const top = await git($, await sessionCwd($), ['rev-parse', '--show-toplevel'])
   if (run !== engagement) return
   const root = top.stdout.trim()
   if (top.exitCode !== 0 || root === '') {
@@ -4052,7 +4070,7 @@ async function forget($: EngineInterface, settings: Settings, named: Scope | nul
 
       return
     }
-    const root = repoRoot !== '' ? repoRoot : (await git($, undefined, ['rev-parse', '--show-toplevel'])).stdout.trim()
+    const root = repoRoot !== '' ? repoRoot : (await git($, await sessionCwd($), ['rev-parse', '--show-toplevel'])).stdout.trim()
     const projectName = root === '' ? 'no repository here' : projectId(root)
 
     const scope = named ?? (await pickScope($))

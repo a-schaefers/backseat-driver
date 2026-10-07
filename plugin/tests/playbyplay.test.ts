@@ -1,6 +1,6 @@
 import { expect } from 'claude-code/testing'
 
-import { PANE, SESSION, sessionTest, stubSession, typed } from './kit'
+import { PANE, ROOT, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const MEAN = 'def mean(xs):\n    return sum(xs) / len(xs)\n'
 const EMPTY_LIST = {
@@ -351,4 +351,19 @@ sessionTest('a dismissed note does not come back on the next save', async ($, on
   expect(await ui.find({ type: 'Text', text: 'There is a built-in for this.' })).toBeDefined()
   expect((await ui.findAll({ type: 'Text', text: 'What does this do for an empty list?' })).length).toBe(0)
   await ui.unmount()
+})
+
+sessionTest('the repository is found from the session\'s directory, which may be below its top', async ($, on) => {
+  // The owner's session in ~/repos/php-hello/public_html, where .git is, was told the folder was not a repository:
+  // git had been run where the process was started (2026-10-06).
+  const session = stubSession(on, { head: { 'stats.py': 'x = 1\n' } })
+  session.cwd = `${ROOT}/public_html`
+  await $.session.start(SESSION)
+  await $.command.run(typed('backseat'))
+  await session.clock.settle()
+  await session.clock.advance(1000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: 'On. Watching for your next save.' })).toBeDefined()
+  await ui.unmount()
+  expect(session.scans).toBeGreaterThan(0)
 })
