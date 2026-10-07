@@ -3104,6 +3104,7 @@ async function restorePaneFromDisk($: EngineInterface, isFresh: boolean): Promis
   const path = notesPath()
   if (path === '') return
   await loadIssues($)
+  await mendCoverage($)
   const kept = parseKeptNotes(await storeOf($).read(path))
   const now = await printsNow($, kept)
   for (const [file, print] of Object.entries(kept.prints)) {
@@ -3322,6 +3323,23 @@ async function sourceFiles($: EngineInterface): Promise<{ own: string[]; vendore
   }
 
   return { own, vendored: [...vendored].slice(0, 40) }
+}
+
+/**
+ * An audit's reading as a reader counts it: their source files it read and
+ * did not also skip. One kept before 2026-10-07 counted a vendored file it
+ * had skipped and a config file ("read 13 of 16" for eleven): counted again
+ * at switch-on, in the driver, and written back when it changes.
+ */
+async function mendCoverage($: EngineInterface): Promise<void> {
+  const coverage = ledger.coverage
+  if (coverage.at <= 0 || coverage.read.length === 0 || !leaseState.isDriver) return
+  const passed = new Set(coverage.skipped.map(skip => skip.path))
+  const sources = new Set((await sourceFiles($)).own)
+  const read = coverage.read.filter(path => !passed.has(path) && sources.has(path))
+  if (read.length === coverage.read.length) return
+  trace($, 'state', 'audit reading counted again', () => ({ was: coverage.read.length, now: read.length }))
+  await changeIssues($, current => coveredLedger(current, { ...current.coverage, read: current.coverage.read.filter(path => read.includes(path)) }))
 }
 
 /** Marks the project audited, when its audit starts: one that fails is not started again at every switch-on. */

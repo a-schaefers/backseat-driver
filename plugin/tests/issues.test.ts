@@ -119,6 +119,16 @@ sessionTest('an audit that says nothing of its reading still finished, and one t
   await ui.unmount()
 })
 
+sessionTest('an audit whose reading was kept before it was counted as a reader counts is counted again at switch-on', async ($, on) => {
+  const coverage = { at: 1000, commit: '0000000', files: 2, read: ['stats.py', '.user.ini', 'web/viewer.js'], skipped: [{ path: 'web/viewer.js', why: 'vendored' }] }
+  const head = { 'stats.py': MEAN, 'web/viewer.js': 'x()\n', '.user.ini': 'display_errors = Off\n' }
+  const session = stubSession(on, { head, data: { [`${FOLDER}/findings.json`]: { ...ON_RECORD, coverage } } })
+  await $.session.start(SESSION)
+  await $.command.run(typed('backseat'))
+  await session.clock.settle()
+  expect(parseLedger(session.data(`${FOLDER}/findings.json`)).coverage.read).toEqual(['stats.py'])
+})
+
 sessionTest('a commit review rules on the issues on record in its files, and adds its own', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { [`${FOLDER}/findings.json`]: ON_RECORD } })
   await $.session.start(SESSION)
