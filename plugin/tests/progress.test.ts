@@ -529,3 +529,16 @@ test('under no level the report loses the model\'s words for the level it propos
   const clean = { ...placed, level: null, report: { ...placed.report, why: '', next: '', encouragement: '' } }
   expect(unplaced(clean)).toBe(clean)
 })
+
+test('a patch the host cut short is judged on what was read, as a floor, and never as a person\'s own', () => {
+  // The owner's import of 385 files read as "5400 lines in 16 files" for 21155 (the tenth ui-truth pass, 2026-10-07).
+  const mine = { hash: 'a'.repeat(40), parents: ['p'], email: 'me@example.com', name: 'Me', message: 'Add a lot' }
+  const refused = (verdict: ReturnType<typeof judge>) => (verdict.isYours ? '' : verdict.reason)
+  const few = [{ path: 'stats.py', language: 'python', lines: ['x = 1', 'y = 2'] }]
+  const many = [{ path: 'web/viewer.js', language: 'javascript', lines: Array.from({ length: 5400 }, (_, index) => `var v${index}`) }]
+  expect(judge(mine, ['me@example.com'], few).isYours).toBe(true)
+  expect(refused(judge(mine, ['me@example.com'], few, true))).toBe('its changes are larger than the tutor reads at once (over 4 MiB), which reads as an import or generated code')
+  expect(refused(judge(mine, ['me@example.com'], many, true))).toBe('it adds more than 5400 lines in 1 files at once, which reads as an import or generated code')
+  expect(refused(judge(mine, ['me@example.com'], many))).toBe('it adds 5400 lines in 1 files at once, which reads as an import or generated code')
+  expect(refused(judge(mine, ['me@example.com'], [], true))).toMatch('larger than the tutor reads at once')
+})

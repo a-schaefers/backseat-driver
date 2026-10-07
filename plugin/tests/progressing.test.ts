@@ -215,3 +215,22 @@ test('with no review of any commit, HEAD itself is judged and the reason put on 
   await explainUnassessed(silent.ports, quiet)
   expect(quiet.skipped).toBe('')
 })
+
+test('a commit whose patch the host cut short is skipped as larger than the tutor reads, and its lines are never counted', async () => {
+  const info = ['e'.repeat(40), 'p'.repeat(40), 'me@example.com', 'Adam', 'Import the viewer'].join('\0')
+  const patch = ['diff --git a/stats.py b/stats.py', '--- a/stats.py', '+++ b/stats.py', '@@ -0,0 +1,2 @@', '+x = 1', '+y = 2'].join('\n')
+  const git = async (args: readonly string[]) => (args[0] === 'show' && !args.includes('-s') ? { exitCode: 0, stdout: patch, isCut: true } : { exitCode: 0, stdout: args[0] === 'rev-parse' ? 'eeeeeee\n' : args.includes('-s') ? info : 'me@example.com' })
+  const store = plainStore(memoryDisk())
+  const w = world({ store: () => store, git, latestReviewed: () => '' })
+  const state = freshProgressState()
+  state.identity = ['me@example.com']
+  await explainUnassessed(w.ports, state)
+  expect(state.skipped).toBe('Commit eeeeeee does not count toward your progress: its changes are larger than the tutor reads at once (over 4 MiB), which reads as an import or generated code.')
+  // A record whose assessed commit's patch is cut gets no line count, and so no withdrawal, from here.
+  const thin = { ...emptyRecord('python'), level: 'beginner' as const, isProvisional: true, assessed: ['e'.repeat(40)], linesRead: 0, observations: [], history: [] }
+  await store.update(progressPath('/data', 'python'), () => thin)
+  const read = freshProgressState()
+  await setUpProgress(w.ports, read)
+  expect(read.records.get('python')?.level).toBe('beginner')
+  expect(read.records.get('python')?.linesRead).toBe(0)
+})

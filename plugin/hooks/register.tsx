@@ -1615,7 +1615,7 @@ async function git(
   args: readonly string[],
   isNetwork = false,
   stdin?: string,
-): Promise<{ exitCode: number; stdout: string; stderr?: string }> {
+): Promise<{ exitCode: number; stdout: string; stderr?: string; isCut?: boolean }> {
   const started = Date.now()
   // What git is asked to do, past any option that comes before it.
   const verb = args.find(arg => !arg.startsWith('--')) ?? ''
@@ -1627,9 +1627,12 @@ async function git(
     const isQuietPoll = args[0] === 'status' && result.exitCode === 0 && result.stdout === lastStatus
     if (args[0] === 'status') lastStatus = result.stdout
     if (isQuietPoll) quiet.polls += 1
-    else trace($, 'git', verb, () => ({ args, cwd, exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr }), Date.now() - started)
+    else trace($, 'git', verb, () => ({ args, cwd, exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr, isCut: result.isStdoutTruncated }), Date.now() - started)
 
-    return result
+    // Claude Code keeps the first 4 MiB of what a process prints and says so: a patch cut there counted 5400 added
+    // lines where there were 21155, and would miss a person's own code after a large vendored file (the tenth
+    // ui-truth pass, 2026-10-07).
+    return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr, isCut: result.isStdoutTruncated === true }
   } catch (error) {
     // Git is missing, or took too long. -1 is no exit code of git's: a caller can tell "git did not answer" from "git said no".
     trace($, 'git', verb, () => ({ args, cwd, error: String(error) }), Date.now() - started)

@@ -90,6 +90,10 @@ SELF_GRACE_MS = 15_000
 TAB_SETTLE_MS = 2_000
 # A commit of the person's own this old with no review must be accounted for by the Growth tab.
 HEAD_GRACE_MS = 20 * 60_000
+# How much of a process's output Claude Code keeps (`$.process.run`, `isStdoutTruncated`): a patch past it is read in part.
+OUTPUT_CAP = 4 * 1024 * 1024
+# How many of a record's latest assessed commits are measured against that cap.
+ASSESSED_MEASURED = 5
 # A deadline this far past its time has not been met.
 OVERDUE_MS = 15_000
 # After a reload the watchers are killed and started again: this long, a mismatch with the processes is that.
@@ -1628,6 +1632,23 @@ def check_cache(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]]
             else:
                 out.append((FINE, f"{who}'s Growth tab accounts for HEAD {short}, the person's own commit with no review"))
 
+    # A patch past what the host keeps is read in part: the numbers in the skip line are a floor and must say so, and a
+    # commit assessed on such a patch was judged on part of its code (the tenth ui-truth pass, 2026-10-07: "5400
+    # lines in 16 files" for 21155, the person's own code after a vendored file never read).
+    skipped_now = str(dig(state, "pane.progress.skipped") or (read_json(project["dir"] / "watched.json") or {}).get("skipped") or "")
+    cut_named = re.search(r"Commit ([0-9a-f]{7,40}) ", skipped_now)
+    root_cut = state.get("repoRoot") or ""
+    if cut_named and root_cut and "lines in" in skipped_now and "more than" not in skipped_now and "larger than the tutor reads" not in skipped_now:
+        size = patch_size(root_cut, cut_named.group(1))
+        if size is not None and size > OUTPUT_CAP:
+            out.append((BAD, f"{who}'s Growth tab counts commit {cut_named.group(1)}'s patch as whole, and it is {size // 1024 // 1024} MiB, past the {OUTPUT_CAP // 1024 // 1024} MiB the host keeps: the numbers are of its start"))
+    if root_cut and s["home"] is not None:
+        for file in sorted((s["home"] / "progress").glob("*.json")):
+            for hash_ in ((read_json(file) or {}).get("assessed") or [])[-ASSESSED_MEASURED:]:
+                size = patch_size(root_cut, str(hash_))
+                if size is not None and size > OUTPUT_CAP:
+                    out.append((BAD, f"progress/{file.name} assessed commit {str(hash_)[:7]} on a patch of {size // 1024 // 1024} MiB, past the {OUTPUT_CAP // 1024 // 1024} MiB the host keeps: judged on part of its code"))
+
     # The watched files of a commit the tab says did not count: they leave with it, as a settled commit's do, or a
     # later commit of the person's own weighs in full for saves the tutor never watched (the fifth ui-truth pass, 2026-10-06).
     skipped_text = str(dig(state, "pane.progress.skipped") or (read_json(project["dir"] / "watched.json") or {}).get("skipped") or "")
@@ -1782,7 +1803,16 @@ def cmd_bundle(args) -> int:
     print(f"jack bundle · {clock(w['now'])} · working copy {working_copy()} · {len(chosen)} session(s)\n")
     for s in chosen:
         print_bundle(w, s)
+    print_home_checks(w)
     return 0
+
+
+def print_home_checks(w: dict) -> None:
+    """What the data folder says, against the world: the leases, the sessions' word, the records, the editors' roots.
+    Printed by `status` and `truth`, and missing from the page the ui-truth pass reads until 2026-10-07 (the tenth pass)."""
+    print("--- HOME CHECKS (the data folder against the world; !! disagrees, ok agrees, ·· a note)")
+    for level, text in check_homes(w):
+        print(f"  {level} {text}")
 
 
 # ------------------------------------------------------------------ what it told the person ----
@@ -1842,6 +1872,16 @@ def check_said(w: dict, s: dict, rows: list[str] | None) -> list[tuple[str, str]
 
 
 # ------------------------------------------------------------------ what it believes about the world ----
+def patch_size(root: str, hash_: str) -> int | None:
+    """How many bytes a commit's patch is as the tutor asks for it (`commitPatchArgs`: `--unified=0`, no header), or
+    None when git does not know the commit here."""
+    try:
+        p = subprocess.run(["git", "--no-optional-locks", "-C", root, "show", "--format=", "--unified=0", hash_], capture_output=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return len(p.stdout) if p.returncode == 0 else None
+
+
 def git_out(root: str, *args: str) -> str | None:
     code, out, _ = run(["git", "--no-optional-locks", "-C", root, *args], timeout=10)
     return out if code == 0 else None

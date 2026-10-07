@@ -39,8 +39,12 @@ export type Deadlines = {
   cancel: (name: string) => void
 }
 
-/** What git answered. -1 is git not answering at all (missing, timed out). */
-export type GitResult = { exitCode: number; stdout: string }
+/**
+ * What git answered. -1 is git not answering at all (missing, timed out).
+ * `isCut`: the host keeps only so much output (Claude Code: 4 MiB), and
+ * this is the start of a longer answer.
+ */
+export type GitResult = { exitCode: number; stdout: string; isCut?: boolean }
 
 /**
  * Everything the engines ask of the program they run in, in one place. Each

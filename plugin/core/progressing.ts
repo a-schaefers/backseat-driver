@@ -10,7 +10,7 @@
 
 import type { LevelChange, ProgressRecord, ProgressView } from '../types'
 import { addedLines, byLanguage, commitInfoArgs, commitPatchArgs, identityOf, judge, MIN_LINES, parseCommitInfo, parseRecent, RECENT_COMMITS_ARGS, sizeOf } from './authorship'
-import type { Host } from './host'
+import type { GitResult, Host } from './host'
 import { languageName } from './languages'
 import { progressPath, watchedPath } from './datahome'
 import { ANSWER_LABELS, GENERAL } from './profiles'
@@ -46,7 +46,7 @@ export type ProgressPorts = Pick<
 > & {
   settings: Settings
   /** Runs git in the repository, or wherever the host is when there is none. -1 is git not answering. */
-  git: (args: readonly string[]) => Promise<{ exitCode: number; stdout: string }>
+  git: (args: readonly string[]) => Promise<GitResult>
   /** The project's name, without its hash. */
   projectName: () => string
   profiles: () => Profiles
@@ -200,7 +200,8 @@ export async function explainUnassessed(ports: ProgressPorts, state: ProgressSta
   if (asked.exitCode !== 0) return
   const info = parseCommitInfo(asked.stdout)
   if (info === null) return
-  const verdict = judge(info, state.identity, addedLines((await ports.git(commitPatchArgs(info.hash))).stdout))
+  const patch = await ports.git(commitPatchArgs(info.hash))
+  const verdict = judge(info, state.identity, addedLines(patch.stdout), patch.isCut === true)
   const named = shortHash(info.hash)
   if (!verdict.isYours) await noteSkipped(ports, state, `Commit ${named} does not count toward your progress: ${verdict.reason}.`)
   else if ([...byLanguage(verdict.files)].every(([, group]) => sizeOf(group) < MIN_LINES)) {
@@ -227,7 +228,8 @@ async function withLinesCounted(ports: Pick<ProgressPorts, 'git'>, record: Progr
   let lines = 0
   for (const hash of record.assessed.slice(-20)) {
     const shown = await ports.git(commitPatchArgs(hash))
-    if (shown.exitCode !== 0) return null
+    // Not here, or more than the host reads at once: nothing can be said of its lines.
+    if (shown.exitCode !== 0 || shown.isCut === true) return null
     lines += addedLines(shown.stdout)
       .filter(file => file.language === record.language)
       .reduce((sum, file) => sum + file.lines.length, 0)
@@ -359,8 +361,9 @@ export async function assessCommit(ports: ProgressPorts, state: ProgressState, h
   if (asked.exitCode === -1) return false
   const info = parseCommitInfo(asked.stdout)
   if (info === null) return true
-  const files = addedLines((await ports.git(commitPatchArgs(hash))).stdout)
-  const verdict = judge(info, state.identity, files)
+  const patch = await ports.git(commitPatchArgs(hash))
+  const files = addedLines(patch.stdout)
+  const verdict = judge(info, state.identity, files, patch.isCut === true)
   const short = shortHash(info.hash)
   if (!verdict.isYours) {
     // Its files leave the watched set as a settled commit's do: kept, they made a later commit of the person's own weigh
@@ -425,7 +428,8 @@ export async function placeFirst(ports: ProgressPorts, state: ProgressState, run
       if (record.assessed.includes(commit.hash)) continue
       const info = parseCommitInfo((await ports.git(commitInfoArgs(commit.hash))).stdout)
       if (info === null) continue
-      const verdict = judge(info, state.identity, addedLines((await ports.git(commitPatchArgs(commit.hash))).stdout))
+      const patch = await ports.git(commitPatchArgs(commit.hash))
+      const verdict = judge(info, state.identity, addedLines(patch.stdout), patch.isCut === true)
       if (commit === mine[0] && !verdict.isYours && newestReason === '') newestReason = `Commit ${shortHash(info.hash)} does not count toward your progress: ${verdict.reason}.`
       const group = verdict.isYours ? byLanguage(verdict.files).get(language) : undefined
       if (group === undefined || sizeOf(group) < MIN_LINES) continue

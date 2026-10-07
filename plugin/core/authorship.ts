@@ -137,12 +137,20 @@ export type Verdict = { isYours: true; files: AddedLines[] } | { isYours: false;
  * Whether a commit can count as the person's own work, and if so the lines
  * to judge. Each refusal says why, in words the Progress tab can show.
  */
-export function judge(info: CommitInfo, identity: readonly string[], files: readonly AddedLines[]): Verdict {
+export function judge(info: CommitInfo, identity: readonly string[], files: readonly AddedLines[], isCut = false): Verdict {
   if (identity.length === 0) return { isYours: false, reason: 'git has no user.email here, so no commit can be confirmed as yours' }
   if (!identity.includes(info.email)) return { isYours: false, reason: `it was written by ${info.name} <${info.email}>` }
   if (info.parents.length > 1) return { isYours: false, reason: 'it is a merge' }
   if (hasOtherAuthor(info.message)) return { isYours: false, reason: 'it names a co-author, or says a tool wrote it' }
   const added = files.reduce((sum, file) => sum + file.lines.length, 0)
+  // A patch the host cut short (Claude Code keeps 4 MiB of it) is read in part: what was read is a floor, said as
+  // one when it is already past the limits, and nothing is said of the rest, where their own code may be (git
+  // orders a patch by path). The owner's import of 385 files read as "5400 lines in 16 files" for 21155 (the tenth
+  // ui-truth pass, 2026-10-07).
+  if (isCut && (added > MAX_ADDED_LINES || files.length > MAX_FILES)) {
+    return { isYours: false, reason: `it adds more than ${added} lines in ${files.length} files at once, which reads as an import or generated code` }
+  }
+  if (isCut) return { isYours: false, reason: 'its changes are larger than the tutor reads at once (over 4 MiB), which reads as an import or generated code' }
   if (added === 0) return { isYours: false, reason: 'it adds no source code' }
   if (added > MAX_ADDED_LINES || files.length > MAX_FILES) {
     return { isYours: false, reason: `it adds ${added} lines in ${files.length} files at once, which reads as an import or generated code` }

@@ -1072,6 +1072,32 @@ class Cache(unittest.TestCase):
         (self.home / "editors" / "emacs-1.json").write_text(json.dumps({**report, "at": self.now - 600_000}))
         self.assertEqual(jack.check_editor_roots(self.home, self.now), [])
 
+    def test_a_skip_line_that_counts_a_patch_cut_by_the_host(self):
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "me@x", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "me@x"}
+        subprocess.run(["git", "init", "-q", self.root], check=True, env=env)
+        # A patch past the 4 MiB the host keeps: one vendored file of a hundred thousand lines.
+        (pathlib.Path(self.root) / "viewer.js").write_text("".join(f"var v{i} = {i};\n" for i in range(220_000)))
+        (pathlib.Path(self.root) / "stats.py").write_text("x = 1\n")
+        subprocess.run(["git", "-C", self.root, "add", "."], check=True, env=env)
+        subprocess.run(["git", "-C", self.root, "commit", "-q", "-m", "Import the viewer"], check=True, env=env)
+        short = subprocess.run(["git", "-C", self.root, "rev-parse", "--short=7", "HEAD"], check=True, env=env, capture_output=True, text=True).stdout.strip()
+        full = subprocess.run(["git", "-C", self.root, "rev-parse", "HEAD"], check=True, env=env, capture_output=True, text=True).stdout.strip()
+        self.assertGreater(jack.patch_size(self.root, short) or 0, jack.OUTPUT_CAP)
+        self.assertIsNone(jack.patch_size(self.root, "0" * 40))
+        told = self.told(True, progress={"identity": ["me@x"], "records": [], "skipped": f"Commit {short} does not count toward your progress: it adds 5400 lines in 16 files at once, which reads as an import or generated code.", "busy": ""})
+        found = bad(self.found(told))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn(f"counts commit {short}'s patch as whole, and it is 4 MiB", found[0])
+        # Said as a floor, as the tutor says it since: nothing against it.
+        told["pane"]["progress"]["skipped"] = f"Commit {short} does not count toward your progress: it adds more than 5400 lines in 16 files at once, which reads as an import or generated code."
+        self.assertEqual(bad(self.found(told)), [])
+        # A record that assessed the commit judged it on part of its code.
+        (self.home / "progress").mkdir(exist_ok=True)
+        (self.home / "progress" / "javascript.json").write_text(json.dumps({"v": 1, "language": "javascript", "level": None, "history": [], "report": None, "assessed": [full], "observations": [], "withdrawnAt": 0}))
+        found = bad(self.found(told))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn(f"assessed commit {short} on a patch of 4 MiB", found[0])
+
     def test_a_bundle_reads_as_one_page(self):
         import contextlib
         import io
@@ -1091,6 +1117,16 @@ class Cache(unittest.TestCase):
         with contextlib.redirect_stdout(out):
             jack.print_bundle(world([s], [self.home], self.now), s)
         self.assertIn("said “” at yesterday ", out.getvalue())
+        # The page ends with what the data folder says against the world (the tenth ui-truth pass, 2026-10-07).
+        (self.home / "editors").mkdir(exist_ok=True)
+        (self.home / "editors" / "emacs-7.json").write_text(json.dumps({"v": 1, "editor": "emacs", "pid": 1, "at": self.now - 1000, "changed": self.now - 5000, "file": f"{self.root}/stats.py", "line": 1, "buffers": [], "visible": [], "active": True}))
+        subprocess.run(["git", "init", "-q", self.root], check=True)
+        (pathlib.Path(self.root) / "stats.py").write_text("x = 1\n")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            jack.print_home_checks(world([s], [self.home], self.now))
+        self.assertIn("--- HOME CHECKS", out.getvalue())
+        self.assertIn("says no root for", out.getvalue())
         # "provisional" is a level's word, as the pane draws it: a record with none is "not placed", plain.
         self.write(self.home / "progress" / "shell.json", {"v": 1, "language": "shell", "level": None, "isProvisional": True, "observations": []}, 60_000)
         told["pane"]["progress"] = {"records": [{"language": "shell", "level": None, "isProvisional": True, "observations": []}]}
