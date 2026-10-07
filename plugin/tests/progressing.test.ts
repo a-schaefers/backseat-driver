@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import { NO_PRESSURE } from '../core/health'
 import { progressPath, watchedPath } from '../core/datahome'
 import { emptyRecord } from '../core/progress'
-import { explainUnassessed, forgetWatched, freshProgressState, loadWatched, noteWatched, placeFirst, queueProgress, setUpProgress } from '../core/progressing'
+import { explainUnassessed, forgetWatched, freshProgressState, loadWatched, noteWatched, placeFirst, queueProgress, releaseSkipped, setUpProgress } from '../core/progressing'
 import { memoryDisk } from '../core/storage'
 import { plainStore } from '../core/store'
 import type { ProgressPorts } from '../core/progressing'
@@ -156,4 +156,19 @@ test('the latest reviewed commit that counted nowhere is judged again, and the t
   assessed.records.set('shell', { ...emptyRecord('shell'), assessed: ['a83b842d7f0e6c1b2a3f4e5d6c7b8a9f0e1d2c3b'] })
   await explainUnassessed(w.ports, assessed)
   expect(w.log.length).toBe(before)
+})
+
+test('the watched files of the commit the reason on record names are released at switch-on', async () => {
+  const store = plainStore(memoryDisk())
+  const git = async (args: readonly string[]) => ({ exitCode: 0, stdout: args.includes('--name-only') ? 'stats.py\nREADME.md\n' : 'me@example.com' })
+  const w = world({ store: () => store, git })
+  const state = freshProgressState()
+  await noteWatched(w.ports, state, ['stats.py', 'README.md', 'other.py'])
+  state.skipped = 'Commit abc1234 does not count toward your progress: it names a co-author.'
+  await releaseSkipped(w.ports, state)
+  expect([...state.watchedPaths]).toEqual(['other.py'])
+  expect((await store.read(watchedPath('/data', '/work')) as { paths: string[] }).paths).toEqual(['other.py'])
+  // No reason on record: nothing is asked of git.
+  const quiet = world({ git: async args => { throw new Error(`asked ${args.join(' ')}`) } })
+  await releaseSkipped(quiet.ports, freshProgressState())
 })

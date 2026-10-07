@@ -167,6 +167,20 @@ export async function setUpProgress(ports: ProgressPorts, state: ProgressState):
 }
 
 /**
+ * The watched files of the commit the reason on record names, released at
+ * switch-on: a skip made before 2026-10-06 kept them (the fifth ui-truth
+ * pass), and so would one made just before a reload by the copy that did.
+ * One `git show` when a reason is on record, nothing otherwise.
+ */
+export async function releaseSkipped(ports: Pick<ProgressPorts, 'git' | 'store' | 'dataRoot' | 'repoRoot'>, state: ProgressState): Promise<void> {
+  const named = /Commit ([0-9a-f]{7,40}) /.exec(state.skipped)?.[1]
+  if (named === undefined || state.watchedPaths.size === 0) return
+  const shown = await ports.git(['show', '--name-only', '--format=', named])
+  if (shown.exitCode !== 0) return
+  await forgetWatched(ports, state, shown.stdout.split('\n').map(line => line.trim()).filter(line => line !== ''))
+}
+
+/**
  * Why the latest reviewed commit did not count, when nothing says: assessed
  * in no record, not waiting, and no reason on record. Judged again as
  * `assessCommit` judges, without a model: a reader with four reviews in the

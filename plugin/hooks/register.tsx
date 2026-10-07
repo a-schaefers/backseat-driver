@@ -149,6 +149,7 @@ import {
   setUpProgress as setUpProgressOf,
   showProgress as showProgressOf,
   explainUnassessed as explainUnassessedOf,
+  releaseSkipped as releaseSkippedOf,
 } from '../core/progressing'
 import type { ProgressPorts, ProgressState } from '../core/progressing'
 import { helpText, isModeRequest, parseRequest, SETTINGS_OFF, transition } from '../core/mode'
@@ -3866,8 +3867,9 @@ async function engage(
     if (leaseState.isDriver) {
       await loadQueue($)
       await adoptReview($, settings)
-      // Why the latest reviewed commit did not count, when nothing on record says.
+      // Why the latest reviewed commit did not count, when nothing on record says, and its watched files released.
       await explainUnassessedOf(progressPortsOf($, settings), progressState)
+      await releaseSkippedOf(progressPortsOf($, settings), progressState)
     }
     await startExplaining($, settings, run)
     // Commits that were left reviewState.waiting, by an outage or a closed session, are taken up now.
