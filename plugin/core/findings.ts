@@ -235,10 +235,15 @@ export function parseFindingsFence(answer: string): { issues: FenceIssue[]; ruli
   return { issues, rulings, coverage }
 }
 
+/** A line that opens with a comment: a quote of code found inside one is the code commented out, not the code. */
+const COMMENTED = /^(\/\/|#|\/\*|\*|--|<!--|;|%)/
+
 /** Whether a line of a file is the quoted one: the same text, trimmed, or a long enough quote it contains. */
 function isQuoted(line: string, quote: string): boolean {
   const said = line.trim()
   const wanted = quote.trim()
+  // The line commented out since is not the line: the issue there was dealt with, or the line is gone.
+  if (COMMENTED.test(said) && !COMMENTED.test(wanted)) return false
 
   // The line itself, a long enough part of it, or its start up to a value left out: a secret's line is quoted so, and
   // the first live audit's "DB password committed" was dropped for a start of eleven characters (2026-10-07).
@@ -287,6 +292,21 @@ export function anchorIssue(issue: FenceIssue, current: readonly string[] | null
 }
 
 /**
+ * Where an issue's line stands now: still at its line, or moved when its text
+ * is once in the file. Twice or more, which of them it was cannot be told:
+ * null, "changed since", rather than another line of the same text (the
+ * thirteenth ui-truth pass: a debug echo fixed away would have moved its
+ * issue onto the real output line).
+ */
+export function standsAt(lines: readonly string[], quote: string, line: number): number | null {
+  if (quote.trim() === '') return null
+  if (isQuoted(lines[line - 1] ?? '', quote)) return line
+  const at = lines.flatMap((candidate, index) => (isQuoted(candidate, quote) ? [index + 1] : []))
+
+  return at.length === 1 ? (at[0] ?? null) : null
+}
+
+/**
  * Where each open issue of a file stands in its current text: its line, or
  * null when its line no longer reads as it did ("the code here changed since
  * it was found"). An issue about the whole file stands at 0. Placement never
@@ -296,7 +316,7 @@ export function placeIssues(ledger: Ledger, file: string, lines: readonly string
   const placed = new Map<number, number | null>()
   for (const finding of ledger.findings) {
     if (finding.file !== file || finding.status === 'resolved' || finding.status === 'dismissed') continue
-    placed.set(finding.id, finding.line === 0 || finding.lineText === '' ? 0 : placeLine(lines, finding.lineText, finding.line))
+    placed.set(finding.id, finding.line === 0 || finding.lineText === '' ? 0 : standsAt(lines, finding.lineText, finding.line))
   }
 
   return placed

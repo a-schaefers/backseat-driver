@@ -886,6 +886,20 @@ class Issues(unittest.TestCase):
         ledger = self.keep([], {"at": self.now - 600_000, "commit": "abc1234", "files": 1, "read": ["stats.py"], "skipped": [{"path": "stats.py", "why": "vendored"}]})
         self.assertIn("counts 1 file(s) as read that it also skipped: stats.py", " ".join(bad(self.found(ledger, "explain", []))))
 
+    def test_where_the_pane_places_an_issue_reads_as_the_issue(self):
+        code = pathlib.Path(self.root) / "a.php"
+        code.write_text("<?php\n// run($sql);\nrun($sql);\n")
+        old = (self.now - 600_000) / 1000
+        os.utime(code, (old, old))
+        ledger = self.keep([{**self.issue(1, "high", "SQL built from input", file="a.php"), "line": 3, "lineText": "run($sql);"}])
+        found = lambda at: " ".join(bad(self.found(ledger, "explain", [], issues={"ledger": ledger, "placed": {"1": at}, "isAudited": True})))
+        self.assertEqual(found(3), "")
+        self.assertIn("places issue 1 “SQL built from input” at a.php:2, and that line no longer reads as the issue's", found(2))
+        self.assertIn("at a.php:1", found(1))
+        # Saved a moment ago: the next look places it.
+        os.utime(code, None)
+        self.assertEqual(found(2), "")
+
     def test_an_audit_of_another_day_is_dated_with_its_day(self):
         at = self.now - 3 * 24 * 3_600_000
         ledger = self.keep([], {"at": at, "commit": "abc1234", "files": 1, "read": ["stats.py"], "skipped": []})

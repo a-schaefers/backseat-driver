@@ -1820,6 +1820,28 @@ def check_issues(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]
         if twin is not None:
             out.append((NOTE, f"{who}'s note {note.get('id')} at {note.get('file')}:{note.get('line')} stands beside issue {twin.get('id')} “{twin.get('title')}”: the next review of that file adopts it"))
 
+    # Where the pane places each open issue, against the file: the line holds the issue's text and is no comment of it. A
+    # file saved in the last minute is the next look's to place (the thirteenth ui-truth pass: a commented-out line, or
+    # another line of the same text, would have kept a fixed issue standing).
+    placed = dig(state, "pane.issues.placed") or {}
+    root_now = state.get("repoRoot") or ""
+    comment = re.compile(r"^(//|#|/\*|\*|--|<!--|;|%)")
+    for f in on_disk:
+        at = placed.get(str(f.get("id"))) if isinstance(placed, dict) else None
+        if not is_open(f) or not root_now or not isinstance(at, int) or at <= 0 or str(f.get("file", "")) in ("", ".") or not str(f.get("lineText", "")).strip():
+            continue
+        path = pathlib.Path(root_now) / str(f["file"])
+        try:
+            if now - path.stat().st_mtime * 1000 < 60_000:
+                continue
+            lines = path.read_text(errors="replace").split("\n")
+        except OSError:
+            continue
+        line = lines[at - 1].strip() if at - 1 < len(lines) else ""
+        quote = str(f["lineText"]).strip()
+        if quote not in line or (comment.match(line) and not comment.match(quote)):
+            out.append((BAD, f"{who} places issue {f.get('id')} “{f.get('title')}” at {f['file']}:{at}, and that line no longer reads as the issue's"))
+
     # What the audit says it read, against the repository: a file that is not there, or more source files than git lists,
     # and a file it counts as read that it also skipped.
     root = state.get("repoRoot") or ""

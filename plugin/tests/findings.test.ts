@@ -254,6 +254,12 @@ test('placement follows an issue\'s line and says when it is gone, without chang
   ]).ledger
   expect(placeIssues(found, 'a.php', ['x', 'y', 'z', 'run($sql);'])).toEqual(new Map([[1, 4], [2, 0]]))
   expect(placeIssues(found, 'a.php', ['nothing'])).toEqual(new Map([[1, null], [2, 0]]))
+  // Commented out since: dealt with or gone, never placed on the comment. Its text twice elsewhere: which, nobody can tell.
+  expect(placeIssues(found, 'a.php', ['x', 'y', 'z', '// run($sql);'])).toEqual(new Map([[1, null], [2, 0]]))
+  expect(placeIssues(found, 'a.php', ['run($sql);', 'x', 'y', 'z', 'run($sql);'])).toEqual(new Map([[1, null], [2, 0]]))
+  expect(placeIssues(found, 'a.php', ['a', 'b', 'c', 'd', 'e', 'run($sql);'])).toEqual(new Map([[1, 6], [2, 0]]))
+  // A quote that is itself a comment is found as one.
+  expect(placeLine(['x', '# TODO: escape this'], '# TODO: escape this', 2)).toBe(2)
   expect(found.findings.every(finding => finding.status === 'open')).toBe(true)
   expect(issueWhere({ file: 'a.php', line: 3 }, null)).toBe('a.php:3')
   expect(issueWhere({ file: '.', line: 0 })).toBe('the project')
