@@ -337,6 +337,9 @@ export async function assessCommit(ports: ProgressPorts, state: ProgressState, h
   const verdict = judge(info, state.identity, files)
   const short = shortHash(info.hash)
   if (!verdict.isYours) {
+    // Its files leave the watched set as a settled commit's do: kept, they made a later commit of the person's own weigh
+    // in full for saves the tutor never watched (the fifth ui-truth pass, 2026-10-06: thirty-four paths of four skipped commits).
+    await forgetWatched(ports, state, files.map(file => file.path))
     await noteSkipped(ports, state, `Commit ${short} does not count toward your progress: ${verdict.reason}.`)
 
     return true

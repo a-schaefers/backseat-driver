@@ -134,6 +134,21 @@ def ago(ms: float | None) -> str:
     return f"{s // 86400}d{(s % 86400) // 3600}h"
 
 
+def day_clock(ms: float | None, now: int | None = None) -> str:
+    """A moment as the person reads it beside today's clock: today's by its time, another day's with its day (the
+    pane's `dayTime`): a review of the night before read as tonight's (the fifth ui-truth pass, 2026-10-06)."""
+    if not isinstance(ms, (int, float)):
+        return "?"
+    then = datetime.fromtimestamp(ms / 1000)
+    today = datetime.fromtimestamp((now if now is not None else now_ms()) / 1000)
+    time_ = then.strftime("%H:%M:%S")
+    if then.date() == today.date():
+        return time_
+    if (today.date() - then.date()).days == 1:
+        return f"yesterday {time_}"
+    return then.strftime("%b %-d, ") + time_
+
+
 def clock(ms: float | None) -> str:
     if not ms:
         return "—"
@@ -1328,6 +1343,31 @@ def check_cache(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]]
         elif not assessed and not waiting:
             out.append((FINE, f"{who}'s Growth tab says why commit {short} did not count"))
 
+    # The watched files of a commit the tab says did not count: they leave with it, as a settled commit's do, or a
+    # later commit of the person's own weighs in full for saves the tutor never watched (the fifth ui-truth pass, 2026-10-06).
+    skipped_text = str(dig(state, "pane.progress.skipped") or (read_json(project["dir"] / "watched.json") or {}).get("skipped") or "")
+    m = re.search(r"Commit ([0-9a-f]{7,40}) ", skipped_text)
+    watched = (read_json(project["dir"] / "watched.json") or {}).get("paths") or []
+    root = state.get("repoRoot") or ""
+    if m and watched and root:
+        named = git_out(root, "show", "--name-only", "--format=", m.group(1))
+        kept = sorted(set(watched) & set((named or "").split())) if named is not None else []
+        if kept and settled(mtime_ms(project["dir"] / "watched.json"), SHARED_GRACE_MS):
+            out.append((BAD, f"{who} keeps {len(kept)} watched file(s) of commit {m.group(1)}, which did not count: {', '.join(kept[:3])}{' and more' if len(kept) > 3 else ''}: a later commit of theirs would weigh in full for saves never watched"))
+
+    # A review of another day drawn with a bare time of day, on the open Deep review tab: a stale clock to a reader.
+    if dig(state, "pane.tab") == "review":
+        older = [r for r in (pane_review.get("older") or []) if isinstance(r, dict)]
+        texts_drawn = [t for t in (dig(state, "shown.pane.texts") or []) if isinstance(t, str)]
+        for r in older:
+            at = r.get("at")
+            if not isinstance(at, (int, float)) or datetime.fromtimestamp(at / 1000).date() == datetime.fromtimestamp(now / 1000).date():
+                continue
+            bare = clock(at)[:5]
+            if any(t.lstrip("▸❯▾ ").startswith(f"{bare}  ") or t.endswith(f"· {bare}") for t in texts_drawn):
+                out.append((BAD, f"{who}'s Deep review tab dates “{r.get('subject')}” {bare}, a time of day, and it is of {day_clock(at, now)[:-3]}: a reader takes it for today's"))
+                break
+
     # The level, which any session may change, and which the bar for a first placement has to support: a provisional
     # level placed under an older bar stood for a day with "Not placed yet" above it (the second ui-truth pass, 2026-10-06).
     for record in (dig(state, "pane.progress.records") or []):
@@ -1407,7 +1447,7 @@ def print_bundle(w: dict, s: dict) -> None:
                 print(f"  #{n.get('id')} {n.get('kind')} {n.get('file')}:{n.get('line')} “{brief(n.get('text'), 110)}”")
         print(f"reviews.json ({since(project['reviews_at'])}): {len(project['reviews'])} review(s), oldest first")
         for r in project["reviews"]:
-            print(f"  {clock(r.get('at'))} “{r.get('subject')}” · {len(r.get('decisions') or [])} decision(s), {len(r.get('insights') or [])} insight(s) · “{brief(r.get('text'), 90)}”")
+            print(f"  {day_clock(r.get('at'), now)} “{r.get('subject')}” · {len(r.get('decisions') or [])} decision(s), {len(r.get('insights') or [])} insight(s) · “{brief(r.get('text'), 90)}”")
         waiting = [c for c in (dig(project["queue"], "commits") or []) if isinstance(c, dict)] if isinstance(project["queue"], dict) else []
         print(f"queue.json ({since(project['queue_at'])}): {len(waiting)} waiting: " + ", ".join(f"{str(c.get('hash', ''))[:7]} “{c.get('title')}”{' reviewed' if c.get('isReviewed') else ''}" for c in waiting))
         said = dig(project["journal"], "said") or {}
@@ -1425,13 +1465,27 @@ def print_bundle(w: dict, s: dict) -> None:
         book = (read_json(s["home"] / "sessions.json") or {}).get("sessions", [])
         print("sessions.json: " + "; ".join(f"{short(str(e.get('session', '')))} {e.get('mode')} born {clock(e.get('born'))} said {ago(now - (e.get('at') or 0))} ago{' left' if e.get('leftAt') else ''}" for e in book if isinstance(e, dict)))
     print("--- SAID LATELY (outside the pane, newest last)")
-    for told in (state.get("said") or [])[-8:]:
-        if isinstance(told, dict):
-            print(f"  {clock(told.get('at'))} {told.get('how')}: {brief(told.get('text'), 140)}")
+    for told in said_lately(state, s["debug"], now)[-8:]:
+        print(f"  {clock(told.get('at'))} {told.get('how')}: {brief(told.get('text'), 140)}")
     print("--- CHECKS (!! disagrees, ok agrees, ·· a note)")
     for level, text in check_session(w, s, rows):
         print(f"  {level} {text}")
     print()
+
+
+def said_lately(state: dict, debug: pathlib.Path | None, now: int) -> list[dict]:
+    """What the person was told lately: the state's ring, and when a reload emptied it (it is the module's), the
+    `said` records of the last ten minutes from the log (the fifth ui-truth pass, 2026-10-06: a toast nineteen
+    seconds before a reload was nowhere on the page)."""
+    ring = [told for told in (state.get("said") or []) if isinstance(told, dict)]
+    if ring:
+        return ring
+    out = []
+    for r in log_records(debug)[-600:]:
+        if r.get("k") == "said" and now - (r.get("t") or 0) < 600_000:
+            d = r.get("d") if isinstance(r.get("d"), dict) else {}
+            out.append({"at": r.get("t"), "how": r.get("n"), "text": d.get("text", "")})
+    return out
 
 
 def cmd_bundle(args) -> int:

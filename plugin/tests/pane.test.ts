@@ -6,6 +6,7 @@ import { currentNote, detailMarkdown, explainNotice, FOCUSED_HINT, followingLine
 import type { PaneView } from '../hooks/pane'
 import { paneContext } from '../core/prompts'
 import { readableReview, reviewHistory, shownReview, spotsIn, SURVEY_SUBJECT, withReviewChange } from '../core/review'
+import { dayTime } from '../core/clock'
 import { clockTime, watchOf } from '../core/status'
 import { PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
@@ -335,8 +336,8 @@ test('the review history lists the readable review once, then the older ones, an
   // A review by hand that reviews.json does not hold yet is listed first.
   const byHand = { ...done, subject: 'the work since the last review', text: 'Looks fine.' }
   expect(reviewHistory(byHand).length).toBe(3)
-  expect(reviewPlace(1, 3, older[1]?.at)).toBe(`Review 2 of 3 · ${clockTime(older[1]?.at ?? 0)}`)
-  expect(reviewPlace(0, 2, undefined)).toBe('Review 1 of 2')
+  expect(reviewPlace(1, 3, older[1]?.at, older[1]?.at ?? 0)).toBe(`Review 2 of 3 · ${clockTime(older[1]?.at ?? 0)}`)
+  expect(reviewPlace(0, 2, undefined, 0)).toBe('Review 1 of 2')
 })
 
 test('the places a review names are what the person can jump to', async () => {
@@ -378,8 +379,16 @@ test('the spinner behind a tab at work, the line where another session drives, a
   expect(tabBadge('explain', { explain: { ...VIEW.explain, status: 'updating' } })).toBe(' (…)')
   expect(followingLine('')).toBe('Looks and reviews run in the session that drives this project.')
   expect(followingLine('00:58')).toBe('Looks and reviews run in your session started 00:58.')
-  expect(reviewsHeading(1, 5, undefined, false)).toBe('▸ Review 2 of 5')
-  expect(reviewsHeading(0, 2, 0, true)).toBe('▾ Review 1 of 2')
-  expect(reviewRow({ subject: 'commit a1b2c3d: Fix the parser' })).toBe('Commit a1b2c3d: Fix the parser')
-  expect(reviewRow({ subject: 'a first look around this project', at: 0 })).toBe('A first look around this project')
+  expect(reviewsHeading(1, 5, undefined, false, 0)).toBe('▸ Review 2 of 5')
+  expect(reviewsHeading(0, 2, 0, true, 0)).toBe('▾ Review 1 of 2')
+  expect(reviewRow({ subject: 'commit a1b2c3d: Fix the parser' }, 0)).toBe('Commit a1b2c3d: Fix the parser')
+  expect(reviewRow({ subject: 'a first look around this project', at: 0 }, 0)).toBe('A first look around this project')
+  // A review of another day carries its day: four of the night before read as tonight's (the fifth ui-truth pass, 2026-10-06).
+  const noon = new Date(2026, 9, 6, 12, 0).getTime()
+  const lastNight = new Date(2026, 9, 5, 19, 57).getTime()
+  expect(dayTime(noon - 60_000, noon)).toBe('11:59')
+  expect(dayTime(lastNight, noon)).toBe('yesterday 19:57')
+  expect(dayTime(new Date(2026, 8, 30, 8, 5).getTime(), noon)).toBe('Sep 30, 08:05')
+  expect(reviewRow({ subject: 'commit a83b842: fail loudly', at: lastNight }, noon)).toBe('yesterday 19:57  Commit a83b842: fail loudly')
+  expect(reviewsHeading(0, 4, lastNight, false, noon)).toBe('▸ Review 1 of 4 · yesterday 19:57')
 })

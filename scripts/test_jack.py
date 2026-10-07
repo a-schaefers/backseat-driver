@@ -751,6 +751,48 @@ class Cache(unittest.TestCase):
         self.write(self.folder / "queue.json", {"v": 1, "commits": [{"hash": full, "title": "fail loudly", "at": self.now, "isReviewed": True, "attempts": 0}]}, 60_000)
         self.assertEqual(bad(self.found(self.told(True, review=shown, progress={"records": [], "skipped": "", "busy": ""}))), [])
 
+    def test_a_review_of_another_day_drawn_as_todays(self):
+        last_night = self.now - 24 * 3_600_000
+        review = {"state": "done", "subject": "commit a83b842: fail loudly", "text": "Two lines.", "older": [{"subject": "commit a83b842: fail loudly", "at": last_night}]}
+        self.write(self.folder / "reviews.json", [{"commit": "a83b842", "subject": "commit a83b842: fail loudly", "at": last_night, "text": "Two lines."}], 60_000)
+        bare = jack.clock(last_night)[:5]
+        told = self.told(True, review=review, tab="review", progress={"records": [], "skipped": "Commit a83b842 is too small to say anything about your progress.", "busy": ""})
+        told["shown"]["pane"]["texts"] = [*TEXTS, f"▸ Review 1 of 1 · {bare}", f"❯ {bare}  Commit a83b842: fail loudly"]
+        found = bad(self.found(told))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn(f"dates “commit a83b842: fail loudly” {bare}, a time of day, and it is of yesterday", found[0])
+        # Drawn with its day, as the pane does since: nothing against it.
+        told["shown"]["pane"]["texts"] = [*TEXTS, f"▸ Review 1 of 1 · yesterday {bare}", f"❯ yesterday {bare}  Commit a83b842: fail loudly"]
+        self.assertEqual(bad(self.found(told)), [])
+        # The tool's own clock says the day too.
+        self.assertTrue(jack.day_clock(last_night, self.now).startswith("yesterday "))
+        self.assertEqual(jack.day_clock(self.now - 60_000, self.now), jack.clock(self.now - 60_000))
+        self.assertIn(",", jack.day_clock(self.now - 3 * 24 * 3_600_000, self.now))
+
+    def test_watched_files_of_a_commit_that_did_not_count(self):
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@x"}
+        subprocess.run(["git", "init", "-q", self.root], check=True, env=env)
+        (pathlib.Path(self.root) / "stats.py").write_text("x = 1\n")
+        subprocess.run(["git", "-C", self.root, "add", "stats.py"], check=True, env=env)
+        subprocess.run(["git", "-C", self.root, "commit", "-q", "-m", "Add stats"], check=True, env=env)
+        short = subprocess.run(["git", "-C", self.root, "rev-parse", "--short=7", "HEAD"], check=True, env=env, capture_output=True, text=True).stdout.strip()
+        self.write(self.folder / "watched.json", {"v": 1, "paths": ["stats.py", "other.py"], "skipped": f"Commit {short} does not count toward your progress: it names a co-author."}, 60_000)
+        found = bad(self.found(self.told(True, progress={"records": [], "skipped": "", "busy": ""})))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn(f"keeps 1 watched file(s) of commit {short}, which did not count: stats.py", found[0])
+        self.write(self.folder / "watched.json", {"v": 1, "paths": ["other.py"], "skipped": f"Commit {short} does not count toward your progress: it names a co-author."}, 60_000)
+        self.assertEqual(bad(self.found(self.told(True, progress={"records": [], "skipped": "", "busy": ""}))), [])
+
+    def test_what_was_said_comes_from_the_log_when_a_reload_emptied_the_ring(self):
+        debug = pathlib.Path(self.tmp.name) / "debug" / "20261006-000000-aaaaaaaa"
+        debug.mkdir(parents=True)
+        (debug / "000000.jsonl").write_text(json.dumps({"t": self.now - 19_000, "seq": 1, "s": "a", "p": "", "k": "said", "n": "toast", "d": {"text": "Deep review ready: commit abc1234"}}) + "\n")
+        told = state(self.now)
+        told["said"] = []
+        self.assertEqual([t["text"] for t in jack.said_lately(told, debug, self.now)], ["Deep review ready: commit abc1234"])
+        told["said"] = [{"at": self.now - 1000, "how": "toast", "text": "From the ring."}]
+        self.assertEqual([t["text"] for t in jack.said_lately(told, debug, self.now)], ["From the ring."])
+
     def test_a_bundle_reads_as_one_page(self):
         import contextlib
         import io

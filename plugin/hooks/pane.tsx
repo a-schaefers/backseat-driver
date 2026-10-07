@@ -14,6 +14,7 @@ import { lessonLanguage, lessonProgress } from '../core/lessons'
 import { lately, levelPhrase } from '../core/progress'
 import { readableReview, reviewHistory, shownReview, spotsIn, SURVEY_SUBJECT } from '../core/review'
 import { DEFAULT_PERSONA } from '../core/settings'
+import { dayTime } from '../core/clock'
 import { clockTime, playLine } from '../core/status'
 import type { Persona } from '../core/settings'
 
@@ -59,6 +60,8 @@ export type PaneView = {
   openList?: string
   /** The spinner's tick behind a tab at work. Absent where nothing ticks, which draws an ellipsis. */
   spin?: number
+  /** The clock now, for what is drawn beside a time of day: a review of another day carries its day. The hook reads the host's clock. */
+  now?: number
   /** How many rows the terminal has, as far as the drawing knows. */
   rows: number
   /** The plugin's own `/config` rows, for the Settings tab. */
@@ -672,19 +675,19 @@ export function waitingLine(review: Review): string {
   return behind === 1 ? 'One more commit is waiting for its review.' : `${behind} more commits are waiting for their reviews.`
 }
 
-/** What a review's history line says: which review of how many, and when it finished. */
-export function reviewPlace(index: number, count: number, at: number | undefined): string {
-  return `Review ${index + 1} of ${count}${at === undefined || at === 0 ? '' : ` · ${clockTime(at)}`}`
+/** What a review's history line says: which review of how many, and when it finished (with its day when not today). */
+export function reviewPlace(index: number, count: number, at: number | undefined, now: number): string {
+  return `Review ${index + 1} of ${count}${at === undefined || at === 0 ? '' : ` · ${dayTime(at, now)}`}`
 }
 
 /** The heading of the reviews, folded or open: "▸ Review 2 of 5 · 19:57", "▾ Review 2 of 5 · 19:57". */
-export function reviewsHeading(index: number, count: number, at: number | undefined, isOpen: boolean): string {
-  return `${isOpen ? '▾' : '▸'} ${reviewPlace(index, count, at)}`
+export function reviewsHeading(index: number, count: number, at: number | undefined, isOpen: boolean, now: number): string {
+  return `${isOpen ? '▾' : '▸'} ${reviewPlace(index, count, at, now)}`
 }
 
-/** A review in the list: when it finished, and what it was about. */
-export function reviewRow(entry: Pick<ReviewText, 'subject' | 'at'>): string {
-  return `${entry.at === undefined || entry.at === 0 ? '' : `${clockTime(entry.at)}  `}${capitalized(entry.subject)}`
+/** A review in the list: when it finished (with its day when not today), and what it was about. */
+export function reviewRow(entry: Pick<ReviewText, 'subject' | 'at'>, now: number): string {
+  return `${entry.at === undefined || entry.at === 0 ? '' : `${dayTime(entry.at, now)}  `}${capitalized(entry.subject)}`
 }
 
 /**
@@ -694,13 +697,14 @@ export function reviewRow(entry: Pick<ReviewText, 'subject' | 'at'>): string {
  * and `n` step through them, and open, one row a review, newest first, the
  * one shown marked, a press opens another and folds the list.
  */
-function reviewList({ Box, Text, Button }: Pick<Kit, 'Box' | 'Text' | 'Button'>, view: Pick<PaneView, 'openList'>, history: readonly ReviewText[], index: number, actions: PaneActions) {
+function reviewList({ Box, Text, Button }: Pick<Kit, 'Box' | 'Text' | 'Button'>, view: Pick<PaneView, 'openList' | 'now'>, history: readonly ReviewText[], index: number, actions: PaneActions) {
   const isOpen = view.openList === 'reviews'
+  const now = view.now ?? Date.now()
 
   return (
     <Box flexDirection="column">
       <Box flexDirection="row" columnGap={3}>
-        <Button key="review-list" label={reviewsHeading(index, history.length, history[index]?.at, isOpen)} plain onPress={() => actions.onReviewsFold?.()} />
+        <Button key="review-list" label={reviewsHeading(index, history.length, history[index]?.at, isOpen, now)} plain onPress={() => actions.onReviewsFold?.()} />
         {index + 1 < history.length && <Button key="review-older" label="older" hotkey="p" plain onPress={() => actions.onReviewStep?.(1)} />}
         {index > 0 && <Button key="review-newer" label="newer" hotkey="n" plain onPress={() => actions.onReviewStep?.(-1)} />}
       </Box>
@@ -708,9 +712,9 @@ function reviewList({ Box, Text, Button }: Pick<Kit, 'Box' | 'Text' | 'Button'>,
         <Box flexDirection="column" paddingLeft={2}>
           {history.map((entry, at) =>
             at === index ? (
-              <Text bold>{`❯ ${reviewRow(entry)}`}</Text>
+              <Text bold>{`❯ ${reviewRow(entry, now)}`}</Text>
             ) : (
-              <Button key={`review-open-${at}`} label={`▸ ${reviewRow(entry)}`} plain onPress={() => actions.onReviewOpen?.(at)} />
+              <Button key={`review-open-${at}`} label={`▸ ${reviewRow(entry, now)}`} plain onPress={() => actions.onReviewOpen?.(at)} />
             ),
           )}
         </Box>

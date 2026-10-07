@@ -4086,7 +4086,7 @@ async function drawTutor(
 ) {
   quiet.renders += 1
   // One round for everything the pane shows, not a dozen in a row for every frame.
-  const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, shownSettings, licensing, backdrop, lessons, openList, spin] = await Promise.all([
+  const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, shownSettings, licensing, backdrop, lessons, openList, spin, now] = await Promise.all([
     read($, modeAtom),
     read($, tabAtom),
     read($, notesAtom),
@@ -4106,6 +4106,7 @@ async function drawTutor(
     read($, lessonsAtom),
     read($, openListAtom),
     read($, spinAtom),
+    $.clock.now(),
   ])
   const view: PaneView = {
     mode: shownMode,
@@ -4133,6 +4134,7 @@ async function drawTutor(
     character: settings.isAnimated ? { avatar: avatarFor(settings.persona.voice), speech, backdrop } : null,
     openList,
     spin,
+    now,
     settings: shownSettings,
   }
 

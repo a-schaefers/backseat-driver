@@ -168,6 +168,15 @@ export function createDebugLog(ports: DebugPorts, dir: string) {
       for (const name of await ports.list(dir)) last = Math.max(last, chunkIndex(name) ?? -1)
       index = last + 1
       text = ''
+      // The chunk that falls out of the ring with this one is emptied, as when a chunk fills: a chunk opened by a reload
+      // skipped that, and a session reloaded often kept old chunks for good (the fifth ui-truth pass, 2026-10-06).
+      if (index >= MAX_CHUNKS) {
+        try {
+          await ports.write(`${dir}/${chunkName(index - MAX_CHUNKS)}`, '')
+        } catch {
+          // The disk said no: the chunk stays, and the log goes on.
+        }
+      }
       isOpen = true
     },
 

@@ -246,3 +246,17 @@ test('what /backseat debug is asked', async () => {
   expect(parseDebugRequest('clear')).toBe('clear')
   expect(parseDebugRequest('verbose')).toBe(null)
 })
+
+test('a chunk opened by a reload empties the one that falls out of the ring, as a chunk that fills does', async () => {
+  const written = new Map<string, string>()
+  const log = createDebugLog(
+    {
+      list: async () => Array.from({ length: MAX_CHUNKS }, (_, index) => chunkName(index)),
+      write: async (path: string, text: string) => void written.set(path, text),
+    },
+    '/d/debug/s',
+  )
+  await log.open()
+  expect(written.get(`/d/debug/s/${chunkName(0)}`)).toBe('')
+  expect(written.size).toBe(1)
+})

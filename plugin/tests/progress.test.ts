@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { addedLines, byLanguage, hasOtherAuthor, identityOf, judge, MAX_ADDED_LINES, parseCommitInfo, parseRecent } from '../core/authorship'
+import { projectId } from '../core/datahome'
 import { FORGET } from '../core/forget'
 import {
   assessmentRequest,
@@ -17,7 +18,7 @@ import {
 } from '../core/progress'
 import type { Assessment } from '../core/progress'
 import type { Level, Observation, ProgressRecord } from '../types'
-import { COMPOSE, DATA_HOME, PANE, SESSION, sessionTest, stubSession, typed } from './kit'
+import { COMPOSE, DATA_HOME, PANE, ROOT, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const MEAN = 'def mean(xs):\n    return sum(xs) / len(xs)\n'
 
@@ -317,6 +318,8 @@ sessionTest("someone else's commit, a co-authored one and a bulk import are not 
   await session.clock.advance(2000)
   await $.turn.complete(session.finish(2, 'Fine.'))
   await session.clock.settle()
+  // Its files leave the watched set, as a settled commit's do: a later commit of yours is not weighed by saves the tutor watched for someone else's.
+  expect((session.data(`projects/${projectId(ROOT)}/watched.json`) as { paths: string[] }).paths).toEqual([])
 
   session.write('vendor.py', Array.from({ length: 700 }, (_, index) => `x${index} = ${index}`).join('\n'))
   session.commit('Vendor a library')
