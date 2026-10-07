@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Note, OutlineRow, Watch } from '../types'
 import { NO_VIEW } from '../core/explainer'
-import { currentNote, detailMarkdown, emptyPlayLine, explainNotice, FOCUSED_HINT, followingLine, jumpHeading, KEYBOARD_HINT, keysRowFits, nameColumns, NO_LOOK_YET, NO_NOTES, outlineName, personaLine, reviewBanner, reviewPlace, reviewRow, reviewsHeading, reviewSpots, spinFrame, stateMark, statusLine, tabBadge, tabRow, tabRows, underlineSpans, waitingLine, workingLayout } from '../hooks/pane'
+import { currentNote, detailMarkdown, emptyPlayLine, estimatedRows, explainNotice, FOCUSED_HINT, followingLine, jumpHeading, KEYBOARD_HINT, keysRowFits, nameColumns, NO_LOOK_YET, NO_NOTES, outlineName, personaLine, reviewBanner, reviewPlace, reviewRow, reviewsHeading, reviewSpots, spinFrame, stateMark, statusLine, tabBadge, tabRow, tabRows, underlineSpans, waitingLine, workingLayout } from '../hooks/pane'
 import type { PaneView } from '../hooks/pane'
 import { paneContext } from '../core/prompts'
 import { readableReview, reviewHistory, shownReview, spotsIn, SURVEY_SUBJECT, withReviewChange } from '../core/review'
@@ -443,4 +443,11 @@ test('the tab bar falls to three rows of two, and then one tab a row, when two r
   const six = tabRows({ columns: 12, review })
   expect(six.length).toBe(6)
   expect(six[0]?.labels).toEqual(['Play'])
+})
+
+test('the Explain area is about as tall as its text wraps to', () => {
+  // Held while the next explanation is looked up, so a pick never lets the window clamp (the twelfth ui-truth pass, 2026-10-07).
+  expect(estimatedRows('one\ntwo', 40)).toBe(2)
+  expect(estimatedRows('x'.repeat(81), 40)).toBe(3)
+  expect(estimatedRows('', 40)).toBe(1)
 })

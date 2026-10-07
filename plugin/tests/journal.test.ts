@@ -328,7 +328,7 @@ test('the picture covers the last ten minutes, and ranks what was changed above 
 
   const [first, second] = picture.places
   expect(first === undefined ? '' : placeWords(first)).toBe('a.py, in mean')
-  expect(first === undefined ? '' : shareWords(first, picture)).toBe('25% of the last 10 minutes in the editor')
+  expect(first === undefined ? '' : shareWords(first, picture)).toBe('30 s in the editor in the last 10 minutes')
   expect(second === undefined ? '' : placeWords(second)).toBe('b.py, in render')
 
   // With no editor reporting, it goes by the saves.
@@ -345,7 +345,7 @@ test('workingOf: their own words, what a look made of it while it still fits, an
     saidAgo: '',
     inferred: '',
     where: 'a.py, in mean',
-    share: '25% of the last 10 minutes in the editor',
+    share: '30 s in the editor in the last 10 minutes',
   })
 
   const inferred = { text: 'adding a mean', at: NOW - MINUTE, paths: ['a.py'] }
@@ -568,7 +568,7 @@ test('the editor file becomes where the caret is, and time in the file', async (
   await counted.tick(8000)
   expect(reads).toBe(1)
 
-  expect(recorder.working(6000)).toMatchObject({ where: 'stats.py, in mean', share: '100% of the last 10 minutes in the editor' })
+  expect(recorder.working(6000)).toMatchObject({ where: 'stats.py, in mean', share: '6 s in the editor in the last 10 minutes' })
   expect(recorder.brief(6000)).toMatch('Caret now: stats.py line 2, in mean.')
   expect(recorder.glance(6000)).toMatch('Also open in the editor: notes.md')
 

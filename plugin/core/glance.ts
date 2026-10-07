@@ -178,10 +178,20 @@ export function placeWords(place: Place): string {
   return lines === null ? place.path : `${place.path}, ${lineWords(lines)}`
 }
 
-/** How much of the window went to a place: its share of the editor's time, or its saves when no editor reported. */
+/** A stretch of time in a few words: seconds under a minute ("7 s"), then minutes and hours. */
+function spent(ms: number): string {
+  return ms < 60_000 ? `${Math.max(1, Math.round(ms / 1000))} s` : took(ms)
+}
+
+/**
+ * How much of the window went to a place: the editor's time there, or its
+ * saves when no editor reported. The time itself, not its share of the
+ * editor's time: "100% of the last 10 minutes in the editor" was said of
+ * seven seconds (the twelfth ui-truth pass, 2026-10-07).
+ */
 export function shareWords(place: Place, picture: Picture, windowMs = WINDOW_MS): string {
   const lately = `the last ${Math.round(windowMs / 60_000)} minutes`
-  if (picture.ms > 0 && place.ms > 0) return `${Math.round((place.ms / picture.ms) * 100)}% of ${lately} in the editor`
+  if (picture.ms > 0 && place.ms > 0) return `${spent(place.ms)} in the editor in ${lately}`
   if (place.saves > 0) return `saved ${times(place.saves)} in ${lately}`
 
   return ''

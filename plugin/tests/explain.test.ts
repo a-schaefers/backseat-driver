@@ -820,3 +820,32 @@ test('a lookup stopped while it ran touches nothing of a host that is gone', asy
   expect(w.state.changes).toBe(changes)
   expect(w.explainer.pending()).toBe(0)
 })
+
+test('a section of a script relies on what came before it, never on a later section', async () => {
+  // An earlier section "relying on" a later one pointed the never-stale check the wrong way (the twelfth ui-truth pass, 2026-10-07).
+  const SCRIPT = ['x = 1', 'y = 2', '', 'print(x)', 'print(y)', ''].join('\n')
+  const SECTIONS = {
+    summary: 'A small script.',
+    symbols: [
+      { name: 'setup', kind: 'section', start: 1, end: 2, head: 'x = 1', summary: 'Sets the values.' },
+      { name: 'output', kind: 'section', start: 4, end: 5, head: 'print(x)', summary: 'Prints them.' },
+    ],
+  }
+  const w = world({ 'run.py': SCRIPT })
+  await w.explainer.view({ path: 'run.py', line: 1 }, 'browsing')
+  await w.settle()
+  w.answer(w.open('Map this file.')[0], SECTIONS)
+  await w.settle()
+  await w.explainer.view({ path: 'run.py', line: 1 }, 'browsing')
+  await w.settle()
+  w.answer(w.open('Explain').find(request => request.prompt.includes('Explain setup')), { what: 'Sets x and y.', how: 'Two assignments.', why: 'The output needs them.', watch: '', uses: ['output'] })
+  await w.settle()
+  const shown = await w.explainer.view({ path: 'run.py', line: 1 }, 'browsing')
+  expect(shown.detail?.uses).toEqual([])
+  // The later section relies on the earlier one, as it should.
+  await w.explainer.view({ path: 'run.py', line: 4 }, 'browsing')
+  await w.settle()
+  w.answer(w.open('Explain').find(request => request.prompt.includes('Explain output')), { what: 'Prints x and y.', how: 'Two prints.', why: 'To show them.', watch: '', uses: ['setup'] })
+  await w.settle()
+  expect((await w.explainer.view({ path: 'run.py', line: 4 }, 'browsing')).detail?.uses).toEqual(['setup'])
+})

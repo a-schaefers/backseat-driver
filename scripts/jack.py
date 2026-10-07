@@ -88,6 +88,8 @@ STATE_STALE_MS = 3 * SELF_CHECK_MS
 SELF_GRACE_MS = 15_000
 # A tab opened this long ago has had its pane scrolled back to the top by the tutor.
 TAB_SETTLE_MS = 2_000
+# What the tutor holds of the time in the editor is up to a slice of attention (2 min) and a journal write (30 s) ahead of the file.
+WORKING_SLACK_MS = 150_000
 # A commit of the person's own this old with no review must be accounted for by the Growth tab.
 HEAD_GRACE_MS = 20 * 60_000
 # How much of a process's output Claude Code keeps (`$.process.run`, `isStdoutTruncated`): a patch past it is read in part.
@@ -112,7 +114,7 @@ PLACE_LINES = 80
 # The spinner's marks behind a tab at work (plugin/hooks/pane.tsx `SPINNER`), bare after the tab's name: a drawing and a screen
 # caught a tick apart differ only there.
 SPINNER = "·✢✳✶✻✽"
-# The first pieces of a drawing are the tabs and the status line: the top of the pane, which is never below the fold.
+# The first pieces of a drawing are the six tabs: the top of the pane, which is never below the fold.
 HEAD_PIECES = 6
 # Claude Code docks a pane at the side from this many columns (CLAUDE.md, "Handoff"); under it the pane goes above the prompt.
 DOCK_COLUMNS = 110
@@ -822,6 +824,13 @@ def is_on_screen(piece: str, where: list[str], head: int = HEAD_CHARS) -> bool:
     return any(want in despin(demark(flow)) for flow in where)
 
 
+def quoted_pieces(pieces: list[str], shown: int = 3) -> str:
+    """Pieces of a drawing named for a reader: the first few quoted, and how many more. The scrolled-pane note said
+    "the tabs and the status line" whatever was missing (the twelfth ui-truth pass, 2026-10-07)."""
+    quoted = ", ".join(f"“{p[:30]}”" for p in pieces[:shown])
+    return quoted + (f" and {len(pieces) - shown} more" if len(pieces) > shown else "")
+
+
 def missing_pieces(texts: list[str], rows: list[str], chars: int = HEAD_CHARS) -> tuple[list[str], list[str]]:
     """The pieces not on the screen: those from the top of the drawing, and the rest."""
     where = flows(rows)
@@ -1013,6 +1022,29 @@ def check_progress_files(home: pathlib.Path) -> list[tuple[str, str]]:
     return out
 
 
+def marker_text() -> str:
+    """What the data folder's marker says, as plugin/core/datahome.ts `MARKER_TEXT` writes it."""
+    try:
+        source = (REPO / "plugin" / "core" / "datahome.ts").read_text()
+    except OSError:
+        return ""
+    m = re.search(r"export const MARKER_TEXT =\s*'((?:[^'\\]|\\.)*)'", source)
+    return m.group(1).encode().decode("unicode_escape") if m else ""
+
+
+def check_marker(home: pathlib.Path) -> list[tuple[str, str]]:
+    """The data folder's marker against what the tutor writes now: one written before 2026-10-06 named /bsd forget, a
+    command since gone, and was never written again (the twelfth ui-truth pass, 2026-10-07)."""
+    try:
+        said = (home / ".backseat-driver").read_text()
+    except OSError:
+        return []
+    want = marker_text()
+    if want and said != want:
+        return [(NOTE, f"{tilde(str(home))}'s marker says “{brief(said, 80)}”, and the tutor writes “{brief(want, 80)}”: it is written again at the next switch-on")]
+    return []
+
+
 def check_editor_roots(home: pathlib.Path, now: int) -> list[tuple[str, str]]:
     """Each connected editor's `root` against git's: the Emacs plugin remembered "no repository" for a folder for good,
     and said no root for an hour after the owner made one under it (the ninth ui-truth pass, 2026-10-07)."""
@@ -1037,6 +1069,7 @@ def check_homes(w: dict) -> list[tuple[str, str]]:
     for home in w["homes"]:
         out += check_progress_files(home)
         out += check_editor_roots(home, now)
+        out += check_marker(home)
     for home in w["homes"]:
         for entry in (read_json(home / "sessions.json") or {}).get("sessions", []):
             if not isinstance(entry, dict) or entry.get("leftAt"):
@@ -1239,6 +1272,8 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
     out += check_notes_lines(who, state, root)
     out += check_explain_fresh(who, state, root, project)
     out += check_explain_insights(who, state, root, project)
+    out += check_explain_uses(who, state, project)
+    out += check_working_share(who, state, project, now)
 
     # What it says it shows, against the screen.
     shown = state.get("shown") if isinstance(state.get("shown"), dict) else {}
@@ -1278,7 +1313,7 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
         if head and below > 0 and not is_top_there:
             # The top is missing and the rest is there: the person scrolled the pane down to read (the owner, 2026-10-05,
             # a long deep review in a 30-row terminal). Their view, not a fault.
-            out.append((NOTE, f"{who}'s {where} is scrolled: its top ({len(head)} piece(s), the tabs and the status line) is above the frame, and {below} piece(s) below it are on the screen"))
+            out.append((NOTE, f"{who}'s {where} is scrolled: its top ({quoted_pieces(head)}) is above the frame, and {below} piece(s) below it are on the screen"))
         elif head:
             quoted = "; ".join(f"“{t[:60]}”" for t in head[:3])
             cut = " The first piece is on the screen, so the row is cut, not scrolled." if is_top_there else ""
@@ -1316,6 +1351,8 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
                 moved = any(r.get("n") == "scroll" and isinstance(r.get("d"), dict) and r["d"].get("origin") == "person" and (r.get("t") or 0) > (opened_tab.get("t") or 0) for r in recent)
                 if not moved:
                     out.append((BAD, f"{who}'s {where} stands scrolled {scroll.get('offset')} row(s) past its top since the {opened_tab.get('d')} tab was opened at {clock(opened_tab.get('t'))}, and nobody scrolled it: its controls and keys row are above the frame"))
+        if not minimized and s["debug"] is not None:
+            out += check_pick_kept_page(who, log_records(s["debug"])[-400:], now)
         if not minimized:
             out += check_keys_row(who, texts, rows)
     elif mode != "off" and rows is not None:
@@ -1489,6 +1526,76 @@ def mentioned_at(lines: list[str], name: str) -> int:
         if as_word(bare).search(line):
             return i + 1
     return -1
+
+
+def check_working_share(who: str, state: dict, project: dict | None, now: int) -> list[tuple[str, str]]:
+    """The "Working on" line's time in the editor, against the journal: a share of the editor's time read as a share
+    of the window ("100% of the last 10 minutes in the editor" for seven seconds: the twelfth ui-truth pass,
+    2026-10-07), and a time said that the journal's caret time for that file cannot hold. What the tutor holds is
+    up to a slice (2 min) and a write (30 s) ahead of the file, so that much is allowed."""
+    share = str(dig(state, "pane.working.share") or "")
+    where = str(dig(state, "pane.working.where") or "")
+    if not share or project is None:
+        return []
+    if re.search(r"\d+% of the last", share):
+        return [(BAD, f"{who}'s “Working on” says “{share}”: a share of the editor's time, read as a share of the window")]
+    m = re.match(r"(\d+) (s|min) in the editor in the last (\d+) minutes", share)
+    if not m or not where:
+        return []
+    said_ms = int(m.group(1)) * (1000 if m.group(2) == "s" else 60_000)
+    window = int(m.group(3)) * 60_000
+    path = where.split(",")[0].strip()
+    entries = [e for e in (project.get("journal") or {}).get("entries") or [] if isinstance(e, dict)]
+    on_file = sum(e.get("ms") or 0 for e in entries if e.get("kind") == "focus" and e.get("path") == path and now - (e.get("at") or 0) <= window)
+    if said_ms > on_file + WORKING_SLACK_MS:
+        return [(BAD, f"{who}'s “Working on” says {share} on {path}, and the journal holds {on_file // 1000} s of caret time there in that window")]
+    return [(FINE, f"{who}'s “Working on” time agrees with the journal: {share}")]
+
+
+def check_explain_uses(who: str, state: dict, project: dict | None) -> list[tuple[str, str]]:
+    """The Explain cache's "Relies on" for the file in focus, against the order of its sections: a section of a script
+    relies on an earlier one, never a later one, and two sections that list each other are one of them wrong (the
+    twelfth ui-truth pass, 2026-10-07: "roll the dice" and "map roll to move" listed each other)."""
+    path = str((dig(state, "pane.explain.spot") or {}).get("path") or "")
+    if not path or project is None:
+        return []
+    entry = read_json(project["dir"] / "files" / f"{fnv(path)}-{pathlib.Path(path).name}.json") or {}
+    symbols = [s for s in (entry.get("symbols") or []) if isinstance(s, dict)] if isinstance(entry, dict) else []
+    by_name = {s.get("name"): s for s in symbols}
+    uses = {s.get("name"): {u.get("name") for u in ((s.get("detail") or {}).get("uses") or []) if isinstance(u, dict) and u.get("file") == path} for s in symbols}
+    out: list[tuple[str, str]] = []
+    for s in symbols:
+        if s.get("kind") != "section":
+            continue
+        for name in sorted(n for n in uses.get(s.get("name"), set()) if isinstance(n, str)):
+            other = by_name.get(name)
+            if other is None or other.get("kind") != "section":
+                continue
+            if (other.get("startLine") or 0) > (s.get("endLine") or 0):
+                out.append((NOTE, f"{who}'s Explain cache says {path}'s section “{s.get('name')}” relies on “{name}”, a later section: a later part reads what an earlier one builds, not the other way round"))
+            elif s.get("name") in uses.get(name, set()):
+                out.append((NOTE, f"{who}'s Explain cache says {path}'s sections “{s.get('name')}” and “{name}” each rely on the other: one of them is wrong"))
+    return out
+
+
+def check_pick_kept_page(who: str, records: list[dict], now: int) -> list[tuple[str, str]]:
+    """A pick in the Explain outline moves the mark, never the page: the window as the last drawing before the latest
+    pick had it, against the latest drawing since, with no scroll by anyone between. A shorter drawing while the
+    lookup ran let Claude Code clamp the window from row 8 to row 1 (the twelfth ui-truth pass, 2026-10-07)."""
+    picks = [r for r in records if r.get("k") == "ui" and r.get("n") == "explain pick"]
+    if not picks or now - (picks[-1].get("t") or 0) > 120_000:
+        return []
+    at = picks[-1].get("t") or 0
+    drawn = [r for r in records if r.get("k") == "shown" and r.get("n") == "pane" and isinstance(r.get("d"), dict) and isinstance(r["d"].get("scroll"), dict)]
+    before = [r for r in drawn if (r.get("t") or 0) <= at]
+    after = [r for r in drawn if (r.get("t") or 0) > at]
+    scrolled = any(r.get("k") == "ui" and r.get("n") in ("scroll", "scroll to top") and (r.get("t") or 0) > at for r in records)
+    if not before or not after or scrolled:
+        return []
+    was, became = before[-1]["d"]["scroll"].get("offset"), after[-1]["d"]["scroll"].get("offset")
+    if isinstance(was, int) and isinstance(became, int) and was != became:
+        return [(BAD, f"{who}'s pane moved from row {was} to row {became} after a pick in the Explain outline at {clock(at)}, and nobody scrolled it: a pick moves the mark, never the page")]
+    return []
 
 
 def check_explain_insights(who: str, state: dict, root: str, project: dict | None) -> list[tuple[str, str]]:

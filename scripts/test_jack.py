@@ -1099,6 +1099,63 @@ class Cache(unittest.TestCase):
         self.assertEqual(len(found), 1, found)
         self.assertIn(f"assessed commit {short} on a patch of 4 MiB", found[0])
 
+    def test_the_working_on_time_against_the_journal(self):
+        # "100% of the last 10 minutes in the editor" for seven seconds (the twelfth ui-truth pass, 2026-10-07).
+        told = self.told(True, working={"said": "", "inferred": "", "where": "index.php, line 27", "share": "100% of the last 10 minutes in the editor"})
+        found = bad(jack.check_working_share("aaaaaaaa", told, jack.projects(self.home)[0], self.now))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("a share of the editor's time, read as a share of the window", found[0])
+        self.write(self.folder / "journal.json", {"entries": [{"kind": "focus", "at": self.now - 60_000, "ms": 7000, "path": "index.php", "lines": [[27, 27]], "where": ""}], "sittings": []}, 0)
+        told["pane"]["working"]["share"] = "7 s in the editor in the last 10 minutes"
+        self.assertEqual(bad(jack.check_working_share("aaaaaaaa", told, jack.projects(self.home)[0], self.now)), [])
+        told["pane"]["working"]["share"] = "9 min in the editor in the last 10 minutes"
+        found = bad(jack.check_working_share("aaaaaaaa", told, jack.projects(self.home)[0], self.now))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("the journal holds 7 s of caret time there", found[0])
+
+    def test_sections_that_rely_on_a_later_one_or_on_each_other(self):
+        (self.folder / "files").mkdir(exist_ok=True)
+        uses = lambda *names: {"what": "w", "how": "", "why": "", "watch": "", "uses": [{"file": "play.sh", "name": n, "print": "p"} for n in names], "at": 1, "model": "m"}
+        entry = {"v": 1, "path": "play.sh", "print": "x", "symbols": [
+            {"name": "roll the dice", "kind": "section", "startLine": 9, "endLine": 11, "detail": uses("map roll to move")},
+            {"name": "map roll to move", "kind": "section", "startLine": 13, "endLine": 29, "detail": uses("roll the dice")},
+        ]}
+        (self.folder / "files" / f"{jack.fnv('play.sh')}-play.sh.json").write_text(json.dumps(entry))
+        told = self.told(True, explain={"status": "fresh", "spot": {"path": "play.sh", "line": 9}})
+        found = jack.check_explain_uses("aaaaaaaa", told, jack.projects(self.home)[0])
+        self.assertEqual(bad(found), [])
+        notes = [text for level, text in found if level == jack.NOTE]
+        self.assertTrue(any("“roll the dice” relies on “map roll to move”, a later section" in text for text in notes), notes)
+        # The later section relying on the earlier one alone is as it should be.
+        entry["symbols"][0]["detail"] = uses()
+        (self.folder / "files" / f"{jack.fnv('play.sh')}-play.sh.json").write_text(json.dumps(entry))
+        self.assertEqual(jack.check_explain_uses("aaaaaaaa", told, jack.projects(self.home)[0]), [])
+
+    def test_a_pick_in_the_explain_outline_that_moved_the_page(self):
+        pick = {"t": self.now - 30_000, "k": "ui", "n": "explain pick", "d": 98}
+        drawn = lambda t, offset: {"t": t, "k": "shown", "n": "pane", "d": {"texts": [], "scroll": {"offset": offset, "bodyRows": 31}}}
+        records = [drawn(self.now - 40_000, 8), pick, drawn(self.now - 29_000, 8), drawn(self.now - 25_000, 1)]
+        found = bad(jack.check_pick_kept_page("aaaaaaaa", records, self.now))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("moved from row 8 to row 1 after a pick in the Explain outline", found[0])
+        # The person scrolled after the pick: their view.
+        self.assertEqual(jack.check_pick_kept_page("aaaaaaaa", records + [{"t": self.now - 20_000, "k": "ui", "n": "scroll", "d": {"offset": 1, "by": -7, "origin": "person"}}], self.now), [])
+        # The page stayed: nothing to say.
+        self.assertEqual(jack.check_pick_kept_page("aaaaaaaa", [drawn(self.now - 40_000, 8), pick, drawn(self.now - 25_000, 8)], self.now), [])
+
+    def test_a_marker_from_before_the_command_was_renamed(self):
+        self.assertIn("/backseat forget", jack.marker_text())
+        (self.home / ".backseat-driver").write_text("Delete the folder to forget all of it, or run /bsd forget.\n")
+        found = jack.check_marker(self.home)
+        self.assertEqual(len(found), 1, found)
+        self.assertEqual(found[0][0], jack.NOTE)
+        (self.home / ".backseat-driver").write_text(jack.marker_text())
+        self.assertEqual(jack.check_marker(self.home), [])
+
+    def test_the_scrolled_note_names_the_pieces_missing(self):
+        self.assertEqual(jack.quoted_pieces(["1: Play", "2: Review"]), "“1: Play”, “2: Review”")
+        self.assertEqual(jack.quoted_pieces(["a", "b", "c", "d", "e"]), "“a”, “b”, “c” and 2 more")
+
     def test_a_bundle_reads_as_one_page(self):
         import contextlib
         import io

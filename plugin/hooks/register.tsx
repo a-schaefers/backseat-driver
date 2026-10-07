@@ -147,7 +147,14 @@ import { isLookDue, playOf, wakeAt } from '../core/play'
 import type { Play, PlayFacts } from '../core/play'
 import { isProblem, keepNotes, parseKeptNotes, stillOpen, withDismissed } from '../core/notes'
 import type { KeptNotes } from '../core/notes'
-import { renderMinimized, renderPane, reviewSchedule, steppedNote } from './pane'
+import {
+  detailMarkdown,
+  estimatedRows,
+  renderMinimized,
+  renderPane,
+  reviewSchedule,
+  steppedNote,
+} from './pane'
 import type { Kit, PaneView } from './pane'
 import {
   ANSWER_LABELS,
@@ -476,6 +483,8 @@ const shown: {
 }
 /** The drawings as the debug log last recorded them, and the timer that records the next. */
 const shownLogged: { pane: Shown | null; band: Shown | null } = { pane: null, band: null }
+/** About how many rows the Explain tab's last explanation took: held while the next is looked up. */
+let explainRows = 0
 /** Where the pane's window last stood, as its last `ui.scroll` asked: a scroll that moves nothing is not logged. */
 let lastScrollOffset = -1
 let shownTimer: Timer | null = null
@@ -1304,7 +1313,11 @@ function storeOf($: EngineInterface): Store {
 /** Makes sure the data folder carries its marker before anything is written into it. */
 async function markHome($: EngineInterface): Promise<void> {
   if (isHomeMarked || dataRoot === '') return
-  if (!(await $.fs.exists(`${dataRoot}/${MARKER}`))) await $.fs.write(`${dataRoot}/${MARKER}`, MARKER_TEXT)
+  const path = `${dataRoot}/${MARKER}`
+  // Written again when it says something else: a marker from before 2026-10-06 named /bsd forget, a command since
+  // gone (the twelfth ui-truth pass, 2026-10-07).
+  const isCurrent = (await $.fs.exists(path)) && (await $.fs.read(path).catch(() => '')) === MARKER_TEXT
+  if (!isCurrent) await $.fs.write(path, MARKER_TEXT)
   isHomeMarked = true
 }
 
@@ -4193,6 +4206,9 @@ async function drawTutor(
     read($, spinAtom),
     $.clock.now(),
   ])
+  // While a lookup runs, the area the explanation stood in keeps its height (`estimatedRows`).
+  if (explain.detail !== null) explainRows = estimatedRows(detailMarkdown(explain.detail), where.columns) + explain.insights.length
+  const explainHold = explain.detail === null && explain.target !== null && explain.status === 'updating' ? explainRows : 0
   const view: PaneView = {
     mode: shownMode,
     tab,
@@ -4221,6 +4237,7 @@ async function drawTutor(
     spin,
     now,
     settings: shownSettings,
+    explainHold,
   }
 
   const tree = renderPane(kit, view, {

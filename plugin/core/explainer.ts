@@ -570,10 +570,14 @@ export function createExplainer(ports: ExplainPorts) {
 
     // What it leans on is recorded with today's fingerprints, so a change there is noticed later.
     const here = latest === null ? [] : freshSymbols(latest, after.lines)
+    // A section of a script relies on what came before it, never on a later section that reads what it builds: the
+    // other way round pointed the never-stale check the wrong way (the twelfth ui-truth pass, 2026-10-07).
+    const isSection = here.find(candidate => candidate.startLine === found.start && candidate.endLine === found.end)?.kind === 'section'
     const uses: Use[] = []
     for (const name of parsed.uses) {
       const symbol = here.find(candidate => candidate.name === name || candidate.name.endsWith(`.${name}`))
       if (symbol !== undefined) {
+        if (isSection && symbol.startLine > found.end) continue
         if (symbol.print !== job.print) uses.push({ file: job.path, name: symbol.name, print: symbol.print })
         continue
       }

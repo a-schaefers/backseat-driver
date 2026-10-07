@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { dataHome, fileEntryPath, isRemovable, MARKER, profilePath, progressPath, projectDir, projectId, safeName } from '../core/datahome'
+import { dataHome, fileEntryPath, isRemovable, MARKER, MARKER_TEXT, profilePath, progressPath, projectDir, projectId, safeName } from '../core/datahome'
 import {
   confirmQuestion,
   FORGET,
@@ -301,4 +301,14 @@ sessionTest('nothing is deleted from a folder that does not carry the tutor\'s m
   expect(session.removed).toEqual([])
   expect(session.disk.has('/home/me/Documents/profiles/python.json')).toBe(true)
   expect(session.logs.some(line => line.startsWith('Could not delete /home/me/Documents/profiles/python.json'))).toBe(true)
+})
+
+sessionTest('a marker that says something else is written again', async ($, on) => {
+  // A marker from before 2026-10-06 named /bsd forget, a command since gone (the twelfth ui-truth pass, 2026-10-07).
+  const session = stubSession(on)
+  session.disk.set(MARKER_PATH, 'Backseat Driver keeps what it knows about you and your projects in this folder.\nDelete the folder to forget all of it, or run /bsd forget.\n')
+  await $.session.start(SESSION)
+  await $.command.run(typed('backseat'))
+  await session.clock.settle()
+  expect(session.disk.get(MARKER_PATH)).toBe(MARKER_TEXT)
 })

@@ -56,6 +56,8 @@ export type PaneView = {
   character: { avatar: Avatar; speech: Speech; backdrop?: Backdrop } | null
   /** True where rows are scarce, as in a pane above the prompt: the character is then drawn in one line. */
   isCompact: boolean
+  /** Blank rows the Explain tab holds while the next explanation is looked up: the rows the last one took. */
+  explainHold?: number
   /** Which list opened downward is open: `jump:<subject>`, `setting:<key>` or `reviews`, or '' while every one is folded. */
   openList?: string
   /** The spinner's tick behind a tab at work. Absent where nothing ticks, which draws an ellipsis. */
@@ -657,6 +659,19 @@ function explainControls({ Button }: Pick<Kit, 'Button'>, view: PaneView, action
   ]
 }
 
+/**
+ * About how many rows a text takes in a pane this wide: each line, wrapped.
+ * The Explain tab holds the rows its last explanation took while the next is
+ * looked up, so that a shorter drawing does not let Claude Code clamp the
+ * window: a pick in the outline moved the page seven rows (the twelfth
+ * ui-truth pass, 2026-10-07).
+ */
+export function estimatedRows(text: string, columns: number): number {
+  const width = Math.max(1, columns)
+
+  return text.split('\n').reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / width)), 0)
+}
+
 function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, actions: PaneActions) {
   const { explain } = view
   if (explain.spot === null) {
@@ -694,6 +709,7 @@ function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
         <Text>{`Deep review: ${insight}`}</Text>
       ))}
       {notice !== '' && <Text dimColor>{notice}</Text>}
+      {detail === null && Array.from({ length: Math.max(0, view.explainHold ?? 0) }, () => <Text> </Text>)}
       {!explain.isMappable && <Text dimColor>This file is too large to map, so only the lines around the cursor are explained.</Text>}
     </Box>
   )
