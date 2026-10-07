@@ -89,6 +89,8 @@ export function playByPlayPrompt<Change extends FileChange>(
   doing = '',
   /** The topic slugs raised before in the languages of these files, most raised first, so that the same kind of point gets the same slug. */
   topics: readonly string[] = [],
+  /** The open issues on record in these files, as a request lists them, with their ids and where they stand now. */
+  issues: readonly string[] = [],
 ): { prompt: string; shown: Change[] } {
   // Only what was dismissed in the files of this look: the rest cannot come up.
   const gone = dismissed.filter(note => changes.some(change => change.path === note.file))
@@ -99,6 +101,9 @@ export function playByPlayPrompt<Change extends FileChange>(
     open.length === 0 ? '(none)' : listNotes(open),
     '',
     ...(gone.length === 0 ? [] : ['Notes they dismissed. Do not raise these again:', listDismissed(gone), '']),
+    ...(issues.length === 0
+      ? []
+      : ['Issues on record in these files, from the deep review, with their ids and where they stand now. They are in front of the person already: never raise one as a note. Say in "issues" which this change fixes, or fixes in part:', ...issues, '']),
     ...(topics.length === 0 ? [] : [`Topics raised before in their code. Reuse the slug when a note is the same kind of point: ${topics.join(', ')}`, '']),
     'Changes since your last look:',
   ].join('\n')

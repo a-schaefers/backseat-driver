@@ -48,6 +48,7 @@ function world(reply: ModelReply) {
     notePrints: new Map(),
     saveNotes: async () => void log.push('saveNotes'),
     saveSubject: async () => undefined,
+    issues: { forLook: () => ({ lines: [], spots: [] }), rule: async () => undefined },
     recorder: () => null,
     showWorking: async () => undefined,
     say: async () => undefined,

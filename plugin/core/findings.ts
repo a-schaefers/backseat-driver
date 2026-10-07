@@ -16,6 +16,7 @@
  */
 
 import type { Actor, Category, Coverage, Finding, IssueOrigin, IssueStatus, Ledger, PersonAction, Severity } from '../types'
+import type { IssueSpot } from './notes'
 import { askedIssues, coveredLedger, foundIssues, LEDGER_MAX_CLOSED, LEDGER_NEAR_LINES, ledgerViews, normalLedger, personIssue, ruledIssues } from './core'
 
 export { askedIssues, coveredLedger, foundIssues, LEDGER_MAX_CLOSED, LEDGER_NEAR_LINES, ledgerViews, normalLedger, personIssue, ruledIssues }
@@ -308,16 +309,39 @@ export function issueWhere(finding: Pick<Finding, 'file' | 'line'>, placed?: num
 }
 
 /** The issues a review is told about, with their ids, so that it rules on them by id. */
-export function issuesForRequest(ledger: Ledger, ids: readonly number[]): string[] {
+export function issuesForRequest(ledger: Ledger, ids: readonly number[], placed?: ReadonlyMap<number, number | null>): string[] {
   const byId = new Map(ledger.findings.map(finding => [finding.id, finding]))
 
   return ids.flatMap(id => {
     const finding = byId.get(id)
     if (finding === undefined) return []
     const partly = finding.status === 'partly' ? ` (partly fixed: ${finding.statusNote})` : ''
+    const stands = placed?.get(id)
+    const moved = stands === null ? ' (its line has changed since it was found)' : ''
 
-    return [`${id}. [${finding.severity}, ${finding.category}] ${issueWhere(finding)} (${finding.topic}) ${finding.title}${partly}`, `   ${finding.text}`]
+    return [`${id}. [${finding.severity}, ${finding.category}] ${issueWhere(finding, stands)} (${finding.topic}) ${finding.title}${partly}${moved}`, `   ${finding.text}`]
   })
+}
+
+/**
+ * The open issues of the files a look is shown, placed in each file's text
+ * as it is now: the lines its request lists, and where each stands, so that
+ * a note about the same thing is not raised beside it.
+ */
+export function lookIssues(ledger: Ledger, texts: ReadonlyMap<string, string>): { lines: string[]; spots: IssueSpot[] } {
+  const byId = new Map(ledger.findings.map(finding => [finding.id, finding]))
+  const placed = new Map<number, number | null>()
+  const spots: IssueSpot[] = []
+  for (const [file, text] of texts) {
+    for (const [id, line] of placeIssues(ledger, file, text.split('\n'))) {
+      const finding = byId.get(id)
+      if (finding === undefined) continue
+      placed.set(id, line)
+      spots.push({ id, file, topic: finding.topic, line: line ?? 0 })
+    }
+  }
+
+  return { lines: issuesForRequest(ledger, [...placed.keys()], placed), spots }
 }
 
 /** The issues the person dismissed, which a review never raises again. */

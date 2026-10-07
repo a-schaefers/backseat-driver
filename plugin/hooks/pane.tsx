@@ -29,6 +29,8 @@ export type PaneView = {
   tab: Tab
   /** The project's ledger of issues, its views, and the issue the Deep review tab's keys act on. Absent in tests that draw no tutor. */
   issues?: { state: IssuesState; views: LedgerViews; selected: number | null }
+  /** What the Play-by-play tab's keys act on: the selected note, or the issue picked from the deep review. */
+  playOn?: 'note' | 'issue'
   persona: Persona
   notes: readonly Note[]
   /** The id of the note the keys act on, or null for the first one. */
@@ -124,6 +126,12 @@ export type PaneActions = {
   /** Audits the codebase now. Absent in a session that does not drive. */
   onAudit?: () => void
   onIssuesFold?: (which: 'low' | 'closed') => void
+  /** The Play-by-play tab's keys: through its notes, then the issues it shows from the deep review. */
+  onPlayStep?: (step: 1 | -1) => void
+  /** Tracks an issue, shown in the play-by-play while it is open, or stops tracking it. */
+  onIssuePin?: (id: number, isPinned: boolean) => void
+  /** A note the play-by-play raised, pressed on the Deep review tab: opened on its own tab. */
+  onRaisedNote?: (id: number) => void
   /** Open the list of every review, or fold it again. */
   onReviewsFold?: () => void
   /** Open a setting's options under its row, or fold them again. */
@@ -868,6 +876,57 @@ export function currentIssue(view: Pick<PaneView, 'issues' | 'openList'>): Findi
   return issues.state.ledger.findings.find(finding => finding.id === id)
 }
 
+/** How many issues the Play-by-play tab shows from the deep review. */
+export const PLAY_PICKS = 3
+/** Over the issues the Play-by-play tab shows: the deep review's, ranked on its tab. */
+export const FROM_REVIEW_HEADING = 'From the deep review'
+/** Over the bugs and risks the play-by-play raised, on the Deep review tab: in both views (2026-10-07). */
+export const RAISED_HEADING = 'Raised while you worked'
+
+/** The issues the Play-by-play tab shows, in order: those tracked, then the serious ones in the files saved this sitting. */
+export function playPicks(view: Pick<PaneView, 'issues'>): Finding[] {
+  const issues = view.issues
+  if (issues === undefined) return []
+  const byId = new Map(issues.state.ledger.findings.map(finding => [finding.id, finding]))
+
+  return issues.views.play.flatMap(id => byId.get(id) ?? [])
+}
+
+/** What the Play-by-play tab's keys act on: the issue picked there while it is shown, else the current note, else the first issue shown. */
+export function currentPlayItem(view: Pick<PaneView, 'notes' | 'selected' | 'issues' | 'playOn'>): { note: Note } | { issue: Finding } | undefined {
+  const picks = playPicks(view)
+  if (view.playOn === 'issue') {
+    const issue = picks.find(finding => finding.id === view.issues?.selected)
+    if (issue !== undefined) return { issue }
+  }
+  const note = currentNote(view)
+  if (note !== undefined) return { note }
+  const issue = picks[0]
+
+  return issue === undefined ? undefined : { issue }
+}
+
+/** The bugs and risks the play-by-play raised that are still open, on the Deep review tab, each a press away from its keys. */
+function raisedSection({ Box, Text, Button }: Pick<Kit, 'Box' | 'Text' | 'Button'>, view: PaneView, actions: PaneActions) {
+  const raised = drawnOrder(view.notes).filter(note => note.kind === 'bug' || note.kind === 'risk')
+  if (raised.length === 0) return null
+
+  return (
+    <Box flexDirection="column">
+      <Text bold>{RAISED_HEADING}</Text>
+      {raised.map(note => (
+        <Box flexDirection="column">
+          <Button key={`raised-${note.id}`} label={`${noteMark(note).mark} ${note.kind} · ${note.file}:${note.line}`} plain onPress={() => actions.onRaisedNote?.(note.id)} />
+          <Box paddingLeft={4}>
+            <Text>{note.text}</Text>
+          </Box>
+        </Box>
+      ))}
+      {rule({ Text }, view.columns)}
+    </Box>
+  )
+}
+
 /** One issue: its mark, where it is now, its title, and under them what is wrong and where it came from. */
 function issueRow({ Box, Text, Button }: Pick<Kit, 'Box' | 'Text' | 'Button'>, finding: Finding, placed: number | null | undefined, isCurrent: boolean, actions: PaneActions) {
   const where = placed === null ? `${issueWhere(finding)}, changed since` : issueWhere(finding, placed)
@@ -965,6 +1024,7 @@ function deepReview({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
   return (
     <Box flexDirection="column">
       {issuesSection({ Box, Text, Button, Markdown } as Kit, view, actions)}
+      {raisedSection({ Box, Text, Button }, view, actions)}
       {review.state === 'none' && <Text dimColor>No deep review yet. One runs {view.reviewSchedule}.</Text>}
       {banner !== '' && <Text dimColor={review.state === 'running'}>{banner}</Text>}
       {behind !== '' && <Text dimColor>{behind}</Text>}
@@ -1016,6 +1076,9 @@ function reviewControls({ Text, Button }: Pick<Kit, 'Text' | 'Button'>, view: Pa
   const issueKeys = [
     current !== undefined && <Button key="issue-explain" label="explain" hotkey="e" plain onPress={() => actions.onIssueExplain?.(current.id)} />,
     current !== undefined && <Button key="issue-dismiss" label="dismiss" hotkey="d" plain onPress={() => actions.onIssueDismiss?.(current.id)} />,
+    current !== undefined && actions.onIssuePin !== undefined && (
+      <Button key="issue-track" label={current.isPinned ? 'untrack' : 'track'} hotkey="t" plain onPress={() => actions.onIssuePin?.(current.id, !current.isPinned)} />
+    ),
     drawn.length > 1 && <Button key="issue-next" label="next issue" hotkey="j" plain onPress={() => actions.onIssueStep?.(1)} />,
     drawn.length > 1 && <Button key="issue-previous" label="previous" hotkey="k" plain onPress={() => actions.onIssueStep?.(-1)} />,
     current !== undefined && actions.onIssueOpen !== undefined && <Button key="issue-open" label="open in editor" hotkey="o" plain onPress={() => actions.onIssueOpen?.(current.id)} />,
@@ -1037,14 +1100,14 @@ export const DECISION_HEADING = '◆ Your call'
 export const INSIGHT_HEADING = '★ Insight'
 
 /** One note: the key that selects it, then its text, indented. */
-function noteRow({ Box, Text, Button }: Kit, note: Note, current: Note, label: string, actions: PaneActions) {
+function noteRow({ Box, Text, Button }: Kit, note: Note, current: Note | undefined, label: string, actions: PaneActions) {
   return (
     <Box flexDirection="column">
       <Button
         key={`note-${note.id}`}
-        label={`${note.id === current.id ? '❯' : ' '} ${label}`}
+        label={`${note.id === current?.id ? '❯' : ' '} ${label}`}
         plain
-        dimColor={note.id !== current.id}
+        dimColor={note.id !== current?.id}
         onPress={() => actions.onSelect(note.id)}
       />
       <Box paddingLeft={4}>
@@ -1065,19 +1128,31 @@ function noteRow({ Box, Text, Button }: Kit, note: Note, current: Note, label: s
  * pass, 2026-10-06: a "look now" the owner pressed four times, which only refused).
  */
 function playControls({ Text, Button }: Pick<Kit, 'Text' | 'Button'>, view: PaneView, actions: PaneActions): RenderChildren[] {
-  const notes = drawnOrder(view.notes)
-  const current = currentNote(view)
+  const item = currentPlayItem(view)
+  // The keys act on the current note, or on the issue picked from the deep review: one record, whichever view it is in.
+  const current = item !== undefined && 'note' in item ? item.note : undefined
+  const issue = item !== undefined && 'issue' in item ? item.issue : undefined
+  const picks = playPicks(view)
+  const count = drawnOrder(view.notes).length + picks.length
+  const step = (by: 1 | -1) => (picks.length > 0 && actions.onPlayStep !== undefined ? actions.onPlayStep(by) : actions.onStep(by))
   const isFollowing = view.watch.state === 'following'
   const canLook = view.mode !== 'paused' && !isFollowing
 
   return [
     current !== undefined && <Button key="explain" label="explain" hotkey="e" plain onPress={() => actions.onExplain(current)} />,
+    issue !== undefined && <Button key="explain" label="explain" hotkey="e" plain onPress={() => actions.onIssueExplain?.(issue.id)} />,
     current !== undefined && <Button key="dismiss" label="dismiss" hotkey="d" plain onPress={() => actions.onDismiss(current)} />,
+    issue !== undefined && <Button key="dismiss" label="dismiss" hotkey="d" plain onPress={() => actions.onIssueDismiss?.(issue.id)} />,
     current !== undefined && <Button key="mute" label="mute" hotkey="m" plain onPress={() => actions.onMute(current)} />,
-    notes.length > 1 && <Button key="next-note" label="next note" hotkey="j" plain onPress={() => actions.onStep(1)} />,
-    notes.length > 1 && <Button key="previous-note" label="previous" hotkey="k" plain onPress={() => actions.onStep(-1)} />,
+    // An issue is dismissed, never muted: a muted topic would silence the reviewers too.
+    issue !== undefined && actions.onIssuePin !== undefined && (
+      <Button key="track" label={issue.isPinned ? 'untrack' : 'track'} hotkey="t" plain onPress={() => actions.onIssuePin?.(issue.id, !issue.isPinned)} />
+    ),
+    count > 1 && <Button key="next-note" label={picks.length > 0 ? 'next' : 'next note'} hotkey="j" plain onPress={() => step(1)} />,
+    count > 1 && <Button key="previous-note" label="previous" hotkey="k" plain onPress={() => step(-1)} />,
     canLook && <Button key="look" label="look now" hotkey="l" plain onPress={() => actions.onLook()} />,
     current !== undefined && actions.onOpen !== undefined && <Button key="open" label="open in editor" hotkey="o" plain onPress={() => actions.onOpen?.(current.file, current.line)} />,
+    issue !== undefined && actions.onIssueOpen !== undefined && <Button key="open" label="open in editor" hotkey="o" plain onPress={() => actions.onIssueOpen?.(issue.id)} />,
     isFollowing && <Text dimColor>{followingLine(view.watch.driver)}</Text>,
   ]
 }
@@ -1097,8 +1172,24 @@ export function emptyPlayLine(view: Pick<PaneView, 'watch' | 'mode'>): string {
 function playByPlay(kit: Kit, view: PaneView, actions: PaneActions) {
   const { Box, Text } = kit
   const notes = drawnOrder(view.notes)
-  const current = currentNote(view)
-  if (current === undefined) {
+  const item = currentPlayItem(view)
+  const current = item !== undefined && 'note' in item ? item.note : undefined
+  const picked = item !== undefined && 'issue' in item ? item.issue : undefined
+  // The deep review's serious issues in the files saved this sitting, and those tracked: the same records as on its tab.
+  const picks = playPicks(view)
+  const more = view.issues?.views.playMore ?? 0
+  const fromReview =
+    picks.length === 0 && more === 0 ? null : (
+      <Box flexDirection="column">
+        {notes.length > 0 && <Text> </Text>}
+        <Text bold color="red">
+          {FROM_REVIEW_HEADING}
+        </Text>
+        {picks.map(finding => issueRow(kit, finding, view.issues?.state.placed[String(finding.id)], finding.id === picked?.id, actions))}
+        {more > 0 && <Text dimColor>{`${more} more: 2: Deep review.`}</Text>}
+      </Box>
+    )
+  if (notes.length === 0) {
     // Under an empty tab, what the ledger holds: its silence must never read as an all-clear (2026-10-07).
     const ledger = view.issues === undefined || view.mode !== 'on' || view.watch.state === 'no-git' ? '' : ledgerLine(view.issues.views, view.issues.state.isAudited, view.issues.state.ledger.coverage)
 
@@ -1106,6 +1197,7 @@ function playByPlay(kit: Kit, view: PaneView, actions: PaneActions) {
       <Box flexDirection="column">
         <Text dimColor>{emptyPlayLine(view)}</Text>
         {ledger !== '' && <Text dimColor>{ledger}</Text>}
+        {fromReview}
       </Box>
     )
   }
@@ -1132,6 +1224,7 @@ function playByPlay(kit: Kit, view: PaneView, actions: PaneActions) {
       {insights.length > 0 && (decisions.length > 0 || others.length > 0) && <Text> </Text>}
       {insights.length > 0 && <Text color="cyan">{INSIGHT_HEADING}</Text>}
       {insights.map(note => noteRow(kit, note, current, `${note.id}  ${note.file} · line ${note.line}`, actions))}
+      {fromReview}
     </Box>
   )
 }

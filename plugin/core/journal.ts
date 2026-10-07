@@ -85,6 +85,11 @@ const MAX_TEXT_CHARS = 200
 /** Under this much editor time, a sitting with no save and no commit is not worth a line. */
 const QUIET_MS = 60_000
 
+/** The files saved this sitting, as the journal has them: where the play-by-play shows the serious issues on record. */
+export function savedPathsOf(journal: Journal): string[] {
+  return [...new Set(journal.entries.flatMap(entry => (entry.kind === 'save' ? [entry.path] : [])))]
+}
+
 export function emptyJournal(): Journal {
   return { said: null, inferred: null, entries: [], sittings: [] }
 }

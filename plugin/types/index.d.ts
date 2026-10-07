@@ -373,6 +373,8 @@ export type IssuesState = {
   placed: Record<string, number | null>
   /** True once an audit of the project was started. */
   isAudited: boolean
+  /** The files saved this sitting, as the journal has them: the play-by-play shows the serious issues of these. */
+  savedFiles?: string[]
 }
 
 declare module 'claude-code' {
@@ -402,6 +404,8 @@ declare module 'claude-code' {
       issues: IssuesState
       /** The id of the issue the Deep review tab's keys act on, or null for the first one. */
       selectedIssue: number | null
+      /** What the Play-by-play tab's keys act on: the note selected, or the issue picked from the deep review. */
+      playOn: 'note' | 'issue'
       watch: Watch
       review: Review
       profiles: Profiles

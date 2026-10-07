@@ -4,7 +4,7 @@ import { diffLines, formatHunks, splitLines } from './diff'
 import { enclosingName } from './enclosing'
 import { briefText, changesText, glanceText, workingOf } from './glance'
 import type { Change, Seen } from './glance'
-import { compact, emptyJournal, knownEntries, MAX_NAMES, mergeSpans, parseEntry, parseJournal, sync, withEntry } from './journal'
+import { compact, emptyJournal, knownEntries, MAX_NAMES, mergeSpans, parseEntry, parseJournal, savedPathsOf, sync, withEntry } from './journal'
 import type { Entry, Journal, Span } from './journal'
 import { isTrivialChange, looksBinary } from './noise'
 import type { Store } from './store'
@@ -116,6 +116,11 @@ export function createRecorder(ports: RecorderPorts) {
         isDirty = false
       }
       plan()
+    },
+
+    /** The files saved this sitting. */
+    savedPaths(): string[] {
+      return savedPathsOf(held)
     },
 
     /** These files were saved since the previous poll: records what each save changed, and where. */

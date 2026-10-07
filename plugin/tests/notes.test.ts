@@ -23,6 +23,7 @@ test('parseReply reads the JSON object the reviewer was asked for', async () => 
   expect(reply).toEqual({
     resolved: [2],
     notes: [{ file: 'a.py', line: 12, kind: 'bug', topic: 'off-by-one', text: 'Look at the last index.' }],
+    issues: [],
     say: 'Count the fence posts.',
     workingOn: 'adding a median',
   })
@@ -31,7 +32,7 @@ test('parseReply reads the JSON object the reviewer was asked for', async () => 
 test('parseReply finds the object inside prose or a code fence', async () => {
   const fenced = 'Here you go:\n```json\n{"resolved": [], "notes": []}\n```\nDone.'
 
-  expect(parseReply(fenced)).toEqual({ resolved: [], notes: [], say: '', workingOn: '' })
+  expect(parseReply(fenced)).toEqual({ resolved: [], notes: [], issues: [], say: '', workingOn: '' })
 })
 
 test('parseReply drops what it cannot trust and never throws', async () => {
@@ -49,11 +50,24 @@ test('parseReply drops what it cannot trust and never throws', async () => {
         'not an object',
         { file: 'a.py', kind: 'tip', note: 'No line or topic given.' },
       ],
+      // The look may say an issue is fixed, or fixed in part: nothing else, and nothing it cannot name by id.
+      issues: [
+        { id: 1, status: 'resolved', note: '  an empty list   raises ' },
+        { id: 2, status: 'dismissed', note: 'not mine' },
+        { id: 2, status: 'open' },
+        { id: 'x', status: 'resolved' },
+        'not an object',
+        { id: 3, status: 'partly' },
+      ],
     }),
   )
   expect(reply).toEqual({
     resolved: [1],
     notes: [{ file: 'a.py', line: 1, kind: 'tip', topic: 'no-line-or-topic-given', text: 'No line or topic given.' }],
+    issues: [
+      { id: 1, status: 'resolved', note: 'an empty list raises' },
+      { id: 3, status: 'partly', note: '' },
+    ],
     say: '',
     workingOn: '',
   })

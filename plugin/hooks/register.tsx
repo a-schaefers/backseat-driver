@@ -150,8 +150,12 @@ import type { Play, PlayFacts } from '../core/play'
 import { isProblem, keepNotes, parseKeptNotes, stillOpen, withDismissed } from '../core/notes'
 import type { KeptNotes } from '../core/notes'
 import {
+  currentPlayItem,
   detailMarkdown,
+  drawnOrder,
   estimatedRows,
+  PLAY_PICKS,
+  playPicks,
   renderMinimized,
   renderPane,
   reviewSchedule,
@@ -306,8 +310,30 @@ import { checkKey, cleanKey, looksLikeKey } from '../core/licensekey'
 import type { KeyCheck } from '../core/licensekey'
 import type { Watcher } from '../core/watcher'
 import { chosen, parseWorking, tidy, WORKING_HEADER, WORKING_QUESTION, workingChoices } from '../core/working'
-import { anchorIssue, askedIssues, auditLine, coveredLedger, dismissedForRequest, EMPTY_LEDGER, FINDINGS_FILE, foundIssues, issueQuestion, issuesBrief, issuesForRequest, ledgerViews, MAX_FROM_AUDIT, MAX_FROM_REVIEW, parseFindingsFence, parseLedger, personIssue, placeIssues, ruledIssues } from '../core/findings'
+import {
+  anchorIssue,
+  askedIssues,
+  auditLine,
+  coveredLedger,
+  dismissedForRequest,
+  EMPTY_LEDGER,
+  FINDINGS_FILE,
+  foundIssues,
+  issueQuestion,
+  issuesBrief,
+  issuesForRequest,
+  ledgerViews,
+  lookIssues,
+  MAX_FROM_AUDIT,
+  MAX_FROM_REVIEW,
+  parseFindingsFence,
+  parseLedger,
+  personIssue,
+  placeIssues,
+  ruledIssues,
+} from '../core/findings'
 import type { Candidate, Finding, Ledger, PersonAction } from '../core/findings'
+import { parseJournal, savedPathsOf } from '../core/journal'
 
 const IDLE: Watch = { state: 'idle', lastLookAt: null, line: playLine({ at: 'watching' }) }
 const NO_REVIEW: Review = { state: 'none', subject: '', text: '', isUnseen: false, decisions: [], insights: [] }
@@ -322,6 +348,8 @@ const selectedAtom = atom({ plugin: 'backseat-driver', key: 'selected' } as cons
 const NO_ISSUES: IssuesState = { ledger: EMPTY_LEDGER, placed: {}, isAudited: false }
 const issuesAtom = atom({ plugin: 'backseat-driver', key: 'issues' } as const, NO_ISSUES)
 const selectedIssueAtom = atom({ plugin: 'backseat-driver', key: 'selectedIssue' } as const, null)
+/** What the Play-by-play tab's keys act on: the selected note, or the issue picked from the deep review. */
+const playOnAtom = atom({ plugin: 'backseat-driver', key: 'playOn' } as const, 'note' as 'note' | 'issue')
 const watchAtom = atom({ plugin: 'backseat-driver', key: 'watch' } as const, IDLE)
 const reviewAtom = atom({ plugin: 'backseat-driver', key: 'review' } as const, NO_REVIEW)
 const profilesAtom = atom({ plugin: 'backseat-driver', key: 'profiles' } as const, NO_PROFILES)
@@ -757,6 +785,7 @@ async function fullState($: EngineInterface): Promise<Record<string, unknown>> {
       review: await read($, reviewAtom),
       issues: await read($, issuesAtom),
       selectedIssue: await read($, selectedIssueAtom),
+      playOn: await read($, playOnAtom),
       explain: await read($, explainAtom),
       working: await read($, workingAtom),
       progress: await read($, progressAtom),
@@ -2427,6 +2456,16 @@ function lookPortsOf($: EngineInterface, settings: Settings): LookPorts {
     notePrints,
     saveNotes: () => saveNotes($),
     saveSubject: (subject, change) => saveSubject($, settings, subject, change),
+    issues: {
+      forLook: texts => lookIssues(ledger, texts),
+      rule: async rulings => {
+        // Nothing to say: the files changed, so the issues are placed again.
+        if (rulings.length === 0) return void (await showIssues($))
+        const at = await $.clock.now()
+        trace($, 'state', 'issues ruled by the look', () => ({ rulings }))
+        await changeIssues($, current => ruledIssues(current, 'look', at, rulings.map(ruling => ({ ...ruling, severity: '' as const }))).ledger)
+      },
+    },
     recorder: () => journalState.recorder,
     showWorking: now => showWorking($, now),
     say: text => say($, text),
@@ -2840,7 +2879,10 @@ async function followProject($: EngineInterface, settings: Settings): Promise<vo
   try {
     if (isChanged('notes.json')) await followNotes($, isFirst)
     if (isChanged('reviews.json') || isChanged('queue.json') || isChanged('project.json')) await followReviews($, settings, isFirst)
-    if (isChanged('journal.json')) await showStoredWorkingOf(journalPortsOf($), journalState, repoRoot)
+    if (isChanged('journal.json')) {
+      await showStoredWorkingOf(journalPortsOf($), journalState, repoRoot)
+      await noteSavedFiles($)
+    }
     if (isChanged(FINDINGS_FILE)) await loadIssues($)
   } catch (error) {
     fail($, 'could not take up what the driver wrote', error)
@@ -3101,7 +3143,19 @@ async function placedNow($: EngineInterface, of: Ledger): Promise<Record<string,
 /** Shows the ledger in the pane, each open issue where its line stands now. */
 async function showIssues($: EngineInterface): Promise<void> {
   const placed = await placedNow($, ledger)
-  await update($, issuesAtom, (): IssuesState => ({ ledger, placed, isAudited: project?.isAudited ?? false }))
+  await update($, issuesAtom, (state): IssuesState => ({ ...state, ledger, placed, isAudited: project?.isAudited ?? false }))
+}
+
+/**
+ * The files saved this sitting, as the journal has them, for the
+ * play-by-play's picks among the issues: the driver's journal in memory, or
+ * the project's file in a session that keeps none.
+ */
+async function noteSavedFiles($: EngineInterface): Promise<void> {
+  let saved: string[] = []
+  if (journalState.recorder !== null) saved = journalState.recorder.savedPaths()
+  else if (repoRoot !== '' && dataRoot !== '') saved = savedPathsOf(parseJournal(await storeOf($).read(journalPath(dataRoot, repoRoot)).catch(() => null)))
+  await update($, issuesAtom, (state): IssuesState => (JSON.stringify(state.savedFiles ?? []) === JSON.stringify(saved) ? state : { ...state, savedFiles: saved }))
 }
 
 /** Reads the ledger from the project's folder and shows it. */
@@ -3732,6 +3786,7 @@ async function scan($: EngineInterface, settings: Settings): Promise<void> {
     // Until an editor has written its focus file, looking for it this often is enough.
     if (!followState.isWatchingClosely) await pollFocus($)
     await keepJournal($, active, now)
+    await noteSavedFiles($)
     await checkHead($, settings)
     // Another session may have changed what is on record about the person.
     if (now - sharedCheckedAt >= SHARED_CHECK_MS) await refreshShared($, settings)
@@ -4399,7 +4454,7 @@ async function drawTutor(
 ) {
   quiet.renders += 1
   // One round for everything the pane shows, not a dozen in a row for every frame.
-  const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, shownSettings, licensing, backdrop, lessons, openList, spin, now, issues, selectedIssue] = await Promise.all([
+  const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, shownSettings, licensing, backdrop, lessons, openList, spin, now, issues, selectedIssue, playOn] = await Promise.all([
     read($, modeAtom),
     read($, tabAtom),
     read($, notesAtom),
@@ -4422,6 +4477,7 @@ async function drawTutor(
     $.clock.now(),
     read($, issuesAtom),
     read($, selectedIssueAtom),
+    read($, playOnAtom),
   ])
   // While a lookup runs, the area the explanation stood in keeps its height (`estimatedRows`).
   if (explain.detail !== null) explainRows = estimatedRows(detailMarkdown(explain.detail), where.columns) + explain.insights.length
@@ -4455,7 +4511,8 @@ async function drawTutor(
     now,
     settings: shownSettings,
     explainHold,
-    issues: { state: issues, views: ledgerViews(issues.ledger, { savedFiles: [], cap: 3 }), selected: selectedIssue },
+    issues: { state: issues, views: ledgerViews(issues.ledger, { savedFiles: issues.savedFiles ?? [], cap: PLAY_PICKS }), selected: selectedIssue },
+    playOn,
   }
 
   const tree = renderPane(kit, view, {
@@ -4483,6 +4540,31 @@ async function drawTutor(
     onSelect: (id: number) => {
       touched($, settings, 'select', () => id)
       void update($, selectedAtom, () => id)
+      void update($, playOnAtom, (): 'note' | 'issue' => 'note')
+    },
+    // The Play-by-play tab's keys walk its notes, then the issues it shows from the deep review.
+    onPlayStep: (step: 1 | -1) => {
+      touched($, settings, 'play step', () => step)
+      const drawn = [...drawnOrder(view.notes).map(note => ({ kind: 'note' as const, id: note.id })), ...playPicks(view).map(finding => ({ kind: 'issue' as const, id: finding.id }))]
+      const item = currentPlayItem(view)
+      const at = item === undefined ? -1 : drawn.findIndex(entry => ('note' in item ? entry.kind === 'note' && entry.id === item.note.id : entry.kind === 'issue' && entry.id === item.issue.id))
+      const next = drawn[(Math.max(0, at) + (at === -1 ? 0 : step) + drawn.length) % drawn.length]
+      if (next === undefined) return
+      // Each atom by its own name: the module's state is listed from the calls as written.
+      if (next.kind === 'note') void update($, selectedAtom, () => next.id)
+      else void update($, selectedIssueAtom, () => next.id)
+      void update($, playOnAtom, (): 'note' | 'issue' => next.kind)
+    },
+    onIssuePin: (id: number, isPinned: boolean) => {
+      touched($, settings, isPinned ? 'issue pin' : 'issue unpin', () => id)
+      void personOnIssue($, isPinned ? 'pin' : 'unpin', id)
+    },
+    // A note the play-by-play raised, from the Deep review tab: shown where its keys are.
+    onRaisedNote: (id: number) => {
+      touched($, settings, 'raised note', () => id)
+      void update($, selectedAtom, () => id)
+      void update($, playOnAtom, (): 'note' | 'issue' => 'note')
+      void update($, tabAtom, (): Tab => 'play')
     },
     onExplain: (note: Note) => {
       touched($, settings, 'explain', () => note)
@@ -4547,6 +4629,7 @@ async function drawTutor(
     onIssueSelect: (id: number) => {
       touched($, settings, 'issue select', () => id)
       void update($, selectedIssueAtom, () => id)
+      void update($, playOnAtom, (): 'note' | 'issue' => 'issue')
     },
     onIssueStep: (step: 1 | -1) => {
       touched($, settings, 'issue step', () => step)
@@ -5289,9 +5372,15 @@ export const register: Register = (on, options) => {
     const result = await next(e)
     if (result.deny !== undefined) return result
     const note = /^note-(\d+)$/.exec(e.element ?? '')
-    if (note !== null) await update($, selectedAtom, () => Number(note[1]))
+    if (note !== null) {
+      await update($, selectedAtom, () => Number(note[1]))
+      await update($, playOnAtom, (): 'note' | 'issue' => 'note')
+    }
     const issue = /^issue-(\d+)$/.exec(e.element ?? '')
-    if (issue !== null) await update($, selectedIssueAtom, () => Number(issue[1]))
+    if (issue !== null) {
+      await update($, selectedIssueAtom, () => Number(issue[1]))
+      await update($, playOnAtom, (): 'note' | 'issue' => 'issue')
+    }
 
     return result
   })

@@ -10,9 +10,17 @@ import type { Hunk } from './diff'
 export type ReviewReply = {
   resolved: number[]
   notes: Omit<Note, 'id'>[]
+  /** What the look says of the issues on record it was shown: fixed, or fixed in part. Nothing else is read. */
+  issues: LookRuling[]
   say: string
   workingOn: string
 }
+
+/** The play-by-play's word on an issue on record: the deep review checks it at the next commit. */
+export type LookRuling = { id: number; status: 'resolved' | 'partly'; note: string }
+
+/** Where an open issue on record stands in a file a look is shown: a note about it is not raised beside it. */
+export type IssueSpot = { id: number; file: string; topic: string; line: number }
 
 /**
  * Most important first. A decision point comes after what will or may break,
@@ -87,9 +95,19 @@ export function parseReply(text: string): ReviewReply | null {
     })
   }
 
+  const issues: LookRuling[] = []
+  for (const item of Array.isArray(reply.issues) ? reply.issues : []) {
+    const ruling = asRecord(item)
+    if (ruling === null || typeof ruling.id !== 'number' || !Number.isInteger(ruling.id)) continue
+    // The look may say an issue is fixed, or fixed in part. It never dismisses, reopens or judges how bad one is.
+    if (ruling.status !== 'resolved' && ruling.status !== 'partly') continue
+    issues.push({ id: ruling.id, status: ruling.status, note: typeof ruling.note === 'string' ? ruling.note.replace(/\s+/g, ' ').trim().slice(0, 200) : '' })
+  }
+
   return {
     resolved,
     notes: notes.slice(0, MAX_NEW_NOTES),
+    issues: issues.slice(0, 12),
     say: typeof reply.say === 'string' ? reply.say.trim() : '',
     workingOn: typeof reply.working_on === 'string' ? reply.working_on.replace(/\s+/g, ' ').trim() : '',
   }
@@ -126,6 +144,8 @@ export function applyReply(
   dismissed: readonly Note[] = [],
   /** The changes this look was shown, with each file's text as it is now: the open notes about them are placed again. */
   changed: readonly ShownChange[] = [],
+  /** The open issues on record in these files: a note about the same thing is not raised beside one (2026-10-07). */
+  onRecord: readonly IssueSpot[] = [],
 ): { notes: Note[]; nextId: number } {
   // A note never outlives the code it was about (the owner, 2026-10-05: three notes about fixed bugs stood through
   // the looks that saw the fixes). The look just saw these files: every open note about them is placed again by the
@@ -142,6 +162,7 @@ export function applyReply(
     if (!lookedAt.includes(added.file)) continue
     if (notes.some(note => isSamePoint(note, added))) continue
     if (dismissed.some(note => isSamePoint(note, added))) continue
+    if (onRecord.some(issue => issue.file === added.file && (issue.topic === added.topic || (issue.line > 0 && issue.line === added.line)))) continue
     const after = changed.find(shown => shown.path === added.file)?.after
     const lineText = after === undefined ? '' : (splitLines(after)[added.line - 1] ?? '').trim()
     notes.push({ ...added, id, ...(lineText === '' ? {} : { lineText }) })

@@ -117,6 +117,10 @@ SEVERITIES = ("critical", "high", "medium", "low")
 SHARED_CHECK_MS = 5_000
 PUSHED_SCAN_MS = 30_000
 LEDGER_GRACE_MS = PUSHED_SCAN_MS + SHARED_CHECK_MS + 5_000
+# How many issues the Play-by-play tab shows from the deep review, and the heading on the Deep review tab over what the
+# play-by-play raised (plugin/hooks/pane.tsx `PLAY_PICKS`, `RAISED_HEADING`).
+PLAY_PICKS = 3
+RAISED_HEADING = "Raised while you worked"
 # The lines the empty play-by-play draws about the ledger (plugin/core/findings.ts `ledgerLine`): one of them, always.
 LEDGER_LINE_STARTS = ("The deep review has ", "The audit found nothing open", "The audit has not finished", "Not audited for issues yet:")
 # The bar for a first placement (plugin/core/progress.ts): a level on a record under it is one the rules no longer support.
@@ -1765,6 +1769,14 @@ def check_issues(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]
             out.append((BAD, f"{who}'s Deep review tab says nothing of the {expected} open in findings.json"))
         elif said is not None and said != f"Open: {expected}":
             out.append((BAD, f"{who}'s Deep review tab says “{said}”, and findings.json has {expected or 'none'} open"))
+        # The bugs and risks the play-by-play raised are on this tab too, so that a problem is in both views (2026-10-07).
+        raised = [n for n in (dig(state, "pane.notes") or []) if isinstance(n, dict) and n.get("kind") in ("bug", "risk")]
+        if raised and RAISED_HEADING not in texts:
+            out.append((BAD, f"{who}'s Deep review tab does not list the {len(raised)} bug(s) and risk(s) the play-by-play raised"))
+        elif raised:
+            unlisted = [n for n in raised if " ".join(str(n.get("text", "")).split()) not in texts]
+            if unlisted:
+                out.append((BAD, f"{who}'s Deep review tab lists what the play-by-play raised without {len(unlisted)} of them: " + ", ".join(f"{n.get('file')}:{n.get('line')}" for n in unlisted[:3])))
         # What was read, or that nothing was: the tab is never silent about it.
         is_auditing = dig(state, "pane.review.state") == "running" and dig(state, "pane.review.subject") == AUDIT_SUBJECT
         if not is_auditing:
@@ -1772,6 +1784,17 @@ def check_issues(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]
                 out.append((BAD, f"{who}'s Deep review tab does not say what the audit of {day_clock(coverage['at'], now)} read"))
             elif (coverage.get("at") or 0) <= 0 and not any(t.startswith(("Not audited for issues yet.", "The audit did not finish.")) for t in texts):
                 out.append((BAD, f"{who}'s Deep review tab says nothing of an audit, and none is on record: its silence reads as an all-clear"))
+    if tab == "play" and texts:
+        # What it shows from the deep review is open, and every issue the person tracks is among it.
+        rows = drawn_issue_rows(texts, on_disk)
+        for row in rows:
+            if not any(is_open(f) for f in row):
+                out.append((BAD, f"{who}'s Play-by-play tab shows issue {row[0].get('id')} “{row[0].get('title')}” from the deep review, and findings.json has it {row[0].get('status')}"))
+        tracked = [f for f in on_disk if is_open(f) and f.get("isPinned")]
+        shown_ids = {f.get("id") for row in rows for f in row}
+        if 0 < len(tracked) <= PLAY_PICKS and any(f.get("id") not in shown_ids for f in tracked):
+            lost = [f for f in tracked if f.get("id") not in shown_ids]
+            out.append((BAD, f"{who}'s Play-by-play tab does not show {len(lost)} tracked issue(s): " + ", ".join(f"{f.get('id')} “{f.get('title')}”" for f in lost[:3])))
     if tab == "play" and texts and not (dig(state, "pane.notes") or []) and dig(state, "pane.watch.state") != "no-git" and tutor_mode(s) == "on":
         expected = ledger_line(counts, project.get("is_audited") is True, coverage)
         said = next((t for t in texts if t.startswith(LEDGER_LINE_STARTS)), None)
@@ -2027,7 +2050,7 @@ def print_bundle(w: dict, s: dict) -> None:
         ledger = project.get("findings") or {}
         found = [f for f in (ledger.get("findings") or []) if isinstance(f, dict)]
         cov = ledger.get("coverage") if isinstance(ledger.get("coverage"), dict) else {}
-        audit = (f"audited {day_clock(cov.get('at'), now)} at {cov.get('commit') or '-'}: read {len(cov.get('read') or [])} of {cov.get('files')} source files, skipped {len(cov.get('skipped') or [])}"
+        audit = (f"audited {day_clock(cov.get('at'), now)} at {cov.get('commit') or '-'}: read {len(cov.get('read') or [])} file(s), {cov.get('files')} source file(s) in git, skipped {len(cov.get('skipped') or [])}"
                  if (cov.get("at") or 0) > 0 else "an audit started and never finished" if project.get("is_audited") else "never audited")
         print(f"findings.json ({since(project['findings_at'])}): {len(found)} issue(s), open {counts_words(ledger_counts(found)) or 'none'} · {audit}")
         for f in found:

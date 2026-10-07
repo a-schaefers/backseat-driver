@@ -15,6 +15,7 @@ import { outcomeOf } from './health'
 import { sourcePrint } from './knowledge'
 import { languageOf } from './languages'
 import { applyReply, isProblem, parseReply } from './notes'
+import type { IssueSpot, LookRuling } from './notes'
 import type { Bubble } from './prompts'
 import { playByPlayPrompt } from './prompts'
 import { GENERAL, isHushed, withFlagged, withLooked } from './profiles'
@@ -76,6 +77,15 @@ export type LookPorts = Pick<Host, 'now' | 'ask' | 'trace' | 'toast' | 'fail'> &
   saveNotes: () => Promise<void>
   /** Changes what is on record about a language, as one step. */
   saveSubject: (subject: string, change: (profile: Profile) => Profile) => Promise<void>
+  /**
+   * The issues on record: those of the files a look is shown, placed in their
+   * text as it is now, and what the look says of them. `rule` with nothing to
+   * say places the issues again, since the files changed.
+   */
+  issues: {
+    forLook: (texts: ReadonlyMap<string, string>) => { lines: string[]; spots: IssueSpot[] }
+    rule: (rulings: readonly LookRuling[]) => Promise<void>
+  }
   recorder: () => Recorder | null
   showWorking: (now: number) => Promise<void>
   say: (text: string) => Promise<void>
@@ -131,7 +141,18 @@ export async function runLook(ports: LookPorts, state: LookState, isAsked: boole
     const brief = ports.brief(changedFiles, insight => current.has(insight))
     // What the journal says they have been doing, so that the changes are read in the light of it.
     const doing = await ports.glance()
-    const { prompt, shown } = playByPlayPrompt(changes, await ports.notes.open(), await ports.notes.dismissed(), bubble, brief, doing, topicsRaised(ports.profiles(), changedFiles))
+    // The issues on record in these files: never raised again as notes, and ruled on when the change fixes one.
+    const onRecord = ports.issues.forLook(new Map(changes.map(change => [change.path, change.after])))
+    const { prompt, shown } = playByPlayPrompt(
+      changes,
+      await ports.notes.open(),
+      await ports.notes.dismissed(),
+      bubble,
+      brief,
+      doing,
+      topicsRaised(ports.profiles(), changedFiles),
+      onRecord.lines,
+    )
     const result = await ports.ask('play-by-play', {
       model: settings.playByPlay.model,
       effort: settings.playByPlay.thinking,
@@ -158,6 +179,11 @@ export async function runLook(ports: LookPorts, state: LookState, isAsked: boole
     active.settle(shown)
     const parsed = parseReply(result.text)
     if (parsed === null) ports.trace('look', 'reply not understood', () => ({ text: result.text }))
+    // Only the issues of the files it was shown: a word on any other is not the look's to give.
+    const seen = new Set(shown.map(change => change.path))
+    const spots = onRecord.spots.filter(spot => seen.has(spot.file))
+    const rulings = (parsed?.issues ?? []).filter(ruling => spots.some(spot => spot.id === ruling.id))
+    await ports.issues.rule(rulings)
     if (parsed !== null) {
       // The reviewer is told what was hushed. This makes sure of it.
       const profiles = ports.profiles()
@@ -171,7 +197,7 @@ export async function runLook(ports: LookPorts, state: LookState, isAsked: boole
       // Read again: a note dismissed while this look ran must not come back with it.
       const dismissed = await ports.notes.dismissed()
       const dealtWith = (await ports.notes.open()).filter(note => reply.resolved.includes(note.id))
-      await ports.notes.change(open => applyReply(open, reply, paths, firstId, dismissed, shown).notes)
+      await ports.notes.change(open => applyReply(open, reply, paths, firstId, dismissed, shown, spots).notes)
       // The notes about these files are about the text this look saw.
       for (const change of shown) ports.notePrints.set(change.path, sourcePrint(change.after))
       void ports.saveNotes()
@@ -181,6 +207,10 @@ export async function runLook(ports: LookPorts, state: LookState, isAsked: boole
       const added = (await ports.notes.open()).filter(note => note.id >= firstId)
       const recorder = ports.recorder()
       for (const note of dealtWith) recorder?.add({ at: now, kind: 'fixed', path: note.file, line: note.line, text: note.topic })
+      for (const ruling of rulings.filter(item => item.status === 'resolved')) {
+        const spot = spots.find(item => item.id === ruling.id)
+        if (spot !== undefined) recorder?.add({ at: now, kind: 'fixed', path: spot.file, line: spot.line, text: spot.topic })
+      }
       for (const note of added) recorder?.add({ at: now, kind: 'note', path: note.file, line: note.line, text: note.topic })
       recorder?.infer(reply.workingOn, paths, now)
       ports.trace('look', 'done', () => ({
@@ -188,6 +218,7 @@ export async function runLook(ports: LookPorts, state: LookState, isAsked: boole
         added,
         dealtWith,
         hushedOut: parsed.notes.length - reply.notes.length,
+        issues: rulings,
         say: reply.say,
         workingOn: reply.workingOn,
       }))

@@ -834,6 +834,29 @@ class Issues(unittest.TestCase):
         self.assertEqual(jack.ledger_line(jack.ledger_counts([]), True, {"at": 5, "read": ["a", "b"]}), "The audit found nothing open in the 2 files it read.")
         self.assertEqual(jack.ledger_line(jack.ledger_counts([self.issue(1, "low", "x"), self.issue(2, "medium", "y")]), True, {}), "The deep review has 2 lesser issues open: 2: Deep review.")
 
+    def test_the_play_by_play_shows_open_issues_and_every_one_tracked(self):
+        high = self.issue(1, "high", "mean of an empty list")
+        tracked = {**self.issue(2, "medium", "unescaped output", file="index.php"), "isPinned": True}
+        gone = self.issue(3, "high", "the password in the web root", "dismissed", file=".")
+        ledger = self.keep([high, tracked, gone])
+        line = "The deep review has 1 high open: 2: Deep review."
+        right = ["On.", line, "From the deep review", "medium · index.php:2", "unescaped output", "❯ high · stats.py:1", "mean of an empty list"]
+        self.assertEqual(bad(self.found(ledger, "play", right)), [])
+        # A dismissed issue still shown, a tracked one missing.
+        self.assertIn("shows issue 3 “the password in the web root” from the deep review, and findings.json has it dismissed",
+                      " ".join(bad(self.found(ledger, "play", right + ["high · the project", "the password in the web root"]))))
+        self.assertIn("does not show 1 tracked issue(s): 2 “unescaped output”", " ".join(bad(self.found(ledger, "play", ["On.", line, "From the deep review", *right[5:]]))))
+
+    def test_the_deep_review_tab_lists_what_the_play_by_play_raised(self):
+        ledger = self.keep([], {"at": self.now - 600_000, "commit": "abc1234", "files": 1, "read": ["stats.py"], "skipped": []})
+        note = {"id": 4, "file": "stats.py", "line": 2, "kind": "bug", "topic": "empty-input", "text": "What does this do for an empty list?"}
+        tip = {"id": 5, "file": "stats.py", "line": 1, "kind": "tip", "topic": "statistics", "text": "The standard library has a module for this."}
+        status = "Audited 11:42 at abc1234: read 1 of 1 source files."
+        found = lambda texts: " ".join(bad(self.found(ledger, "review", texts, notes=[note, tip])))
+        self.assertEqual(found([status, jack.RAISED_HEADING, "● bug · stats.py:2", note["text"]]), "")
+        self.assertIn("does not list the 1 bug(s) and risk(s) the play-by-play raised", found([status]))
+        self.assertIn("without 1 of them: stats.py:2", found([status, jack.RAISED_HEADING]))
+
     def test_what_the_audit_read_is_in_the_repository(self):
         env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@x"}
         subprocess.run(["git", "init", "-q", self.root], check=True, env=env)
@@ -854,6 +877,9 @@ class Issues(unittest.TestCase):
         for start in jack.LEDGER_LINE_STARTS:
             self.assertIn(start.split(" open")[0] if start.startswith("The deep review") else start, findings)
         self.assertIn(f"export const AUDIT_SUBJECT = '{jack.AUDIT_SUBJECT}'", (REPO / "plugin" / "core" / "review.ts").read_text())
+        pane = (REPO / "plugin" / "hooks" / "pane.tsx").read_text()
+        self.assertIn(f"export const PLAY_PICKS = {jack.PLAY_PICKS}", pane)
+        self.assertIn(f"export const RAISED_HEADING = '{jack.RAISED_HEADING}'", pane)
         self.assertEqual(jack.counts_words({"critical": 1, "high": 2, "medium": 0, "low": 3}), "1 critical, 2 high, 3 low")
 
 
