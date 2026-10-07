@@ -115,6 +115,8 @@ export type ReviewContext = {
   earlier: string
   /** The issues on record for what it looks at, each a line or two with its id, and the ones the person dismissed. */
   issues?: { open: readonly string[]; dismissed: readonly string[] }
+  /** The play-by-play's open bugs and risks in the files it looks at, one a line, for it to adopt as issues. */
+  notes?: readonly string[]
 }
 
 function background(context: ReviewContext): string[] {
@@ -124,6 +126,13 @@ function background(context: ReviewContext): string[] {
       ? []
       : ['', 'Your earlier reviews, newest first. Where this change answers something you raised, say so. Do not repeat a point that still stands unless it matters more now:', context.earlier]),
     ...issuesOnRecord(context.issues),
+    ...(context.notes === undefined || context.notes.length === 0
+      ? []
+      : [
+          '',
+          "Bugs and risks the play-by-play raised in these files that are still open. When one is a real issue, raise it in your fence with your own severity, and it takes the note's place in the pane. Leave out the ones that are not:",
+          ...context.notes,
+        ]),
   ]
 }
 

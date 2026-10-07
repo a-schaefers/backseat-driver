@@ -49,6 +49,8 @@ When it depends on how the code is deployed or used, say so in `condition` ("onl
 - Never the fix, and never code: what is wrong, and the name of the idea behind it.
 - Twelve at most, the most serious first. None when there is none: do not invent problems.
 
+When you are given bugs and risks the play-by-play raised, each that is a real issue goes in your fence as one, with your own severity and title: the note leaves the pane and the issue stands in its place. One that is not an issue is left out.
+
 When you are given issues on record with their ids, rule on each in the same fence, one line each: `{"id": 12, "status": "open", "note": "what remains, or why", "severity": ""}`, where `status` is `open`, `partly` or `resolved`, and `severity` is how bad it is when you see it differently now, or empty. Confirm or reopen what the play-by-play marked resolved. Never raise an issue on record again as a new one, and never one the person dismissed.
 
 ## Notes for the tutor's memory

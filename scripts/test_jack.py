@@ -857,6 +857,18 @@ class Issues(unittest.TestCase):
         self.assertIn("does not list the 1 bug(s) and risk(s) the play-by-play raised", found([status]))
         self.assertIn("without 1 of them: stats.py:2", found([status, jack.RAISED_HEADING]))
 
+    def test_the_explain_tab_shows_open_issues_of_its_file(self):
+        ledger = self.keep([self.issue(1, "high", "mean of an empty list"), self.issue(2, "low", "a name", "dismissed")],
+                           {"at": self.now - 600_000, "commit": "abc1234", "files": 1, "read": ["stats.py"], "skipped": []})
+        explain = {"spot": {"path": "stats.py", "line": 1}, "target": None}
+        found = lambda texts: " ".join(bad(self.found(ledger, "explain", texts, explain=explain)))
+        self.assertEqual(found(["stats.py", "Issue: high · line 1 mean of an empty list"]), "")
+        self.assertIn("shows the issue “a name” at stats.py:2, which findings.json does not have open there", found(["stats.py", "Issue: low · line 2 a name"]))
+        # A note beside an open issue is a note to read, not a disagreement: the next review adopts it.
+        note = {"id": 7, "file": "stats.py", "line": 1, "kind": "bug", "topic": "division", "text": "What of an empty list?"}
+        said = self.found(ledger, "explain", ["stats.py"], explain=explain, notes=[note])
+        self.assertTrue(any(level == jack.NOTE and "stands beside issue 1" in text for level, text in said), said)
+
     def test_what_the_audit_read_is_in_the_repository(self):
         env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@x"}
         subprocess.run(["git", "init", "-q", self.root], check=True, env=env)

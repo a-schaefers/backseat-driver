@@ -221,7 +221,7 @@ sessionTest('the hush tool stops a topic at once, for good, and removes its note
   await $.session.start(SESSION)
   await $.command.run(typed('backseat'))
   await session.clock.settle()
-  expect(session.tools.map(tool => tool.name)).toEqual(['hush', 'unhush', 'record', 'lookup', 'progress', 'lesson', 'profile', 'working', 'activity'])
+  expect(session.tools.map(tool => tool.name)).toEqual(['hush', 'unhush', 'record', 'lookup', 'progress', 'lesson', 'profile', 'issue', 'working', 'activity'])
 
   session.write('stats.py', `${MEAN}\ndef total(xs):\n    return sum(xs)\n`)
   await session.clock.advance(14_000)

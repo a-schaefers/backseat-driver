@@ -314,6 +314,7 @@ import {
   anchorIssue,
   askedIssues,
   auditLine,
+  coverageLine,
   coveredLedger,
   dismissedForRequest,
   EMPTY_LEDGER,
@@ -2398,6 +2399,20 @@ async function registerTools($: EngineInterface): Promise<void> {
     inputSchema: { type: 'object', properties: { language }, required: ['language'] },
   })
   await $.tool.register({
+    name: 'issue',
+    description:
+      "Backseat Driver: the issues the deep review keeps for this project, ranked. With no id, lists the open ones with their ids and what the last audit read. With an id, records the deep reviewer's verdict on an issue the user contested: status open (with severity when the reviewer weighs it otherwise), partly or resolved, and a note saying why. Only the reviewer's verdict: the user dismisses issues in the pane.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'The issue, by its id. Leave it out to list the open issues.' },
+        status: { type: 'string', enum: ['open', 'partly', 'resolved'], description: "The reviewer's verdict." },
+        severity: { type: 'string', enum: ['critical', 'high', 'medium', 'low', ''], description: 'How bad the reviewer now says it is, or empty for unchanged.' },
+        note: { type: 'string', description: 'Why, in a few words: what remains, or why it is resolved.' },
+      },
+    },
+  })
+  await $.tool.register({
     name: 'working',
     description:
       'Backseat Driver: record what the user says they are working on right now, in their own words. Call it when they tell you, whether you asked or not. It is shown in the pane and given to the background reviewers. Pass an empty string when they take it back or tell you to work it out yourself.',
@@ -2515,7 +2530,7 @@ async function startReview($: EngineInterface, settings: Settings, scope: Review
   try {
     const prompt = reviewRequest(
       scope,
-      { overview: project === null ? '' : overviewLine(project), earlier: reviewDigest(reviews), issues: issuesContext(scope) },
+      { overview: project === null ? '' : overviewLine(project), earlier: reviewDigest(reviews), issues: issuesContext(scope), notes: await notesForReview($, scope) },
       journalState.recorder?.glance(await $.clock.now()) ?? '',
     )
     const started = Date.now()
@@ -3236,6 +3251,32 @@ function issuesContext(scope: ReviewScope): { open: string[]; dismissed: string[
   return { open: issuesForRequest(ledger, asked.open), dismissed: dismissedForRequest(ledger, asked.dismissed) }
 }
 
+/** The play-by-play's open bugs and risks in the files a review looks at, all of them for an audit, as its request lists them: without their ids, which are no issue's. */
+async function notesForReview($: EngineInterface, scope: ReviewScope): Promise<string[]> {
+  if (scope.kind === 'survey') return []
+  const files = scope.kind === 'commit' ? changedFilesOf(scope.patch) : scope.kind === 'since' ? changedFilesOf(scope.diff) : null
+  const open = (await read($, notesAtom)).filter(note => (note.kind === 'bug' || note.kind === 'risk') && (files === null || files.includes(note.file)))
+
+  return open.map(note => `- [${note.kind}] ${note.file}:${note.line} (${note.topic}) ${note.text}`)
+}
+
+/**
+ * The play-by-play's bugs and risks that an open issue now covers leave the
+ * pane: the same file, and the same topic or a line within one of the
+ * issue's. The issue stands in their place, in both views (2026-10-07).
+ */
+async function adoptNotes($: EngineInterface): Promise<void> {
+  const covers = (note: Note) =>
+    ledger.findings.some(
+      finding => (finding.status === 'open' || finding.status === 'partly') && finding.file === note.file && (finding.topic === note.topic || (finding.line > 0 && Math.abs(finding.line - note.line) <= 1)),
+    )
+  const adopted = (await read($, notesAtom)).filter(note => (note.kind === 'bug' || note.kind === 'risk') && covers(note))
+  if (adopted.length === 0) return
+  await update($, notesAtom, (notes: Note[]): Note[] => notes.filter(note => !adopted.some(gone => gone.id === note.id)))
+  trace($, 'state', 'notes adopted as issues', () => ({ notes: adopted.map(note => `${note.file}:${note.line} ${note.topic}`) }))
+  void saveNotes($)
+}
+
 /** Their source files as git lists them, and the folders among them that look generated or vendored. */
 async function sourceFiles($: EngineInterface): Promise<{ own: string[]; vendored: string[] }> {
   const listed = await git($, repoRoot, ['ls-files', '-z'])
@@ -3453,6 +3494,7 @@ async function keepReview($: EngineInterface, scope: ReviewScope, answer: string
     // A survey or an audit looked at the project as of HEAD. Work since a review may include uncommitted changes, so it names no commit.
     const commit = scope.kind === 'commit' ? shortHash(scope.hash) : (scope.kind === 'survey' || scope.kind === 'audit') && lastHead !== '' ? shortHash(lastHead) : ''
     issues = await keepIssues($, scope, answer, commit, at)
+    await adoptNotes($)
     const prints = new Map<Insight, { print: string; of: 'symbol' | 'file' } | null>()
     // A commit's review is about the code as committed. A file changed since then would tie the insight to code it was not written about.
     const asCommitted = new Map<string, boolean>()
@@ -5257,6 +5299,32 @@ export const register: Register = (on, options) => {
         ? 'Cleared. What they are working on is worked out from their activity again.'
         : `Recorded: they are working on "${said}". The pane shows it, and the background reviewers are told.`,
     )
+  })
+
+  on('tool.call', { tool: 'mcp__backseat-driver__issue' }, async ($, e) => {
+    if (mode === 'off' || repoRoot === '') return answered($, e, 'No project is being looked after here, so there are no issues on record.')
+    if (typeof e.id !== 'number') {
+      const views = ledgerViews(ledger, { savedFiles: [], cap: 0 })
+      const listed = issuesForRequest(ledger, [...views.ranked, ...views.folded])
+      const read = coverageLine(ledger.coverage, clockTime)
+
+      return answered($, e, [listed.length === 0 ? 'No issue is open.' : listed.join('\n'), read === '' ? 'The codebase has not been audited.' : read].join('\n\n'))
+    }
+    const id = e.id
+    const before = ledger.findings.find(finding => finding.id === id)
+    if (before === undefined) return answered($, e, `There is no issue ${id}.`)
+    if (e.status === undefined && (e.severity === undefined || e.severity === '')) return answered($, e, `Nothing was recorded: give the reviewer's verdict as a status, or a severity.`)
+    const at = await $.clock.now()
+    const ruling = { id, status: e.status ?? before.status, note: typeof e.note === 'string' ? tidy(e.note) : '', severity: e.severity ?? '' }
+    trace($, 'state', 'issue ruled in the conversation', () => ruling)
+    // The deep reviewer's verdict, so it is a review's word: never a dismissal, which is the person's own.
+    await changeIssues($, current => ruledIssues(current, 'review', at, [ruling]).ledger)
+    const after = ledger.findings.find(finding => finding.id === id)
+    if (after === undefined || (after.status === before.status && after.severity === before.severity && after.statusNote === before.statusNote)) {
+      return answered($, e, `Issue ${id} was not changed${before.status === 'dismissed' ? ': they dismissed it, and that stands' : ''}.`)
+    }
+
+    return answered($, e, `Issue ${id} (${after.title}) is now ${after.status}, ${after.severity}${after.statusNote === '' ? '' : `: ${after.statusNote}`}. The pane shows it.`)
   })
 
   on('tool.call', { tool: 'mcp__backseat-driver__activity' }, async ($, e) => {

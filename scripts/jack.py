@@ -1803,6 +1803,21 @@ def check_issues(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]
         elif said != expected:
             out.append((BAD, f"{who}'s empty play-by-play says “{said}”, and findings.json makes it “{expected}”"))
 
+    # The issues the Explain tab shows in the code in focus: open, of that file.
+    spot_path = dig(state, "pane.explain.spot.path")
+    if tab == "explain" and texts and isinstance(spot_path, str):
+        for text in texts:
+            m = re.match(r"^Issue: (critical|high|medium|low) · line (\d+) (.+)$", text)
+            if m and not any(is_open(f) and f.get("file") == spot_path and f.get("severity") == m.group(1) and " ".join(str(f.get("title", "")).split()) == m.group(3) for f in on_disk):
+                out.append((BAD, f"{who}'s Explain tab shows the issue “{m.group(3)}” at {spot_path}:{m.group(2)}, which findings.json does not have open there"))
+    # A bug or risk note beside an open issue on its line: a review adopts it, until then the same thing shows twice.
+    for note in (dig(state, "pane.notes") or []):
+        if not isinstance(note, dict) or note.get("kind") not in ("bug", "risk"):
+            continue
+        twin = next((f for f in on_disk if is_open(f) and f.get("file") == note.get("file") and (f.get("topic") == note.get("topic") or (int(f.get("line") or 0) > 0 and abs(int(f.get("line") or 0) - int(note.get("line") or 0)) <= 1))), None)
+        if twin is not None:
+            out.append((NOTE, f"{who}'s note {note.get('id')} at {note.get('file')}:{note.get('line')} stands beside issue {twin.get('id')} “{twin.get('title')}”: the next review of that file adopts it"))
+
     # What the audit says it read, against the repository: a file that is not there, or more source files than git lists.
     root = state.get("repoRoot") or ""
     if (coverage.get("at") or 0) > 0 and root:

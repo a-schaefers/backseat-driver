@@ -386,6 +386,7 @@ declare module 'claude-code' {
     'mcp__backseat-driver__record': { about: string; language: string; answer: string }
     'mcp__backseat-driver__lookup': { file: string; line?: number }
     'mcp__backseat-driver__working': { on: string }
+    'mcp__backseat-driver__issue': { id?: number; status?: 'open' | 'partly' | 'resolved'; severity?: 'critical' | 'high' | 'medium' | 'low' | ''; note?: string }
     'mcp__backseat-driver__activity': Record<never, never>
     'mcp__backseat-driver__progress': { language: string }
     'mcp__backseat-driver__lesson': { path?: string; step?: number; outcome?: 'done' | 'help' }

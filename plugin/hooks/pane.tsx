@@ -17,7 +17,7 @@ import { DEFAULT_PERSONA } from '../core/settings'
 import { dayTime } from '../core/clock'
 import { clockTime, playLine } from '../core/status'
 import type { Persona } from '../core/settings'
-import { AUDIT_UNFINISHED, countsWords, coverageLine, issueWhere, ledgerLine, NOT_AUDITED } from '../core/findings'
+import { AUDIT_UNFINISHED, countsWords, coverageLine, issueWhere, ledgerLine, NOT_AUDITED, SEVERITIES } from '../core/findings'
 import type { Finding, LedgerViews, Severity } from '../core/findings'
 
 /** The elements the pane is built from. Every surface that draws panes has them, save `Select`, which some lack, and `Raster`, which only the terminal has. */
@@ -735,6 +735,9 @@ function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
       {explain.insights.map(insight => (
         <Text>{`Deep review: ${insight}`}</Text>
       ))}
+      {issuesHere(view).map(({ finding, line }) => (
+        <Text color={SEVERITY_MARKS[finding.severity].color}>{`Issue: ${finding.severity} · line ${line}  ${finding.title}`}</Text>
+      ))}
       {notice !== '' && <Text dimColor>{notice}</Text>}
       {detail === null && Array.from({ length: Math.max(0, view.explainHold ?? 0) }, () => <Text> </Text>)}
       {!explain.isMappable && <Text dimColor>This file is too large to map, so only the lines around the cursor are explained.</Text>}
@@ -874,6 +877,27 @@ export function currentIssue(view: Pick<PaneView, 'issues' | 'openList'>): Findi
   const id = issues.selected !== null && drawn.includes(issues.selected) ? issues.selected : drawn[0]
 
   return issues.state.ledger.findings.find(finding => finding.id === id)
+}
+
+/**
+ * The open issues placed inside the symbol the Explain tab is on, or on the
+ * line in focus between symbols, worst first: what the deep review keeps
+ * about this code, where it is read (2026-10-07).
+ */
+export function issuesHere(view: Pick<PaneView, 'explain' | 'issues'>): { finding: Finding; line: number }[] {
+  const { spot, target } = view.explain
+  const issues = view.issues
+  if (spot === null || issues === undefined) return []
+  const from = target?.startLine ?? spot.line
+  const to = target?.endLine ?? spot.line
+  const here = issues.state.ledger.findings.flatMap(finding => {
+    if (finding.file !== spot.path || (finding.status !== 'open' && finding.status !== 'partly')) return []
+    const line = issues.state.placed[String(finding.id)]
+
+    return typeof line === 'number' && line > 0 && line >= from && line <= to ? [{ finding, line }] : []
+  })
+
+  return here.sort((a, b) => SEVERITIES.indexOf(a.finding.severity) - SEVERITIES.indexOf(b.finding.severity) || a.line - b.line)
 }
 
 /** How many issues the Play-by-play tab shows from the deep review. */
