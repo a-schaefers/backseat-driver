@@ -295,6 +295,20 @@ export function createExplainer(ports: ExplainPorts) {
     return isDetailFresh(detail, use => prints.get(`${use.file}\n${use.name}`) ?? null) ? detail : null
   }
 
+  /**
+   * An explanation of a section without the later sections it names as relied
+   * on: reliance runs forward, and a cache written before 2026-10-07 has some
+   * the other way round, which showed in "Relies on" and made a sound
+   * explanation look stale when a later section changed (the twelfth ui-truth pass).
+   */
+  function forward(detail: Detail | undefined, symbol: Sym, fresh: readonly Sym[], path: string): Detail | undefined {
+    if (detail === undefined || symbol.kind !== 'section') return detail
+    const later = new Set(fresh.filter(other => other.startLine > symbol.endLine).map(other => other.name))
+    const kept = detail.uses.filter(use => use.file !== path || !later.has(use.name))
+
+    return kept.length === detail.uses.length ? detail : { ...detail, uses: kept }
+  }
+
   function row(symbol: Sym): OutlineRow {
     return { name: symbol.name, kind: symbol.kind, startLine: symbol.startLine, endLine: symbol.endLine, summary: symbol.summary }
   }
@@ -362,7 +376,7 @@ export function createExplainer(ports: ExplainPorts) {
       if (symbol !== undefined) {
         target = row(symbol)
         insights = ports.insights(spot.path, symbol.name, symbol.print, read.print, name => mentionedAt(read.lines.slice(symbol.startLine - 1, symbol.endLine), name) !== -1)
-        detail = await trusted(symbol.detail)
+        detail = await trusted(forward(symbol.detail, symbol, fresh, spot.path))
         if (detail === null) {
           const job = detailJob(spot.path, symbol.print, symbol.endLine - symbol.startLine + 1, symbol.startLine, false, priority)
           wanted = job.key
@@ -540,9 +554,8 @@ export function createExplainer(ports: ExplainPorts) {
     if (found === null) return 'stale'
     const fresh = held === null ? [] : freshSymbols(held, before.lines)
     // The same: an explanation that is already there and still holds is not asked for again.
-    const existing = job.isRegion
-      ? held?.regions.find(region => region.print === job.print)?.detail
-      : fresh.find(symbol => symbol.print === job.print)?.detail
+    const own = fresh.find(symbol => symbol.print === job.print)
+    const existing = job.isRegion ? held?.regions.find(region => region.print === job.print)?.detail : own === undefined ? undefined : forward(own.detail, own, fresh, job.path)
     if ((await trusted(existing)) !== null) return 'done'
 
     const reply = await ports.complete(

@@ -848,4 +848,16 @@ test('a section of a script relies on what came before it, never on a later sect
   w.answer(w.open('Explain').find(request => request.prompt.includes('Explain output')), { what: 'Prints x and y.', how: 'Two prints.', why: 'To show them.', watch: '', uses: ['setup'] })
   await w.settle()
   expect((await w.explainer.view({ path: 'run.py', line: 4 }, 'browsing')).detail?.uses).toEqual(['setup'])
+
+  // A cache written before the rule, with a later section among the uses (and its print since changed), reads
+  // with that use dropped, and the explanation still trusted.
+  const path = '/d/files/run.py.json'
+  const stored = JSON.parse(w.disk.files.get(path) ?? '{}') as { symbols: { name: string; detail?: { uses: { file: string; name: string; print: string }[] } }[] }
+  const setup = stored.symbols.find(symbol => symbol.name === 'setup')
+  if (setup?.detail !== undefined) setup.detail.uses = [{ file: 'run.py', name: 'output', print: 'changed since' }]
+  w.disk.files.set(path, JSON.stringify(stored))
+  const again = w.start()
+  const read = await again.view({ path: 'run.py', line: 1 }, 'browsing')
+  expect(read.detail?.what).toBe('Sets x and y.')
+  expect(read.detail?.uses).toEqual([])
 })

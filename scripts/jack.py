@@ -1553,29 +1553,20 @@ def check_working_share(who: str, state: dict, project: dict | None, now: int) -
 
 
 def check_explain_uses(who: str, state: dict, project: dict | None) -> list[tuple[str, str]]:
-    """The Explain cache's "Relies on" for the file in focus, against the order of its sections: a section of a script
-    relies on an earlier one, never a later one, and two sections that list each other are one of them wrong (the
-    twelfth ui-truth pass, 2026-10-07: "roll the dice" and "map roll to move" listed each other)."""
-    path = str((dig(state, "pane.explain.spot") or {}).get("path") or "")
-    if not path or project is None:
+    """What the Explain tab shows a section relying on, against the order of the file's sections: a section of a
+    script relies on earlier sections, never on a later one that reads what it builds (the twelfth ui-truth pass,
+    2026-10-07: "Page setup and includes" shown relying on four sections after it). The tutor drops such a use
+    when it writes an explanation and when it reads one from the cache, so one on the screen is a `!!`."""
+    explain = dig(state, "pane.explain") if isinstance(dig(state, "pane.explain"), dict) else {}
+    target = explain.get("target") if isinstance(explain.get("target"), dict) else None
+    detail = explain.get("detail") if isinstance(explain.get("detail"), dict) else None
+    if target is None or detail is None or target.get("kind") != "section":
         return []
-    entry = read_json(project["dir"] / "files" / f"{fnv(path)}-{pathlib.Path(path).name}.json") or {}
-    symbols = [s for s in (entry.get("symbols") or []) if isinstance(s, dict)] if isinstance(entry, dict) else []
-    by_name = {s.get("name"): s for s in symbols}
-    uses = {s.get("name"): {u.get("name") for u in ((s.get("detail") or {}).get("uses") or []) if isinstance(u, dict) and u.get("file") == path} for s in symbols}
-    out: list[tuple[str, str]] = []
-    for s in symbols:
-        if s.get("kind") != "section":
-            continue
-        for name in sorted(n for n in uses.get(s.get("name"), set()) if isinstance(n, str)):
-            other = by_name.get(name)
-            if other is None or other.get("kind") != "section":
-                continue
-            if (other.get("startLine") or 0) > (s.get("endLine") or 0):
-                out.append((NOTE, f"{who}'s Explain cache says {path}'s section “{s.get('name')}” relies on “{name}”, a later section: a later part reads what an earlier one builds, not the other way round"))
-            elif s.get("name") in uses.get(name, set()):
-                out.append((NOTE, f"{who}'s Explain cache says {path}'s sections “{s.get('name')}” and “{name}” each rely on the other: one of them is wrong"))
-    return out
+    later = {r.get("name") for r in (explain.get("outline") or []) if isinstance(r, dict) and (r.get("startLine") or 0) > (target.get("endLine") or 0)}
+    backward = [u for u in (detail.get("uses") or []) if u in later]
+    if backward:
+        return [(BAD, f"{who}'s Explain tab shows the section “{target.get('name')}” relying on {', '.join(f'“{u}”' for u in backward)}, after it: reliance runs forward")]
+    return [(FINE, f"{who}'s Explain tab shows “{target.get('name')}” relying on earlier parts only")]
 
 
 def check_pick_kept_page(who: str, records: list[dict], now: int) -> list[tuple[str, str]]:

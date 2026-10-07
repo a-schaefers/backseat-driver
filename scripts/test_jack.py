@@ -1113,23 +1113,19 @@ class Cache(unittest.TestCase):
         self.assertEqual(len(found), 1, found)
         self.assertIn("the journal holds 7 s of caret time there", found[0])
 
-    def test_sections_that_rely_on_a_later_one_or_on_each_other(self):
-        (self.folder / "files").mkdir(exist_ok=True)
-        uses = lambda *names: {"what": "w", "how": "", "why": "", "watch": "", "uses": [{"file": "play.sh", "name": n, "print": "p"} for n in names], "at": 1, "model": "m"}
-        entry = {"v": 1, "path": "play.sh", "print": "x", "symbols": [
-            {"name": "roll the dice", "kind": "section", "startLine": 9, "endLine": 11, "detail": uses("map roll to move")},
-            {"name": "map roll to move", "kind": "section", "startLine": 13, "endLine": 29, "detail": uses("roll the dice")},
-        ]}
-        (self.folder / "files" / f"{jack.fnv('play.sh')}-play.sh.json").write_text(json.dumps(entry))
-        told = self.told(True, explain={"status": "fresh", "spot": {"path": "play.sh", "line": 9}})
-        found = jack.check_explain_uses("aaaaaaaa", told, jack.projects(self.home)[0])
-        self.assertEqual(bad(found), [])
-        notes = [text for level, text in found if level == jack.NOTE]
-        self.assertTrue(any("“roll the dice” relies on “map roll to move”, a later section" in text for text in notes), notes)
-        # The later section relying on the earlier one alone is as it should be.
-        entry["symbols"][0]["detail"] = uses()
-        (self.folder / "files" / f"{jack.fnv('play.sh')}-play.sh.json").write_text(json.dumps(entry))
-        self.assertEqual(jack.check_explain_uses("aaaaaaaa", told, jack.projects(self.home)[0]), [])
+    def test_a_section_shown_relying_on_a_later_one(self):
+        outline = [{"name": "Page setup and includes", "kind": "section", "startLine": 2, "endLine": 42, "summary": ""},
+                   {"name": "Goal keyword input", "kind": "section", "startLine": 44, "endLine": 60, "summary": ""}]
+        explain = {"status": "fresh", "spot": {"path": "index.php", "line": 2}, "outline": outline, "target": outline[0],
+                   "detail": {"what": "w", "how": "", "why": "", "watch": "", "uses": ["Goal keyword input"]}}
+        found = bad(jack.check_explain_uses("aaaaaaaa", self.told(True, explain=explain), None))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("“Page setup and includes” relying on “Goal keyword input”, after it", found[0])
+        explain["detail"]["uses"] = []
+        self.assertEqual(bad(jack.check_explain_uses("aaaaaaaa", self.told(True, explain=explain), None)), [])
+        # A later section relying on an earlier one is as it should be.
+        explain["target"], explain["detail"]["uses"] = outline[1], ["Page setup and includes"]
+        self.assertEqual(bad(jack.check_explain_uses("aaaaaaaa", self.told(True, explain=explain), None)), [])
 
     def test_a_pick_in_the_explain_outline_that_moved_the_page(self):
         pick = {"t": self.now - 30_000, "k": "ui", "n": "explain pick", "d": 98}
