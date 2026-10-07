@@ -23,8 +23,4 @@ The license key is a receipt, not a lock. Backseat Driver keeps working when a k
 
 Commercial licenses are not on sale yet. When they are, this section will say where. Until then, get in touch through https://github.com/a-schaefers/backseat-driver.
 
-## Earlier versions
-
-Each commit of Backseat Driver is under the license in its own `LICENSE` file. Commits whose `LICENSE` is the MIT License stay under the MIT License for anyone who has a copy of them. This license and `LICENSE` apply from the commit that introduced them.
-
 Copyright (c) 2026 Adam Schaefers
