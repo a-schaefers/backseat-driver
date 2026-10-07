@@ -107,6 +107,15 @@ class Numbers(unittest.TestCase):
         self.assertEqual(len(set(hellos.values())), 5)
         self.assertIn(f"export const SURVEY_SUBJECT = '{jack.SURVEY_SUBJECT}'", (REPO / "plugin" / "core" / "review.ts").read_text())
 
+    def test_the_source_fingerprint_is_the_mods(self):
+        # Values from plugin/core/hash.ts and `splitSource` run under Node (2026-10-06): the lines however they end, no trailing empty one.
+        self.assertEqual(jack.source_print("def mean(xs):\n    return sum(xs) / len(xs)\n"), "037b904e52b53bfa")
+        self.assertEqual(jack.source_print("x = 1\r\ny = 2"), "5dcf4837b4d4501e")
+        self.assertEqual(jack.source_print("héllo ✻ world\n\n"), "a26626c0372b340b")
+        self.assertEqual(jack.source_print(""), "811c9dc5ebb6c228")
+        self.assertEqual(jack.source_print("one\n"), "ba2719ef90963ae1")
+        self.assertEqual(jack.fnv("x = 1\r\ny = 2"), "13a03882")
+
     def test_a_project_folder_is_named_as_the_tutor_names_it(self):
         # Both seen in real data folders.
         self.assertEqual(jack.project_id("/home/grok/repos/bashscripts"), "bashscripts-2c7d6042")
@@ -793,6 +802,52 @@ class Cache(unittest.TestCase):
         told["said"] = [{"at": self.now - 1000, "how": "toast", "text": "From the ring."}]
         self.assertEqual([t["text"] for t in jack.said_lately(told, debug, self.now)], ["From the ring."])
 
+    def test_open_notes_against_the_lines_they_quote(self):
+        stats = pathlib.Path(self.root) / "stats.py"
+        stats.write_text("def mean(xs):\n    return sum(xs) / len(xs)\n")
+        old = (self.now - 600_000) / 1000
+        os.utime(stats, (old, old))
+        note = {"id": 1, "file": "stats.py", "line": 2, "kind": "tip", "topic": "t", "text": "A note.", "lineText": "return sum(xs) / len(xs)"}
+        told = self.told(True, notes=[note], watch={"state": "idle", "lastLookAt": self.now - 60_000})
+        found = jack.check_notes_lines("aaaaaaaa", told, self.root)
+        self.assertEqual(bad(found), [])
+        self.assertTrue(any("point at the lines they quote" in text for _, text in found), found)
+        # The line moved: a note, placed at the next look. The line gone: the note is stale.
+        stats.write_text("import math\n\ndef mean(xs):\n    return sum(xs) / len(xs)\n")
+        os.utime(stats, (old, old))
+        found = jack.check_notes_lines("aaaaaaaa", told, self.root)
+        self.assertEqual(bad(found), [])
+        self.assertTrue(any(level == jack.NOTE and "its line is now 4" in text for level, text in found), found)
+        stats.write_text("def mean(xs):\n    return 0\n")
+        os.utime(stats, (old, old))
+        found = bad(jack.check_notes_lines("aaaaaaaa", told, self.root))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("which reads “return 0”, and the note quotes “return sum(xs) / len(xs)”", found[0])
+        # Saved since the last look: the next look's business.
+        fresh = (self.now - 1000) / 1000
+        os.utime(stats, (fresh, fresh))
+        self.assertEqual(jack.check_notes_lines("aaaaaaaa", told, self.root), [])
+
+    def test_the_explain_tab_fresh_against_the_file(self):
+        stats = pathlib.Path(self.root) / "stats.py"
+        text = "def mean(xs):\n    return sum(xs) / len(xs)\n"
+        stats.write_text(text)
+        old = (self.now - 600_000) / 1000
+        os.utime(stats, (old, old))
+        entry = self.folder / "files" / f"{jack.fnv('stats.py')}-stats.py.json"
+        entry.parent.mkdir(exist_ok=True)
+        entry.write_text(json.dumps({"v": 1, "path": "stats.py", "print": jack.source_print(text)}))
+        told = self.told(True, explain={"status": "fresh", "spot": {"path": "stats.py", "line": 2}})
+        found = jack.check_explain_fresh("aaaaaaaa", told, self.root, jack.projects(self.home)[0])
+        self.assertEqual(bad(found), [])
+        self.assertTrue(any("is fresh for stats.py, as the file reads" in text for _, text in found), found)
+        entry.write_text(json.dumps({"v": 1, "path": "stats.py", "print": "0000000000000000"}))
+        found = bad(jack.check_explain_fresh("aaaaaaaa", told, self.root, jack.projects(self.home)[0]))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("says stats.py is fresh, and the cache's fingerprint 0000000000000000 is not the file's", found[0])
+        told["pane"]["explain"]["status"] = "updating"
+        self.assertEqual(jack.check_explain_fresh("aaaaaaaa", told, self.root, jack.projects(self.home)[0]), [])
+
     def test_a_bundle_reads_as_one_page(self):
         import contextlib
         import io
@@ -806,6 +861,12 @@ class Cache(unittest.TestCase):
             jack.print_bundle(world([s], [self.home], self.now), s)
         page = out.getvalue()
         self.assertIn("settings tab: Voice persona: default", page)
+        # A time of another day carries its day on the page too (the sixth ui-truth pass).
+        self.write(self.folder / "journal.json", {"said": {"text": "", "at": self.now - 24 * 3_600_000}, "inferred": None, "entries": [], "sittings": []}, 60_000)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            jack.print_bundle(world([s], [self.home], self.now), s)
+        self.assertIn("said “” at yesterday ", out.getvalue())
         # "provisional" is a level's word, as the pane draws it: a record with none is "not placed", plain.
         self.write(self.home / "progress" / "shell.json", {"v": 1, "language": "shell", "level": None, "isProvisional": True, "observations": []}, 60_000)
         told["pane"]["progress"] = {"records": [{"language": "shell", "level": None, "isProvisional": True, "observations": []}]}

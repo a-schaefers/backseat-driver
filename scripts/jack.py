@@ -210,14 +210,52 @@ def data_home(env: dict[str, str]) -> pathlib.Path | None:
     return pathlib.Path(home.rstrip("/")) / ".local/share" / FOLDER if home else None
 
 
+def code_units(text: str) -> list[int]:
+    """The string as JavaScript reads it: UTF-16 code units."""
+    units = text.encode("utf-16-le")
+    return [units[i] | (units[i + 1] << 8) for i in range(0, len(units), 2)]
+
+
 def fnv(text: str) -> str:
     """plugin/core/hash.ts `shortHash`: FNV-1a over the string's UTF-16 code units."""
     h = 0x811C9DC5
-    units = text.encode("utf-16-le")
-    for i in range(0, len(units), 2):
-        h ^= units[i] | (units[i + 1] << 8)
+    for unit in code_units(text):
+        h ^= unit
         h = (h * 0x01000193) & 0xFFFFFFFF
     return f"{h:08x}"
+
+
+def mix(text: str) -> str:
+    """plugin/core/hash.ts `mix`: a second 32 bits, mixed the way MurmurHash3 mixes, over the UTF-16 code units."""
+    units = code_units(text)
+    h = 0x9747B28C
+    for unit in units:
+        unit = (unit * 0xCC9E2D51) & 0xFFFFFFFF
+        unit = ((unit << 15) | (unit >> 17)) & 0xFFFFFFFF
+        h ^= (unit * 0x1B873593) & 0xFFFFFFFF
+        h = ((h << 13) | (h >> 19)) & 0xFFFFFFFF
+        h = (h * 5 + 0xE6546B64) & 0xFFFFFFFF
+    h ^= len(units)
+    h ^= h >> 16
+    h = (h * 0x85EBCA6B) & 0xFFFFFFFF
+    h ^= h >> 13
+    h = (h * 0xC2B2AE35) & 0xFFFFFFFF
+    return f"{(h ^ (h >> 16)) & 0xFFFFFFFF:08x}"
+
+
+def split_source(text: str) -> list[str]:
+    """plugin/core/knowledge.ts `splitSource`: lines however they end, without a trailing empty one."""
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    return [line[:-1] if line.endswith("\r") else line for line in lines]
+
+
+def source_print(text: str) -> str:
+    """plugin/core/knowledge.ts `sourcePrint`: the fingerprint of a whole file's text, however its lines end. What the
+    Explain cache and the kept notes are held to; scripts/test_jack.py holds it to values from the mod's own hash."""
+    joined = "\n".join(split_source(text))
+    return fnv(joined) + mix(joined)
 
 
 def safe_name(text: str) -> str:
@@ -1106,6 +1144,8 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
         if lost and now - (project["notes_at"] or 0) > (DRIVER_GRACE_MS if is_driver is True else FOLLOW_GRACE_MS):
             out.append((BAD, f"{who} has {len(notes)} open note(s) in its pane, and notes.json, written {ago(now - (project['notes_at'] or 0))} ago, lacks {len(lost)} of them: a restart would lose them"))
     out += check_cache(w, s, project)
+    out += check_notes_lines(who, state, root)
+    out += check_explain_fresh(who, state, root, project)
 
     # What it says it shows, against the screen.
     shown = state.get("shown") if isinstance(state.get("shown"), dict) else {}
@@ -1253,6 +1293,66 @@ def despin(text: str) -> str:
     return re.sub(rf"\(([{SPINNER}…])\)", "(…)", text)
 
 
+def check_notes_lines(who: str, state: dict, root: str) -> list[tuple[str, str]]:
+    """Each open note's quoted line against the file on disk: a note is placed again after every look (kept at its
+    line, moved to the line that reads the same, taken down when it is gone), so a file the last look saw must read
+    at the note's line what the note quotes. A file saved since the last look is the next look's (the sixth ui-truth
+    pass, 2026-10-06, which held the six open notes by hand)."""
+    notes = [n for n in (dig(state, "pane.notes") or []) if isinstance(n, dict) and n.get("lineText")]
+    looked = dig(state, "pane.watch.lastLookAt") or 0
+    if not notes or not root:
+        return []
+    out: list[tuple[str, str]] = []
+    held = 0
+    for n in notes:
+        file = pathlib.Path(root) / str(n.get("file", ""))
+        written = mtime_ms(file)
+        if written is None or written > looked:
+            continue
+        try:
+            lines = file.read_text(errors="replace").split("\n")
+        except OSError:
+            continue
+        held += 1
+        line = int(n.get("line") or 0)
+        quoted = str(n.get("lineText")).strip()
+        at = lines[line - 1].strip() if 1 <= line <= len(lines) else ""
+        if at == quoted:
+            continue
+        hits = [i + 1 for i, text in enumerate(lines) if text.strip() == quoted]
+        if len(hits) == 1:
+            out.append((NOTE, f"{who}'s note {n.get('id')} points at {n.get('file')}:{line}, and its line is now {hits[0]}: it is placed there at the next look"))
+        else:
+            out.append((BAD, f"{who}'s note {n.get('id')} points at {n.get('file')}:{line}, which reads “{at[:40]}”, and the note quotes “{quoted[:40]}”: the file no longer says what the note is about"))
+    if held and not out:
+        out.append((FINE, f"{who}'s {held} open note(s) point at the lines they quote"))
+    return out
+
+
+def check_explain_fresh(who: str, state: dict, root: str, project: dict | None) -> list[tuple[str, str]]:
+    """The Explain tab's "fresh" against the file: what it shows is of the text the cache's fingerprint names, and
+    fresh means that text is the file's now (plugin/core/knowledge.ts `sourcePrint`; the sixth ui-truth pass)."""
+    explain = dig(state, "pane.explain") if isinstance(dig(state, "pane.explain"), dict) else {}
+    path = str((explain.get("spot") or {}).get("path") or "")
+    if explain.get("status") != "fresh" or not path or not root or project is None:
+        return []
+    file = pathlib.Path(root) / path
+    written = mtime_ms(file)
+    if written is None or written > (state.get("at") or 0) - 2000:
+        return []
+    known = read_json(project["dir"] / "files" / f"{fnv(path)}-{pathlib.Path(path).name}.json") or {}
+    print_ = known.get("print") if isinstance(known, dict) else None
+    if not isinstance(print_, str) or print_ == "unmapped":
+        return []
+    try:
+        now_print = source_print(file.read_text(errors="replace"))
+    except OSError:
+        return []
+    if print_ != now_print:
+        return [(BAD, f"{who}'s Explain tab says {path} is fresh, and the cache's fingerprint {print_} is not the file's {now_print}: what it shows is of another text")]
+    return [(FINE, f"{who}'s Explain tab is fresh for {path}, as the file reads")]
+
+
 def unchanged_since(root: str, path: str, at: float | None, now: int) -> bool:
     """Whether a file of the repository was last written before `at`: a note about it is still what the look saw."""
     if not root or at is None:
@@ -1321,7 +1421,7 @@ def check_cache(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]]
         # The driver's own journal merges the file at its next write (later wins): held against it once it has written since.
         is_due = settled(project["journal_at"]) if not is_driver else (project["journal_at"] or 0) > (said.get("at") or 0) + DRIVER_GRACE_MS
         if is_due:
-            out.append((BAD, f"{who}'s pane says they are working on “{pane_said or '(nothing said)'}”, and the journal says they said “{said['text'] or '(taken back)'}” at {clock(said.get('at'))}"))
+            out.append((BAD, f"{who}'s pane says they are working on “{pane_said or '(nothing said)'}”, and the journal says they said “{said['text'] or '(taken back)'}” at {day_clock(said.get('at'), now)}"))
 
     # The commits waiting, as the tab counts them. The driver's count in memory is held against the file in check_world.
     if not is_driver and isinstance(project["queue"], dict) and settled(project["queue_at"]):
@@ -1452,7 +1552,7 @@ def print_bundle(w: dict, s: dict) -> None:
         print(f"queue.json ({since(project['queue_at'])}): {len(waiting)} waiting: " + ", ".join(f"{str(c.get('hash', ''))[:7]} “{c.get('title')}”{' reviewed' if c.get('isReviewed') else ''}" for c in waiting))
         said = dig(project["journal"], "said") or {}
         inferred = dig(project["journal"], "inferred") or {}
-        print(f"journal.json ({since(project['journal_at'])}): said “{said.get('text', '') if isinstance(said, dict) else ''}” at {clock(said.get('at')) if isinstance(said, dict) and said.get('at') else '-'} · inferred “{inferred.get('text', '') if isinstance(inferred, dict) else ''}” · {len(dig(project['journal'], 'entries') or [])} entries in this sitting")
+        print(f"journal.json ({since(project['journal_at'])}): said “{said.get('text', '') if isinstance(said, dict) else ''}” at {day_clock(said.get('at'), now) if isinstance(said, dict) and said.get('at') else '-'} · inferred “{inferred.get('text', '') if isinstance(inferred, dict) else ''}” · {len(dig(project['journal'], 'entries') or [])} entries in this sitting")
     if s["home"] is not None:
         for file in sorted((s["home"] / "progress").glob("*.json")):
             stored = read_json(file) or {}
@@ -1463,7 +1563,7 @@ def print_bundle(w: dict, s: dict) -> None:
             d = e["data"]
             print(f"editor {d.get('editor', e['name'])} pid {d.get('pid')} {'alive' if e['alive'] else 'GONE'} · wrote {ago(now - (e['at'] or 0))} ago · {tilde(str(d.get('file', '')))}:{d.get('line', '')}")
         book = (read_json(s["home"] / "sessions.json") or {}).get("sessions", [])
-        print("sessions.json: " + "; ".join(f"{short(str(e.get('session', '')))} {e.get('mode')} born {clock(e.get('born'))} said {ago(now - (e.get('at') or 0))} ago{' left' if e.get('leftAt') else ''}" for e in book if isinstance(e, dict)))
+        print("sessions.json: " + "; ".join(f"{short(str(e.get('session', '')))} {e.get('mode')} born {day_clock(e.get('born'), now)} said {ago(now - (e.get('at') or 0))} ago{' left' if e.get('leftAt') else ''}" for e in book if isinstance(e, dict)))
     print("--- SAID LATELY (outside the pane, newest last)")
     for told in said_lately(state, s["debug"], now)[-8:]:
         print(f"  {clock(told.get('at'))} {told.get('how')}: {brief(told.get('text'), 140)}")
