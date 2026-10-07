@@ -142,9 +142,7 @@ import {
 } from '../core/progressing'
 import type { ProgressPorts, ProgressState } from '../core/progressing'
 import { helpText, isModeRequest, parseRequest, REPOSITORY_APPEARED, SETTINGS_OFF, transition } from '../core/mode'
-import {
-  isNoiseFile,
-} from '../core/noise'
+import { isNoiseFile, noiseRoot, VENDORED_BYTES } from '../core/noise'
 import { isLookDue, playOf, wakeAt } from '../core/play'
 import type { Play, PlayFacts } from '../core/play'
 import { isProblem, keepNotes, parseKeptNotes, stillOpen, withDismissed } from '../core/notes'
@@ -3281,11 +3279,20 @@ async function adoptNotes($: EngineInterface): Promise<void> {
 async function sourceFiles($: EngineInterface): Promise<{ own: string[]; vendored: string[] }> {
   const listed = await git($, repoRoot, ['ls-files', '-z'])
   if (listed.exitCode !== 0) return { own: [], vendored: [] }
+  // The sizes of the committed files: one far larger than hand-written code is someone else's (PDF.js's viewer, 427 KB,
+  // went to the first live audit as the person's own source, 2026-10-07).
+  const tree = await git($, repoRoot, ['ls-tree', '-r', '-l', '-z', 'HEAD'])
+  const sizes = new Map<string, number>()
+  for (const entry of tree.exitCode === 0 ? tree.stdout.split('\0') : []) {
+    const tab = entry.indexOf('\t')
+    if (tab !== -1) sizes.set(entry.slice(tab + 1), Number(entry.slice(0, tab).trim().split(/\s+/)[3] ?? 0))
+  }
   const own: string[] = []
   const vendored = new Set<string>()
   for (const path of listed.stdout.split('\0')) {
     if (path === '' || languageOf(path) === null) continue
-    if (isNoiseFile(path)) vendored.add(path.includes('/') ? `${path.split('/')[0]}/` : path)
+    if (isNoiseFile(path)) vendored.add(noiseRoot(path))
+    else if ((sizes.get(path) ?? 0) > VENDORED_BYTES) vendored.add(path)
     else own.push(path)
   }
 

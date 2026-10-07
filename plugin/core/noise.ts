@@ -48,6 +48,22 @@ export function isNoiseFile(path: string): boolean {
   return parts.slice(0, -1).some(folder => GENERATED_FOLDERS.has(folder))
 }
 
+/**
+ * Where a noise file's noise begins: the generated or vendored folder it is
+ * in, with its slash, or the file itself when its name is what makes it
+ * noise. Never a folder above the one that is vendored, which may hold their
+ * own code beside it.
+ */
+export function noiseRoot(path: string): string {
+  const parts = path.split('/')
+  const at = parts.slice(0, -1).findIndex(folder => GENERATED_FOLDERS.has(folder))
+
+  return at === -1 ? path : `${parts.slice(0, at + 1).join('/')}/`
+}
+
+/** A committed source file larger than this is taken for vendored or generated code: hand-written code rarely reaches it. */
+export const VENDORED_BYTES = 200_000
+
 /** Text files do not contain NUL. */
 export function looksBinary(text: string): boolean {
   return text.includes('\0')

@@ -175,7 +175,7 @@ export function reviewRequest(scope: ReviewScope, context: ReviewContext = { ove
       ...(scope.files.length > MAX_AUDIT_FILES ? [`[and ${scope.files.length - MAX_AUDIT_FILES} more]`] : []),
       ...(scope.vendored.length === 0
         ? []
-        : ['', 'Folders that look generated or vendored. Do not audit their insides; a known-vulnerable version of what is in one is one issue:', ...scope.vendored.map(path => `- ${path}`)]),
+        : ['', 'Folders and files that look generated or vendored. Do not audit them; a known-vulnerable version of what is in one is one issue:', ...scope.vendored.map(path => `- ${path}`)]),
     ].join('\n')
   }
   if (scope.kind === 'commit') {

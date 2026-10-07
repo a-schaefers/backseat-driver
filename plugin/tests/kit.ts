@@ -762,6 +762,8 @@ export function stubSession(on: On, options: StubOptions = {}) {
     }
     if (args[0] === 'ls-files' && args.includes('--ignored')) return ok((options.ignored ?? []).map(folder => `${folder}/\n`).join(''))
     if (args[0] === 'ls-files') return ok(Object.keys(head).map(path => `${path}\0`).join(''))
+    // The committed files with their sizes, as `git ls-tree -r -l -z HEAD` lists them.
+    if (args[0] === 'ls-tree') return ok(Object.entries(head).map(([path, text]) => `100644 blob ${'0'.repeat(40)} ${String(text.length).padStart(7)}\t${path}\0`).join(''))
     if (args[0] === 'log') {
       if (args[1] === '-1') return ok(`${tip().hash}\0commit: ${tip().message}\n`)
       const from = String(args[args.length - 1]).replace(/\.\.HEAD$/, '')

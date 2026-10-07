@@ -89,6 +89,18 @@ sessionTest('an unaudited project gets one audit, and its issues fill the Deep r
   expect(session.spawned.length).toBe(1)
 })
 
+sessionTest("an audit is told which code is someone else's: a vendored folder, a minified file, a file too large to be hand-written", async ($, on) => {
+  const head = { 'stats.py': MEAN, 'web/viewer.js': `${'x'.repeat(210_000)}\n`, 'web/app.js': 'run()\n', 'lib/node_modules/left/pad.js': 'pad()\n', 'js/chart.min.js': 'x\n' }
+  const session = stubSession(on, { head, data: UNAUDITED })
+  await $.session.start(SESSION)
+  await $.command.run(typed('backseat'))
+  await session.clock.settle()
+  const prompt = session.spawned[0]?.prompt ?? ''
+  expect(prompt).toMatch('Their source files, as git lists them:\n- stats.py\n- web/app.js\n')
+  // The vendored folder itself, never the folder above it, which holds their own code too; a file by its name or its size.
+  expect(prompt).toMatch('Folders and files that look generated or vendored. Do not audit them; a known-vulnerable version of what is in one is one issue:\n- web/viewer.js\n- lib/node_modules/\n- js/chart.min.js')
+})
+
 sessionTest('a commit review rules on the issues on record in its files, and adds its own', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { [`${FOLDER}/findings.json`]: ON_RECORD } })
   await $.session.start(SESSION)
