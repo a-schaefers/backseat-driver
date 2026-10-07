@@ -1006,7 +1006,8 @@ function issuesSection(kit: Kit, view: PaneView, actions: PaneActions) {
   const byId = new Map(state.ledger.findings.map(finding => [finding.id, finding]))
   const current = currentIssue(view)
   const isAuditing = view.review.state === 'running' && view.review.subject === AUDIT_SUBJECT
-  const coverage = coverageLine(state.ledger.coverage, clockTime)
+  // With its day once it is not today's: an audit runs once, and tomorrow a bare time reads as today's.
+  const coverage = coverageLine(state.ledger.coverage, ms => (view.now === undefined ? clockTime(ms) : dayTime(ms, view.now)))
   const status = isAuditing ? '' : coverage !== '' ? coverage : state.isAudited ? AUDIT_UNFINISHED : NOT_AUDITED
   const counts = countsWords(views.counts)
   const row = (id: number) => {
@@ -1202,15 +1203,16 @@ function playByPlay(kit: Kit, view: PaneView, actions: PaneActions) {
   // The deep review's serious issues in the files saved this sitting, and those tracked: the same records as on its tab.
   const picks = playPicks(view)
   const more = view.issues?.views.playMore ?? 0
+  // Only with an issue to show: a heading over a bare count read as something missing (the ledger's live check).
   const fromReview =
-    picks.length === 0 && more === 0 ? null : (
+    picks.length === 0 ? null : (
       <Box flexDirection="column">
         {notes.length > 0 && <Text> </Text>}
         <Text bold color="red">
           {FROM_REVIEW_HEADING}
         </Text>
         {picks.map(finding => issueRow(kit, finding, view.issues?.state.placed[String(finding.id)], finding.id === picked?.id, actions))}
-        {more > 0 && <Text dimColor>{`${more} more: 2: Deep review.`}</Text>}
+        {more > 0 && <Text dimColor>{`${more} more on the Deep review tab.`}</Text>}
       </Box>
     )
   if (notes.length === 0) {

@@ -45,8 +45,8 @@ When it depends on how the code is deployed or used, say so in `condition` ("onl
 
 - One JSON object a line. `category` is one of `security`, `bug`, `edge-case`, `logic`, `robustness`, `quality`. `topic` names the idea, not the incident: `sql-injection`, not `goal-search-query`.
 - `quote` is the line copied exactly: the pane finds the issue by it after the file changes. For an issue about a whole file, `"line": 0` and an empty quote; about the project as a whole (its layout, how it is deployed), the file `"."`.
-- Never write a secret's value: say where it is. A line that holds one is quoted only up to the value, at least 12 characters of it (`$db_password = `), never the value.
-- Never the fix, and never code: what is wrong, and the name of the idea behind it.
+- Never write a secret's value: say where it is. A line that holds one is quoted from its start up to the value, never the value itself (`$db_password =`).
+- Never the fix, and never code: what is wrong, and the name of the idea behind it. "Diagnostics belong on stderr" is a fix; "the error goes to stdout, where a caller reading the output takes it for data" is the issue.
 - Twelve at most, the most serious first. None when there is none: do not invent problems.
 
 When you are given bugs and risks the play-by-play raised, each that is a real issue goes in your fence as one, with your own severity and title: the note leaves the pane and the issue stands in its place. One that is not an issue is left out.

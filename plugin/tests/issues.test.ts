@@ -79,7 +79,7 @@ sessionTest('an unaudited project gets one audit, and its issues fill the Deep r
   // Elsewhere the tab's badge counts the serious ones, and the empty play-by-play says what is open.
   await ui.press({ key: 'tab-play' })
   expect(await ui.find({ key: 'tab-review', text: 'Review (1)' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: 'The deep review has 1 high open: 2: Deep review.' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Open in the deep review: 1 high, 1 low.' })).toBeDefined()
   await ui.unmount()
 
   // Switched off and on: no second audit.
@@ -99,6 +99,24 @@ sessionTest("an audit is told which code is someone else's: a vendored folder, a
   expect(prompt).toMatch('Their source files, as git lists them:\n- stats.py\n- web/app.js\n')
   // The vendored folder itself, never the folder above it, which holds their own code too; a file by its name or its size.
   expect(prompt).toMatch('Folders and files that look generated or vendored. Do not audit them; a known-vulnerable version of what is in one is one issue:\n- web/viewer.js\n- lib/node_modules/\n- js/chart.min.js')
+})
+
+sessionTest('an audit that says nothing of its reading still finished, and one that read uncommitted changes says so', async ($, on) => {
+  const session = stubSession(on, { head: { 'stats.py': MEAN }, data: UNAUDITED })
+  await $.session.start(SESSION)
+  await $.command.run(typed('backseat'))
+  await session.clock.settle()
+  session.write('stats.py', `${MEAN}# a change not committed yet\n`)
+  await session.clock.advance(2000)
+  await $.turn.complete(session.finish(1, 'I read stats.py. Nothing to raise.'))
+  await session.clock.settle()
+  const ledger = parseLedger(session.data(`${FOLDER}/findings.json`))
+  expect(ledger.coverage).toMatchObject({ commit: '0000000+', files: 1, read: [] })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: 'The audit found nothing open.' })).toBeDefined()
+  await ui.press({ key: 'tab-review' })
+  expect(await ui.find({ type: 'Text', text: `Audited ${clockTime(ledger.coverage.at)} at 0000000 with uncommitted changes: it did not say which of the 1 source files it read.` })).toBeDefined()
+  await ui.unmount()
 })
 
 sessionTest('a commit review rules on the issues on record in its files, and adds its own', async ($, on) => {
@@ -157,9 +175,9 @@ sessionTest(
     // Deep reviews only on request: nothing audits by itself.
     expect(session.spawned.length).toBe(0)
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-    expect(await ui.find({ type: 'Text', text: 'Not audited for issues yet: 2: Deep review.' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Not audited for issues yet.' })).toBeDefined()
     await ui.press({ key: 'tab-review' })
-    expect(await ui.find({ type: 'Text', text: 'Not audited for issues yet. a: audit the codebase.' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Not audited for issues yet: press a to audit the codebase.' })).toBeDefined()
     await ui.press({ key: 'audit' })
     await session.clock.settle()
     expect(session.spawned.length).toBe(1)

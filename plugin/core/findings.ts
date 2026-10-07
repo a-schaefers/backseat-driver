@@ -240,7 +240,9 @@ function isQuoted(line: string, quote: string): boolean {
   const said = line.trim()
   const wanted = quote.trim()
 
-  return said === wanted || (wanted.length >= 12 && said.includes(wanted))
+  // The line itself, a long enough part of it, or its start up to a value left out: a secret's line is quoted so, and
+  // the first live audit's "DB password committed" was dropped for a start of eleven characters (2026-10-07).
+  return said === wanted || (wanted.length >= 12 && said.includes(wanted)) || (wanted.length >= 6 && said.startsWith(wanted))
 }
 
 /** Where a quoted line is in a file: the occurrence nearest the line named, or null when it is nowhere. */
@@ -280,7 +282,8 @@ export function anchorIssue(issue: FenceIssue, current: readonly string[] | null
     if (at !== null) return { ...rest, line: at, lineText: quote.trim() }
   }
 
-  return null
+  // A quote in neither text, in a file that is there: the issue is kept for the file, never lost without a word.
+  return current === null && atCommit === null ? null : { ...rest, line: 0, lineText: '' }
 }
 
 /**
@@ -365,8 +368,18 @@ export function countsWords(counts: Record<Severity, number>, withLow = true): s
 /** What the last audit covered, in a line, or '' before any audit. `clock` says a time of day. */
 export function coverageLine(coverage: Coverage, clock: (ms: number) => string): string {
   if (coverage.at <= 0) return ''
-  const commit = coverage.commit === '' ? '' : ` at ${coverage.commit.slice(0, 7)}`
-  const read = coverage.files > 0 ? `read ${Math.min(coverage.read.length, coverage.files)} of ${coverage.files} source files` : `read ${coverage.read.length} files`
+  // A commit marked `+` was read with the changes not yet committed (the first live audit read an uncommitted line).
+  const isDirty = coverage.commit.endsWith('+')
+  const hash = (isDirty ? coverage.commit.slice(0, -1) : coverage.commit).slice(0, 7)
+  const commit = hash === '' ? '' : isDirty ? ` at ${hash} with uncommitted changes` : ` at ${hash}`
+  const read =
+    coverage.read.length === 0
+      ? coverage.files > 0
+        ? `it did not say which of the ${coverage.files} source files it read`
+        : 'it did not say what it read'
+      : coverage.files > 0
+        ? `read ${Math.min(coverage.read.length, coverage.files)} of ${coverage.files} source files`
+        : `read ${coverage.read.length} files`
   const skipped = coverage.skipped.length === 0 ? '' : `; skipped ${coverage.skipped.map(skip => (skip.why === '' ? skip.path : `${skip.path} (${skip.why})`)).join(', ')}`
 
   return `Audited ${clock(coverage.at)}${commit}: ${read}${skipped}.`
@@ -394,16 +407,16 @@ export function issuesBrief(ledger: Ledger, views: LedgerViews, clock: (ms: numb
 }
 
 /** What the Deep review tab says before any audit was started. */
-export const NOT_AUDITED = 'Not audited for issues yet. a: audit the codebase.'
+export const NOT_AUDITED = 'Not audited for issues yet: press a to audit the codebase.'
 
 /** What it says when an audit was started and never finished. */
-export const AUDIT_UNFINISHED = 'The audit did not finish. a: audit again.'
+export const AUDIT_UNFINISHED = 'The audit did not finish: press a to audit again.'
 
 /** The character's line when an audit is in. No model call. */
 export function auditLine(counts: Record<Severity, number>): string {
   const open = countsWords(counts)
 
-  return open === '' ? "Audit's in. Nothing open in what it read." : `Audit's in: ${open}. The Deep review tab ranks them.`
+  return open === '' ? "Audit's in. Nothing open in what it read." : `Audit's in: ${open}. They're on the Deep review tab.`
 }
 
 /** What `e` on an issue asks the conversation, in their name. */
@@ -417,11 +430,11 @@ export function issueQuestion(finding: Pick<Finding, 'file' | 'line' | 'title' |
  * ones, what the audit read when nothing is open, or that nothing was audited.
  */
 export function ledgerLine(views: LedgerViews, isAudited: boolean, coverage: Coverage): string {
-  if (views.serious > 0) return `The deep review has ${countsWords({ ...views.counts, medium: 0, low: 0 })} open: 2: Deep review.`
-  const lesser = views.counts.medium + views.counts.low
-  if (lesser > 0) return `The deep review has ${lesser} lesser ${lesser === 1 ? 'issue' : 'issues'} open: 2: Deep review.`
-  if (coverage.at > 0) return `The audit found nothing open in the ${coverage.read.length} files it read.`
-  if (isAudited) return 'The audit has not finished: 2: Deep review.'
+  // In the Deep review tab's own words ("Open: 5 low"), and never a `2: Deep review` that looks like a key and is not one.
+  const open = countsWords(views.counts)
+  if (open !== '') return `Open in the deep review: ${open}.`
+  if (coverage.at > 0) return coverage.read.length === 0 ? 'The audit found nothing open.' : `The audit found nothing open in the ${coverage.read.length} files it read.`
+  if (isAudited) return 'The audit has not finished.'
 
-  return 'Not audited for issues yet: 2: Deep review.'
+  return 'Not audited for issues yet.'
 }

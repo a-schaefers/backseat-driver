@@ -222,11 +222,13 @@ export async function explainUnassessed(ports: ProgressPorts, state: ProgressSta
  * reason of that form, and never again once it is restated.
  */
 async function restateCutReason(ports: ProgressPorts, state: ProgressState): Promise<void> {
-  const named = /^Commit ([0-9a-f]{7,40}) does not count toward your progress: it adds (\d+) lines in (\d+) files at once/.exec(state.skipped)
+  // The files of a cut patch are a floor as well as its lines: "more than 5400 lines in 16 files" was 385 files (the
+  // thirteenth ui-truth pass, 2026-10-07). A reason said either way before is said again once, in at least.
+  const named = /^Commit ([0-9a-f]{7,40}) does not count toward your progress: it adds (?:more than )?(\d+) lines in (\d+) files at once/.exec(state.skipped)
   if (named === null) return
   const patch = await ports.git(commitPatchArgs(named[1] ?? ''))
   if (patch.exitCode !== 0 || patch.isCut !== true) return
-  await noteSkipped(ports, state, `Commit ${named[1]} does not count toward your progress: it adds more than ${named[2]} lines in ${named[3]} files at once, which reads as an import or generated code.`)
+  await noteSkipped(ports, state, `Commit ${named[1]} does not count toward your progress: it adds more than ${named[2]} lines in at least ${named[3]} files at once, which reads as an import or generated code.`)
 }
 
 /** HEAD's short hash, or '' outside a repository or when git does not answer. */

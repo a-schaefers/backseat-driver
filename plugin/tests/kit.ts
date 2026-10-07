@@ -942,7 +942,8 @@ export function stubSession(on: On, options: StubOptions = {}) {
     return { value: undefined }
   })
   on('tool.register', ($, e) => {
-    session.tools.push(e)
+    // 2.1.293 gave a tool spec an optional `isDeferred`, which the kit does not keep: cast so that both versions' types take it.
+    session.tools.push(e as Required<ToolSpec>)
 
     return { value: { tool: `mcp__backseat-driver__${e.name}` } }
   })

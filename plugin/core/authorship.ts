@@ -148,7 +148,7 @@ export function judge(info: CommitInfo, identity: readonly string[], files: read
   // orders a patch by path). The owner's import of 385 files read as "5400 lines in 16 files" for 21155 (the tenth
   // ui-truth pass, 2026-10-07).
   if (isCut && (added > MAX_ADDED_LINES || files.length > MAX_FILES)) {
-    return { isYours: false, reason: `it adds more than ${added} lines in ${files.length} files at once, which reads as an import or generated code` }
+    return { isYours: false, reason: `it adds more than ${added} lines in at least ${files.length} files at once, which reads as an import or generated code` }
   }
   if (isCut) return { isYours: false, reason: 'its changes are larger than the tutor reads at once (over 4 MiB), which reads as an import or generated code' }
   if (added === 0) return { isYours: false, reason: 'it adds no source code' }

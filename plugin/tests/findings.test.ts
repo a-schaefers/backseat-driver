@@ -9,6 +9,7 @@ import {
   issuesBrief,
   issueWhere,
   LEDGER_MAX_CLOSED,
+  ledgerLine,
   ledgerViews,
   parseFindingsFence,
   parseLedger,
@@ -229,7 +230,13 @@ test('an issue is placed at the line it quotes, now or as the commit left it, an
   const issue = { file: 'index.php', line: 2, quote: '$sql .= "goal LIKE \'%$goal%\'";', severity: 'high' as const, category: 'security' as const, topic: 'sql-injection', title: 'SQL', text: 'Words in the query.', condition: '' }
   expect(anchorIssue(issue, now, then)).toMatchObject({ line: 4, lineText: '$sql .= "goal LIKE \'%$goal%\'";' })
   expect(anchorIssue(issue, ['nothing'], then)).toMatchObject({ line: 2 })
-  expect(anchorIssue(issue, ['nothing'], ['nor here'])).toBe(null)
+  // A quote in neither text, in a file that is there: kept for the file, never dropped without a word. No file: dropped.
+  expect(anchorIssue(issue, ['nothing'], ['nor here'])).toMatchObject({ line: 0, lineText: '' })
+  expect(anchorIssue(issue, null, null)).toBe(null)
+  // A line's start up to a value left out, as a secret's line is quoted: eleven characters once trimmed (the live audit's).
+  const start = anchorIssue({ ...issue, file: 'db.php', line: 10, quote: '$password = ' }, ['<?php', ...Array.from({ length: 8 }, () => ''), '$password = "not-for-the-ledger";'], null)
+  expect(start).toMatchObject({ line: 10, lineText: '$password =' })
+  expect(JSON.stringify(start)).not.toContain('not-for-the-ledger')
   expect(anchorIssue({ ...issue, file: '.', line: 0, quote: '' }, null, null)).toMatchObject({ file: '.', line: 0, lineText: '' })
   // A long quote a line contains is that line.
   expect(placeLine(['    $sql .= "goal LIKE" . $x; // build'], '$sql .= "goal LIKE" . $x;', 1)).toBe(1)
@@ -263,5 +270,9 @@ test('the conversation is told what was found and what was read, never that sile
   expect(brief).toMatch('Issues on record: 1 high open. Audited 11:42 at 570e787: read 1 of 22 source files; skipped web/ (PDF.js).')
   expect(brief).toMatch('- [high] index.php:95: SQL built from the search words')
   expect(coverageLine(EMPTY_LEDGER.coverage, clock)).toBe('')
+  // An audit that read uncommitted changes says so; one that said nothing of its reading says that.
+  expect(coverageLine({ at: 5, commit: '570e787+', files: 16, read: [], skipped: [] }, clock)).toBe('Audited 11:42 at 570e787 with uncommitted changes: it did not say which of the 16 source files it read.')
+  expect(ledgerLine(ledgerViews(EMPTY_LEDGER, { savedFiles: [], cap: 3 }), true, { at: 5, commit: '', files: 1, read: [], skipped: [] })).toBe('The audit found nothing open.')
+  expect(ledgerLine(ledgerViews(audited, { savedFiles: [], cap: 3 }), true, audited.coverage)).toBe('Open in the deep review: 1 high.')
   expect(countsWords({ critical: 1, high: 0, medium: 2, low: 3 }, false)).toBe('1 critical, 2 medium')
 })

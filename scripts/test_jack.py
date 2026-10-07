@@ -818,28 +818,29 @@ class Issues(unittest.TestCase):
         self.assertIn("does not say what the audit of", " ".join(bad(self.found(ledger, "review", right[1:]))))
         never = self.keep([])
         self.assertIn("says nothing of an audit, and none is on record", " ".join(bad(self.found(never, "review", ["Fine."]))))
-        self.assertEqual(bad(self.found(never, "review", ["Not audited for issues yet. a: audit the codebase."])), [])
+        self.assertEqual(bad(self.found(never, "review", ["Not audited for issues yet: press a to audit the codebase."])), [])
         # While the audit runs, it says so instead.
         self.assertEqual(bad(self.found(never, "review", ["Auditing this project since 11:40."], review={"state": "running", "subject": jack.AUDIT_SUBJECT})), [])
 
     def test_the_empty_play_by_play_says_what_the_ledger_holds(self):
         ledger = self.keep([self.issue(1, "high", "mean of an empty list"), self.issue(2, "low", "a name")])
-        self.assertEqual(bad(self.found(ledger, "play", ["On. Watching for your next save.", "The deep review has 1 high open: 2: Deep review."])), [])
-        self.assertIn("says “Not audited for issues yet: 2: Deep review.”, and findings.json makes it “The deep review has 1 high open",
-                      " ".join(bad(self.found(ledger, "play", ["On.", "Not audited for issues yet: 2: Deep review."]))))
+        self.assertEqual(bad(self.found(ledger, "play", ["On. Watching for your next save.", "Open in the deep review: 1 high, 1 low."])), [])
+        self.assertIn("says “Not audited for issues yet.”, and findings.json makes it “Open in the deep review: 1 high, 1 low.”",
+                      " ".join(bad(self.found(ledger, "play", ["On.", "Not audited for issues yet."]))))
         self.assertIn("says nothing of the ledger", " ".join(bad(self.found(ledger, "play", ["On. Watching for your next save."]))))
         # With notes open, the tab shows them and not the line.
         self.assertEqual(bad(self.found(ledger, "play", ["On."], notes=[{"id": 1}])), [])
-        self.assertEqual(jack.ledger_line(jack.ledger_counts([]), False, {}), "Not audited for issues yet: 2: Deep review.")
+        self.assertEqual(jack.ledger_line(jack.ledger_counts([]), False, {}), "Not audited for issues yet.")
         self.assertEqual(jack.ledger_line(jack.ledger_counts([]), True, {"at": 5, "read": ["a", "b"]}), "The audit found nothing open in the 2 files it read.")
-        self.assertEqual(jack.ledger_line(jack.ledger_counts([self.issue(1, "low", "x"), self.issue(2, "medium", "y")]), True, {}), "The deep review has 2 lesser issues open: 2: Deep review.")
+        self.assertEqual(jack.ledger_line(jack.ledger_counts([self.issue(1, "low", "x"), self.issue(2, "medium", "y")]), True, {}), "Open in the deep review: 1 medium, 1 low.")
+        self.assertEqual(jack.ledger_line(jack.ledger_counts([]), True, {"at": 5, "read": []}), "The audit found nothing open.")
 
     def test_the_play_by_play_shows_open_issues_and_every_one_tracked(self):
         high = self.issue(1, "high", "mean of an empty list")
         tracked = {**self.issue(2, "medium", "unescaped output", file="index.php"), "isPinned": True}
         gone = self.issue(3, "high", "the password in the web root", "dismissed", file=".")
         ledger = self.keep([high, tracked, gone])
-        line = "The deep review has 1 high open: 2: Deep review."
+        line = "Open in the deep review: 1 high, 1 medium."
         right = ["On.", line, "From the deep review", "medium · index.php:2", "unescaped output", "❯ high · stats.py:1", "mean of an empty list"]
         self.assertEqual(bad(self.found(ledger, "play", right)), [])
         # A dismissed issue still shown, a tracked one missing.
@@ -881,6 +882,17 @@ class Issues(unittest.TestCase):
         self.assertIn("counts 5 source files, and git lists 1 files in all", found)
         ledger = self.keep([], {"at": self.now - 600_000, "commit": "abc1234", "files": 1, "read": ["stats.py"], "skipped": []})
         self.assertEqual(bad(self.found(ledger, "explain", [])), [])
+        # Read and skipped at once: the count would not add up.
+        ledger = self.keep([], {"at": self.now - 600_000, "commit": "abc1234", "files": 1, "read": ["stats.py"], "skipped": [{"path": "stats.py", "why": "vendored"}]})
+        self.assertIn("counts 1 file(s) as read that it also skipped: stats.py", " ".join(bad(self.found(ledger, "explain", []))))
+
+    def test_an_audit_of_another_day_is_dated_with_its_day(self):
+        at = self.now - 3 * 24 * 3_600_000
+        ledger = self.keep([], {"at": at, "commit": "abc1234", "files": 1, "read": ["stats.py"], "skipped": []})
+        bare = f"Audited {jack.clock(at)[:5]} at abc1234: read 1 of 1 source files."
+        self.assertIn("dates the audit", " ".join(bad(self.found(ledger, "review", [bare, "Not audited for issues yet."]))))
+        dated = f"Audited {jack.day_clock(at, self.now)[:-3]} at abc1234: read 1 of 1 source files."
+        self.assertEqual([x for x in bad(self.found(ledger, "review", [dated])) if "dates the audit" in x], [])
 
     def test_the_words_are_the_mods(self):
         findings = (REPO / "plugin" / "core" / "findings.ts").read_text()

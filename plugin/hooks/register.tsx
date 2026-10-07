@@ -218,7 +218,7 @@ import { scanGapMs } from '../core/sensor'
 import { parseSessions, SELF_CHECK_MS } from '../core/sessions'
 import { isHello } from '../core/avatar'
 import { parseLease } from '../core/lease'
-import { clockTime } from '../core/clock'
+import { clockTime, dayTime } from '../core/clock'
 import { isSameShown, textsOf } from './shown'
 import type { Shown } from './shown'
 import { healthLine, playLine, watchOf } from '../core/status'
@@ -1686,7 +1686,11 @@ async function git(
     const isQuietPoll = args[0] === 'status' && result.exitCode === 0 && result.stdout === lastStatus
     if (args[0] === 'status') lastStatus = result.stdout
     if (isQuietPoll) quiet.polls += 1
-    else trace($, 'git', verb, () => ({ args, cwd, exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr, isCut: result.isStdoutTruncated }), Date.now() - started)
+    // A file's text read through git is kept by its size, as a read through $.fs is: the log held every file an issue was
+    // anchored in, a password literal with it (the thirteenth ui-truth pass, 2026-10-07).
+    else if (args[0] === 'show' && args.some(arg => /^[^-][^:]*:./.test(arg))) {
+      trace($, 'git', verb, () => ({ args, cwd, exitCode: result.exitCode, chars: result.stdout.length, stderr: result.stderr, isCut: result.isStdoutTruncated }), Date.now() - started)
+    } else trace($, 'git', verb, () => ({ args, cwd, exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr, isCut: result.isStdoutTruncated }), Date.now() - started)
 
     // Claude Code keeps the first 4 MiB of what a process prints and says so: a patch cut there counted 5400 added
     // lines where there were 21155, and would miss a person's own code after a large vendored file (the tenth
@@ -3119,6 +3123,11 @@ async function restorePaneFromDisk($: EngineInterface, isFresh: boolean): Promis
   trace($, 'state', 'pane taken up from disk', () => ({ notes: open.length, of: kept.notes.length, review: last?.subject ?? null }))
 }
 
+/** A time of day with its day once it is not today's, as `now` sees it. */
+function dayClock(now: number): (ms: number) => string {
+  return ms => dayTime(ms, now)
+}
+
 /** A review's text with the issues it found, for the look at the person's progress that follows it. */
 function withIssues(text: string, issues: readonly string[]): string {
   return issues.length === 0 ? text : `${text}\n\nIssues this review found:\n${issues.join('\n')}`
@@ -3210,7 +3219,8 @@ async function personOnIssue($: EngineInterface, action: PersonAction, id: numbe
  */
 async function keepIssues($: EngineInterface, scope: ReviewScope, answer: string, commit: string, at: number): Promise<string[]> {
   const fence = parseFindingsFence(answer)
-  if (fence.issues.length === 0 && fence.rulings.length === 0 && fence.coverage === null) return []
+  // An audit that says nothing is still an audit that finished: it is kept as one, with no account of its reading.
+  if (scope.kind !== 'audit' && fence.issues.length === 0 && fence.rulings.length === 0 && fence.coverage === null) return []
   const ref = scope.kind === 'commit' ? scope.hash : 'HEAD'
   const texts = new Map<string, { now: string[] | null; then: string[] | null }>()
   const candidates: Candidate[] = []
@@ -3224,17 +3234,32 @@ async function keepIssues($: EngineInterface, scope: ReviewScope, answer: string
     if (placed !== null) candidates.push(placed)
   }
   const origin = scope.kind === 'audit' ? 'audit' : 'review'
-  // An audit adopted after a reload has no list of its own: the files are counted again, as they stand.
-  const files = scope.kind !== 'audit' ? 0 : scope.files.length > 0 ? scope.files.length : (await sourceFiles($)).own.length
+  // An audit's account of its reading, kept as a reader counts it: their source files it read and did not also call
+  // skipped (the first live audit's "read 13 of 16" counted a config file, and a vendored one it had skipped too). An
+  // audit adopted after a reload has no list of its own: the files are listed again, as they stand.
+  const sources = scope.kind !== 'audit' ? [] : scope.files.length > 0 ? scope.files : (await sourceFiles($)).own
+  const skipped = fence.coverage?.skipped ?? []
+  const passed = new Set(skipped.map(skip => skip.path))
+  const read = (fence.coverage?.read ?? []).filter(path => sources.includes(path) && !passed.has(path))
+  // Changes not yet committed were read with the commit: `+` says so (the first live audit's high issue was in one).
+  const isDirty = scope.kind === 'audit' && (watcher?.dirty().length ?? 0) > 0
   let raised: number[] = []
   await changeIssues($, current => {
     const found = foundIssues(current, 'review', at, origin, commit, candidates)
     raised = [...found.added, ...found.matched]
     const ruled = ruledIssues(found.ledger, 'review', at, fence.rulings).ledger
 
-    return scope.kind === 'audit' && fence.coverage !== null ? coveredLedger(ruled, { at, commit, files, read: fence.coverage.read, skipped: fence.coverage.skipped }) : ruled
+    return scope.kind === 'audit' ? coveredLedger(ruled, { at, commit: isDirty ? `${commit}+` : commit, files: sources.length, read, skipped }) : ruled
   })
-  trace($, 'state', 'issues kept', () => ({ subject: scopeSubject(scope), issues: fence.issues.length, placed: candidates.length, raised, rulings: fence.rulings.length, coverage: fence.coverage }))
+  trace($, 'state', 'issues kept', () => ({
+    subject: scopeSubject(scope),
+    issues: fence.issues.length,
+    placed: candidates.length,
+    forTheFile: candidates.filter(candidate => candidate.line === 0 && candidate.file !== '.').length,
+    raised,
+    rulings: fence.rulings.length,
+    coverage: fence.coverage,
+  }))
 
   return issuesForRequest(ledger, raised)
 }
@@ -5052,7 +5077,7 @@ export const register: Register = (on, options) => {
       explainContext(await read($, explainAtom)),
       journalState.recorder === null ? await storedJournalText($, 'brief') : journalState.recorder.brief(await $.clock.now()),
       // What the ledger holds, so that "is my code healthy?" is answered from what was found and read (2026-10-07).
-      repoRoot === '' ? '' : issuesBrief(ledger, ledgerViews(ledger, { savedFiles: [], cap: 0 }), clockTime),
+      repoRoot === '' ? '' : issuesBrief(ledger, ledgerViews(ledger, { savedFiles: [], cap: 0 }), dayClock(await $.clock.now())),
     ].filter(part => part !== '')
     // Another session may have recorded something about the person since the last look at the files.
     await refreshShared($, settings)
@@ -5313,7 +5338,7 @@ export const register: Register = (on, options) => {
     if (typeof e.id !== 'number') {
       const views = ledgerViews(ledger, { savedFiles: [], cap: 0 })
       const listed = issuesForRequest(ledger, [...views.ranked, ...views.folded])
-      const read = coverageLine(ledger.coverage, clockTime)
+      const read = coverageLine(ledger.coverage, dayClock(await $.clock.now()))
 
       return answered($, e, [listed.length === 0 ? 'No issue is open.' : listed.join('\n'), read === '' ? 'The codebase has not been audited.' : read].join('\n\n'))
     }

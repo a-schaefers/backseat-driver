@@ -242,7 +242,7 @@ test('a reason on record that counts a cut patch as whole is said again as the f
   const state = freshProgressState()
   state.skipped = 'Commit 570e787 does not count toward your progress: it adds 5400 lines in 16 files at once, which reads as an import or generated code.'
   await explainUnassessed(w.ports, state)
-  expect(state.skipped).toBe('Commit 570e787 does not count toward your progress: it adds more than 5400 lines in 16 files at once, which reads as an import or generated code.')
+  expect(state.skipped).toBe('Commit 570e787 does not count toward your progress: it adds more than 5400 lines in at least 16 files at once, which reads as an import or generated code.')
   expect((await store.read(watchedPath('/data', '/work')) as { skipped: string }).skipped).toBe(state.skipped)
   // Said as a floor, it is not asked about again; a patch that is whole leaves its reason as it is.
   const before = w.log.length
@@ -253,4 +253,9 @@ test('a reason on record that counts a cut patch as whole is said again as the f
   kept.skipped = 'Commit 570e787 does not count toward your progress: it adds 700 lines in 3 files at once, which reads as an import or generated code.'
   await explainUnassessed(whole.ports, kept)
   expect(kept.skipped).toMatch('it adds 700 lines in 3 files')
+  // Said before as "more than … in 16 files": the files were a floor too, and it is said again once.
+  const older = freshProgressState()
+  older.skipped = 'Commit 570e787 does not count toward your progress: it adds more than 5400 lines in 16 files at once, which reads as an import or generated code.'
+  await explainUnassessed(world({ store: () => store, git }).ports, older)
+  expect(older.skipped).toBe('Commit 570e787 does not count toward your progress: it adds more than 5400 lines in at least 16 files at once, which reads as an import or generated code.')
 })

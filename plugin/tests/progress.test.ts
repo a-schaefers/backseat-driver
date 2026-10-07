@@ -538,7 +538,7 @@ test('a patch the host cut short is judged on what was read, as a floor, and nev
   const many = [{ path: 'web/viewer.js', language: 'javascript', lines: Array.from({ length: 5400 }, (_, index) => `var v${index}`) }]
   expect(judge(mine, ['me@example.com'], few).isYours).toBe(true)
   expect(refused(judge(mine, ['me@example.com'], few, true))).toBe('its changes are larger than the tutor reads at once (over 4 MiB), which reads as an import or generated code')
-  expect(refused(judge(mine, ['me@example.com'], many, true))).toBe('it adds more than 5400 lines in 1 files at once, which reads as an import or generated code')
+  expect(refused(judge(mine, ['me@example.com'], many, true))).toBe('it adds more than 5400 lines in at least 1 files at once, which reads as an import or generated code')
   expect(refused(judge(mine, ['me@example.com'], many))).toBe('it adds 5400 lines in 1 files at once, which reads as an import or generated code')
   expect(refused(judge(mine, ['me@example.com'], [], true))).toMatch('larger than the tutor reads at once')
 })

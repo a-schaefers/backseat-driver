@@ -122,7 +122,7 @@ LEDGER_GRACE_MS = PUSHED_SCAN_MS + SHARED_CHECK_MS + 5_000
 PLAY_PICKS = 3
 RAISED_HEADING = "Raised while you worked"
 # The lines the empty play-by-play draws about the ledger (plugin/core/findings.ts `ledgerLine`): one of them, always.
-LEDGER_LINE_STARTS = ("The deep review has ", "The audit found nothing open", "The audit has not finished", "Not audited for issues yet:")
+LEDGER_LINE_STARTS = ("Open in the deep review: ", "The audit found nothing open", "The audit has not finished", "Not audited for issues yet.")
 # The bar for a first placement (plugin/core/progress.ts): a level on a record under it is one the rules no longer support.
 PLACE_OBSERVATIONS = 8
 PLACE_COMMITS = 3
@@ -1655,7 +1655,7 @@ def check_explain_insights(who: str, state: dict, root: str, project: dict | Non
             if "project notes" in words or "does not match" in words or f"right {file.name.lower()}" in words:
                 out.append((BAD, f"{who}'s Explain tab sends the reader to check {path} against the project notes, which were rewritten at {clock(overview_at)} after the explanation ({clock(at)}): the file is the right one, and the notes were old"))
             else:
-                out.append((NOTE, f"{who}'s explanation of {target.get('name')} in {path} was written at {clock(at)} under project notes rewritten at {clock(overview_at)}: it stands, as the file reads the same"))
+                out.append((NOTE, f"{who}'s explanation of {target.get('name')} in {path} was written at {day_clock(at)} under project notes rewritten at {day_clock(overview_at)}: it stands, as the file reads the same"))
     return out
 
 
@@ -1684,16 +1684,14 @@ def counts_words(counts: dict[str, int]) -> str:
 def ledger_line(counts: dict[str, int], is_audited: bool, coverage: dict) -> str:
     """`ledgerLine` (plugin/core/findings.ts): what the empty play-by-play says of the ledger, so that its silence never
     reads as an all-clear."""
-    if counts["critical"] + counts["high"] > 0:
-        return f"The deep review has {counts_words({**counts, 'medium': 0, 'low': 0})} open: 2: Deep review."
-    lesser = counts["medium"] + counts["low"]
-    if lesser > 0:
-        return f"The deep review has {lesser} lesser {'issue' if lesser == 1 else 'issues'} open: 2: Deep review."
+    if counts_words(counts):
+        return f"Open in the deep review: {counts_words(counts)}."
     if (coverage.get("at") or 0) > 0:
-        return f"The audit found nothing open in the {len(coverage.get('read') or [])} files it read."
+        read = len(coverage.get("read") or [])
+        return "The audit found nothing open." if read == 0 else f"The audit found nothing open in the {read} files it read."
     if is_audited:
-        return "The audit has not finished: 2: Deep review."
-    return "Not audited for issues yet: 2: Deep review."
+        return "The audit has not finished."
+    return "Not audited for issues yet."
 
 
 def issue_label(finding: dict) -> re.Pattern:
@@ -1782,7 +1780,11 @@ def check_issues(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]
         if not is_auditing:
             if (coverage.get("at") or 0) > 0 and not any(t.startswith("Audited ") for t in texts):
                 out.append((BAD, f"{who}'s Deep review tab does not say what the audit of {day_clock(coverage['at'], now)} read"))
-            elif (coverage.get("at") or 0) <= 0 and not any(t.startswith(("Not audited for issues yet.", "The audit did not finish.")) for t in texts):
+            # An audit of another day, dated by a bare time of day: a reader takes it for today's.
+            at = coverage.get("at") or 0
+            if at > 0 and datetime.fromtimestamp(at / 1000).date() != datetime.fromtimestamp(now / 1000).date() and any(t.startswith(f"Audited {clock(at)[:5]}") for t in texts):
+                out.append((BAD, f"{who}'s Deep review tab dates the audit {clock(at)[:5]}, a time of day, and it is of {day_clock(at, now)[:-3]}"))
+            elif (coverage.get("at") or 0) <= 0 and not any(t.startswith(("Not audited for issues yet", "The audit did not finish")) for t in texts):
                 out.append((BAD, f"{who}'s Deep review tab says nothing of an audit, and none is on record: its silence reads as an all-clear"))
     if tab == "play" and texts:
         # What it shows from the deep review is open, and every issue the person tracks is among it.
@@ -1818,8 +1820,13 @@ def check_issues(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]
         if twin is not None:
             out.append((NOTE, f"{who}'s note {note.get('id')} at {note.get('file')}:{note.get('line')} stands beside issue {twin.get('id')} “{twin.get('title')}”: the next review of that file adopts it"))
 
-    # What the audit says it read, against the repository: a file that is not there, or more source files than git lists.
+    # What the audit says it read, against the repository: a file that is not there, or more source files than git lists,
+    # and a file it counts as read that it also skipped.
     root = state.get("repoRoot") or ""
+    passed = {str(s.get("path")) for s in (coverage.get("skipped") or []) if isinstance(s, dict)}
+    both = sorted(passed & {str(p) for p in (coverage.get("read") or [])})
+    if both:
+        out.append((BAD, f"the audit of {project['id']} counts {len(both)} file(s) as read that it also skipped: {', '.join(both[:3])}"))
     if (coverage.get("at") or 0) > 0 and root:
         listed = git_out(root, "ls-files", "-z")
         if listed is not None:
@@ -2311,7 +2318,7 @@ def check_world(w: dict, s: dict) -> list[tuple[str, str]]:
         if newest is not None and newest[0] > loaded_at + 1000 and now - newest[0] > RELOAD_GRACE_MS:
             out.append((BAD, f"{who} loaded the mod {ago(now - loaded_at)} ago, and {newest[1]} was saved {ago(now - newest[0])} ago: it runs code older than the working copy (/reload-plugins in it)"))
         elif newest is not None:
-            out.append((FINE, f"{who} runs the working copy as it is (loaded {ago(now - loaded_at)} ago)"))
+            out.append((FINE, f"{who} runs the {copy_label(s)} as it is (loaded {ago(now - loaded_at)} ago)"))
 
     # The settings it runs with.
     options = dig(state, "loaded.options")
