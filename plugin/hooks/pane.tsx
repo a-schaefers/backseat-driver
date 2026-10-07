@@ -1106,7 +1106,8 @@ function reviewControls({ Text, Button }: Pick<Kit, 'Text' | 'Button'>, view: Pa
     ),
     drawn.length > 1 && <Button key="issue-next" label="next issue" hotkey="j" plain onPress={() => actions.onIssueStep?.(1)} />,
     drawn.length > 1 && <Button key="issue-previous" label="previous" hotkey="k" plain onPress={() => actions.onIssueStep?.(-1)} />,
-    current !== undefined && actions.onIssueOpen !== undefined && <Button key="issue-open" label="open in editor" hotkey="o" plain onPress={() => actions.onIssueOpen?.(current.id)} />,
+    // An issue about the whole project has no file to open: no key that would do nothing (the fifteenth ui-truth pass).
+    current !== undefined && current.file !== '.' && actions.onIssueOpen !== undefined && <Button key="issue-open" label="open in editor" hotkey="o" plain onPress={() => actions.onIssueOpen?.(current.id)} />,
     overview >= 0 && overview !== index && <Button key="overview" label="overview" hotkey="v" plain onPress={() => actions.onReviewOpen?.(overview)} />,
   ]
   if (view.watch.state === 'following') return [...issueKeys, <Text dimColor>{followingLine(view.watch.driver)}</Text>]
@@ -1177,7 +1178,7 @@ function playControls({ Text, Button }: Pick<Kit, 'Text' | 'Button'>, view: Pane
     count > 1 && <Button key="previous-note" label="previous" hotkey="k" plain onPress={() => step(-1)} />,
     canLook && <Button key="look" label="look now" hotkey="l" plain onPress={() => actions.onLook()} />,
     current !== undefined && actions.onOpen !== undefined && <Button key="open" label="open in editor" hotkey="o" plain onPress={() => actions.onOpen?.(current.file, current.line)} />,
-    issue !== undefined && actions.onIssueOpen !== undefined && <Button key="open" label="open in editor" hotkey="o" plain onPress={() => actions.onIssueOpen?.(issue.id)} />,
+    issue !== undefined && issue.file !== '.' && actions.onIssueOpen !== undefined && <Button key="open" label="open in editor" hotkey="o" plain onPress={() => actions.onIssueOpen?.(issue.id)} />,
     isFollowing && <Text dimColor>{followingLine(view.watch.driver)}</Text>,
   ]
 }

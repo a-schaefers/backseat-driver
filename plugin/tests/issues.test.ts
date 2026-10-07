@@ -154,6 +154,26 @@ sessionTest("an audit's insights are the audit's, kept so and mended so", async 
   ])
 })
 
+sessionTest(
+  'an issue about the whole project offers no key to open it in the editor, one about a file does',
+  { options: { editor_command: 'code --goto {file}:{line}' } },
+  async ($, on) => {
+    // An `o` that would do nothing (the fifteenth ui-truth pass, 2026-10-07).
+    const project = { ...ON_RECORD.findings[0], id: 2, file: '.', line: 0, lineText: '', severity: 'critical', category: 'security', topic: 'git-in-web-root', title: 'Git folder can be served' }
+    const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { [`${FOLDER}/findings.json`]: { ...ON_RECORD, nextId: 3, findings: [...ON_RECORD.findings, project] } } })
+    await $.session.start(SESSION)
+    await $.command.run(typed('backseat'))
+    await session.clock.settle()
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await ui.press({ key: 'tab-review' })
+    expect((await ui.find({ key: 'issue-2' }))?.props.label).toBe('❯ critical · the project')
+    expect(await ui.find({ key: 'issue-open' })).toBeUndefined()
+    await ui.press({ key: 'issue-next' })
+    expect(await ui.find({ key: 'issue-open' })).toBeDefined()
+    await ui.unmount()
+  },
+)
+
 sessionTest('a commit review rules on the issues on record in its files, and adds its own', async ($, on) => {
   const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { [`${FOLDER}/findings.json`]: ON_RECORD } })
   await $.session.start(SESSION)

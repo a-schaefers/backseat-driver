@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { followEditor, freshFollowState, isWatched, lookUp, readFocus } from '../core/following'
+import { followEditor, freshFollowState, isWatched, lookUp, readFocus, startExplaining } from '../core/following'
 import type { FollowPorts, FollowState } from '../core/following'
 
 /** An engine that knows nothing, enough for the focus to be followed. */
@@ -40,6 +40,8 @@ function world(overrides: Partial<FollowPorts> = {}) {
     deadline: { set: name => void log.push(`set ${name}`), cancel: name => void log.push(`cancel ${name}`) },
     after: () => ({ cancel: () => undefined }),
     markHome: async () => undefined,
+    lastFollowed: async () => null,
+    keepFollowed: async () => undefined,
     ...overrides,
   }
 
@@ -94,6 +96,32 @@ test('a caret is followed closely for ten minutes after the editor says it moved
   expect(moved.editorFocusAt).toBe(5000)
   expect(moved.isWatchingClosely).toBe(true)
   expect(w.log).toContain('set focus')
+})
+
+test('a reload keeps a spot chosen after the caret was followed, for as long as the editor says the same', async () => {
+  // A pick in the outline stood only until the next sync took the unchanged report for a move (the fifteenth ui-truth pass, 2026-10-07).
+  const reading = freshFollowState()
+  await readFocus(world().ports, reading)
+  const said = reading.focusText
+  const restart = async (followed: string | null, line: number) => {
+    const kept: (string | null)[] = []
+    const shown = { spot: { path: 'a.py', line }, status: 'fresh', fileSummary: '', outline: [], isOutlineCurrent: true, isMappable: true, target: null, detail: null, insights: [] }
+    const w = world({ lastFollowed: async () => followed, keepFollowed: async text => void kept.push(text), readView: async () => shown as never })
+    const state = freshFollowState()
+    await startExplaining({ ...w.ports, createExplainer: () => QUIET_ENGINE as never, isExplainOff: () => false }, state, 1)
+
+    return { state, kept }
+  }
+  // Line 9 was picked after the caret at line 3 was followed, and the editor says the same: the pick stands.
+  const picked = await restart(said, 9)
+  expect(picked.state.focus).toEqual({ path: 'a.py', line: 9, source: 'pane' })
+  expect(picked.kept).toEqual([])
+  // The spot restored is the caret's own: it is the editor's, as before.
+  expect((await restart(said, 3)).state.focus).toEqual({ path: 'a.py', line: 3, source: 'editor' })
+  // Nothing followed before (a new session), or the caret moved since: the editor's, and kept as followed.
+  const fresh = await restart(null, 9)
+  expect(fresh.state.focus).toEqual({ path: 'a.py', line: 3, source: 'editor' })
+  expect(fresh.kept).toEqual([said])
 })
 
 test('an editor that moved its caret lately is watched by the driver, and by a session that does not drive only through its open tab', async () => {

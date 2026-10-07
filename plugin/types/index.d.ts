@@ -407,6 +407,8 @@ declare module 'claude-code' {
       selectedIssue: number | null
       /** What the Play-by-play tab's keys act on: the note selected, or the issue picked from the deep review. */
       playOn: 'note' | 'issue'
+      /** What the editor said when Explain last followed it: a reload of the module tells a move from the same report. */
+      followedEditor: string | null
       watch: Watch
       review: Review
       profiles: Profiles

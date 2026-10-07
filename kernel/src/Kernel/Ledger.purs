@@ -459,8 +459,11 @@ ledgerCoveredWire coverage ledger =
   case fromWire ledger of
     Ledger l -> toWire (Ledger (l { coverage = coverage }))
 
+-- | Worst first, and within a severity the reviewer's own order, which is the order its ids were given (an older
+-- | review's before a newer one's). Security first within a severity put the issue an audit ranked last, and only
+-- | under a condition, at the top (the fifteenth ui-truth pass, 2026-10-07).
 rankOrder :: Finding -> Finding -> Ordering
-rankOrder a b = compare a.severity b.severity <> compare a.category b.category <> compare a.file b.file <> compare a.line b.line <> compare a.id b.id
+rankOrder a b = compare a.severity b.severity <> compare a.id b.id
 
 -- | The views every surface draws from the one ledger.
 ledgerViewsWire :: LedgerFactsWire -> LedgerWire -> LedgerViewsWire

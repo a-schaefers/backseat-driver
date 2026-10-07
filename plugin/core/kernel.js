@@ -60,7 +60,7 @@ var filterImpl = function(f, xs) {
   return xs.filter(f);
 };
 var sortByImpl = /* @__PURE__ */ (function() {
-  function mergeFromTo(compare5, fromOrdering, xs1, xs2, from, to) {
+  function mergeFromTo(compare4, fromOrdering, xs1, xs2, from, to) {
     var mid;
     var i;
     var j;
@@ -69,15 +69,15 @@ var sortByImpl = /* @__PURE__ */ (function() {
     var y;
     var c;
     mid = from + (to - from >> 1);
-    if (mid - from > 1) mergeFromTo(compare5, fromOrdering, xs2, xs1, from, mid);
-    if (to - mid > 1) mergeFromTo(compare5, fromOrdering, xs2, xs1, mid, to);
+    if (mid - from > 1) mergeFromTo(compare4, fromOrdering, xs2, xs1, from, mid);
+    if (to - mid > 1) mergeFromTo(compare4, fromOrdering, xs2, xs1, mid, to);
     i = from;
     j = mid;
     k = from;
     while (i < mid && j < to) {
       x = xs2[i];
       y = xs2[j];
-      c = fromOrdering(compare5(x)(y));
+      c = fromOrdering(compare4(x)(y));
       if (c > 0) {
         xs1[k++] = y;
         ++j;
@@ -93,11 +93,11 @@ var sortByImpl = /* @__PURE__ */ (function() {
       xs1[k++] = xs2[j++];
     }
   }
-  return function(compare5, fromOrdering, xs) {
+  return function(compare4, fromOrdering, xs) {
     var out;
     if (xs.length < 2) return xs;
     out = xs.slice(0);
-    mergeFromTo(compare5, fromOrdering, out, xs.slice(0), 0, xs.length);
+    mergeFromTo(compare4, fromOrdering, out, xs.slice(0), 0, xs.length);
     return out;
   };
 })();
@@ -485,20 +485,20 @@ var compare = function(dict) {
   return dict.compare;
 };
 var comparing = function(dictOrd) {
-  var compare33 = compare(dictOrd);
+  var compare32 = compare(dictOrd);
   return function(f) {
     return function(x) {
       return function(y) {
-        return compare33(f(x))(f(y));
+        return compare32(f(x))(f(y));
       };
     };
   };
 };
 var greaterThanOrEq = function(dictOrd) {
-  var compare33 = compare(dictOrd);
+  var compare32 = compare(dictOrd);
   return function(a1) {
     return function(a2) {
-      var v = compare33(a1)(a2);
+      var v = compare32(a1)(a2);
       if (v instanceof LT) {
         return false;
       }
@@ -508,10 +508,10 @@ var greaterThanOrEq = function(dictOrd) {
   };
 };
 var lessThanOrEq = function(dictOrd) {
-  var compare33 = compare(dictOrd);
+  var compare32 = compare(dictOrd);
   return function(a1) {
     return function(a2) {
-      var v = compare33(a1)(a2);
+      var v = compare32(a1)(a2);
       if (v instanceof GT) {
         return false;
       }
@@ -521,10 +521,10 @@ var lessThanOrEq = function(dictOrd) {
   };
 };
 var max = function(dictOrd) {
-  var compare33 = compare(dictOrd);
+  var compare32 = compare(dictOrd);
   return function(x) {
     return function(y) {
-      var v = compare33(x)(y);
+      var v = compare32(x)(y);
       if (v instanceof LT) {
         return y;
       }
@@ -542,10 +542,10 @@ var max = function(dictOrd) {
   };
 };
 var min = function(dictOrd) {
-  var compare33 = compare(dictOrd);
+  var compare32 = compare(dictOrd);
   return function(x) {
     return function(y) {
-      var v = compare33(x)(y);
+      var v = compare32(x)(y);
       if (v instanceof LT) {
         return x;
       }
@@ -907,9 +907,9 @@ var maximumBy = function(dictFoldable) {
   };
 };
 var maximum = function(dictOrd) {
-  var compare5 = compare(dictOrd);
+  var compare4 = compare(dictOrd);
   return function(dictFoldable) {
-    return maximumBy(dictFoldable)(compare5);
+    return maximumBy(dictFoldable)(compare4);
   };
 };
 var sum = function(dictFoldable) {
@@ -2611,7 +2611,6 @@ var compare3 = /* @__PURE__ */ compare(ordNumber);
 var compare12 = /* @__PURE__ */ compare(ordInt);
 var map4 = /* @__PURE__ */ map(functorArray);
 var elem5 = /* @__PURE__ */ elem2(eqInt);
-var compare22 = /* @__PURE__ */ compare(ordString);
 var max6 = /* @__PURE__ */ max(ordInt);
 var maximum2 = /* @__PURE__ */ maximum(ordInt)(foldableArray);
 var elem1 = /* @__PURE__ */ elem2(eqString);
@@ -2848,8 +2847,8 @@ var pruned = function(v) {
     return function(b) {
       return append3(compare3(b.statusAt)(a.statusAt))(compare12(b.id)(a.id));
     };
-  })(filter(function($144) {
-    return !isOpen($144);
+  })(filter(function($142) {
+    return !isOpen($142);
   })(v.findings)));
   var kept2 = map4(function(v1) {
     return v1.id;
@@ -2959,116 +2958,10 @@ var ordSeverity = {
     return eqSeverity;
   }
 };
-var compare32 = /* @__PURE__ */ compare(ordSeverity);
-var eqCategory = {
-  eq: function(x) {
-    return function(y) {
-      if (x instanceof Security && y instanceof Security) {
-        return true;
-      }
-      ;
-      if (x instanceof Bug && y instanceof Bug) {
-        return true;
-      }
-      ;
-      if (x instanceof EdgeCase && y instanceof EdgeCase) {
-        return true;
-      }
-      ;
-      if (x instanceof Logic && y instanceof Logic) {
-        return true;
-      }
-      ;
-      if (x instanceof Robustness && y instanceof Robustness) {
-        return true;
-      }
-      ;
-      if (x instanceof Quality && y instanceof Quality) {
-        return true;
-      }
-      ;
-      return false;
-    };
-  }
-};
-var ordCategory = {
-  compare: function(x) {
-    return function(y) {
-      if (x instanceof Security && y instanceof Security) {
-        return EQ.value;
-      }
-      ;
-      if (x instanceof Security) {
-        return LT.value;
-      }
-      ;
-      if (y instanceof Security) {
-        return GT.value;
-      }
-      ;
-      if (x instanceof Bug && y instanceof Bug) {
-        return EQ.value;
-      }
-      ;
-      if (x instanceof Bug) {
-        return LT.value;
-      }
-      ;
-      if (y instanceof Bug) {
-        return GT.value;
-      }
-      ;
-      if (x instanceof EdgeCase && y instanceof EdgeCase) {
-        return EQ.value;
-      }
-      ;
-      if (x instanceof EdgeCase) {
-        return LT.value;
-      }
-      ;
-      if (y instanceof EdgeCase) {
-        return GT.value;
-      }
-      ;
-      if (x instanceof Logic && y instanceof Logic) {
-        return EQ.value;
-      }
-      ;
-      if (x instanceof Logic) {
-        return LT.value;
-      }
-      ;
-      if (y instanceof Logic) {
-        return GT.value;
-      }
-      ;
-      if (x instanceof Robustness && y instanceof Robustness) {
-        return EQ.value;
-      }
-      ;
-      if (x instanceof Robustness) {
-        return LT.value;
-      }
-      ;
-      if (y instanceof Robustness) {
-        return GT.value;
-      }
-      ;
-      if (x instanceof Quality && y instanceof Quality) {
-        return EQ.value;
-      }
-      ;
-      throw new Error("Failed pattern match at Kernel.Ledger (line 0, column 0 - line 0, column 0): " + [x.constructor.name, y.constructor.name]);
-    };
-  },
-  Eq0: function() {
-    return eqCategory;
-  }
-};
-var compare4 = /* @__PURE__ */ compare(ordCategory);
+var compare22 = /* @__PURE__ */ compare(ordSeverity);
 var rankOrder = function(a) {
   return function(b) {
-    return append3(compare32(a.severity)(b.severity))(append3(compare4(a.category)(b.category))(append3(compare22(a.file)(b.file))(append3(compare12(a.line)(b.line))(compare12(a.id)(b.id)))));
+    return append3(compare22(a.severity)(b.severity))(compare12(a.id)(b.id));
   };
 };
 var eqActor = {
@@ -3240,8 +3133,8 @@ var ledgerCoveredWire = function(coverage) {
     });
   };
 };
-var ledgerNormalWire = function($145) {
-  return toWire(fromWire($145));
+var ledgerNormalWire = function($143) {
+  return toWire(fromWire($143));
 };
 var ledgerPersonWire = function(action) {
   return function(id) {
@@ -3387,8 +3280,8 @@ var ledgerViewsWire = function(facts) {
       return function(b) {
         return append3(compare3(b.statusAt)(a.statusAt))(compare12(b.id)(a.id));
       };
-    })(filter(function($146) {
-      return !isOpen($146);
+    })(filter(function($144) {
+      return !isOpen($144);
     })(v.findings));
     return {
       ranked: map4(function(v1) {
@@ -3524,8 +3417,8 @@ var foundStep = function(actor) {
       return function(commit) {
         return function(acc) {
           return function(v) {
-            var $130 = notEq4(actor)(Review.value) || (v.candidate.file === "" || v.candidate.text === "");
-            if ($130) {
+            var $128 = notEq4(actor)(Review.value) || (v.candidate.file === "" || v.candidate.text === "");
+            if ($128) {
               return {
                 ledger: acc.ledger,
                 added: acc.added,
@@ -3553,8 +3446,8 @@ var foundStep = function(actor) {
                     nextId: acc.ledger.nextId,
                     coverage: acc.ledger.coverage,
                     findings: map4(function(f) {
-                      var $132 = f.id === v1.value0.id;
-                      if ($132) {
+                      var $130 = f.id === v1.value0.id;
+                      if ($130) {
                         return raisedAgain(actor)(at)(v.candidate)(f);
                       }
                       ;
@@ -3614,8 +3507,8 @@ var ruledStep = function(actor) {
             statusBy: actorWord(actor),
             statusNote: ruling.note,
             severity: (function() {
-              var $139 = eq4(actor)(Review.value) && ruling.severity !== "";
-              if ($139) {
+              var $137 = eq4(actor)(Review.value) && ruling.severity !== "";
+              if ($137) {
                 return severityOf(ruling.severity);
               }
               ;
@@ -3629,8 +3522,8 @@ var ruledStep = function(actor) {
               nextId: acc.ledger.nextId,
               coverage: acc.ledger.coverage,
               findings: map4(function(f) {
-                var $140 = f.id === ruling.id;
-                if ($140) {
+                var $138 = f.id === ruling.id;
+                if ($138) {
                   return changed2;
                 }
                 ;

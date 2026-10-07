@@ -844,6 +844,23 @@ class Issues(unittest.TestCase):
         self.assertEqual(jack.ledger_line(jack.ledger_counts([self.issue(1, "low", "x"), self.issue(2, "medium", "y")]), True, {}), "Open in the deep review: 1 medium, 1 low.")
         self.assertEqual(jack.ledger_line(jack.ledger_counts([]), True, {"at": 5, "read": []}), "The audit found nothing open.")
 
+    def test_issues_of_one_severity_are_drawn_in_the_reviewers_order(self):
+        first, second = self.issue(1, "low", "Error message goes to stdout"), self.issue(2, "low", "PID seed is guessable", file="game.sh")
+        ledger = self.keep([first, second], {"at": self.now - 600_000, "commit": "abc1234", "files": 2, "read": ["stats.py", "game.sh"], "skipped": []})
+        status = "Audited 11:42 at abc1234: read 2 of 2 source files."
+        rows = [status, "Open: 2 low", "❯ low · stats.py:1", "Error message goes to stdout", "low · game.sh:2", "PID seed is guessable"]
+        self.assertEqual(bad(self.found(ledger, "review", rows, openList="issues-low")), [])
+        swapped = [status, "Open: 2 low", "❯ low · game.sh:2", "PID seed is guessable", "low · stats.py:1", "Error message goes to stdout"]
+        self.assertIn("draws low issue 2 “PID seed is guessable” before 1 “Error message goes to stdout”, against the reviewer's order",
+                      " ".join(bad(self.found(ledger, "review", swapped, openList="issues-low"))))
+
+    def test_no_key_to_open_an_issue_about_the_whole_project(self):
+        whole = self.issue(1, "critical", "Git folder can be served", file=".")
+        ledger = self.keep([whole], {"at": self.now - 600_000, "commit": "abc1234", "files": 1, "read": ["stats.py"], "skipped": []})
+        rows = ["Audited 11:42 at abc1234: read 1 of 1 source files.", "Open: 1 critical", "❯ critical · the project", "Git folder can be served"]
+        self.assertEqual(bad(self.found(ledger, "review", rows)), [])
+        self.assertIn("offers “o: open in editor” on issue 1, which is about the whole project", " ".join(bad(self.found(ledger, "review", rows + ["o: open in editor"]))))
+
     def test_the_play_by_play_shows_open_issues_and_every_one_tracked(self):
         high = self.issue(1, "high", "mean of an empty list")
         tracked = {**self.issue(2, "medium", "unescaped output", file="index.php"), "isPinned": True}
@@ -1351,6 +1368,14 @@ class Cache(unittest.TestCase):
         explain["insights"] = ["One function, no tests. (from the audit, at abc1234)", "The mean divides by the count. (deep review of abc1234)"]
         self.assertEqual(bad(jack.check_explain_insights("aaaaaaaa", self.told(True, explain=explain), self.root, jack.projects(self.home)[0])), [])
 
+    def test_an_explanation_in_the_first_person(self):
+        explain = {"status": "fresh", "spot": {"path": "index.php", "line": 2}, "target": {"name": "Page setup and includes", "kind": "section", "startLine": 2, "endLine": 42},
+                   "detail": {"what": "Sets up the page.", "how": "", "why": "", "watch": "The includes are only protected by a constant, which only I can confirm is checked.", "uses": []}}
+        found = jack.check_explain_voice("aaaaaaaa", self.told(True, explain=explain))
+        self.assertTrue(any(level == jack.NOTE and "in the first person" in text for level, text in found), found)
+        explain["detail"]["watch"] = "Reading I/O errors are swallowed."
+        self.assertEqual(jack.check_explain_voice("aaaaaaaa", self.told(True, explain=explain)), [])
+
     def test_code_commented_out_shown_relying_on_something(self):
         (pathlib.Path(self.root) / "game.sh").write_text("roll=$((RANDOM % 6))\n\n# old game\n# echo $roll\n")
         outline = [{"name": "roll the dice", "kind": "section", "startLine": 1, "endLine": 1, "summary": ""},
@@ -1672,6 +1697,37 @@ class FastLane(unittest.TestCase):
             (home / "editors" / "emacs-1.json").write_text(json.dumps(caret))
             s["state"]["explain"]["editorFocusAt"] = now - 60_000
             self.assertEqual(closely(), [])
+
+
+class PickKept(unittest.TestCase):
+    """A spot the pane chose after the caret last moved stands until the caret moves: a reload took the editor's
+    unchanged report for a move and undid a pick in the outline (the fifteenth ui-truth pass, 2026-10-07)."""
+
+    def test_a_pick_made_after_the_caret_moved_and_undone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = jack.now_ms()
+            home = pathlib.Path(tmp) / "home"
+            (home / "editors").mkdir(parents=True)
+            debug = pathlib.Path(tmp) / "debug"
+            debug.mkdir()
+            root = "/tmp/ride-editor"
+            caret = {"v": 1, "editor": "emacs", "pid": 1, "at": now - 1000, "changed": now - 3_600_000, "root": root, "file": f"{root}/index.php", "line": 27}
+            (home / "editors" / "emacs-1.json").write_text(json.dumps(caret))
+            pick = {"t": now - 1_800_000, "seq": 1, "s": "aaaaaaaa", "p": "x", "k": "ui", "n": "explain pick", "d": 2}
+            (debug / "000001.jsonl").write_text(json.dumps(pick) + "\n")
+            believed = {"repoRoot": root, "scan": {"lastScanAt": now - 1000}, "loaded": {"at": now, "options": {}},
+                        "explain": {"isOn": True, "editorFocusAt": now - 3_600_000, "focus": {"path": "index.php", "line": 27, "source": "editor"}}}
+            s = session(home=home, debug=debug, state=state(now, **believed))
+            undone = lambda: [x for x in bad(jack.check_world(world([s], [home], now), s)) if "the pane moved it" in x]
+            self.assertTrue(any("Explain spot is emacs's, index.php:27, and the pane moved it at" in x for x in undone()), undone())
+            # The pick stands: as it should be.
+            s["state"]["explain"]["focus"] = {"path": "index.php", "line": 2, "source": "pane"}
+            self.assertEqual(undone(), [])
+            # The caret moved after the pick: the editor's spot is right.
+            s["state"]["explain"]["focus"] = {"path": "index.php", "line": 27, "source": "editor"}
+            caret["changed"] = now - 60_000
+            (home / "editors" / "emacs-1.json").write_text(json.dumps(caret))
+            self.assertEqual(undone(), [])
 
 
 class StateWords(unittest.TestCase):

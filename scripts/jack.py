@@ -1299,6 +1299,7 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
     out += check_explain_fresh(who, state, root, project)
     out += check_explain_insights(who, state, root, project)
     out += check_explain_uses(who, state, project, root)
+    out += check_explain_voice(who, state)
     out += check_working_share(who, state, project, now)
 
     # What it says it shows, against the screen.
@@ -1608,6 +1609,24 @@ def check_explain_uses(who: str, state: dict, project: dict | None, root: str = 
     return [(FINE, f"{who}'s Explain tab shows “{target.get('name')}” relying on earlier parts only")]
 
 
+# Words of an explanation about the one who wrote it, not the code (the fifteenth ui-truth pass, 2026-10-07: "which
+# only I can confirm is checked"). plugin/prompts/explain.md says to write about the code.
+FIRST_PERSON = re.compile(r"\b(I|we) (can|can't|cannot|could|only|think|believe|would|will|see|don't|do not)\b")
+
+
+def check_explain_voice(who: str, state: dict) -> list[tuple[str, str]]:
+    """An explanation on the Explain tab that speaks of its writer: a `··`, since a reader is the judge of a sentence."""
+    detail = dig(state, "pane.explain.detail") if isinstance(dig(state, "pane.explain.detail"), dict) else None
+    if detail is None:
+        return []
+    said = [str(detail.get(field) or "") for field in ("what", "how", "why", "watch")]
+    found = next((line for line in said if FIRST_PERSON.search(line)), None)
+    if found is None:
+        return []
+    target = dig(state, "pane.explain.target.name") or dig(state, "pane.explain.spot.path")
+    return [(NOTE, f"{who}'s Explain tab says of “{target}”, in the first person: “{brief(found, 90)}”")]
+
+
 def check_pick_kept_page(who: str, records: list[dict], now: int) -> list[tuple[str, str]]:
     """A pick in the Explain outline moves the mark, never the page: the window as the last drawing before the latest
     pick had it, against the latest drawing since, with no scroll by anyone between. A shorter drawing while the
@@ -1840,6 +1859,16 @@ def check_issues(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]
         ranks = [SEVERITIES.index(f["severity"]) for f in drawn if f.get("severity") in SEVERITIES]
         if ranks != sorted(ranks):
             out.append((BAD, f"{who}'s Deep review tab draws its issues out of order: {', '.join(str(f.get('severity')) for f in drawn)}"))
+        # Within a severity, the reviewer's own order, which is the order of its ids (the fifteenth ui-truth pass,
+        # 2026-10-07: security first had put the issue an audit ranked last at the top).
+        for before, after in zip(drawn, drawn[1:]):
+            if before.get("severity") == after.get("severity") and (before.get("id") or 0) > (after.get("id") or 0):
+                out.append((BAD, f"{who}'s Deep review tab draws {after.get('severity')} issue {before.get('id')} “{before.get('title')}” before {after.get('id')} “{after.get('title')}”, against the reviewer's order"))
+                break
+        # No key that would do nothing: an issue about the whole project has no file to open.
+        current = next((row for row in rows if any(is_open(f) for f in row) and any(t_.startswith("❯ ") for t_ in texts if issue_label(row[0]).match(t_))), None)
+        if current is not None and current[0].get("file") == "." and "o: open in editor" in texts:
+            out.append((BAD, f"{who}'s Deep review tab offers “o: open in editor” on issue {current[0].get('id')}, which is about the whole project and has no file to open"))
         shown_ids = {f.get("id") for row in rows for f in row}
         missing = [f for f in on_disk if is_open(f) and f.get("severity") != "low" and f.get("id") not in shown_ids]
         if missing:
@@ -2511,6 +2540,14 @@ def check_world(w: dict, s: dict) -> list[tuple[str, str]]:
                 # Connected through an open buffer, with its caret in another repository: the spot is not its (the third ui-truth pass, 2026-10-06).
                 focus = dig(state, "explain.focus") or {}
                 out.append((FINE, f"{who}'s Explain spot is {focus.get('source', 'its own')}'s, {focus.get('path')}:{focus.get('line')}: {d.get('editor')}'s caret is in another repository"))
+            # A spot the pane chose after the caret last moved stands until the caret moves: a reload took the editor's
+            # unchanged report for a move and undid a pick in the outline (the fifteenth ui-truth pass, 2026-10-07).
+            if moved and s["debug"] is not None:
+                picks = [r for r in log_records(s["debug"])[-400:] if r.get("k") == "ui" and r.get("n") in ("explain pick", "explain move")]
+                focus_now = dig(state, "explain.focus") or {}
+                picked_at = picks[-1].get("t") or 0 if picks else 0
+                if picked_at > moved + 1000 and focus_now.get("source") == "editor" and believed_at - picked_at > 5000:
+                    out.append((BAD, f"{who}'s Explain spot is {d.get('editor')}'s, {focus_now.get('path')}:{focus_now.get('line')}, and the pane moved it at {day_clock(picked_at, now)}, after the caret last moved at {day_clock(moved, now)}"))
             # Checked ten times a second for ten minutes after the caret moved, timed by the move itself, and only while
             # nobody reads the Explain tab otherwise: a reload took an unchanged report for a move (the fourteenth pass).
             if moved and dig(state, "explain.isWatchingClosely") is True and dig(state, "pane.tab") != "explain" and believed_at - moved > EDITOR_LIVE_MS + 30_000:

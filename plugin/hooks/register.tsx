@@ -350,6 +350,8 @@ const issuesAtom = atom({ plugin: 'backseat-driver', key: 'issues' } as const, N
 const selectedIssueAtom = atom({ plugin: 'backseat-driver', key: 'selectedIssue' } as const, null)
 /** What the Play-by-play tab's keys act on: the selected note, or the issue picked from the deep review. */
 const playOnAtom = atom({ plugin: 'backseat-driver', key: 'playOn' } as const, 'note' as 'note' | 'issue')
+/** What the editor said when Explain last followed it, which outlives a reload of the module. */
+const followedEditorAtom = atom({ plugin: 'backseat-driver', key: 'followedEditor' } as const, null as string | null)
 const watchAtom = atom({ plugin: 'backseat-driver', key: 'watch' } as const, IDLE)
 const reviewAtom = atom({ plugin: 'backseat-driver', key: 'review' } as const, NO_REVIEW)
 const profilesAtom = atom({ plugin: 'backseat-driver', key: 'profiles' } as const, NO_PROFILES)
@@ -4054,6 +4056,8 @@ function followPortsOf($: EngineInterface): FollowPorts {
     markActive: now => void (activeAt = now),
     feedJournal: (text, now) => journalState.recorder?.editor(text, now, false),
     isPushed: role => isPushed(role),
+    lastFollowed: () => read($, followedEditorAtom),
+    keepFollowed: async text => void (await update($, followedEditorAtom, () => text)),
   }
 }
 

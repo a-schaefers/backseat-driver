@@ -102,6 +102,9 @@ export type FollowPorts = Pick<
   markActive: (now: number) => void
   /** Whether a watcher pushes the changes of this role. */
   isPushed: (role: WatchRole) => boolean
+  /** What the editor said when it was last followed, kept where a reload of the module finds it; null before any. */
+  lastFollowed: () => Promise<string | null>
+  keepFollowed: (text: string | null) => Promise<void>
 }
 
 /** What starting the lookup engine needs besides that. */
@@ -214,6 +217,7 @@ export async function followEditor(ports: FollowPorts, state: FollowState, now: 
   // An editor is reporting its cursor: from now on its file is checked ten times a second. In a session that does not
   // drive, only its open Explain tab is worth that, and opening the tab starts the fast lane by itself.
   if (ports.isDriver() && now - state.editorFocusAt < EDITOR_LIVE_MS) watchClosely(ports, state)
+  await ports.keepFollowed(state.focusText)
   await setFocus(ports, state, { ...spot, source: 'editor' }, false)
 }
 
@@ -318,9 +322,14 @@ export async function startExplaining(ports: StartPorts, state: FollowState, run
   if (shown !== null) state.focus = { ...shown, source: 'pane' }
   else await ports.setView(() => NO_VIEW)
   await refreshView(ports, state)
-  // The journal may have read the focus file already. What it said is followed either way.
+  // The journal may have read the focus file already. What it said is followed, unless it is what was followed before
+  // a reload and the spot restored is another, which the pane chose since: a pick in the outline stood only until the
+  // next sync took the unchanged report for a move (the fifteenth ui-truth pass, 2026-10-07).
+  const followed = await ports.lastFollowed()
   await readFocus(ports, state)
-  await followEditor(ports, state, await ports.now())
+  const said = state.focusText === null ? null : parseFocusFile(state.focusText, root)
+  const isChosenSince = shown !== null && state.focusText === followed && said !== null && (said.path !== shown.path || said.line !== shown.line)
+  if (!isChosenSince) await followEditor(ports, state, await ports.now())
   if (await isWatched(ports, state)) watchClosely(ports, state)
 }
 

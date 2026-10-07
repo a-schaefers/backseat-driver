@@ -152,6 +152,14 @@ test('the ledger keeps its rules over random histories', { timeoutMs: 120_000 },
       // Ranked by severity, worst first.
       const rank = (id: number) => SEVERITY.indexOf(ledger.findings.find(f => f.id === id)?.severity ?? 'low')
       for (let at = 1; at < views.ranked.length; at += 1) must(rank(views.ranked[at - 1] ?? 0) <= rank(views.ranked[at] ?? 0), `the ranking is out of order: ${where}`)
+      // Within a severity, the reviewer's own order: the order its ids were given.
+      for (const order of [views.ranked, views.folded]) {
+        for (let at = 1; at < order.length; at += 1) {
+          const before = order[at - 1] ?? 0
+          const after = order[at] ?? 0
+          must(rank(before) < rank(after) || before < after, `within a severity, not in the reviewer's order: ${where}`)
+        }
+      }
       // The play-by-play's picks are open issues, at most so many; a pinned one is picked or counted.
       expect(views.play.length <= cap).toBe(true)
       for (const id of views.play) must(opened.has(id), `the play-by-play picked a closed issue: ${where}`)
