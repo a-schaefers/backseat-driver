@@ -11,7 +11,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, PluginOptions, Register, Timer, UiFocusResult } from 'claude-code'
 
 import type { ExplainView, Hush, LessonsView, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, ReviewText, SettingRow, Speech, Spot, Tab, Watch, Working } from '../types'
-import { avatarFor, BLINK_MS, BLINK_SHUT_MS, closingLine, finished, isTalking, nextTick, SILENT, speech, SURVEY_LINE, TALK_MS } from '../core/avatar'
+import { avatarFor, BLINK_MS, BLINK_SHUT_MS, closingLine, finished, isTalking, lineAtReload, nextTick, SILENT, speech, SURVEY_LINE, TALK_MS } from '../core/avatar'
 import { backdropOf } from '../core/sprite'
 import type { Backdrop } from '../core/sprite'
 import { carryOn as carryOnOf, checkBound as checkBoundOf, checkSelf as checkSelfOf, freshCarryState, sayLeft as sayLeftOf, sayOff as sayOffOf, sayOn as sayOnOf } from '../core/carrying'
@@ -1526,7 +1526,8 @@ async function startAnimating($: EngineInterface, settings: Settings, isFresh: b
     // A hello another voice said, with the voice changed under it by a reload, is this voice's to say: the mascot
     // stood under Linus's "Ready. Save something." for sixteen hours (the second ui-truth pass, 2026-10-06).
     const shown = await read($, speechAtom)
-    if (shown.text !== hello && isHello(shown.text)) await say($, hello)
+    const instead = lineAtReload(shown.text, hello, isHello)
+    if (instead !== null) await say($, instead)
     else await update($, speechAtom, finished)
   }
 }

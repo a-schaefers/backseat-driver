@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { avatarFor, AVATARS, bubble, bubbleColumn, bubbleWidth, closingLine, finished, isHello, isTalking, nextTick, poseOf, saidSoFar, speakable, speech, SURVEY_LINE, wordsSaid, wrap } from '../core/avatar'
+import { avatarFor, AVATARS, bubble, bubbleColumn, bubbleWidth, closingLine, finished, isHello, isTalking, lineAtReload, nextTick, poseOf, saidSoFar, speakable, speech, SURVEY_LINE, wordsSaid, wrap } from '../core/avatar'
 import type { Pose } from '../core/avatar'
 import { backdropOf, base64, cellWords, dimmed, pixels, poseGrid, rasterCells, spriteSize } from '../core/sprite'
 
@@ -212,4 +212,12 @@ test('a review that ends in a paragraph gives its last sentence to the bubble, a
   expect(closingLine(`Some review.\n\n${paragraph}`)).toBe('head.php turns errors on screen on, and .user.ini turns them off on the server.')
   expect(closingLine('Some review.\n\nFix the empty case first.')).toBe('Fix the empty case first.')
   expect(SURVEY_LINE.length).toBeLessThan(80)
+})
+
+test('a reload replaces another voice\'s hello and a line cut mid-sentence with the hello, and keeps any other line', () => {
+  const isHello = (line: string) => line === 'Ready. Save something.' || line === 'Riding along. You drive.'
+  expect(lineAtReload('Ready. Save something.', 'Riding along. You drive.', isHello)).toBe('Riding along. You drive.')
+  expect(lineAtReload("I've had a look around. HTML is built up in strings and printed at the end. The database login details are typed…", 'Riding along. You drive.', isHello)).toBe('Riding along. You drive.')
+  expect(lineAtReload('Riding along. You drive.', 'Riding along. You drive.', isHello)).toBe(null)
+  expect(lineAtReload("Review's in. Fix the empty case first.", 'Riding along. You drive.', isHello)).toBe(null)
 })

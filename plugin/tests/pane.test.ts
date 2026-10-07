@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Note, OutlineRow, Watch } from '../types'
 import { NO_VIEW } from '../core/explainer'
-import { currentNote, detailMarkdown, emptyPlayLine, explainNotice, FOCUSED_HINT, followingLine, jumpHeading, KEYBOARD_HINT, keysRowFits, nameColumns, NO_LOOK_YET, NO_NOTES, outlineName, personaLine, reviewBanner, reviewPlace, reviewRow, reviewsHeading, reviewSpots, spinFrame, stateMark, statusLine, tabBadge, tabRow, tabRows, underlineSpans, waitingLine, workingRowFits } from '../hooks/pane'
+import { currentNote, detailMarkdown, emptyPlayLine, explainNotice, FOCUSED_HINT, followingLine, jumpHeading, KEYBOARD_HINT, keysRowFits, nameColumns, NO_LOOK_YET, NO_NOTES, outlineName, personaLine, reviewBanner, reviewPlace, reviewRow, reviewsHeading, reviewSpots, spinFrame, stateMark, statusLine, tabBadge, tabRow, tabRows, underlineSpans, waitingLine, workingLayout } from '../hooks/pane'
 import type { PaneView } from '../hooks/pane'
 import { paneContext } from '../core/prompts'
 import { readableReview, reviewHistory, shownReview, spotsIn, SURVEY_SUBJECT, withReviewChange } from '../core/review'
@@ -422,12 +422,14 @@ test('the empty Play-by-play tab says that nothing has been looked at yet, where
   expect(emptyPlayLine({ mode: 'paused', watch })).toBe(NO_NOTES)
 })
 
-test('the "Working on" value goes on a row of its own when the label and the control leave it no room', () => {
-  // At 23 columns "Working on:", the gaps and "w: change" took every column (the eighth ui-truth pass, 2026-10-06).
-  expect(workingRowFits(23, 'change')).toBe(false)
-  expect(workingRowFits(30, 'change')).toBe(false)
-  expect(workingRowFits(31, 'change')).toBe(true)
-  expect(workingRowFits(64, 'say what')).toBe(true)
+test('the "Working on" row gives its value, and then its control, a row of its own as the pane narrows', () => {
+  // At 23 columns "Working on:", the gaps and "w: change" took every column, and "w: say what" did not fit beside the
+  // label at all (the eighth ui-truth pass, 2026-10-06).
+  expect(workingLayout(64, 'say what')).toBe('one')
+  expect(workingLayout(31, 'change')).toBe('one')
+  expect(workingLayout(30, 'change')).toBe('two')
+  expect(workingLayout(23, 'change')).toBe('two')
+  expect(workingLayout(23, 'say what')).toBe('three')
 })
 
 test('the tab bar falls to three rows of two, and then one tab a row, when two rows of three do not fit', () => {

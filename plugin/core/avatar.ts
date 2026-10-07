@@ -199,6 +199,20 @@ export function closingLine(review: string): string {
   return speakable(line)
 }
 
+/**
+ * What a reload says in place of the line it finds: the voice's hello when
+ * the line is another voice's hello (the mascot stood under Linus's "Ready.
+ * Save something." for sixteen hours: the second ui-truth pass, 2026-10-06)
+ * or a line cut mid-sentence (a survey's paragraph, from a copy before the
+ * eighth pass); null to keep the line as it is.
+ */
+export function lineAtReload(shown: string, hello: string, isHello: (line: string) => boolean): string | null {
+  if (shown !== hello && isHello(shown)) return hello
+  if (shown.endsWith('…')) return hello
+
+  return null
+}
+
 /** A new line to say, from its first word. */
 export function speech(text: string): Speech {
   return { text: speakable(text), tick: 0, isBlinking: false }

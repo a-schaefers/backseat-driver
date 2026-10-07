@@ -408,19 +408,25 @@ export function workingLines(working: Working): { head: string; tail: string } {
 const WORKING_MIN_COLUMNS = 8
 
 /**
- * Whether the "Working on" value fits beside its label and its control: at 23
- * columns the label, the gaps and `w: change` took every column, and the
- * value vanished without an ellipsis (the eighth ui-truth pass, 2026-10-06).
+ * How the "Working on" row is laid out: label, value and control on one
+ * row; the value on a row of its own under the label and the control; or
+ * each on its own row. At 23 columns the label, the gaps and `w: change`
+ * took every column and the value vanished without an ellipsis, and
+ * `w: say what` did not fit beside the label at all, "what" wrapping onto
+ * the value's row (the eighth ui-truth pass, 2026-10-06).
  */
-export function workingRowFits(columns: number, control: string): boolean {
+export function workingLayout(columns: number, control: string): 'one' | 'two' | 'three' {
   // The label, a gap, the value, a gap, the control's margin, and the control as `w: label`.
-  return columns - ('Working on:'.length + 3 + control.length + 3) >= WORKING_MIN_COLUMNS
+  if (columns - ('Working on:'.length + 3 + control.length + 3) >= WORKING_MIN_COLUMNS) return 'one'
+
+  return 'Working on:'.length + 2 + control.length + 3 <= columns ? 'two' : 'three'
 }
 
 function workingOn({ Box, Text, Button }: Kit, view: PaneView, actions: PaneActions) {
   const { head, tail } = workingLines(view.working)
   const control = head === NOT_CLEAR ? 'say what' : 'change'
-  const isOneLine = workingRowFits(view.columns, control)
+  const layout = workingLayout(view.columns, control)
+  const button = <Button key="working" label={control} hotkey="w" plain onPress={() => actions.onWorking()} />
 
   return (
     <Box flexDirection="column">
@@ -428,16 +434,19 @@ function workingOn({ Box, Text, Button }: Kit, view: PaneView, actions: PaneActi
         <Box flexShrink={0}>
           <Text dimColor>Working on:</Text>
         </Box>
-        {isOneLine && (
+        {layout === 'one' && (
           <Box flexShrink={1}>
             <Text wrap="truncate-end">{head}</Text>
           </Box>
         )}
-        <Box flexShrink={0} marginLeft={1}>
-          <Button key="working" label={control} hotkey="w" plain onPress={() => actions.onWorking()} />
-        </Box>
+        {layout !== 'three' && (
+          <Box flexShrink={0} marginLeft={1}>
+            {button}
+          </Box>
+        )}
       </Box>
-      {!isOneLine && <Text wrap="truncate-end">{head}</Text>}
+      {layout !== 'one' && <Text wrap="truncate-end">{head}</Text>}
+      {layout === 'three' && button}
       {tail !== '' && !view.isCompact && (
         <Text dimColor wrap="truncate-end">
           {tail}

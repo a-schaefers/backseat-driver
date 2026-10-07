@@ -776,22 +776,36 @@ def flows(rows: list[str]) -> list[str]:
     return out
 
 
-def is_on_screen(piece: str, where: list[str]) -> bool:
+# How much of a piece's beginning is looked for on the screen.
+HEAD_CHARS = 28
+# A pane narrower than this cuts its rows short of that: a piece is looked for by what a row of it can hold.
+NARROW_COLUMNS = 40
+
+
+def piece_head(columns) -> int:
+    """How many characters of a piece a row of the pane can hold: the owner's 23-column dock cut every long line to
+    about fifteen characters and an ellipsis, and the tool took them for missing (the eighth ui-truth pass, 2026-10-06)."""
+    if isinstance(columns, int) and 0 < columns < NARROW_COLUMNS:
+        return max(8, columns - 10)
+    return HEAD_CHARS
+
+
+def is_on_screen(piece: str, where: list[str], head: int = HEAD_CHARS) -> bool:
     """Whether a piece of text the tutor says it drew is there. Long text is cut or wrapped by the
     terminal, so its beginning is what is looked for; one or two characters say too little to judge."""
     want = despin(squash(demark(piece)))
     if len(want) < 3:
         return True
-    want = want[:28].rstrip()
+    want = want[:head].rstrip()
     # The screen keeps the backticks of a note's code words as a plain Text draws them; the piece has them dropped: both sides alike.
     return any(want in despin(demark(flow)) for flow in where)
 
 
-def missing_pieces(texts: list[str], rows: list[str]) -> tuple[list[str], list[str]]:
+def missing_pieces(texts: list[str], rows: list[str], chars: int = HEAD_CHARS) -> tuple[list[str], list[str]]:
     """The pieces not on the screen: those from the top of the drawing, and the rest."""
     where = flows(rows)
-    head = [t for t in texts[:HEAD_PIECES] if not is_on_screen(t, where)]
-    rest = [t for t in texts[HEAD_PIECES:] if not is_on_screen(t, where)]
+    head = [t for t in texts[:HEAD_PIECES] if not is_on_screen(t, where, chars)]
+    rest = [t for t in texts[HEAD_PIECES:] if not is_on_screen(t, where, chars)]
     return head, rest
 
 
@@ -813,19 +827,19 @@ def check_keys_row(who: str, texts: list[str], rows: list[str]) -> list[tuple[st
     return []
 
 
-def squeezed_pieces(texts: list[str], rows: list[str]) -> list[str]:
+def squeezed_pieces(texts: list[str], rows: list[str], chars: int = HEAD_CHARS) -> list[str]:
     """The pieces missing from the screen while a later piece of the same drawing is on it: not below the fold, but
     squeezed out of the middle. Only pieces long enough to be told apart count, on either side."""
     where = flows(rows)
-    found = [len(squash(demark(t))) >= 3 and is_on_screen(t, where) for t in texts]
+    found = [len(squash(demark(t))) >= 3 and is_on_screen(t, where, chars) for t in texts]
     last_found = max((i for i, ok in enumerate(found) if ok), default=-1)
     return [t for i, t in enumerate(texts) if i < last_found and not found[i] and len(squash(demark(t))) >= 3]
 
 
-def pieces_below(texts: list[str], rows: list[str]) -> int:
+def pieces_below(texts: list[str], rows: list[str], chars: int = HEAD_CHARS) -> int:
     """How many pieces from below the top of the drawing are really on the screen: long enough to be told apart, and found."""
     where = flows(rows)
-    return sum(1 for t in texts[HEAD_PIECES:] if len(squash(demark(t))) >= 3 and is_on_screen(t, where))
+    return sum(1 for t in texts[HEAD_PIECES:] if len(squash(demark(t))) >= 3 and is_on_screen(t, where, chars))
 
 
 def sides(rows: list[str]) -> dict[str, list[str]]:
@@ -1216,12 +1230,13 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
         out.append((NOTE, f"{who}'s pane was drawn docked ({drawing.get('columns')} columns) and its terminal is now {width} wide, under the {DOCK_COLUMNS} a dock takes: the pane is moving above the prompt (a resize), and is checked again next time"))
     elif mode != "off" and isinstance(drawing, dict) and isinstance(drawing.get("texts"), list):
         texts = [t for t in drawing["texts"] if isinstance(t, str)]
-        head, rest = missing_pieces(texts, rows)
+        chars = piece_head(drawing.get("columns"))
+        head, rest = missing_pieces(texts, rows, chars)
         where = "strip above the prompt" if minimized else "pane" if layout == "vertical" else "lines above the prompt"
-        below = pieces_below(texts, rows)
+        below = pieces_below(texts, rows, chars)
         # A scrolled pane lacks its first piece. One whose first piece is there and a later one of the top is not has
         # that piece cut off its row (the owner's 157-column terminal, 2026-10-06: a 46-column dock cut "6: Set" off).
-        is_top_there = bool(texts) and is_on_screen(texts[0], flows(rows))
+        is_top_there = bool(texts) and is_on_screen(texts[0], flows(rows), chars)
         if head and below > 0 and not is_top_there:
             # The top is missing and the rest is there: the person scrolled the pane down to read (the owner, 2026-10-05,
             # a long deep review in a 30-row terminal). Their view, not a fault.
@@ -1232,12 +1247,12 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
             out.append((BAD, f"{who} says its {where} shows {quoted}{' and more' if len(head) > 3 else ''}: not on its screen (drawn {ago(now - (drawing.get('at') or now))} ago, {drawing.get('placement') or 'above the prompt'}, {drawing.get('columns')} columns).{cut}"))
             # The middle is held against the screen whether or not the top is whole: at 23 columns the "Working on" value
             # and the character's line went missing under a cut tab row, and went unreported (the eighth ui-truth pass, 2026-10-06).
-            squeezed = [t for t in squeezed_pieces(texts, rows) if t not in head]
+            squeezed = [t for t in squeezed_pieces(texts, rows, chars) if t not in head]
             if squeezed:
                 quoted = "; ".join(f"“{t[:50]}”" for t in squeezed[:3])
                 out.append((BAD, f"{who}'s {where} is squeezed as well: {len(squeezed)} piece(s) missing from its middle while pieces below them are on the screen ({quoted}{' and more' if len(squeezed) > 3 else ''})"))
         else:
-            squeezed = squeezed_pieces(texts, rows)
+            squeezed = squeezed_pieces(texts, rows, chars)
             if squeezed:
                 # A piece missing while a later one of the same drawing is on the screen was squeezed out, not cut at the
                 # bottom: the owner's pane was laid out into sixteen rows of a thirty-seven-row terminal for half a

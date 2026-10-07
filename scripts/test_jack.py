@@ -481,6 +481,21 @@ class Disagreements(unittest.TestCase):
         told["pane"]["speech"]["text"] = "I've had a look around. The Deep review tab has the map."
         self.assertEqual(bad(jack.check_speech("aaaaaaaa", told)), [])
 
+    def test_a_narrow_pane_cuts_its_rows_and_a_cut_row_is_the_piece(self):
+        # The owner's 23-column dock: "I've had a look around. HTML…" drawn as "_|o_o|_ I've had a loo…" (the eighth ui-truth pass, 2026-10-06).
+        self.assertEqual(jack.piece_head(23), 13)
+        self.assertEqual(jack.piece_head(64), jack.HEAD_CHARS)
+        self.assertEqual(jack.piece_head(None), jack.HEAD_CHARS)
+        line = "I've had a look around. HTML is built up in strings and printed at the end."
+        self.assertTrue(jack.is_on_screen(line, ["_|o_o|_ I've had a loo…"], jack.piece_head(23)))
+        self.assertFalse(jack.is_on_screen(line, ["_|o_o|_ I've had a loo…"]))
+        told = state(self.now)
+        told["shown"]["pane"]["columns"] = 23
+        told["shown"]["pane"]["texts"] = [*TEXTS[:7], "Working on:", "w: say what", "(not clear yet)", "l: look now", "_|o_o|_", line]
+        rows = ["1: Play (1)  2: Review", "3: Explain   4: Progress", "On. Watching for your", "●", "No editor is connected.", "Working on:", "w: say what", "(not clear yet)", "l: look now", "_|o_o|_ I've had a loo…"]
+        s = session(state=told)
+        self.assertEqual(bad(jack.check_session(world([s], now=self.now), s, rows)), [])
+
     def test_a_squeezed_middle_is_reported_under_a_cut_top(self):
         # At 23 columns the tab row was cut and the "Working on" value went missing under it (the eighth ui-truth pass, 2026-10-06).
         told = state(self.now)
