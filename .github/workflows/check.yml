@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 20
     env:
       # Keep in step with "last verified against" in CLAUDE.md.
-      CLAUDE_CODE_VERSION: '2.1.290'
+      CLAUDE_CODE_VERSION: '2.1.292'
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
       DISABLE_TELEMETRY: '1'
     steps:

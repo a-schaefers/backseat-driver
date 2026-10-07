@@ -210,6 +210,7 @@ scripts/outage-proxy.py 18080    # a proxy for staging an outage in a live sessi
 - Typecheck needs `plugin/.claude-plugin/types/` (self-gitignored). Claude Code writes it whenever it loads the plugin from this folder: a dev session, or `claude -p hi --plugin-dir ./plugin`, which writes the types even without a login and then fails at the model call. Rerun after a Claude Code update.
 - CI:
   - `check.yml` pins `CLAUDE_CODE_VERSION` to the last-verified version (bump it with "last verified" below).
+  - Bump it whenever the code starts relying on a newer version's types: `kit.ts`'s `promptText` reads 2.1.292's `ModelTextBlock`, and `check` stayed red on the 2.1.290 pin from 2026-10-06 to 2026-10-07 (`Property 'map' does not exist on type 'never'`) while the nightly on `latest` was green.
   - `nightly.yml` runs on `latest`. Red there means a new Claude Code changed the mod API, not that `main` is broken. Both are README badges.
   - Validate and test need no login.
   - `gh run list`, `gh run view --log-failed`.
