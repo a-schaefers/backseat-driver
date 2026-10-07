@@ -30,7 +30,7 @@ const MAX_ASSESSED = 600
 const MAX_HISTORY = 50
 
 export function emptyRecord(language: string): ProgressRecord {
-  return { v: 1, language, level: null, isProvisional: true, observations: [], history: [], report: null, assessed: [], linesRead: 0 }
+  return { v: 1, language, level: null, isProvisional: true, observations: [], history: [], report: null, assessed: [], linesRead: 0, withdrawnAt: 0 }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -113,6 +113,7 @@ export function parseRecord(value: unknown, language: string): ProgressRecord {
           },
     assessed: (Array.isArray(stored.assessed) ? stored.assessed : []).filter((hash): hash is string => typeof hash === 'string').slice(-MAX_ASSESSED),
     linesRead: whole(stored.linesRead),
+    withdrawnAt: whole(stored.withdrawnAt),
   }
 }
 
@@ -195,13 +196,21 @@ export function isPlaceable(record: Pick<ProgressRecord, 'observations' | 'lines
  * that said "Not placed yet" (the second ui-truth pass, 2026-10-06). The
  * record as it is when there is nothing to withdraw.
  */
-export function withdrawn(record: ProgressRecord): ProgressRecord {
-  if (record.level === null || !record.isProvisional || isPlaceable(record)) return record
+export function withdrawn(record: ProgressRecord, at: number): ProgressRecord {
+  const last = record.history[record.history.length - 1]
+  if (record.level === null) {
+    // Withdrawn by a copy from before the report went with the level (2026-10-06): a report written under the level
+    // the history last reached is that placement's, and goes now.
+    if (record.withdrawnAt === 0 && last !== undefined && record.report !== null && record.report.at >= last.at) return { ...record, report: null, withdrawnAt: at }
+
+    return record
+  }
+  if (!record.isProvisional || isPlaceable(record)) return record
 
   // The history records levels reached, never one taken away (`LevelChange.to`): the tab's counts say what is short.
   // The report was the model's words for the placement withdrawn ("keep the record at beginner for now", "To reach
   // junior…"), and stood under "Not placed yet" (the third ui-truth pass, 2026-10-06): it goes with the level.
-  return { ...record, level: null, isProvisional: true, report: null }
+  return { ...record, level: null, isProvisional: true, report: null, withdrawnAt: at }
 }
 
 /** Where the level goes after new evidence, and why, under the rules above. */

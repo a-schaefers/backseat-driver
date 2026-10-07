@@ -498,14 +498,23 @@ test('a provisional level the bar no longer supports is withdrawn as the record 
   const report = { why: 'Gaps keep the record at beginner for now.', next: 'To reach junior, handle the error case.', working: [], encouragement: '', at: 1 }
   const thin = { ...emptyRecord('shell'), level: 'beginner' as const, isProvisional: true, observations: [...seen('a', 5), ...seen('b', 5), ...seen('c', 5)], assessed: ['a', 'b', 'c'], linesRead: 0, report }
   // The owner's record of 2026-10-05: placed under the old bar, with no lines on record. The report went with the placement.
-  expect(withdrawn(thin).level).toBe(null)
-  expect(withdrawn(thin).isProvisional).toBe(true)
-  expect(withdrawn(thin).report).toBe(null)
-  // Enough lines read, confirmed, or no level: as it is, the same object.
+  expect(withdrawn(thin, 5000).level).toBe(null)
+  expect(withdrawn(thin, 5000).isProvisional).toBe(true)
+  expect(withdrawn(thin, 5000).report).toBe(null)
+  expect(withdrawn(thin, 5000).withdrawnAt).toBe(5000)
+  // Enough lines read, or confirmed: as it is, the same object.
   const read = { ...thin, linesRead: 80 }
-  expect(withdrawn(read)).toBe(read)
+  expect(withdrawn(read, 5000)).toBe(read)
   const confirmed = { ...thin, isProvisional: false }
-  expect(withdrawn(confirmed)).toBe(confirmed)
-  const unplaced = { ...thin, level: null }
-  expect(withdrawn(unplaced)).toBe(unplaced)
+  expect(withdrawn(confirmed, 5000)).toBe(confirmed)
+  // Withdrawn by a copy from before the report went with the level: a report written under the level the history reached goes now.
+  const placedAt = { at: 2, from: null, to: 'beginner' as const, reason: 'First placement.', observationCount: 10 }
+  const older = { ...thin, level: null, history: [placedAt], report: { ...report, at: 3 } }
+  expect(withdrawn(older, 5000).report).toBe(null)
+  expect(withdrawn(older, 5000).withdrawnAt).toBe(5000)
+  // A report written while the record was unplaced, or one already marked withdrawn: as it is.
+  const unplaced = { ...thin, level: null, history: [], report }
+  expect(withdrawn(unplaced, 5000)).toBe(unplaced)
+  const marked = { ...older, withdrawnAt: 4000 }
+  expect(withdrawn(marked, 5000)).toBe(marked)
 })

@@ -398,16 +398,26 @@ class Disagreements(unittest.TestCase):
     def test_the_progress_files_against_themselves(self):
         home = pathlib.Path(self.tmp.name) / "home2"
         (home / "progress").mkdir(parents=True)
-        (home / "progress" / "shell.json").write_text(json.dumps({"v": 1, "language": "shell", "level": None, "report": {"why": "Gaps keep it at beginner."},
-                                                                  "history": [{"from": None, "to": "beginner"}]}))
+        placed = [{"from": None, "to": "beginner", "at": 1000}]
+        write = lambda **record: (home / "progress" / "shell.json").write_text(json.dumps({"v": 1, "language": "shell", "history": placed, **record}))
+        # Withdrawn by a copy from before withdrawals were marked: the report written under the level is the placement's.
+        write(level=None, report={"why": "Gaps keep it at beginner.", "at": 2000}, withdrawnAt=0)
         found = bad(jack.check_progress_files(home))
         self.assertEqual(len(found), 1, found)
-        self.assertIn("has no level and still a report", found[0])
-        (home / "progress" / "shell.json").write_text(json.dumps({"v": 1, "language": "shell", "level": "junior", "report": None, "history": [{"from": None, "to": "beginner"}]}))
+        self.assertIn("has no level and still the report of the placement withdrawn", found[0])
+        # Marked withdrawn, with the report from before: the same. With a report written since: an unplaced record's own.
+        write(level=None, report={"why": "Gaps keep it at beginner.", "at": 2000}, withdrawnAt=3000)
+        self.assertEqual(len(bad(jack.check_progress_files(home))), 1)
+        write(level=None, report={"why": "No level yet: four of eight observations.", "at": 4000}, withdrawnAt=3000)
+        self.assertEqual(bad(jack.check_progress_files(home)), [])
+        write(level="junior", report=None)
         self.assertIn("is at junior and its history last reached beginner", bad(jack.check_progress_files(home))[0])
-        (home / "progress" / "shell.json").write_text(json.dumps({"v": 1, "language": "shell", "level": None, "report": None, "history": [{"from": None, "to": "beginner"}]}))
+        write(level=None, report=None)
         self.assertEqual(bad(jack.check_progress_files(home)), [])
         shutil.rmtree(home)
+        # A note's code words keep their backticks on the screen and lose them in the piece: both sides alike.
+        self.assertTrue(jack.is_on_screen("`held` is read before two awaits, then `known.set`", ["    `held` is read before two awaits, then `known.set` is called"]))
+        self.assertTrue(jack.is_on_screen("held is read before two awaits", ["`held` is read before two awaits"]))
 
     def test_the_settings_tab_against_the_manifest(self):
         folder = pathlib.Path(self.tmp.name) / "copy"

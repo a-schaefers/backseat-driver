@@ -282,6 +282,8 @@ export type ProgressRecord = {
   assessed: string[]
   /** The person's own added lines the assessments have read, in all. A level needs enough of them (owner, 2026-10-05: eight lines are no basis for one). */
   linesRead: number
+  /** When a provisional level was last withdrawn as the record was read, in clock milliseconds, or 0: a report older than that was the placement's. */
+  withdrawnAt: number
 }
 
 /** One step of a lesson as the Lessons tab shows it. `checked` is done with the tutor watching, `done` marked done by them. */

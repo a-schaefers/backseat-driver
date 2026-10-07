@@ -725,7 +725,8 @@ def is_on_screen(piece: str, where: list[str]) -> bool:
     if len(want) < 3:
         return True
     want = want[:28].rstrip()
-    return any(want in despin(flow) for flow in where)
+    # The screen keeps the backticks of a note's code words as a plain Text draws them; the piece has them dropped: both sides alike.
+    return any(want in despin(demark(flow)) for flow in where)
 
 
 def missing_pieces(texts: list[str], rows: list[str]) -> tuple[list[str], list[str]]:
@@ -896,8 +897,14 @@ def check_progress_files(home: pathlib.Path) -> list[tuple[str, str]]:
             continue
         level = record.get("level")
         history = [h for h in (record.get("history") or []) if isinstance(h, dict)]
-        if level is None and record.get("report"):
-            out.append((BAD, f"progress/{file.name} has no level and still a report: the Growth tab would say “Not placed yet” over the words of a placement withdrawn"))
+        report = record.get("report") if isinstance(record.get("report"), dict) else None
+        withdrawn_at = record.get("withdrawnAt") or 0
+        reached_at = (history[-1].get("at") or 0) if history else 0
+        # A report under no level is the placement's when it was written after the level the history last reached and
+        # before the withdrawal (or with no withdrawal on record, by a copy from before withdrawals were marked).
+        is_stale = level is None and report is not None and history and (report.get("at") or 0) >= reached_at and (withdrawn_at == 0 or (report.get("at") or 0) < withdrawn_at)
+        if is_stale:
+            out.append((BAD, f"progress/{file.name} has no level and still the report of the placement withdrawn: the Growth tab would say “Not placed yet” over its words"))
         elif level and history and history[-1].get("to") != level:
             out.append((BAD, f"progress/{file.name} is at {level} and its history last reached {history[-1].get('to')}: a level the history does not account for"))
         else:

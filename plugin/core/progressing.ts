@@ -190,11 +190,12 @@ async function withLinesCounted(ports: Pick<ProgressPorts, 'git'>, record: Progr
  */
 async function mendedRecord(ports: ProgressPorts, language: string): Promise<ProgressRecord> {
   const read = await loadRecord(ports, language)
-  if (read.level === null || !read.isProvisional) return read
-  const counted = read.linesRead > 0 ? read : await withLinesCounted(ports, read)
+  const needsLines = read.level !== null && read.isProvisional && read.linesRead === 0
+  const counted = needsLines ? await withLinesCounted(ports, read) : read
   // Its commits are elsewhere: nothing can be said of its lines here, so nothing is withdrawn here.
   if (counted === null) return read
-  const mended = withdrawn(counted)
+  const at = await ports.now()
+  const mended = withdrawn(counted, at)
   if (mended === read) return read
   if (ports.dataRoot() === '') return mended
   try {
@@ -202,7 +203,7 @@ async function mendedRecord(ports: ProgressPorts, language: string): Promise<Pro
       ports.store(),
       progressPath(ports.dataRoot(), language),
       stored => parseRecord(stored, language),
-      latest => withdrawn({ ...latest, linesRead: Math.max(latest.linesRead, counted.linesRead) }),
+      latest => withdrawn({ ...latest, linesRead: Math.max(latest.linesRead, counted.linesRead) }, at),
       { keepBackup: true },
     )
   } catch (error) {
