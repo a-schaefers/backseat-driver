@@ -1485,7 +1485,7 @@ var alt2 = function(v) {
       return v1;
     }
     ;
-    throw new Error("Failed pattern match at Kernel.Growth (line 398, column 1 - line 398, column 47): " + [v.constructor.name, v1.constructor.name]);
+    throw new Error("Failed pattern match at Kernel.Growth (line 402, column 1 - line 402, column 47): " + [v.constructor.name, v1.constructor.name]);
   };
 };
 var above = function(v) {
@@ -1538,9 +1538,16 @@ var growthOf = function(facts) {
       return [];
     }
     ;
-    return append2([item("place")("")(max1(0)(placeObservations - length(facts.seen) | 0))(max1(0)(placeCommits - commitCount(facts.seen) | 0))])((function() {
-      var $86 = facts.linesRead < placeLines;
+    return append2((function() {
+      var $86 = length(facts.seen) < placeObservations || commitCount(facts.seen) < placeCommits;
       if ($86) {
+        return [item("place")("")(max1(0)(placeObservations - length(facts.seen) | 0))(max1(0)(placeCommits - commitCount(facts.seen) | 0))];
+      }
+      ;
+      return [];
+    })())((function() {
+      var $87 = facts.linesRead < placeLines;
+      if ($87) {
         return [item("lines")("")(placeLines - facts.linesRead | 0)(placeLines)];
       }
       ;
@@ -1703,10 +1710,10 @@ var growthOf = function(facts) {
     })(facts.seen))),
     missed: sum1(map3(function(v) {
       return v.weight;
-    })(filter(function($104) {
+    })(filter(function($105) {
       return !(function(v) {
         return v.isShown;
-      })($104);
+      })($105);
     })(facts.seen))),
     lessonSteps: sum22(map3(function(v) {
       return v.done;
@@ -1732,7 +1739,7 @@ var growthWire = function(wire) {
           return f(v.value0);
         }
         ;
-        throw new Error("Failed pattern match at Kernel.Growth (line 452, column 23 - line 454, column 18): " + [v.constructor.name]);
+        throw new Error("Failed pattern match at Kernel.Growth (line 456, column 23 - line 458, column 18): " + [v.constructor.name]);
       };
     };
   };
@@ -4395,6 +4402,10 @@ var watchState = function(v) {
   ;
   if (v instanceof Waiting2) {
     return "waiting";
+  }
+  ;
+  if (v instanceof Following) {
+    return "following";
   }
   ;
   return "idle";

@@ -5,12 +5,12 @@ import { projectId } from '../core/datahome'
 import { parseStatus } from '../core/git'
 import { sourcePrint } from '../core/knowledge'
 import { applyReply, keepNotes, parseKeptNotes, stillOpen } from '../core/notes'
-import { emptyProfile, withFlagged } from '../core/profiles'
+import { emptyProfile, parseProfile, withFlagged, withHush } from '../core/profiles'
 import { emptyRecord, withAssessment } from '../core/progress'
 import type { Assessment } from '../core/progress'
 import { parseReviews } from '../core/project'
 import type { Note } from '../types'
-import { PANE, ROOT, SESSION, sessionTest, stubSession, typed } from './kit'
+import { COMPOSE, DATA_HOME, PANE, ROOT, SESSION, sessionTest, stubSession, typed } from './kit'
 
 const MEAN = 'def mean(xs):\n    return sum(xs) / len(xs)\n'
 const MEDIAN = `${MEAN}\ndef median(xs):\n    return sorted(xs)[len(xs) // 2]\n`
@@ -144,4 +144,53 @@ test('a review on record keeps what the tab showed beside it', () => {
   expect(parseReviews([{ commit: 'a', subject: 's', at: 1, text: 't', decisions: [decision], insights: ['stats.py: copies'] }])).toEqual([
     { commit: 'a', subject: 's', at: 1, text: 't', decisions: [decision], insights: ['stats.py: copies'] },
   ])
+})
+
+sessionTest('after a restart a new project has its first look around back in the tab, and the history lists it after the reviews', async ($, on) => {
+  const session = stubSession(on, {
+    head: { 'stats.py': MEAN },
+    data: {
+      [`projects/${projectId(ROOT)}/project.json`]: {
+        v: 1,
+        root: ROOT,
+        isSurveyed: true,
+        survey: { commit: '', subject: 'a first look around this project', at: 1, text: 'A small statistics library, one file.', decisions: [], insights: [] },
+      },
+    },
+  })
+  await $.session.start(SESSION)
+  await $.command.run(typed('backseat'))
+  await session.clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-review' })
+  expect((await ui.find({ type: 'Markdown', text: 'A small statistics library, one file.' })) ?? (await ui.find({ type: 'Text', text: 'A small statistics library, one file.' }))).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'A first look around this project' })).toBeDefined()
+  await ui.unmount()
+  // Not among the reviews: the next reviewer is not told of it as one.
+  expect(session.data(`projects/${projectId(ROOT)}/reviews.json`)).toBeUndefined()
+})
+
+sessionTest('a profile that could not be read once is not reset by the next write, and the failure is said', async ($, on) => {
+  const hushed = withHush(emptyProfile(), { topic: 'type-hints', text: 'type hints' })
+  const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { 'profiles/python.json': hushed } })
+  session.reply(EVEN)
+  await $.session.start(SESSION)
+  await $.command.run(typed('backseat'))
+  await session.clock.settle()
+
+  // The look's note flags a topic, which the profile records: that write reads the profile first, and the read fails.
+  session.unreadable.add(`${DATA_HOME}/profiles/python.json`)
+  session.write('stats.py', MEDIAN)
+  await session.clock.advance(12_000)
+  await session.clock.settle()
+  expect(session.unreadable.size).toBe(0)
+  expect(parseProfile(session.data('profiles/python.json')).hushed.map(hush => hush.topic)).toEqual(['type-hints'])
+  expect(session.logs.some(line => (line.startsWith('could not keep the profile: ') || line.startsWith('could not read the profile: ')) && line.includes('EIO'))).toBe(true)
+  // The look itself went through, its note is in the pane, and the hush is still what the conversation is told.
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: 'What is the median of four numbers?' })).toBeDefined()
+  await ui.unmount()
+  await $.prompt.submit({ text: 'How is my mean?', wait: false, origin: { kind: 'composer' } })
+  const { sections } = await $.prompt.compose(COMPOSE)
+  expect(sections[sections.length - 1]?.text).toMatch('type hints')
 })

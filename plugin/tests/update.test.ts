@@ -98,6 +98,16 @@ sessionTest('no notice when this copy is the newest, and no request when the che
   expect(session.ran).toEqual([])
 })
 
+sessionTest('offline, a release already known still shows', async ($, on) => {
+  const session = stubSession(on, { install: 'clone', pluginFiles: MANIFEST, data: { 'update.json': { checkedAt: 0, latest: '0.3.0' } } })
+  await $.session.start(SESSION)
+  await $.command.run(typed('backseat'))
+  await session.clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: NOTICE })).toBeDefined()
+  await ui.unmount()
+})
+
 sessionTest('offline, the check fails quietly and is tried again at the next switch-on', async ($, on) => {
   const session = stubSession(on, { install: 'clone', pluginFiles: MANIFEST })
   await $.session.start(SESSION)

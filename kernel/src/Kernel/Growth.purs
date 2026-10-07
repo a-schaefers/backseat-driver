@@ -386,7 +386,11 @@ growthOf facts =
       -- Placed by the counts and still no level: nothing shows one either way.
       if level == Nothing then [ item "evidence" "" 0 0 ] else []
     else
-      [ item "place" "" (max 0 (placeObservations - length facts.seen)) (max 0 (placeCommits - commitCount facts.seen)) ]
+      -- Only what is short is asked for: with the counts there and the lines not, "0 more observations from 0 more
+      -- commits" was a count that did not add up (the second ui-truth pass, 2026-10-06).
+      (if length facts.seen < placeObservations || commitCount facts.seen < placeCommits then
+          [ item "place" "" (max 0 (placeObservations - length facts.seen)) (max 0 (placeCommits - commitCount facts.seen)) ]
+        else [])
         <> (if facts.linesRead < placeLines then [ item "lines" "" (placeLines - facts.linesRead) placeLines ] else [])
 
   toRaise = take 5 (placeItem <> nextSkills <> ownItem <> lessonItems)

@@ -4,6 +4,7 @@ import type { TestBody } from 'claude-code/testing'
 import { projectId } from '../core/datahome'
 import { claimed, isHeld, LEASE_BEAT_MS, LEASE_SLACK_MS, LEASE_TTL_MS, nextLeaseCheck, NO_LEASE, parseLease, released } from '../core/lease'
 import type { Lease } from '../core/lease'
+import { clockTime } from '../core/clock'
 import { sourcePrint } from '../core/knowledge'
 import { emptyProfile, withHush } from '../core/profiles'
 import type { Note } from '../types'
@@ -114,13 +115,15 @@ sessionTest('a second session in the same project is for the conversation, and t
   await session.clock.advance(30_000)
   expect(session.scans).toBe(atStart)
   expect(session.spawned).toEqual([])
+  // No look or review to press here: the line under the controls says where they run (and when that session started, when known).
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'look' })
+  expect(await ui.find({ key: 'look' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'Looks and reviews run in the session that drives this project.' })).toBeDefined()
   await ui.press({ key: 'tab-review' })
-  await ui.press({ key: 'review-now' })
+  expect(await ui.find({ key: 'review-now' })).toBeUndefined()
   await ui.unmount()
   await session.clock.settle()
-  expect(session.toasts.filter(toast => toast === 'Another session is driving Backseat Driver in this project. Ask for it there.').length).toBe(2)
+  expect(session.toasts).toEqual([])
   expect(session.requests).toEqual([])
   expect(session.spawned).toEqual([])
   // The conversation's tools work all the same.
@@ -308,7 +311,7 @@ sessionTest("a session that does not drive shows the driver's notes, reviews and
   await ui.unmount()
 })
 
-sessionTest("asked for a look, a session that does not drive names the session that does, when it knows when it started", QUIET, async ($, on) => {
+sessionTest("a session that does not drive says when the driving session started, when it knows, and its light is not the watching one", QUIET, async ($, on) => {
   const session = stubSession(on, {
     head: { 'stats.py': MEAN },
     data: {
@@ -318,9 +321,8 @@ sessionTest("asked for a look, a session that does not drive names the session t
   })
   await start($, session)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'look' })
+  expect(await ui.find({ type: 'Text', text: `Looks and reviews run in your session started ${clockTime(0)}.` })).toBeDefined()
+  // The light: a dim mark, not the green one of "watching for your next save".
+  expect(await ui.find({ type: 'Text', text: 'On. Another session is driving this project. This one is for the conversation.' })).toBeDefined()
   await ui.unmount()
-  await session.clock.settle()
-  expect(session.toasts.length).toBe(1)
-  expect(session.toasts[0]).toMatch(/^Another session of yours, started \d{1,2}:\d{2}( [AP]M)?, is driving Backseat Driver in this project\. Ask for it there, or switch it off there: this one takes over within a minute\.$/)
 })

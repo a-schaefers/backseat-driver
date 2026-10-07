@@ -1,7 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
 import { NO_PRESSURE } from '../core/health'
-import { watchedPath } from '../core/datahome'
+import { progressPath, watchedPath } from '../core/datahome'
+import { emptyRecord } from '../core/progress'
 import { forgetWatched, freshProgressState, loadWatched, noteWatched, placeFirst, queueProgress, setUpProgress } from '../core/progressing'
 import { memoryDisk } from '../core/storage'
 import { plainStore } from '../core/store'
@@ -47,7 +48,7 @@ test('setting up reads the person\'s email, then the records in play, and shows 
 
   expect(state.identity).toEqual(['me@example.com'])
   expect([...state.records.keys()]).toEqual(['python'])
-  expect(w.log.at(-1)).toBe('progress isOn,identity,records')
+  expect(w.log.at(-1)).toBe('progress isOn,identity,records,skipped')
 })
 
 test('a first placement does nothing without the person\'s email or while the plan is held back', async () => {
@@ -62,7 +63,7 @@ test('a first placement does nothing without the person\'s email or while the pl
   w.log.length = 0
   await placeFirst({ ...w.ports, mayAsk: () => false }, state, 1)
   // The email found is news for the Growth tab, and the plan's limit stops the rest.
-  expect(w.log).toEqual([...IDENTITY, 'progress isOn,identity,records'])
+  expect(w.log).toEqual([...IDENTITY, 'progress isOn,identity,records,skipped'])
   expect(state.identity).toEqual(['me@example.com'])
 })
 
@@ -88,16 +89,47 @@ test('the files the watcher saw change are kept in the project folder, so a rest
   const state = freshProgressState()
   await noteWatched(w.ports, state, ['stats.py', 'README.md'])
   await noteWatched(w.ports, state, ['stats.py'])
-  expect(await store.read(watchedPath('/data', '/work'))).toEqual({ v: 1, paths: ['README.md', 'stats.py'] })
+  expect(await store.read(watchedPath('/data', '/work'))).toEqual({ v: 1, paths: ['README.md', 'stats.py'], skipped: '' })
 
   const after = freshProgressState()
   await loadWatched(w.ports, after)
   expect([...after.watchedPaths].sort()).toEqual(['README.md', 'stats.py'])
 
   await forgetWatched(w.ports, after, ['stats.py', 'never-seen.py'])
-  expect(await store.read(watchedPath('/data', '/work'))).toEqual({ v: 1, paths: ['README.md'] })
+  expect(await store.read(watchedPath('/data', '/work'))).toEqual({ v: 1, paths: ['README.md'], skipped: '' })
   // Outside a repository, or without a data folder, nothing is written.
   const nowhere = world({ store: () => store, repoRoot: () => '' })
   await noteWatched(nowhere.ports, freshProgressState(), ['x.py'])
   expect(await store.read(watchedPath('/data', ''))).toBe(null)
+})
+
+test('a record placed under the old bar is mended as it is read: its lines counted, and its level withdrawn when they are short, only where its commits are', async () => {
+  const thin = {
+    ...emptyRecord('python'),
+    level: 'beginner' as const,
+    isProvisional: true,
+    observations: Array.from({ length: 15 }, (_, index) => ({ commit: (['a', 'b', 'c'][index % 3] ?? 'a').repeat(40), project: 'p', at: 1, skill: `s${index}`, verdict: 'shown' as const, level: 'beginner' as const, weight: 1, note: '' })),
+    assessed: ['a'.repeat(40), 'b'.repeat(40), 'c'.repeat(40)],
+    linesRead: 0,
+  }
+  // The commits are here, with 14 lines of Python among them: short of the bar, so the level goes, and the lines are kept.
+  const patch = ['diff --git a/stats.py b/stats.py', '--- a/stats.py', '+++ b/stats.py', '@@ -0,0 +1,14 @@', ...Array.from({ length: 14 }, (_, index) => `+x${index} = ${index}`)].join('\n')
+  const store = plainStore(memoryDisk())
+  await store.update(progressPath('/data', 'python'), () => thin)
+  const here = world({ store: () => store, git: async args => ({ exitCode: 0, stdout: args[0] === 'show' ? patch : 'me@example.com' }) })
+  const state = freshProgressState()
+  await setUpProgress(here.ports, state)
+  const mended = state.records.get('python')
+  expect(mended?.level).toBe(null)
+  expect(mended?.linesRead).toBe(42)
+  expect((await store.read(progressPath('/data', 'python')) as { linesRead: number }).linesRead).toBe(42)
+
+  // Opened in another repository, where its commits are not: left as it is, level and all.
+  const other = { store: plainStore(memoryDisk()) }
+  await other.store.update(progressPath('/data', 'python'), () => thin)
+  const elsewhere = world({ store: () => other.store, git: async args => ({ exitCode: args[0] === 'show' ? 128 : 0, stdout: args[0] === 'show' ? '' : 'me@example.com' }) })
+  const away = freshProgressState()
+  await setUpProgress(elsewhere.ports, away)
+  expect(away.records.get('python')?.level).toBe('beginner')
+  expect(away.records.get('python')?.linesRead).toBe(0)
 })

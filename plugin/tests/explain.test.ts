@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { createExplainer, RETRY_MS, SETTLE_MS } from '../core/explainer'
+import { createExplainer, MAX_RETRY_MS, RETRY_MS, SETTLE_MS } from '../core/explainer'
 import { detailRequest, isMappable, outlineRequest, parseDetailReply, parseOutline } from '../core/explain-prompts'
 import {
   firstChange,
@@ -160,6 +160,8 @@ function world(initial: Record<string, string>) {
       stamp: async path => (path in files ? `${(files[path] ?? '').length}:${saves.get(path) ?? 0}` : ''),
       store: plainStore(disk),
       entryPath: path => `/d/files/${path}.json`,
+      // The entry's stamp: its text's length, which changes with every write that matters here.
+      entryStamp: async path => String((disk.files.get(`/d/files/${path}.json`) ?? '').length),
       complete: (prompt, maxTokens, signal) =>
         new Promise(resolve => {
           asked.push({ prompt, signal, answer: reply => resolve(reply === null ? null : typeof reply === 'string' ? reply : JSON.stringify(reply)) })
@@ -715,4 +717,65 @@ test('forgetting the cache while a lookup runs leaves nothing of it on disk', as
   await w.settle()
   expect(await w.disk.read('/d/files/stats.py.json')).toBeNull()
   expect(w.explainer.pending()).toBe(0)
+})
+
+test('two sessions explaining one file keep each other\'s work, and each reads what the other wrote', async () => {
+  // Session A mapped stats.py and explained variance; its explanation of mean, ahead of being asked, is still open.
+  const w = await visited()
+  const asked = w.asked.length
+  // Session B, over the same disk, reads A's entry and wants mean explained for the caret on it.
+  const b = w.start()
+  expect((await b.view({ path: 'stats.py', line: 2 }, 'browsing')).detail).toBe(null)
+  await w.settle()
+  expect(w.asked.length).toBe(asked + 1)
+  w.answer(w.asked[w.asked.length - 1], { what: 'The average, as B says.', how: '', why: '', watch: '', uses: [] })
+  await w.settle()
+  // B wrote on top of A's entry: A's explanation of variance is still there beside B's of mean.
+  const stored = parseKnowledge(JSON.parse(w.disk.files.get('/d/files/stats.py.json') ?? 'null'), 'stats.py')
+  expect(stored?.symbols.map(symbol => `${symbol.name}:${symbol.detail?.what ?? 'none'}`)).toEqual(['mean:The average, as B says.', 'variance:How spread out the values are.'])
+  // A notices the entry changed under it and serves B's explanation without a request of its own.
+  expect((await w.explainer.view({ path: 'stats.py', line: 2 }, 'browsing')).detail?.what).toBe('The average, as B says.')
+  await w.settle()
+  expect(w.asked.length).toBe(asked + 1)
+  // A's own answer, landing late, is written on top of the entry as it is now: nothing of B's is lost.
+  w.answer(w.open('Explain').find(request => request.prompt.includes('Explain mean')), { what: 'The average, as A says.', how: '', why: '', watch: '', uses: [] })
+  await w.settle()
+  const again = parseKnowledge(JSON.parse(w.disk.files.get('/d/files/stats.py.json') ?? 'null'), 'stats.py')
+  expect(again?.symbols.map(symbol => symbol.detail === undefined ? 'none' : 'kept')).toEqual(['kept', 'kept'])
+})
+
+test('a lookup the model keeps failing waits twice as long each time, up to an hour', async () => {
+  const w = world({ 'stats.py': STATS })
+  await w.explainer.view({ path: 'stats.py', line: 6 }, 'browsing')
+  await w.settle()
+  const fail = async (): Promise<void> => {
+    w.answer(w.asked[w.asked.length - 1], 'not the JSON asked for')
+    await w.settle()
+  }
+  await fail()
+  expect(w.asked.length).toBe(1)
+  // A minute later it is tried again; after that failure, two minutes; then four.
+  for (const [wait, count] of [[RETRY_MS, 2], [2 * RETRY_MS, 3], [4 * RETRY_MS, 4]] as const) {
+    w.state.now += wait - 1
+    await w.explainer.view({ path: 'stats.py', line: 6 }, 'browsing')
+    await w.settle()
+    expect(w.asked.length).toBe(count - 1)
+    w.state.now += 1
+    await w.explainer.view({ path: 'stats.py', line: 6 }, 'browsing')
+    await w.settle()
+    expect(w.asked.length).toBe(count)
+    await fail()
+  }
+  expect(MAX_RETRY_MS).toBe(60 * RETRY_MS)
+})
+
+test('a caret moving through a file too large to map keeps one lookup queued, not one a line', async () => {
+  const big = Array.from({ length: 5000 }, (_, index) => `x${index} = ${'y'.repeat(40)}`).join('\n')
+  const w = world({ 'big.py': big })
+  expect(isMappable(big, splitSource(big))).toBe(false)
+  for (const line of [100, 200, 300, 400, 500, 600]) await w.explainer.view({ path: 'big.py', line }, 'browsing')
+  await w.settle()
+  // Three in flight (the slots), and of the rest only the latest waits.
+  expect(w.asked.length).toBe(3)
+  expect(w.explainer.pending()).toBe(4)
 })

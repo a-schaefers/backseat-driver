@@ -314,6 +314,8 @@ export function stubSession(on: On, options: StubOptions = {}) {
      * next reads of one find it empty, that many times, as `$.fs.write` leaves it for a moment.
      */
     halfWritten: new Map<string, number>(),
+    /** Paths whose next read fails with an error that is not "no such file". */
+    unreadable: new Set<string>(),
     /** Every lock the plugin took and gave back, in order: `take <ref>`, `steal <ref>`, `give <ref>`, or `refused <ref>`. */
     locking: [] as string[],
     /** Another session's lock on a file of the data folder, taken this long ago on the test's clock. */
@@ -513,6 +515,8 @@ export function stubSession(on: On, options: StubOptions = {}) {
       if (e.path.endsWith(suffix)) return { value: text }
     }
     if (!e.path.startsWith(`${ROOT}/`)) session.diskReads.push(e.path)
+    // A read that fails for a reason other than the file being absent: once, then the file reads as before.
+    if (session.unreadable.delete(e.path)) return { deny: `EIO: read failed: ${e.path}` }
     const emptyReads = session.halfWritten.get(e.path) ?? 0
     if (emptyReads > 0) {
       session.halfWritten.set(e.path, emptyReads - 1)

@@ -12,7 +12,7 @@ import { encouragementLine, growthCounts, growthHeadline, growthLadder, growthMe
 import type { Growth, GrowthBand } from '../core/growth'
 import { lessonLanguage, lessonProgress } from '../core/lessons'
 import { lately, levelPhrase } from '../core/progress'
-import { readableReview, shownReview, spotsIn, SURVEY_SUBJECT } from '../core/review'
+import { readableReview, reviewHistory, shownReview, spotsIn, SURVEY_SUBJECT } from '../core/review'
 import { DEFAULT_PERSONA } from '../core/settings'
 import { clockTime, playLine } from '../core/status'
 import type { Persona } from '../core/settings'
@@ -55,8 +55,10 @@ export type PaneView = {
   character: { avatar: Avatar; speech: Speech; backdrop?: Backdrop } | null
   /** True where rows are scarce, as in a pane above the prompt: the character is then drawn in one line. */
   isCompact: boolean
-  /** Which list opened downward is open: `jump:<subject>` or `setting:<key>`, or '' while every one is folded. */
+  /** Which list opened downward is open: `jump:<subject>`, `setting:<key>` or `reviews`, or '' while every one is folded. */
   openList?: string
+  /** The spinner's tick behind a tab at work. Absent where nothing ticks, which draws an ellipsis. */
+  spin?: number
   /** How many rows the terminal has, as far as the drawing knows. */
   rows: number
   /** The plugin's own `/config` rows, for the Settings tab. */
@@ -100,6 +102,10 @@ export type PaneActions = {
   onJump?: (path: string, line: number) => void
   /** Open the list of places the review names, or fold it again. */
   onJumpFold?: (subject: string) => void
+  /** Deep review: open the review at this place in the history (0 the latest). */
+  onReviewOpen?: (index: number) => void
+  /** Open the list of every review, or fold it again. */
+  onReviewsFold?: () => void
   /** Open a setting's options under its row, or fold them again. */
   onSettingFold?: (key: string) => void
   /** Put the pane away as a strip above the prompt. The tutor stays on. */
@@ -122,28 +128,36 @@ const TABS: readonly { tab: Tab; label: string; short: string; tiny: string; hot
 
 const NEW = ' (new)'
 /** Something is under way behind the tab: a review, a lookup, an assessment. */
-const BUSY = ' (…)'
 /** Something behind the tab did not go to plan and waits to be looked at. */
 const TROUBLE = ' (!)'
+
+/** The frames of the spinner behind a tab at work: Claude Code's own marks, one a tick (owner, 2026-10-06). */
+export const SPINNER = ['·', '✢', '✳', '✶', '✻', '✽'] as const
+
+/** The badge's mark for something at work: the spinner's frame at this tick, or an ellipsis where nothing ticks (no tick known, or the stretch's minute up). */
+export function spinFrame(spin: number | undefined): string {
+  return spin === undefined || spin < 0 ? '…' : (SPINNER[spin % SPINNER.length] ?? '…')
+}
 
 /**
  * What a tab says about what is behind it, after its name: how many notes
  * are open, that a review is new, running or stuck, that Explain or Progress
  * is at work. '' when there is nothing to say.
  */
-export function tabBadge(tab: Tab, view: Partial<Pick<PaneView, 'notes' | 'review' | 'explain' | 'progress'>>): string {
+export function tabBadge(tab: Tab, view: Partial<Pick<PaneView, 'notes' | 'review' | 'explain' | 'progress' | 'spin'>>): string {
+  const busy = ` (${spinFrame(view.spin)})`
   if (tab === 'play') return view.notes === undefined || view.notes.length === 0 ? '' : ` (${view.notes.length})`
   if (tab === 'review') {
     const review = view.review
     if (review === undefined) return ''
     if (review.isUnseen) return NEW
 
-    return review.state === 'running' ? BUSY : review.state === 'failed' ? TROUBLE : ''
+    return review.state === 'running' ? busy : review.state === 'failed' ? TROUBLE : ''
   }
-  if (tab === 'explain') return view.explain?.status === 'updating' ? BUSY : ''
+  if (tab === 'explain') return view.explain?.status === 'updating' ? busy : ''
   if (tab === 'settings' || tab === 'lessons') return ''
 
-  return view.progress !== undefined && view.progress.busy !== '' ? BUSY : ''
+  return view.progress !== undefined && view.progress.busy !== '' ? busy : ''
 }
 
 /**
@@ -153,7 +167,7 @@ export function tabBadge(tab: Tab, view: Partial<Pick<PaneView, 'notes' | 'revie
  * for as long as the row has room for it.
  */
 export function tabRow(
-  view: Pick<PaneView, 'columns' | 'review'> & Partial<Pick<PaneView, 'notes' | 'explain' | 'progress'>>,
+  view: Pick<PaneView, 'columns' | 'review'> & Partial<Pick<PaneView, 'notes' | 'explain' | 'progress' | 'spin'>>,
 ): { labels: string[]; gap: number } {
   return labelsFor(view, TABS)
 }
@@ -165,7 +179,7 @@ function rowFits(labels: readonly string[], gap: number, columns: number): boole
 
 /** `tabRow`'s choice of names, for the tabs given: all of them, or one row of them. */
 function labelsFor(
-  view: Pick<PaneView, 'columns' | 'review'> & Partial<Pick<PaneView, 'notes' | 'explain' | 'progress'>>,
+  view: Pick<PaneView, 'columns' | 'review'> & Partial<Pick<PaneView, 'notes' | 'explain' | 'progress' | 'spin'>>,
   entries: readonly (typeof TABS)[number][],
 ): { labels: string[]; gap: number } {
   const fits = (labels: readonly string[], gap: number): boolean => rowFits(labels, gap, view.columns)
@@ -200,7 +214,7 @@ export type TabRowView = { from: number; labels: string[]; gap: number }
  * by itself, so the badges come back.
  */
 export function tabRows(
-  view: Pick<PaneView, 'columns' | 'review'> & Partial<Pick<PaneView, 'notes' | 'explain' | 'progress'>>,
+  view: Pick<PaneView, 'columns' | 'review'> & Partial<Pick<PaneView, 'notes' | 'explain' | 'progress' | 'spin'>>,
 ): TabRowView[] {
   const one = tabRow(view)
   if (rowFits(one.labels, one.gap, view.columns)) return [{ from: 0, ...one }]
@@ -326,9 +340,17 @@ export function stateMark(view: Pick<PaneView, 'mode' | 'watch'>): { mark: strin
       return { mark: '○', color: 'red' }
     case 'starting':
       return { mark: '◌', color: undefined }
+    case 'following':
+      // On, and no watching of its own: another session drives (its green "watching" light was the second ui-truth pass's finding, 2026-10-06).
+      return { mark: '●', color: undefined }
     case 'idle':
       return { mark: '●', color: 'green' }
   }
+}
+
+/** Under the controls of a session that does not drive: where looks and reviews run, and when that session started when known. */
+export function followingLine(driver: string | undefined): string {
+  return driver === undefined || driver === '' ? 'Looks and reviews run in the session that drives this project.' : `Looks and reviews run in your session started ${driver}.`
 }
 
 /** What the play-by-play is doing. The sentence is worked out where its state is (`status.ts`). */
@@ -655,6 +677,48 @@ export function reviewPlace(index: number, count: number, at: number | undefined
   return `Review ${index + 1} of ${count}${at === undefined || at === 0 ? '' : ` · ${clockTime(at)}`}`
 }
 
+/** The heading of the reviews, folded or open: "▸ Review 2 of 5 · 19:57", "▾ Review 2 of 5 · 19:57". */
+export function reviewsHeading(index: number, count: number, at: number | undefined, isOpen: boolean): string {
+  return `${isOpen ? '▾' : '▸'} ${reviewPlace(index, count, at)}`
+}
+
+/** A review in the list: when it finished, and what it was about. */
+export function reviewRow(entry: Pick<ReviewText, 'subject' | 'at'>): string {
+  return `${entry.at === undefined || entry.at === 0 ? '' : `${clockTime(entry.at)}  `}${capitalized(entry.subject)}`
+}
+
+/**
+ * Every review there is to read, as a list that opens downward under its
+ * heading (owner, 2026-10-06: "somewhere with all historical commit reviews
+ * … similar to our explain menu"): the heading says which of how many, `p`
+ * and `n` step through them, and open, one row a review, newest first, the
+ * one shown marked, a press opens another and folds the list.
+ */
+function reviewList({ Box, Text, Button }: Pick<Kit, 'Box' | 'Text' | 'Button'>, view: Pick<PaneView, 'openList'>, history: readonly ReviewText[], index: number, actions: PaneActions) {
+  const isOpen = view.openList === 'reviews'
+
+  return (
+    <Box flexDirection="column">
+      <Box flexDirection="row" columnGap={3}>
+        <Button key="review-list" label={reviewsHeading(index, history.length, history[index]?.at, isOpen)} plain onPress={() => actions.onReviewsFold?.()} />
+        {index + 1 < history.length && <Button key="review-older" label="older" hotkey="p" plain onPress={() => actions.onReviewStep?.(1)} />}
+        {index > 0 && <Button key="review-newer" label="newer" hotkey="n" plain onPress={() => actions.onReviewStep?.(-1)} />}
+      </Box>
+      {isOpen && (
+        <Box flexDirection="column" paddingLeft={2}>
+          {history.map((entry, at) =>
+            at === index ? (
+              <Text bold>{`❯ ${reviewRow(entry)}`}</Text>
+            ) : (
+              <Button key={`review-open-${at}`} label={`▸ ${reviewRow(entry)}`} plain onPress={() => actions.onReviewOpen?.(at)} />
+            ),
+          )}
+        </Box>
+      )}
+    </Box>
+  )
+}
+
 /** The places a review names, as `path:line`, for the person to jump to. */
 export function reviewSpots(shown: Pick<ReviewText, 'text' | 'decisions' | 'insights'>): { path: string; line: number }[] {
   const named = shown.decisions.filter(decision => decision.line > 0).map(decision => `${decision.file}:${decision.line}`)
@@ -707,13 +771,7 @@ function deepReview({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
       {review.state === 'none' && <Text dimColor>No deep review yet. One runs {view.reviewSchedule}.</Text>}
       {banner !== '' && <Text dimColor={review.state === 'running'}>{banner}</Text>}
       {behind !== '' && <Text dimColor>{behind}</Text>}
-      {count > 1 && (
-        <Box flexDirection="row" columnGap={3}>
-          <Text dimColor>{reviewPlace(index, count, shown?.at)}</Text>
-          {index + 1 < count && <Button key="review-older" label="older" hotkey="p" plain onPress={() => actions.onReviewStep?.(1)} />}
-          {index > 0 && <Button key="review-newer" label="newer" hotkey="n" plain onPress={() => actions.onReviewStep?.(-1)} />}
-        </Box>
-      )}
+      {count > 1 && reviewList({ Box, Text, Button }, view, reviewHistory(review), index, actions)}
       {isOlder && <Text dimColor>The review before it:</Text>}
       {shown !== null && <Text bold>{capitalized(shown.subject)}</Text>}
       {shown !== null && spots.length > 0 && jumpList({ Box, Button }, view, shown.subject, spots, actions)}
@@ -745,7 +803,9 @@ function deepReview({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
           ))}
         </Box>
       )}
-      {controlsRow({ Box, Text }, view, [<Button key="review-now" label="review now" hotkey="r" plain onPress={() => actions.onReview()} />])}
+      {view.watch.state === 'following'
+        ? controlsRow({ Box, Text }, view, [<Text dimColor>{followingLine(view.watch.driver)}</Text>])
+        : controlsRow({ Box, Text }, view, [<Button key="review-now" label="review now" hotkey="r" plain onPress={() => actions.onReview()} />])}
     </Box>
   )
 }
@@ -780,12 +840,16 @@ function playByPlay(kit: Kit, view: PaneView, actions: PaneActions) {
   const { Box, Text, Button } = kit
   const notes = drawnOrder(view.notes)
   const current = currentNote(view)
-  // Paused, nothing looks, so it is not offered.
-  const canLook = view.mode !== 'paused'
+  // Paused, nothing looks, so it is not offered. Another session driving, it says so there (the second ui-truth pass,
+  // 2026-10-06: a "look now" the owner pressed four times, which only refused).
+  const isFollowing = view.watch.state === 'following'
+  const canLook = view.mode !== 'paused' && !isFollowing
+  const followingNote = isFollowing ? <Text dimColor>{followingLine(view.watch.driver)}</Text> : null
   if (current === undefined) {
     return (
       <Box flexDirection="column">
         <Text dimColor>No notes. Keep going.</Text>
+        {followingNote !== null && controlsRow(kit, view, [followingNote])}
         {canLook && controlsRow(kit, view, [<Button key="look" label="look now" hotkey="l" plain onPress={() => actions.onLook()} />])}
       </Box>
     )
@@ -821,6 +885,7 @@ function playByPlay(kit: Kit, view: PaneView, actions: PaneActions) {
         notes.length > 1 && <Button key="previous-note" label="previous" hotkey="k" plain onPress={() => actions.onStep(-1)} />,
         canLook && <Button key="look" label="look now" hotkey="l" plain onPress={() => actions.onLook()} />,
         actions.onOpen !== undefined && <Button key="open" label="open in editor" hotkey="o" plain onPress={() => actions.onOpen?.(current.file, current.line)} />,
+        followingNote,
       ])}
     </Box>
   )

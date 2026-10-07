@@ -51,8 +51,9 @@ test('nothing is placed before eight observations from three commits and eighty 
   // The counts are there and the lines are not: eight lines of a toy script place nobody (the owner, 2026-10-05).
   const thin = growthOf(record(JUNIOR, 8), undefined, [])
   expect(thin.level).toBe(null)
-  expect(thin.toRaise.map(item => item.kind)).toEqual(['place', 'lines'])
-  expect(raiseLine(thin.toRaise[1] ?? { kind: '', what: '', count: 0, total: 0 })).toBe('A level also needs 72 more lines of your own read: 80 in all, from real work, not a toy script.')
+  // Only what is short is asked for: with the counts there, "0 more observations from 0 more commits" was a count that did not add up (2026-10-06).
+  expect(thin.toRaise.map(item => item.kind)).toEqual(['lines'])
+  expect(raiseLine(thin.toRaise[0] ?? { kind: '', what: '', count: 0, total: 0 })).toBe('A level needs 72 more lines of your own read: 80 in all, from real work, not a toy script.')
   // Everything there, and nothing shown at junior or missed below it: no level either way, beginner included.
   const faint = growthOf(record(JUNIOR.map(item => ({ ...item, level: 'beginner' as const }))), undefined, [])
   expect(faint.level).toBe(null)

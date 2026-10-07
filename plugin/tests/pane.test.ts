@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Note, OutlineRow, Watch } from '../types'
 import { NO_VIEW } from '../core/explainer'
-import { currentNote, detailMarkdown, explainNotice, FOCUSED_HINT, jumpHeading, KEYBOARD_HINT, keysRowFits, nameColumns, outlineName, personaLine, reviewBanner, reviewPlace, reviewSpots, stateMark, statusLine, tabBadge, tabRow, tabRows, underlineSpans, waitingLine } from '../hooks/pane'
+import { currentNote, detailMarkdown, explainNotice, FOCUSED_HINT, followingLine, jumpHeading, KEYBOARD_HINT, keysRowFits, reviewRow, reviewsHeading, spinFrame, nameColumns, outlineName, personaLine, reviewBanner, reviewPlace, reviewSpots, stateMark, statusLine, tabBadge, tabRow, tabRows, underlineSpans, waitingLine } from '../hooks/pane'
 import type { PaneView } from '../hooks/pane'
 import { paneContext } from '../core/prompts'
 import { readableReview, reviewHistory, shownReview, spotsIn, SURVEY_SUBJECT, withReviewChange } from '../core/review'
@@ -143,6 +143,8 @@ test('the status line carries a light for what the play-by-play is doing', () =>
   expect(stateMark(at('waiting')).color).toBe('yellow')
   expect(stateMark(at('no-git')).color).toBe('red')
   expect(stateMark(at('starting')).color).toBeUndefined()
+  // Another session drives: on, and no watching of its own (the second ui-truth pass, 2026-10-06, found the green "watching" light there).
+  expect(stateMark(at('following'))).toEqual({ mark: '●', color: undefined })
   // Paused is out, whatever the watcher last was.
   expect(stateMark({ mode: 'paused', watch: { ...VIEW.watch, state: 'looking' } })).toEqual({ mark: '○', color: undefined })
 })
@@ -365,4 +367,19 @@ test('the outline keeps its names in one column and cuts the long ones', () => {
 test('several places fold under a heading that counts them, and opens downward', () => {
   expect(jumpHeading(3, false)).toBe('▸ Jump to a place (3)')
   expect(jumpHeading(3, true)).toBe('▾ Jump to a place (3)')
+})
+
+test('the spinner behind a tab at work, the line where another session drives, and the rows of the review list', () => {
+  // Claude Code's own marks, one a tick, and an ellipsis where nothing ticks (the tests' views, and a pane with no timer).
+  expect(spinFrame(undefined)).toBe('…')
+  expect(spinFrame(-1)).toBe('…')
+  expect([0, 1, 2, 3, 4, 5, 6].map(spinFrame)).toEqual(['·', '✢', '✳', '✶', '✻', '✽', '·'])
+  expect(tabBadge('explain', { explain: { ...VIEW.explain, status: 'updating' }, spin: 4 })).toBe(' (✻)')
+  expect(tabBadge('explain', { explain: { ...VIEW.explain, status: 'updating' } })).toBe(' (…)')
+  expect(followingLine('')).toBe('Looks and reviews run in the session that drives this project.')
+  expect(followingLine('00:58')).toBe('Looks and reviews run in your session started 00:58.')
+  expect(reviewsHeading(1, 5, undefined, false)).toBe('▸ Review 2 of 5')
+  expect(reviewsHeading(0, 2, 0, true)).toBe('▾ Review 1 of 2')
+  expect(reviewRow({ subject: 'commit a1b2c3d: Fix the parser' })).toBe('Commit a1b2c3d: Fix the parser')
+  expect(reviewRow({ subject: 'a first look around this project', at: 0 })).toBe('A first look around this project')
 })

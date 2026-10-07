@@ -54,6 +54,12 @@ export type ProjectKnowledge = {
   insights: KeptInsight[]
   /** True once the deep review model has surveyed the project. */
   isSurveyed: boolean
+  /**
+   * The first look around, as the Deep review tab showed it, so that a new project's tab has it back after a
+   * restart (owner, 2026-10-06). Kept here and not with the reviews: it reviewed nobody's work, and the next
+   * reviewer is not told of it as an earlier review. Null until the survey.
+   */
+  survey: ReviewRecord | null
 }
 
 /** One deep review, as remembered: enough for the next one to follow up on. */
@@ -74,7 +80,7 @@ const MAX_TEXT = 600
 const MAX_OVERVIEW = 900
 
 export function emptyProject(root: string): ProjectKnowledge {
-  return { v: 1, root, overview: '', overviewCommit: '', overviewAt: 0, roles: {}, insights: [], isSurveyed: false }
+  return { v: 1, root, overview: '', overviewCommit: '', overviewAt: 0, roles: {}, insights: [], isSurveyed: false, survey: null }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -197,6 +203,7 @@ export function parseProject(value: unknown, root: string): ProjectKnowledge {
     roles,
     insights: insights.slice(0, MAX_INSIGHTS),
     isSurveyed: stored.isSurveyed === true,
+    survey: parseReviews([stored.survey])[0] ?? null,
   }
 }
 
@@ -292,6 +299,16 @@ export function projectBrief(
   if (about.length > 0) lines.push('What the deep review has said about these files, where that code has not changed since:', ...about)
 
   return lines.join('\n')
+}
+
+/** The project with its first look around on record, as the tab showed it. */
+export function withSurvey(project: ProjectKnowledge, survey: ReviewRecord): ProjectKnowledge {
+  return { ...project, isSurveyed: true, survey }
+}
+
+/** Every review the tab can go back to, newest first: the reviews kept, then the first look around, which came before them all. */
+export function historyTexts(reviews: readonly ReviewRecord[], survey: ReviewRecord | null): ReviewText[] {
+  return [...reviewTexts(reviews), ...(survey === null ? [] : reviewTexts([survey]))]
 }
 
 /** The reviews so far with one more, newest last, and only the latest few. */

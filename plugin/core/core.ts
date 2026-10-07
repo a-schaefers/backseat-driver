@@ -561,7 +561,7 @@ export function healthLine(facts: HealthFacts): string {
 export function watchState(play: Play): Watch['state'] {
   const state = K.watchStateWire(playToWire(play))
 
-  return state === 'starting' || state === 'no-git' || state === 'looking' || state === 'settling' || state === 'waiting' ? state : 'idle'
+  return state === 'starting' || state === 'no-git' || state === 'looking' || state === 'settling' || state === 'waiting' || state === 'following' ? state : 'idle'
 }
 
 // --- Deadlines (Kernel.Schedule)

@@ -93,8 +93,14 @@ WATCHERS_GRACE_MS = 5_000
 FOLLOW_GRACE_MS = LEASE_BEAT_MS + 5_000
 DRIVER_GRACE_MS = 5_000
 SHARED_GRACE_MS = 15_000
-# What the pane calls the first look around a project, which reviews nothing and is not kept in reviews.json (plugin/core/review.ts).
+# What the pane calls the first look around a project, which reviews nothing and is kept in project.json, not reviews.json (plugin/core/review.ts).
 SURVEY_SUBJECT = "a first look around this project"
+# The bar for a first placement (plugin/core/progress.ts): a level on a record under it is one the rules no longer support.
+PLACE_OBSERVATIONS = 8
+PLACE_COMMITS = 3
+PLACE_LINES = 80
+# The spinner's marks behind a tab at work (plugin/hooks/pane.tsx `SPINNER`): a drawing and a screen caught a tick apart differ only there.
+SPINNER = "·✢✳✶✻✽"
 # The first pieces of a drawing are the tabs and the status line: the top of the pane, which is never below the fold.
 HEAD_PIECES = 6
 # Claude Code docks a pane at the side from this many columns (CLAUDE.md, "Handoff"); under it the pane goes above the prompt.
@@ -233,6 +239,8 @@ def projects(home: pathlib.Path) -> list[dict]:
             "queue": queue,
             "queue_at": mtime_ms(folder / "queue.json"),
             "reviews": [r for r in reviews if isinstance(r, dict)] if isinstance(reviews, list) else [],
+            "survey": known.get("survey") if isinstance(known.get("survey"), dict) else None,
+            "project_at": mtime_ms(folder / "project.json"),
             "reviews_at": mtime_ms(folder / "reviews.json"),
             "journal": journal if isinstance(journal, dict) else {},
             "journal_at": mtime_ms(folder / "journal.json"),
@@ -713,11 +721,11 @@ def flows(rows: list[str]) -> list[str]:
 def is_on_screen(piece: str, where: list[str]) -> bool:
     """Whether a piece of text the tutor says it drew is there. Long text is cut or wrapped by the
     terminal, so its beginning is what is looked for; one or two characters say too little to judge."""
-    want = squash(demark(piece))
+    want = despin(squash(demark(piece)))
     if len(want) < 3:
         return True
     want = want[:28].rstrip()
-    return any(want in flow for flow in where)
+    return any(want in despin(flow) for flow in where)
 
 
 def missing_pieces(texts: list[str], rows: list[str]) -> tuple[list[str], list[str]]:
@@ -989,6 +997,20 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
         else:
             out.append((FINE, f"{who} does not drive {project['id']}: {short(holder) if holder else 'nobody'} holds the lease"))
 
+    # A session that does not drive is `following`: no watching light of its own, and no look or review to press
+    # (the second ui-truth pass, 2026-10-06: a green light and an `l: look now` that only refused).
+    play = dig(state, "pane.watch.state")
+    texts_drawn = [t for t in (dig(state, "shown.pane.texts") or []) if isinstance(t, str)]
+    if mode == "on" and root and project is not None:
+        if is_driver is False and play != "following":
+            out.append((BAD, f"{who} does not drive {project['id']} and its light says “{play}”, not following"))
+        elif is_driver is True and play == "following":
+            out.append((BAD, f"{who} drives {project['id']} and its light says following"))
+        offered = [t for t in texts_drawn if t in ("look now", "review now")]
+        if is_driver is False and offered:
+            out.append((BAD, f"{who} does not drive {project['id']} and still offers {', '.join(offered)}, which could only refuse"))
+    out += check_speech(who, state)
+
     # Deadlines that came and went.
     deadlines = state.get("deadlines") if isinstance(state.get("deadlines"), dict) else {}
     for name, due in sorted(deadlines.items()):
@@ -1094,6 +1116,52 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
 
 # ------------------------------------------------------------------ the pane against the cache ----
 
+def hellos_by_voice(source: pathlib.Path = REPO / "plugin" / "core" / "avatar.ts") -> dict[str, str]:
+    """What each voice's character says at switch-on, read out of `core/avatar.ts`: each `const NAME: Avatar = {` block's
+    `hello:` line, and the `AVATARS` block that maps a voice to a constant."""
+    try:
+        text = source.read_text()
+    except OSError:
+        return {}
+    hellos: dict[str, str] = {}
+    current = None
+    for line in text.splitlines():
+        m = re.match(r"^const (\w+): Avatar = \{", line)
+        if m:
+            current = m.group(1)
+            continue
+        m = re.match(r"^\s+hello: (?:'((?:[^'\\]|\\.)*)'|\"((?:[^\"\\]|\\.)*)\"),", line)
+        if m and current:
+            hellos[current] = (m.group(1) if m.group(1) is not None else m.group(2)).replace("\\'", "'")
+    by_voice: dict[str, str] = {}
+    block = re.search(r"export const AVATARS = \{(.*?)\}", text, re.S)
+    for m in re.finditer(r"['\"]?([\w-]+)['\"]?: (\w+),", block.group(1) if block else ""):
+        if m.group(2) in hellos:
+            by_voice[m.group(1)] = hellos[m.group(2)]
+    return by_voice
+
+
+def check_speech(who: str, state: dict) -> list[tuple[str, str]]:
+    """The character's line against the voice it belongs to: a hello is one voice's, and a hello under another voice is
+    the old voice's line left standing by a reload (the mascot under Linus's "Ready. Save something." for sixteen hours,
+    the second ui-truth pass, 2026-10-06)."""
+    said = dig(state, "pane.speech.text")
+    hellos = hellos_by_voice()
+    if not isinstance(said, str) or said == "" or said not in hellos.values():
+        return []
+    voice = dig(state, "loaded.options.voice") or "default"
+    expected = hellos.get(str(voice), hellos.get("default"))
+    if said != expected:
+        theirs = next((v for v, h in hellos.items() if h == said), "?")
+        return [(BAD, f"{who}'s character says “{said}”, the {theirs} voice's hello, under the {voice} voice (whose hello is “{expected}”): a line left over from before the voice changed")]
+    return [(FINE, f"{who}'s character says its own voice's hello")]
+
+
+def despin(text: str) -> str:
+    """A tab's spinner at any tick reads as the ellipsis it stands for, so that a drawing and a screen caught a tick apart agree."""
+    return re.sub(rf"\(([{SPINNER}…])\)", "(…)", text)
+
+
 def unchanged_since(root: str, path: str, at: float | None, now: int) -> bool:
     """Whether a file of the repository was last written before `at`: a note about it is still what the look saw."""
     if not root or at is None:
@@ -1123,19 +1191,24 @@ def check_cache(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]]
     # The deep reviews.
     pane_review = dig(state, "pane.review") if isinstance(dig(state, "pane.review"), dict) else {}
     reviews = project["reviews"]
-    last = reviews[-1] if reviews else None
-    if last is not None and not settled(project["reviews_at"]):
-        out.append((NOTE, f"reviews.json of {project['id']} was written {ago(now - (project['reviews_at'] or now))} ago: {who}'s Deep review tab is held against it next time"))
+    survey = project.get("survey")
+    # The tab's history: the reviews kept, and the first look around, kept with the project (project.json).
+    kept = len(reviews) + (1 if survey else 0)
+    last = reviews[-1] if reviews else survey
+    # project.json changes for other reasons (roles, insights): its time counts only for the survey it holds.
+    written = max(project["reviews_at"] or 0, (project.get("project_at") or 0) if survey else 0) or None
+    if last is not None and not settled(written):
+        out.append((NOTE, f"the reviews of {project['id']} were written {ago(now - (written or now))} ago: {who}'s Deep review tab is held against them next time"))
     elif last is not None:
         older = pane_review.get("older") if isinstance(pane_review.get("older"), list) else []
         if pane_review.get("state") == "none":
-            out.append((BAD, f"{who}'s Deep review tab has nothing to read, and reviews.json holds {len(reviews)} review(s), the latest “{last.get('subject')}” at {clock(last.get('at'))}: the cache is not taken up"))
-        elif len(older) != len(reviews):
-            out.append((BAD, f"{who}'s Deep review tab lists {len(older)} earlier review(s), and reviews.json holds {len(reviews)}"))
+            out.append((BAD, f"{who}'s Deep review tab has nothing to read, and the cache holds {kept} review(s), the latest “{last.get('subject')}” at {clock(last.get('at'))}: the cache is not taken up"))
+        elif len(older) != kept:
+            out.append((BAD, f"{who}'s Deep review tab lists {len(older)} review(s) in its history, and the cache holds {kept}"))
         elif pane_review.get("state") == "done" and pane_review.get("subject") not in (last.get("subject"), SURVEY_SUBJECT):
-            out.append((BAD, f"{who}'s Deep review tab shows “{pane_review.get('subject')}” as the latest review, and reviews.json's latest is “{last.get('subject')}”"))
+            out.append((BAD, f"{who}'s Deep review tab shows “{pane_review.get('subject')}” as the latest review, and the cache's latest is “{last.get('subject')}”"))
         else:
-            out.append((FINE, f"{who}'s Deep review tab has the cache's {len(reviews)} review(s), the latest “{last.get('subject')}”"))
+            out.append((FINE, f"{who}'s Deep review tab has the cache's {kept} review(s), the latest “{last.get('subject')}”"))
 
     # The notes kept about files unchanged since the look that raised them: still true, so still shown, unless dismissed here.
     notes = dig(state, "pane.notes")
@@ -1166,11 +1239,19 @@ def check_cache(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]]
         if count != counted:
             out.append((BAD, f"{who}'s Deep review tab counts {counted} commit(s) waiting for their review, and queue.json has {count}"))
 
-    # The level, which any session may change.
+    # The level, which any session may change, and which the bar for a first placement has to support: a provisional
+    # level placed under an older bar stood for a day with "Not placed yet" above it (the second ui-truth pass, 2026-10-06).
     for record in (dig(state, "pane.progress.records") or []):
-        if not isinstance(record, dict) or s["home"] is None:
+        if not isinstance(record, dict):
             continue
         language = str(record.get("language", ""))
+        seen = [o for o in (record.get("observations") or []) if isinstance(o, dict)]
+        commits = len({o.get("commit") for o in seen})
+        lines = record.get("linesRead") or 0
+        if record.get("level") and record.get("isProvisional") and (len(seen) < PLACE_OBSERVATIONS or commits < PLACE_COMMITS or lines < PLACE_LINES):
+            out.append((BAD, f"{who}'s Growth tab places {language} at {record.get('level')} (provisional) on {len(seen)} observation(s) from {commits} commit(s) and {lines} line(s) read, under the bar of {PLACE_OBSERVATIONS} from {PLACE_COMMITS} and {PLACE_LINES}: a placement the rules no longer support"))
+        if s["home"] is None:
+            continue
         file = s["home"] / "progress" / f"{language}.json"
         stored = read_json(file) or {}
         if isinstance(stored, dict) and stored and settled(mtime_ms(file), max(grace, SHARED_GRACE_MS)) and stored.get("level") != record.get("level"):
@@ -1221,6 +1302,8 @@ def print_bundle(w: dict, s: dict) -> None:
     print(f"lessons: {len(lessons.get('paths') or [])} path(s) · selected {lessons.get('selected')} · update notice: {brief(pane.get('update'), 80) or '-'} · license line: {brief(pane.get('license'), 80) or '-'}")
     speech = pane.get("speech") if isinstance(pane.get("speech"), dict) else {}
     print(f"character says: “{speech.get('text', '')}”")
+    rows = [r for r in (pane.get("settings") or []) if isinstance(r, dict)]
+    print("settings tab: " + ("; ".join(f"{r.get('label')}: {r.get('value')}" for r in rows) if rows else "(no rows in the state)"))
     root = state.get("repoRoot") or ""
     project = next((p for home in w["homes"] for p in projects(home) if root and (p["root"] == root or p["id"] == project_id(root))), None) if root else None
     print(f"--- THE CACHE ON DISK ({project['id'] if project else 'no project folder'})")

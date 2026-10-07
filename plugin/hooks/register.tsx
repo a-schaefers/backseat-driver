@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, PluginOptions, Register, Timer, UiFocusResult } from 'claude-code'
 
-import type { ExplainView, Hush, LessonsView, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, SettingRow, Speech, Spot, Tab, Watch, Working } from '../types'
+import type { ExplainView, Hush, LessonsView, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, ReviewText, SettingRow, Speech, Spot, Tab, Watch, Working } from '../types'
 import {
   avatarFor,
   BLINK_MS,
@@ -35,6 +35,7 @@ import {
   isRemovable,
   journalPath,
   leasePath,
+  lessonsDir,
   sessionsPath,
   licensePath,
   lockRepoPath,
@@ -182,10 +183,11 @@ import {
   parseReviews,
   projectBrief,
   reviewDigest,
-  reviewTexts,
+  historyTexts,
   splitReview,
   withReview,
   withReviewNotes,
+  withSurvey,
 } from '../core/project'
 import type { Insight, KeptInsight, ProjectKnowledge, ReviewNotes, ReviewRecord } from '../core/project'
 import { editorArgv } from '../core/opening'
@@ -211,6 +213,7 @@ import { freshLeaseState, giveLease as giveLeaseOf, keepLease as keepLeaseOf } f
 import type { LeasePorts, LeaseState } from '../core/leasing'
 import { scanGapMs } from '../core/sensor'
 import { parseSessions, SELF_CHECK_MS } from '../core/sessions'
+import { isHello } from '../core/avatar'
 import { parseLease } from '../core/lease'
 import { clockTime } from '../core/clock'
 import { isSameShown, textsOf } from './shown'
@@ -325,6 +328,8 @@ const speechAtom = atom({ plugin: 'backseat-driver', key: 'speech' } as const, S
 const workingAtom = atom({ plugin: 'backseat-driver', key: 'working' } as const, NO_WORKING)
 /** Which list opened downward is open: `jump:<subject>` in the Deep review tab, `setting:<key>` in Settings, or '' while every one is folded. */
 const openListAtom = atom({ plugin: 'backseat-driver', key: 'openList' } as const, '' as string)
+/** The spinner's tick behind a tab at work (owner, 2026-10-06: "some kind of animated claude style spinner"). */
+const spinAtom = atom({ plugin: 'backseat-driver', key: 'spin' } as const, 0 as number)
 /** True while the pane is minimized: closed, with a strip above the prompt to bring it back. The tutor stays on. */
 const minimizedAtom = atom({ plugin: 'backseat-driver', key: 'minimized' } as const, false)
 /** The same, kept beside the state for when the state is emptied (`/clear`). A reload reads it back from the state. */
@@ -505,6 +510,10 @@ const loaded: { at: number; options: PluginOptions | null } = { at: Date.now(), 
  */
 let sharedStamp: string | null = null
 let sharedCheckedAt = 0
+/** The lesson records' folders as last listed, so that a step recorded in another session shows here (the caching audit, 2026-10-06). */
+let lessonsStamp: string | null = null
+/** The journal file's size and time as the driver last took it up (`resyncJournal`). */
+let journalStamp: string | null = null
 /**
  * The project folder's files, each as its size and time, as a session that does not drive last took them up
  * (`followProject`), or null before it has: what tells it which of them to read again.
@@ -521,6 +530,18 @@ let talkTimer: Timer | null = null
 /** Armed after a pick in the Settings tab, and cancelled by the reload that should follow it. */
 let reloadWatch: Timer | null = null
 let blinkTimer: Timer | null = null
+/** The spinner's tick, running only while a review runs, Explain looks something up or the progress is being looked at. */
+let spinTimer: Timer | null = null
+const SPIN_MS = 150
+/**
+ * How long the spinner spins for one stretch of work before the ellipsis stands in for it: a deep review can run a
+ * quarter of an hour, and a pane redrawn seven times a second for that long serves nobody (it also timed the kit's
+ * watchdog test out, which advances forty-five minutes while a review runs).
+ */
+const SPIN_FOR_MS = 60_000
+let spinSince = 0
+/** True once the stretch's minute is up, until the work ends: the spinner does not start again for the same work. */
+let isSpinSpent = false
 
 /** How close the plan's usage limit is: pushed by Claude Code when it measures the session, and read before anything is spent. */
 let pressure: Pressure = NO_PRESSURE
@@ -721,6 +742,7 @@ async function fullState($: EngineInterface): Promise<Record<string, unknown>> {
       update: await read($, updateAtom),
       license: await read($, licenseAtom),
       speech: await read($, speechAtom),
+      settings: await read($, settingsAtom),
     },
   }
 }
@@ -986,7 +1008,7 @@ async function showPlay($: EngineInterface, settings: Settings): Promise<Play> {
   if (shown.state !== next.state || shown.line !== next.line || shown.lastLookAt !== next.lastLookAt || (shown.health ?? '') !== (next.health ?? '')) {
     trace($, 'state', 'watch', () => ({ ...next, play }))
     // The row about connected editors is kept up by `readFocus`.
-    await update($, watchAtom, (w): Watch => (w.editors === undefined ? next : { ...next, editors: w.editors }))
+    await update($, watchAtom, (w): Watch => ({ ...next, ...(w.editors === undefined ? {} : { editors: w.editors }), ...(w.driver === undefined ? {} : { driver: w.driver }) }))
   }
 
   return play
@@ -1168,8 +1190,13 @@ function diskOf($: EngineInterface): Disk {
       let text: string | null = null
       try {
         text = await $.fs.read(path)
-      } catch {
-        // Not there.
+      } catch (error) {
+        // Not there is nothing there. Not readable is not that: taken for nothing there, one failed read had the next
+        // write reset a profile, with no backup (the caching audit, 2026-10-06). The file's existence tells the two apart.
+        if (!/no such file|ENOENT|not found|does not exist/i.test(String(error)) && (await $.fs.exists(path))) {
+          trace($, 'fs', 'read failed', () => ({ path, error: String(error) }), Date.now() - started)
+          throw error
+        }
       }
       trace($, 'fs', 'read', () => ({ path, chars: text === null ? null : text.length }), Date.now() - started)
 
@@ -1495,13 +1522,59 @@ async function startAnimating($: EngineInterface, settings: Settings, isFresh: b
   blinkTimer = $.clock.every(BLINK_MS, () => {
     void blink($)
   })
-  if (isFresh) await say($, avatarFor(settings.persona.voice).hello)
-  else await update($, speechAtom, finished)
+  const hello = avatarFor(settings.persona.voice).hello
+  if (isFresh) await say($, hello)
+  else {
+    // A hello another voice said, with the voice changed under it by a reload, is this voice's to say: the mascot
+    // stood under Linus's "Ready. Save something." for sixteen hours (the second ui-truth pass, 2026-10-06).
+    const shown = await read($, speechAtom)
+    if (shown.text !== hello && isHello(shown.text)) await say($, hello)
+    else await update($, speechAtom, finished)
+  }
 }
 
 async function setReview($: EngineInterface, change: Partial<Review>): Promise<void> {
   trace($, 'state', 'review', () => change)
   await update($, reviewAtom, (review): Review => withReviewChange(review, change))
+  await keepSpinning($)
+}
+
+/**
+ * The spinner behind a tab at work: one tick every `SPIN_MS` while a review runs, Explain looks something up or
+ * the progress is being looked at, and no timer at all otherwise (owner, 2026-10-06: the `(…)` badge "would be nice
+ * if it was some kind of animated claude style spinner"). Looked at whenever one of those three changes.
+ */
+async function keepSpinning($: EngineInterface): Promise<void> {
+  const [review, explain, progress] = await Promise.all([read($, reviewAtom), read($, explainAtom), read($, progressAtom)])
+  const isBusy = mode !== 'off' && (review.state === 'running' || explain.status === 'updating' || progress.busy !== '')
+  if (isBusy && spinTimer === null && !isSpinSpent) {
+    spinSince = await $.clock.now()
+    spinTimer = $.clock.every(SPIN_MS, () => {
+      void spinOnce($)
+    })
+  } else if (!isBusy) {
+    stopSpinning()
+    isSpinSpent = false
+    if ((await read($, spinAtom)) !== 0) await update($, spinAtom, () => 0)
+  }
+}
+
+/** One tick of the spinner, or, its minute up, the ellipsis for the rest of the work. */
+async function spinOnce($: EngineInterface): Promise<void> {
+  if (spinTimer === null) return
+  if ((await $.clock.now()) - spinSince >= SPIN_FOR_MS) {
+    stopSpinning()
+    isSpinSpent = true
+    await update($, spinAtom, () => -1)
+
+    return
+  }
+  await update($, spinAtom, (spin: number): number => Math.max(0, spin) + 1)
+}
+
+function stopSpinning(): void {
+  spinTimer?.cancel()
+  spinTimer = null
 }
 
 /** A file's size and modification time as one string, or '' when it is not there. */
@@ -1784,6 +1857,8 @@ async function checkForUpdate($: EngineInterface, settings: Settings): Promise<v
     const stored = parseUpdateRecord(await storeOf($).read(`${dataRoot}/update.json`))
     const now = await $.clock.now()
     let latest = stored.latest
+    // A release already known shows before the network is asked: offline, the check returned before it did (the caching audit, 2026-10-06).
+    if (latest !== '') await update($, updateAtom, () => updateNotice(version, parseVersion(latest)))
     if (isCheckDue(stored, now)) {
       // Releases come from where this copy came from: the clone's origin, or the marketplace's.
       const install = await detectInstall($)
@@ -2008,8 +2083,11 @@ async function loadSubject($: EngineInterface, subject: string): Promise<Profile
   if (dataRoot === '') return emptyProfile()
   try {
     return parseProfile(await storeOf($).read(profilePath(dataRoot, subject)))
-  } catch {
-    return emptyProfile()
+  } catch (error) {
+    // Not readable just now is not empty: what is held stands until the file reads again (the caching audit, 2026-10-06).
+    fail($, 'could not read the profile', error)
+
+    return profiles.subjects[subject] ?? emptyProfile()
   }
 }
 
@@ -2062,10 +2140,19 @@ async function saveSubject(
 ): Promise<void> {
   // Read, changed and written as one step: another session may be changing this subject too.
   // The file as it was is kept beside it, because nothing can work a profile out again.
-  const next =
-    dataRoot === ''
-      ? change(profiles.subjects[subject] ?? emptyProfile())
-      : await updateJson(storeOf($), profilePath(dataRoot, subject), parseProfile, change, { keepBackup: true })
+  let next: Profile
+  try {
+    next =
+      dataRoot === ''
+        ? change(profiles.subjects[subject] ?? emptyProfile())
+        : await updateJson(storeOf($), profilePath(dataRoot, subject), parseProfile, change, { keepBackup: true })
+  } catch (error) {
+    // The file could not be read or written: nothing of it changes, in memory either. A read that failed once must not
+    // reset a profile (the caching audit, 2026-10-06), and a look does not fail for it.
+    fail($, 'could not keep the profile', error)
+
+    return
+  }
   const before = aboutPerson()
   profiles = { ...profiles, subjects: { ...profiles.subjects, [subject]: next } }
   await update($, profilesAtom, () => profiles)
@@ -2256,7 +2343,7 @@ async function registerTools($: EngineInterface): Promise<void> {
  */
 async function look($: EngineInterface, settings: Settings, isAsked: boolean): Promise<void> {
   if (!leaseState.isDriver) {
-    if (isAsked) toastPerson($, await followingText($))
+    if (isAsked) toastPerson($, FOLLOWING)
 
     return
   }
@@ -2511,21 +2598,24 @@ async function checkSelf($: EngineInterface, settings: Settings): Promise<void> 
 const FOLLOWING = 'Another session is driving Backseat Driver in this project. Ask for it there.'
 
 /**
- * The same, naming when the session that drives began, when `sessions.json`
- * knows it: a session of theirs left on from the night before is the usual
- * one (owner, 2026-10-06: "if that's you then that's fine"). Two small reads.
+ * When the session that drives began, as a clock time, when `sessions.json`
+ * knows it, else '': the pane of a session that does not drive says so under
+ * its controls, since the usual driver is the person's own session left on
+ * from the night before (owner, 2026-10-06: "if that's you then that's
+ * fine"). Two small reads, at every beat.
  */
-async function followingText($: EngineInterface): Promise<string> {
-  if (repoRoot === '' || dataRoot === '') return FOLLOWING
+async function showDriver($: EngineInterface): Promise<void> {
+  if (repoRoot === '' || dataRoot === '') return
+  let driver = ''
   try {
     const lease = parseLease(await storeOf($).read(leasePath(dataRoot, repoRoot)))
-    const driver = parseSessions(await storeOf($).read(sessionsPath(dataRoot))).sessions.find(entry => entry.session === lease.session)
-    if (driver === undefined) return FOLLOWING
-
-    return `Another session of yours, started ${clockTime(driver.born)}, is driving Backseat Driver in this project. Ask for it there, or switch it off there: this one takes over within a minute.`
+    const entry = parseSessions(await storeOf($).read(sessionsPath(dataRoot))).sessions.find(entry => entry.session === lease.session)
+    if (entry !== undefined) driver = clockTime(entry.born)
   } catch {
-    return FOLLOWING
+    // Nothing to say, then.
   }
+  if ((await read($, watchAtom)).driver === driver) return
+  await update($, watchAtom, (w): Watch => ({ ...w, driver }))
 }
 
 /**
@@ -2564,6 +2654,11 @@ async function startDriving($: EngineInterface, settings: Settings, run: number)
   // the project, Explain, the lease's own renewal. What the pane showed for the driver before comes back from the
   // project's folder. Starting the watcher alone laid all of that down and left this session driving without it.
   followedStamps = null
+  await update($, watchAtom, (w): Watch => {
+    const { driver: _driver, ...rest } = w
+
+    return rest
+  })
   engagement += 1
   await engage($, settings, engagement, false, null, '')
 }
@@ -2597,10 +2692,11 @@ async function followDriver($: EngineInterface, settings: Settings): Promise<voi
   // The editors' files: the light, and the caret for the Explain tab (there is no journal here for it to feed).
   await pollFocus($)
   await followProject($, settings)
+  await showDriver($)
 }
 
 /** The files the driver writes for the pane. A change in one is what makes a session that does not drive read it again. */
-const FOLLOWED_FILES: readonly string[] = ['notes.json', 'reviews.json', 'queue.json', 'journal.json']
+const FOLLOWED_FILES: readonly string[] = ['notes.json', 'reviews.json', 'queue.json', 'journal.json', 'project.json']
 
 /** Those files as they are now, each as its size and time. One listing. */
 async function projectStamps($: EngineInterface): Promise<Record<string, string>> {
@@ -2635,7 +2731,7 @@ async function followProject($: EngineInterface, settings: Settings): Promise<vo
   const isChanged = (name: string): boolean => before === null || stamps[name] !== before[name]
   try {
     if (isChanged('notes.json')) await followNotes($, isFirst)
-    if (isChanged('reviews.json') || isChanged('queue.json')) await followReviews($, settings, isFirst)
+    if (isChanged('reviews.json') || isChanged('queue.json') || isChanged('project.json')) await followReviews($, settings, isFirst)
     if (isChanged('journal.json')) await showStoredWorkingOf(journalPortsOf($), journalState, repoRoot)
   } catch (error) {
     fail($, 'could not take up what the driver wrote', error)
@@ -2660,9 +2756,10 @@ async function followNotes($: EngineInterface, isFirst: boolean): Promise<void> 
 async function followReviews($: EngineInterface, settings: Settings, isFirst: boolean): Promise<void> {
   const folder = projectDir(dataRoot, repoRoot)
   reviews = parseReviews(await storeOf($).read(`${folder}/reviews.json`))
+  project = parseProject(await storeOf($).read(`${folder}/project.json`), repoRoot)
   const waiting = current(parseQueue(await storeOf($).read(queuePath())), await $.clock.now())
   const count = waiting.commits.filter(commit => !commit.isReviewed).length
-  const last = reviews.at(-1)
+  const last = reviews.at(-1) ?? project.survey ?? undefined
   const review = await read($, reviewAtom)
   const isNews = last !== undefined && (review.subject !== last.subject || review.text !== last.text)
   const landed: Partial<Review> =
@@ -2678,7 +2775,7 @@ async function followReviews($: EngineInterface, settings: Settings, isFirst: bo
       : {}
   const change: Partial<Review> = {
     ...landed,
-    ...(isNews || (review.older?.length ?? 0) !== reviews.length ? { older: reviewTexts(reviews) } : {}),
+    ...(isNews || (review.older?.length ?? 0) !== historyOf().length ? { older: historyOf() } : {}),
     ...(count !== (review.waiting ?? 0) ? { waiting: count } : {}),
   }
   if (Object.keys(change).length === 0) return
@@ -2688,6 +2785,42 @@ async function followReviews($: EngineInterface, settings: Settings, isFirst: bo
   if (landed.isUnseen === true) toastPerson($, `Deep review ready: ${last.subject}`)
   // The driver's character spoke the review's closing line there. This pane's does here.
   if (settings.isAnimated) await say($, `Review's in. ${closingLine(last.text)}`)
+}
+
+/** The lesson records' folders of the languages in play, each file's name, size and time in one string. */
+async function lessonsPrint($: EngineInterface): Promise<string> {
+  const parts: string[] = []
+  for (const language of [...profiles.languages, 'general']) {
+    try {
+      for (const entry of await $.fs.list(lessonsDir(dataRoot, language))) {
+        if (entry.name.endsWith('.json')) parts.push(`${language}/${entry.name}:${entry.size}:${entry.mtimeMs}`)
+      }
+    } catch {
+      // No record of that language yet.
+    }
+  }
+
+  return parts.sort().join('\n')
+}
+
+/**
+ * The driver takes up what another session wrote into the journal (what they
+ * said they are working on, from a session that keeps none of its own),
+ * without a write of its own: an idle driver never flushes, so it never
+ * merged (the caching audit, 2026-10-06). One stat at each look at the shared files.
+ */
+async function resyncJournal($: EngineInterface): Promise<void> {
+  const journal = journalState.recorder
+  if (journal === null || repoRoot === '' || dataRoot === '') return
+  const stamp = await fileStamp($, journalPath(dataRoot, repoRoot))
+  if (stamp === journalStamp) return
+  journalStamp = stamp
+  try {
+    await journal.resync(await $.clock.now())
+    await showWorking($, await $.clock.now())
+  } catch (error) {
+    fail($, 'could not take up the journal', error)
+  }
 }
 
 /** The shared files' names, sizes and times, in one string. One listing per folder. */
@@ -2715,12 +2848,17 @@ async function sharedPrint($: EngineInterface): Promise<string> {
 async function refreshShared($: EngineInterface, settings: Settings): Promise<void> {
   if (dataRoot === '' || mode === 'off') return
   sharedCheckedAt = await $.clock.now()
+  await resyncJournal($)
   const print = await sharedPrint($)
-  if (print === sharedStamp) return
+  const lessons = await lessonsPrint($)
+  const areLessonsNew = lessonsStamp !== null && lessons !== lessonsStamp
+  lessonsStamp = lessons
+  if (print === sharedStamp && !areLessonsNew) return
   const isFirst = sharedStamp === null
   sharedStamp = print
   // The first reading is of what was loaded a moment ago.
-  if (isFirst) return
+  if (isFirst && !areLessonsNew) return
+  if (areLessonsNew) await loadLessons($)
 
   const subjects: Record<string, Profile> = { ...profiles.subjects }
   for (const subject of Object.keys(profiles.subjects)) subjects[subject] = await loadSubject($, subject)
@@ -2745,8 +2883,8 @@ async function refreshShared($: EngineInterface, settings: Settings): Promise<vo
     }
     if (isProgressNew) await setProgress($, { records: profiles.languages.map(language => progressState.records.get(language) ?? emptyRecord(language)) })
   }
-  if (!areProfilesNew && !isProgressNew) return
-  trace($, 'state', 'shared', () => ({ areProfilesNew, isProgressNew }))
+  if (!areProfilesNew && !isProgressNew && !areLessonsNew) return
+  trace($, 'state', 'shared', () => ({ areProfilesNew, isProgressNew, areLessonsNew }))
   // The reviewer is told about the person when it is registered, so it is registered again.
   await registerReviewer($, settings)
 }
@@ -2807,9 +2945,9 @@ async function restorePaneFromDisk($: EngineInterface, isFresh: boolean): Promis
     lookState.nextNoteId = Math.max(lookState.nextNoteId, ...open.map(note => note.id + 1))
   }
   if (kept.dismissed.length > 0 && (await read($, dismissedAtom)).length === 0) await update($, dismissedAtom, () => kept.dismissed)
-  const last = reviews.at(-1)
+  const last = reviews.at(-1) ?? project?.survey ?? undefined
   if (last !== undefined && (await read($, reviewAtom)).state === 'none') {
-    await setReview($, { state: 'done', subject: last.subject, text: last.text, isUnseen: false, decisions: last.decisions ?? [], insights: last.insights ?? [], older: reviewTexts(reviews) })
+    await setReview($, { state: 'done', subject: last.subject, text: last.text, isUnseen: false, decisions: last.decisions ?? [], insights: last.insights ?? [], older: historyOf() })
   }
   trace($, 'state', 'pane taken up from disk', () => ({ notes: open.length, of: kept.notes.length, review: last?.subject ?? null }))
 }
@@ -2938,6 +3076,11 @@ async function currentInsights($: EngineInterface, files: readonly string[]): Pr
   return current
 }
 
+/** Every review the tab can go back to: the reviews kept, then the first look around. */
+function historyOf(): ReviewText[] {
+  return historyTexts(reviews, project?.survey ?? null)
+}
+
 /** Reads what is known about this project from its cache. */
 async function loadProject($: EngineInterface): Promise<void> {
   if (repoRoot === '' || dataRoot === '') {
@@ -2979,7 +3122,12 @@ async function keepReview($: EngineInterface, scope: ReviewScope, answer: string
       `${folder}/project.json`,
       stored => parseProject(stored, root),
       current => {
-        const surveyed = scope.kind === 'survey' ? { ...current, isSurveyed: true } : current
+        // The first look around is kept with the project, as the tab showed it: a new project's tab has it back after
+        // a restart (owner, 2026-10-06: "it should have been cached and displayed immediately").
+        const surveyed =
+          scope.kind === 'survey'
+            ? withSurvey(current, { commit: '', subject: scopeSubject(scope), at, text, decisions: notes?.decisions ?? [], insights: insightLines(notes) })
+            : current
 
         return notes === null ? surveyed : withReviewNotes(surveyed, notes, commit, at, insight => prints.get(insight) ?? null)
       },
@@ -2988,8 +3136,8 @@ async function keepReview($: EngineInterface, scope: ReviewScope, answer: string
       reviews = await updateJson(storeOf($), `${folder}/reviews.json`, parseReviews, kept =>
         withReview(kept, { commit, subject: scopeSubject(scope), at, text, decisions: notes?.decisions ?? [], insights: insightLines(notes) }),
       )
-      await setReview($, { older: reviewTexts(reviews) })
     }
+    await setReview($, { older: historyOf() })
   } catch (error) {
     fail($, "could not keep the deep review's notes", error)
   }
@@ -3020,7 +3168,7 @@ async function maybeSurvey($: EngineInterface, settings: Settings, run: number):
 async function reviewSince($: EngineInterface, settings: Settings, isAsked: boolean): Promise<void> {
   if (mode === 'off' || (mode === 'paused' && !isAsked)) return
   if (!leaseState.isDriver) {
-    if (isAsked) toastPerson($, await followingText($))
+    if (isAsked) toastPerson($, FOLLOWING)
 
     return
   }
@@ -3412,7 +3560,10 @@ function followPortsOf($: EngineInterface): FollowPorts {
     stamp: path => fileStamp($, path),
     countStat: () => void (quiet.stats += 1),
     readView: () => read($, explainAtom),
-    setView: async change => void (await update($, explainAtom, change)),
+    setView: async change => {
+      await update($, explainAtom, change)
+      await keepSpinning($)
+    },
     showEditors: line => showEditors($, line),
     isExplainShown: async () => (await read($, tabAtom)) === 'explain' && (await isTabShown()),
     markActive: now => void (activeAt = now),
@@ -3499,6 +3650,7 @@ async function startExplaining($: EngineInterface, settings: Settings, run: numb
           stamp: path => fileStamp($, `${root}/${path}`),
           store: storeOf($),
           entryPath: path => fileEntryPath(dataRoot, root, path),
+          entryStamp: path => fileStamp($, fileEntryPath(dataRoot, root, path)),
           complete: async (prompt, maxTokens, signal) => {
             const result = await callModel(
               $,
@@ -3612,6 +3764,7 @@ function queueProgress($: EngineInterface, work: () => Promise<void>): void {
 async function setProgress($: EngineInterface, change: Partial<ProgressView>): Promise<void> {
   trace($, 'state', 'progress', () => change)
   await update($, progressAtom, (view): ProgressView => ({ ...view, ...change }))
+  await keepSpinning($)
 }
 
 /** What the look at the person's progress needs from Claude Code. */
@@ -3784,6 +3937,7 @@ async function switchTo(
     if (leaseState.isDriver && repoRoot !== '' && dataRoot !== '') void giveLease($, leasePath(dataRoot, repoRoot), leaseState.holder)
     stopWatching()
     stopAnimating()
+    stopSpinning()
     shownTimer?.cancel()
     shownTimer = null
     shown.band = null
@@ -3888,6 +4042,12 @@ async function forget($: EngineInterface, settings: Settings, named: Scope | nul
       followedStamps = null
       reviewState.waiting = EMPTY_QUEUE
       reviewState.reviewRetryAt = null
+      // A review, a look at the progress or the watched files in flight would write the folder back (the caching audit, 2026-10-06).
+      reviewState.reviewAgentId = null
+      reviewState.reviewScope = null
+      schedulerOf($).cancel('review-watchdog')
+      progressState.watchedPaths.clear()
+      progressState.skipped = ''
       followState.explainer?.reset()
       notePrints.clear()
       followState.writtenView = ''
@@ -3921,7 +4081,7 @@ async function drawTutor(
 ) {
   quiet.renders += 1
   // One round for everything the pane shows, not a dozen in a row for every frame.
-  const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, shownSettings, licensing, backdrop, lessons, openList] = await Promise.all([
+  const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, shownSettings, licensing, backdrop, lessons, openList, spin] = await Promise.all([
     read($, modeAtom),
     read($, tabAtom),
     read($, notesAtom),
@@ -3940,6 +4100,7 @@ async function drawTutor(
     settings.isAnimated ? themeBackdrop($) : ('dark' as const),
     read($, lessonsAtom),
     read($, openListAtom),
+    read($, spinAtom),
   ])
   const view: PaneView = {
     mode: shownMode,
@@ -3966,6 +4127,7 @@ async function drawTutor(
     rows: where.rows,
     character: settings.isAnimated ? { avatar: avatarFor(settings.persona.voice), speech, backdrop } : null,
     openList,
+    spin,
     settings: shownSettings,
   }
 
@@ -4053,6 +4215,15 @@ async function drawTutor(
 
         return next === index ? review : { ...review, opened: next }
       })
+    },
+    onReviewOpen: (index: number) => {
+      touched($, settings, 'review open', () => index)
+      void update($, openListAtom, () => '')
+      void update($, reviewAtom, (review): Review => (review.opened === index ? review : { ...review, opened: index }))
+    },
+    onReviewsFold: () => {
+      touched($, settings, 'reviews fold')
+      void update($, openListAtom, (open: string): string => (open === 'reviews' ? '' : 'reviews'))
     },
     onJumpFold: (subject: string) => {
       touched($, settings, 'jump fold', () => subject)

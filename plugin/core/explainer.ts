@@ -14,7 +14,7 @@ import {
   withDetail,
   withOutline,
   withRegion,
-} from './knowledge'
+mergeKnowledge } from './knowledge'
 import type { ExplainStatus, ExplainView, OutlineRow, Spot } from '../types'
 import type { Detail, FileKnowledge, Sym, Use } from './knowledge'
 import type { Store } from './store'
@@ -60,6 +60,8 @@ export type ExplainPorts = {
   store: Pick<Store, 'read' | 'update'>
   /** The file that holds what is known about a source file. */
   entryPath: (path: string) => string
+  /** The entry's size and time on disk, or '' when there is none: what another session wrote since is read again. Without it, once read is final. */
+  entryStamp?: (path: string) => Promise<string>
   /** One request to the explain model. Null when it did not answer. */
   complete: (prompt: string, maxTokens: number, signal: AbortSignal) => Promise<string | null>
   now: () => Promise<number>
@@ -89,6 +91,8 @@ export type ExplainPorts = {
 export const SETTLE_MS = 2500
 /** How long a failed lookup waits before it is tried again. */
 export const RETRY_MS = 60_000
+/** A lookup that keeps failing waits twice as long each time, up to this: one that the model keeps answering unusably cost a request a minute for as long as the spot was in focus (the caching audit, 2026-10-06). */
+export const MAX_RETRY_MS = 60 * 60_000
 /** Lookups in flight at once. One more is allowed for what the person is looking at. */
 const PARALLEL = 2
 /** After a file is mapped, this many of its unexplained symbols are explained ahead of being asked. */
@@ -129,7 +133,9 @@ export function createExplainer(ports: ExplainPorts) {
   const sources = new Map<string, Source>()
   const queue = new Map<string, Job>()
   const running = new Map<string, AbortController>()
-  const failedAt = new Map<string, number>()
+  const failedAt = new Map<string, { at: number; count: number }>()
+  /** Each file's entry on disk as it was last read, so that another session's write is noticed. */
+  const entryStamps = new Map<string, string>()
   const writing = new Map<string, Promise<void>>()
   /** When each file was last seen to change on disk. A file is not mapped while it may still be being typed. */
   const changedAt = new Map<string, number>()
@@ -173,11 +179,16 @@ export function createExplainer(ports: ExplainPorts) {
 
   async function knowledge(path: string): Promise<FileKnowledge | null> {
     const held = known.get(path)
-    if (held !== undefined) return held
+    // What is held stands until the entry on disk changes under it: another session explained the file too (or
+    // explained it at all, where this one held "nothing"). The caching audit, 2026-10-06.
+    const stamp = ports.entryStamp === undefined ? undefined : await ports.entryStamp(path)
+    if (held !== undefined && (stamp === undefined || stamp === entryStamps.get(path))) return held
     const loaded = parseKnowledge(await ports.store.read(ports.entryPath(path)), path)
-    known.set(path, loaded)
+    if (stamp !== undefined) entryStamps.set(path, stamp)
+    const latest = held === undefined || held === null ? loaded : loaded === null ? held : mergeKnowledge(held, loaded)
+    known.set(path, latest)
 
-    return loaded
+    return latest
   }
 
   /**
@@ -187,13 +198,23 @@ export function createExplainer(ports: ExplainPorts) {
    * written one write at a time, each of the latest state.
    */
   function commit(path: string, change: (current: FileKnowledge | null) => FileKnowledge): Promise<void> {
+    const born = generation
     known.set(path, change(known.get(path) ?? null))
     const write = (writing.get(path) ?? Promise.resolve()).then(async () => {
       const latest = known.get(path)
-      // Forgotten in the meantime: writing it back would undo that.
-      if (latest === undefined || latest === null) return
+      // Forgotten in the meantime, or since the lookup began: writing it back would undo that.
+      if (latest === undefined || latest === null || born !== generation) return
       try {
-        await ports.store.update(ports.entryPath(path), () => latest)
+        // On top of the entry as it is on disk: another session may have explained the same file, and its work stays.
+        let written = latest
+        await ports.store.update(ports.entryPath(path), stored => {
+          const theirs = parseKnowledge(stored, path)
+          written = theirs === null ? latest : mergeKnowledge(theirs, latest)
+
+          return written
+        })
+        if (known.get(path) === latest && born === generation) known.set(path, written)
+        if (ports.entryStamp !== undefined) entryStamps.set(path, await ports.entryStamp(path))
       } catch (error) {
         ports.log(`could not save what is known about ${path}: ${String(error)}`)
       }
@@ -232,7 +253,7 @@ export function createExplainer(ports: ExplainPorts) {
    */
   function readyAt(job: Job): number {
     const failed = failedAt.get(job.key)
-    const afterFailure = failed === undefined ? 0 : failed + RETRY_MS
+    const afterFailure = failed === undefined ? 0 : failed.at + Math.min(MAX_RETRY_MS, RETRY_MS * 2 ** Math.max(0, failed.count - 1))
     if (job.kind !== 'outline' || job.priority === ASKED) return afterFailure
     const changed = changedAt.get(job.path)
 
@@ -303,7 +324,16 @@ export function createExplainer(ports: ExplainPorts) {
     let isIncomplete = false
     const want = (job: Job): void => {
       isIncomplete = true
-      if (mayFetch) enqueue(job)
+      if (!mayFetch) return
+      // One spot at a time for a file: a caret moving through a file too large to map, or a selection growing line by
+      // line, queued a lookup for every line it passed (the caching audit, 2026-10-06). What was asked for by name,
+      // and what is explained ahead after a mapping, stay.
+      if (job.kind === 'detail' && job.priority === LOOKING) {
+        for (const [key, queued] of queue) {
+          if (key !== job.key && queued.path === job.path && queued.kind === 'detail' && queued.priority === LOOKING) queue.delete(key)
+        }
+      }
+      enqueue(job)
     }
     if (!isOutlineCurrent && canMap) want(outlineJob(spot.path, priority))
 
@@ -372,7 +402,7 @@ export function createExplainer(ports: ExplainPorts) {
   }
 
   function isRecentFailure(key: string, now: number): boolean {
-    const at = failedAt.get(key)
+    const at = failedAt.get(key)?.at
 
     return at !== undefined && now - at < RETRY_MS
   }
@@ -383,6 +413,10 @@ export function createExplainer(ports: ExplainPorts) {
    */
   function pump(now: number): void {
     if (isStopped) return
+    // A failure older than the longest wait is forgotten: the map does not grow with every spot ever failed.
+    for (const [key, failed] of failedAt) {
+      if (now - failed.at > MAX_RETRY_MS) failedAt.delete(key)
+    }
     const level = ports.pressure()
     const waiting = [...queue.values()].filter(job => readyAt(job) <= now).sort((a, b) => a.priority - b.priority)
     for (const job of waiting) {
@@ -411,7 +445,7 @@ export function createExplainer(ports: ExplainPorts) {
             // the rest and goes again when they do, as something looked at and not asked for a second time.
             failedAt.delete(job.key)
             enqueue({ ...job, priority: Math.max(job.priority, LOOKING) })
-          } else if (outcome === 'failed') failedAt.set(job.key, finished)
+          } else if (outcome === 'failed') failedAt.set(job.key, { at: finished, count: (failedAt.get(job.key)?.count ?? 0) + 1 })
           else failedAt.delete(job.key)
           // Saved again while it was being mapped: once more, after it has settled.
           if (outcome === 'again' && born === generation) enqueue(outlineJob(job.path, Math.max(job.priority, LOOKING)))
@@ -625,6 +659,7 @@ export function createExplainer(ports: ExplainPorts) {
       sources.clear()
       queue.clear()
       failedAt.clear()
+      entryStamps.clear()
       writing.clear()
       changedAt.clear()
       changedLine.clear()

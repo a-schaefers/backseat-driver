@@ -136,6 +136,11 @@ export function avatarFor(voice: string): Avatar {
   return BY_VOICE.get(voice) ?? CLAUDE
 }
 
+/** Whether a line is some voice's hello: what a character says at switch-on, and says again when the voice changes under it. */
+export function isHello(text: string): boolean {
+  return Object.values(AVATARS).some(avatar => avatar.hello === text)
+}
+
 /** What a character says when it has nothing to say. */
 export const SILENT: Speech = { text: '', tick: 0, isBlinking: false }
 

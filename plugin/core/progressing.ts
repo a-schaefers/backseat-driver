@@ -15,7 +15,7 @@ import { languageName } from './languages'
 import { progressPath, watchedPath } from './datahome'
 import { ANSWER_LABELS, GENERAL } from './profiles'
 import type { Profiles } from '../types'
-import { assessmentRequest, emptyRecord, parseAssessment, parseRecord, withAssessment } from './progress'
+import { assessmentRequest, emptyRecord, parseAssessment, parseRecord, withAssessment, withdrawn } from './progress'
 import type { AssessedCommit, CommitForAssessment } from './progress'
 import { shortHash } from './review'
 import type { Settings } from './settings'
@@ -27,6 +27,8 @@ export type ProgressState = {
   identity: string[]
   /** The files the watcher saw change since the last commit: work it watched arrive counts in full. */
   watchedPaths: Set<string>
+  /** Why the last commit did not count, as the tab says it, or ''. Kept in the project folder with the watched files. */
+  skipped: string
   /** The records of the languages in play. */
   records: Map<string, ProgressRecord>
   /** Runs one piece of progress work after the ones before it. */
@@ -34,7 +36,7 @@ export type ProgressState = {
 }
 
 export function freshProgressState(): ProgressState {
-  return { identity: [], watchedPaths: new Set<string>(), records: new Map<string, ProgressRecord>(), queue: Promise.resolve() }
+  return { identity: [], watchedPaths: new Set<string>(), skipped: '', records: new Map<string, ProgressRecord>(), queue: Promise.resolve() }
 }
 
 /** What the look at progress needs from its host. Each is read or done when it is needed. */
@@ -67,7 +69,7 @@ export function queueProgress(state: ProgressState, fail: ProgressPorts['fail'],
 /** The Progress tab shows the records of the languages in play, main ones first. */
 export async function showProgress(ports: ProgressPorts, state: ProgressState): Promise<void> {
   const shown = ports.profiles().languages.map(language => state.records.get(language) ?? emptyRecord(language))
-  await ports.setProgress({ isOn: ports.settings.isProgressOn, identity: state.identity, records: shown })
+  await ports.setProgress({ isOn: ports.settings.isProgressOn, identity: state.identity, records: shown, skipped: state.skipped })
 }
 
 export async function loadRecord(ports: Pick<ProgressPorts, 'store' | 'dataRoot'>, language: string): Promise<ProgressRecord> {
@@ -93,13 +95,14 @@ export async function readIdentity(ports: Pick<ProgressPorts, 'git'>, state: Pro
   return isChanged
 }
 
-/** The files the watcher saw change since the last commit, as kept in the project folder. */
-type Watched = { v: 1; paths: string[] }
+/** The files the watcher saw change since the last commit, and why the last commit did not count, as kept in the project folder. */
+type Watched = { v: 1; paths: string[]; skipped: string }
 
 function parseWatched(stored: unknown): Watched {
-  const paths = typeof stored === 'object' && stored !== null && Array.isArray((stored as { paths?: unknown }).paths) ? (stored as { paths: unknown[] }).paths : []
+  const record = typeof stored === 'object' && stored !== null ? (stored as { paths?: unknown; skipped?: unknown }) : {}
+  const paths = Array.isArray(record.paths) ? record.paths : []
 
-  return { v: 1, paths: paths.filter((path): path is string => typeof path === 'string') }
+  return { v: 1, paths: paths.filter((path): path is string => typeof path === 'string'), skipped: typeof record.skipped === 'string' ? record.skipped : '' }
 }
 
 type WatchedPorts = Pick<ProgressPorts, 'store' | 'dataRoot' | 'repoRoot'>
@@ -112,13 +115,28 @@ type WatchedPorts = Pick<ProgressPorts, 'store' | 'dataRoot' | 'repoRoot'>
  */
 export async function loadWatched(ports: WatchedPorts, state: ProgressState): Promise<void> {
   if (ports.dataRoot() === '' || ports.repoRoot() === '') return
-  for (const path of parseWatched(await ports.store().read(watchedPath(ports.dataRoot(), ports.repoRoot()))).paths) state.watchedPaths.add(path)
+  const watched = parseWatched(await ports.store().read(watchedPath(ports.dataRoot(), ports.repoRoot())))
+  for (const path of watched.paths) state.watchedPaths.add(path)
+  state.skipped = watched.skipped
 }
 
 async function saveWatched(ports: WatchedPorts, state: ProgressState): Promise<void> {
   if (ports.dataRoot() === '' || ports.repoRoot() === '') return
   const paths = [...state.watchedPaths].sort()
-  await updateJson(ports.store(), watchedPath(ports.dataRoot(), ports.repoRoot()), parseWatched, () => ({ v: 1, paths }))
+  const skipped = state.skipped
+  await updateJson(ports.store(), watchedPath(ports.dataRoot(), ports.repoRoot()), parseWatched, () => ({ v: 1, paths, skipped }))
+}
+
+/**
+ * Why the last commit did not count: said in the tab, and kept in the project
+ * folder so that the next session says it too. Until 2026-10-06 it lived in
+ * the session's state only, and a session opened later had no idea why the
+ * last commit was skipped (the second ui-truth pass).
+ */
+async function noteSkipped(ports: ProgressPorts, state: ProgressState, text: string): Promise<void> {
+  state.skipped = text
+  await ports.setProgress({ skipped: text })
+  await saveWatched(ports, state)
 }
 
 /** The watcher saw these files change: what is in them counts in full when it is committed. */
@@ -140,8 +158,58 @@ export async function setUpProgress(ports: ProgressPorts, state: ProgressState):
   await readIdentity(ports, state)
   await loadWatched(ports, state)
   state.records.clear()
-  for (const language of ports.profiles().languages) state.records.set(language, await loadRecord(ports, language))
+  for (const language of ports.profiles().languages) state.records.set(language, await mendedRecord(ports, language))
   await showProgress(ports, state)
+}
+
+/**
+ * The lines the record's assessed commits added in its language, counted from
+ * git, for a record from before the lines were kept. Null when a commit is not
+ * in this repository: the record is one language's across projects, and a
+ * count taken where its commits are not would withdraw a level for nothing
+ * (the caching audit, 2026-10-06).
+ */
+async function withLinesCounted(ports: Pick<ProgressPorts, 'git'>, record: ProgressRecord): Promise<ProgressRecord | null> {
+  let lines = 0
+  for (const hash of record.assessed.slice(-20)) {
+    const shown = await ports.git(commitPatchArgs(hash))
+    if (shown.exitCode !== 0) return null
+    lines += addedLines(shown.stdout)
+      .filter(file => file.language === record.language)
+      .reduce((sum, file) => sum + file.lines.length, 0)
+  }
+
+  return { ...record, linesRead: lines }
+}
+
+/**
+ * The record as read, mended where a change of the rules left it behind: a
+ * provisional level the bar no longer supports is withdrawn (`withdrawn`),
+ * with the lines its assessed commits added counted from git first when the
+ * record is from before they were kept. Written back once, under the lock.
+ */
+async function mendedRecord(ports: ProgressPorts, language: string): Promise<ProgressRecord> {
+  const read = await loadRecord(ports, language)
+  if (read.level === null || !read.isProvisional) return read
+  const counted = read.linesRead > 0 ? read : await withLinesCounted(ports, read)
+  // Its commits are elsewhere: nothing can be said of its lines here, so nothing is withdrawn here.
+  if (counted === null) return read
+  const mended = withdrawn(counted)
+  if (mended === read) return read
+  if (ports.dataRoot() === '') return mended
+  try {
+    return await updateJson(
+      ports.store(),
+      progressPath(ports.dataRoot(), language),
+      stored => parseRecord(stored, language),
+      latest => withdrawn({ ...latest, linesRead: Math.max(latest.linesRead, counted.linesRead) }),
+      { keepBackup: true },
+    )
+  } catch (error) {
+    ports.fail('could not mend the progress record', error)
+
+    return mended
+  }
 }
 
 /** What they said about themselves in one language, in a line. It is never evidence. */
@@ -183,13 +251,13 @@ export async function assess(
     })
     if (!result.isAnswered) {
       // No answer: it is worth another try, later.
-      await ports.setProgress({ skipped: `The look at ${subject} got no answer. It is tried again.` })
+      await noteSkipped(ports, state, `The look at ${subject} got no answer. It is tried again.`)
 
       return false
     }
     const assessment = parseAssessment(result.text)
     if (assessment === null) {
-      await ports.setProgress({ skipped: `The look at ${subject} did not finish. Nothing was recorded.` })
+      await noteSkipped(ports, state, `The look at ${subject} did not finish. Nothing was recorded.`)
 
       return true
     }
@@ -240,7 +308,7 @@ export async function assessCommit(ports: ProgressPorts, state: ProgressState, h
   const verdict = judge(info, state.identity, files)
   const short = shortHash(info.hash)
   if (!verdict.isYours) {
-    await ports.setProgress({ skipped: `Commit ${short} does not count toward your progress: ${verdict.reason}.` })
+    await noteSkipped(ports, state, `Commit ${short} does not count toward your progress: ${verdict.reason}.`)
 
     return true
   }
@@ -251,7 +319,7 @@ export async function assessCommit(ports: ProgressPorts, state: ProgressState, h
   const languages = [...byLanguage(verdict.files)].filter(([, group]) => sizeOf(group) >= MIN_LINES).slice(0, 2)
   if (languages.length === 0) {
     await forgetWatched(ports, state, verdict.files.map(file => file.path))
-    await ports.setProgress({ skipped: `Commit ${short} is too small to say anything about your progress.` })
+    await noteSkipped(ports, state, `Commit ${short} is too small to say anything about your progress.`)
 
     return true
   }

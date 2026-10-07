@@ -110,7 +110,10 @@ healthLine clock facts = case facts.play of
     | null facts.failing = []
     | otherwise = [ "Keeps failing: " <> joinWith ", " facts.failing <> ". /backseat debug dump saves the details." ]
 
--- | The state the animated character takes its pose from.
+-- | The state the animated character takes its pose from, and the pane its
+-- | light: a session that does not drive is `following`, which is no
+-- | watching of its own (its light was the green one of "watching for your
+-- | next save" until the second ui-truth pass, 2026-10-06).
 watchState :: Play -> String
 watchState = case _ of
   Starting -> "starting"
@@ -118,6 +121,7 @@ watchState = case _ of
   Looking -> "looking"
   Settling _ -> "settling"
   Waiting _ -> "waiting"
+  Following -> "following"
   _ -> "idle"
 
 -- The same, as the plain records the shell holds.

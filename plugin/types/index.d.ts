@@ -63,9 +63,10 @@ export type Watch = {
    * `starting`: just switched on, and the working tree has not been read yet.
    * `settling`: a save was seen, and a look is on its way.
    * `waiting`: a look is wanted and held back: a request failed, Claude is not answering, or the plan's limit is close.
+   * `following`: another session drives this project, and this one shows what it writes: no watching of its own.
    * `idle`: none of these.
    */
-  state: 'starting' | 'idle' | 'settling' | 'looking' | 'no-git' | 'waiting'
+  state: 'starting' | 'idle' | 'settling' | 'looking' | 'no-git' | 'waiting' | 'following'
   /** When the last look finished, in clock milliseconds; null before the first one. */
   lastLookAt: number | null
   /** The status line as a sentence: what it is doing, and when a wait ends (`status.ts`). */
@@ -78,6 +79,11 @@ export type Watch = {
    * files were first read (the driver reads them at every scan, a session that does not drive at every beat of the lease).
    */
   editors?: string
+  /**
+   * While another session drives this project: when that session started, as a clock time ("00:58"), for the line
+   * under the controls that says looks and reviews run there. '' while not known. Absent while this session drives.
+   */
+  driver?: string
 }
 
 /** A deep review as it was written: what the tab shows of one. */
@@ -356,6 +362,8 @@ declare module 'claude-code' {
       working: Working
       /** Which list opened downward is open: `jump:<subject>` or `setting:<key>`, or '' while every one is folded. */
       openList: string
+      /** The spinner's tick behind a tab at work: a review running, a lookup, a look at the progress. */
+      spin: number
       /** True while the pane is put away as a strip above the prompt: the tutor on, its pane closed. */
       minimized: boolean
       /** The plugin's own `/config` rows, for the Settings tab. Read again whenever the tab is opened. */

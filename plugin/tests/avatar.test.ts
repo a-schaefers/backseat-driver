@@ -16,7 +16,7 @@ import {
   speech,
   wordsSaid,
   wrap,
-} from '../core/avatar'
+isHello } from '../core/avatar'
 import type { Pose } from '../core/avatar'
 import { backdropOf, base64, cellWords, dimmed, pixels, poseGrid, rasterCells, spriteSize } from '../core/sprite'
 
@@ -213,4 +213,11 @@ test('Raster cells are padded base64 of little-endian words', async () => {
   // One orange upper half block on orange: 0x2580, 0xff8800, 0xff8800 as little-endian bytes.
   expect(rasterCells(art, 'rest', null)).toBe(base64(new Uint8Array([0x80, 0x25, 0, 0, 0x00, 0x88, 0xff, 0, 0x00, 0x88, 0xff, 0])))
   expect(rasterCells(art, 'rest', null)).toBe(rasterCells(art, 'talk', null))
+})
+
+test('a hello is any voice\'s, and nothing else is', () => {
+  expect(isHello('Riding along. You drive.')).toBe(true)
+  expect(isHello('Ready. Save something.')).toBe(true)
+  expect(isHello("Review's in. Nice and small.")).toBe(false)
+  expect(isHello('')).toBe(false)
 })

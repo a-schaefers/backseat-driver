@@ -94,6 +94,17 @@ class Numbers(unittest.TestCase):
         self.assertEqual(jack.ALIVE_MS, self.number("kernel/src/Kernel/Sessions.purs", "aliveMs"))
         self.assertEqual(jack.EDITOR_TTL_MS, self.number("plugin/core/editors.ts", "EDITOR_TTL_MS"))
         self.assertEqual(jack.LEASE_BEAT_MS, self.number("kernel/src/Kernel/Lease.purs", "beatMs"))
+        self.assertEqual(jack.PLACE_OBSERVATIONS, self.number("plugin/core/progress.ts", "PLACE_OBSERVATIONS"))
+        self.assertEqual(jack.PLACE_COMMITS, self.number("plugin/core/progress.ts", "PLACE_COMMITS"))
+        self.assertEqual(jack.PLACE_LINES, self.number("plugin/core/progress.ts", "PLACE_LINES"))
+        pane = (REPO / "plugin" / "hooks" / "pane.tsx").read_text()
+        for mark in jack.SPINNER:
+            self.assertIn(f"'{mark}'", pane.split("export const SPINNER")[1].split("\n")[0], mark)
+        # The hellos are read out of the source: every voice has one, and they differ.
+        hellos = jack.hellos_by_voice()
+        self.assertEqual(sorted(hellos), ["default", "eli5-tldr-kiss-terse", "knuth", "primeagen", "torvalds"])
+        self.assertEqual(hellos["default"], "Riding along. You drive.")
+        self.assertEqual(len(set(hellos.values())), 5)
         self.assertIn(f"export const SURVEY_SUBJECT = '{jack.SURVEY_SUBJECT}'", (REPO / "plugin" / "core" / "review.ts").read_text())
 
     def test_a_project_folder_is_named_as_the_tutor_names_it(self):
@@ -339,6 +350,35 @@ class Disagreements(unittest.TestCase):
         self.assertEqual(bad(found), [])
         self.assertTrue(any("keys row is whole" in text for _, text in found), found)
 
+    def test_a_session_that_does_not_drive_has_no_watching_light_and_offers_no_look(self):
+        root = "/tmp/ride"
+        self.project(root, {"session": "someone-else", "at": self.now - 1000})
+        told = state(self.now, repoRoot=root, lease={"isDriver": False, "holder": ""})
+        told["pane"]["watch"] = {"state": "idle", "line": "On. Another session is driving this project. This one is for the conversation."}
+        told["shown"]["pane"]["texts"] = [*TEXTS, "look now"]
+        s = session(home=self.home, state=told)
+        found = bad(jack.check_session(world([s], [self.home], self.now), s, DOCKED))
+        self.assertTrue(any("its light says “idle”, not following" in text for text in found), found)
+        self.assertTrue(any("still offers look now" in text for text in found), found)
+        told["pane"]["watch"]["state"] = "following"
+        told["shown"]["pane"]["texts"] = TEXTS
+        self.assertEqual([f for f in bad(jack.check_session(world([s], [self.home], self.now), s, DOCKED)) if "following" in f or "offers" in f], [])
+
+    def test_a_hello_left_over_from_another_voice(self):
+        told = state(self.now, loaded={"at": self.now - 60_000, "options": {"voice": "default"}})
+        told["pane"]["speech"] = {"text": "Ready. Save something.", "tick": 9, "isBlinking": False}
+        s = session(state=told)
+        found = bad(jack.check_session(world([s], now=self.now), s, DOCKED))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("the torvalds voice's hello, under the default voice", found[0])
+        told["loaded"]["options"]["voice"] = "torvalds"
+        self.assertEqual(bad(jack.check_session(world([s], now=self.now), s, DOCKED)), [])
+        told["pane"]["speech"]["text"] = "Review's in. Nice and small."
+        self.assertEqual(bad(jack.check_session(world([s], now=self.now), s, DOCKED)), [])
+        # A spinner caught a tick apart is the same badge.
+        self.assertTrue(jack.is_on_screen("2: Review (✻)", ["1: Play  2: Review (✶)  3: Explain"]))
+        self.assertTrue(jack.is_on_screen("3: Explain (…)", ["3: Explain (·)"]))
+
     def test_watchers_missing_right_after_a_reload_are_being_started_again(self):
         # The procs table has no inotifywait under this fake pid, and the state says two are live.
         live = {"pushers": [{"role": "tree", "isLive": True}, {"role": "focus", "isLive": True}]}
@@ -547,20 +587,20 @@ class Cache(unittest.TestCase):
         empty = {"state": "none", "subject": "", "text": "", "older": []}
         found = bad(self.found(self.told(False, review=empty)))
         self.assertEqual(len(found), 1, found)
-        self.assertIn("Deep review tab has nothing to read, and reviews.json holds 2 review(s)", found[0])
+        self.assertIn("Deep review tab has nothing to read, and the cache holds 2 review(s)", found[0])
         self.assertIn("commit def5678: Add median", found[0])
         # The tab has them: nothing against it. Short of one in the history, or showing another as the latest: a disagreement.
         full = {"state": "done", "subject": "commit def5678: Add median", "text": "Good.", "older": [{}, {}]}
         self.assertEqual(bad(self.found(self.told(False, review=full))), [])
         self.assertTrue(any("has the cache's 2 review(s)" in text for _, text in self.found(self.told(False, review=full))))
-        self.assertIn("lists 1 earlier review(s), and reviews.json holds 2", bad(self.found(self.told(True, review={**full, "older": [{}]})))[0])
-        self.assertIn("shows “commit abc1234: Add mean” as the latest review", bad(self.found(self.told(True, review={**full, "subject": "commit abc1234: Add mean"})))[0])
+        self.assertIn("lists 1 review(s) in its history, and the cache holds 2", bad(self.found(self.told(True, review={**full, "older": [{}]})))[0])
+        self.assertIn("shows “commit abc1234: Add mean” as the latest review, and the cache's latest", bad(self.found(self.told(True, review={**full, "subject": "commit abc1234: Add mean"})))[0])
         # A first look around is not kept in reviews.json: the tab may show it as the latest.
         self.assertEqual(bad(self.found(self.told(True, review={**full, "subject": jack.SURVEY_SUBJECT}))), [])
         # Written a moment ago: a session that does not drive has a beat to take it up.
         self.write(self.folder / "reviews.json", reviews, 3_000)
         self.assertEqual(bad(self.found(self.told(False, review=empty))), [])
-        self.assertTrue(any(level == jack.NOTE and "held against it next time" in text for level, text in self.found(self.told(False, review=empty))))
+        self.assertTrue(any(level == jack.NOTE and "held against them next time" in text for level, text in self.found(self.told(False, review=empty))))
 
     def test_notes_kept_about_unchanged_files_that_the_pane_lacks(self):
         stats = pathlib.Path(self.root) / "stats.py"
@@ -608,13 +648,37 @@ class Cache(unittest.TestCase):
         self.assertEqual(bad(self.found(self.told(True, review=review))), [])
 
         self.write(self.home / "progress" / "python.json", {"v": 1, "language": "python", "level": "junior", "observations": []}, 60_000)
-        records = {"records": [{"language": "python", "level": "beginner", "isProvisional": True, "observations": []}]}
+        # A confirmed level: only the file is held against it (a provisional one under the bar is the next test's).
+        records = {"records": [{"language": "python", "level": "beginner", "isProvisional": False, "observations": []}]}
         found = bad(self.found(self.told(True, progress=records)))
         self.assertEqual(len(found), 1, found)
         self.assertIn("places python at beginner, and progress/python.json says junior", found[0])
-        self.assertEqual(bad(self.found(self.told(True, progress={"records": [{"language": "python", "level": "junior"}]}))), [])
+        self.assertEqual(bad(self.found(self.told(True, progress={"records": [{"language": "python", "level": "junior", "isProvisional": False}]}))), [])
         self.write(self.home / "progress" / "python.json", {"v": 1, "language": "python", "level": "mid"}, 5_000)
-        self.assertEqual(bad(self.found(self.told(True, progress={"records": [{"language": "python", "level": "junior"}]}))), [])
+        self.assertEqual(bad(self.found(self.told(True, progress={"records": [{"language": "python", "level": "junior", "isProvisional": False}]}))), [])
+
+    def test_a_level_the_bar_does_not_support(self):
+        thin = {"records": [{"language": "shell", "level": "beginner", "isProvisional": True, "linesRead": 0,
+                             "observations": [{"commit": c, "skill": "s"} for c in "aaaaabbbbbccccc"]}]}
+        found = bad(self.found(self.told(True, progress=thin)))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("places shell at beginner (provisional) on 15 observation(s) from 3 commit(s) and 0 line(s) read", found[0])
+        # Placed with the lines read, or confirmed, or withdrawn: nothing against it.
+        self.assertEqual(bad(self.found(self.told(True, progress={"records": [{**thin["records"][0], "linesRead": 80}]}))), [])
+        self.assertEqual(bad(self.found(self.told(True, progress={"records": [{**thin["records"][0], "isProvisional": False}]}))), [])
+        self.assertEqual(bad(self.found(self.told(True, progress={"records": [{**thin["records"][0], "level": None}]}))), [])
+
+    def test_the_first_look_around_counts_in_the_history(self):
+        (self.folder / "project.json").write_text(json.dumps({"v": 1, "root": self.root, "isSurveyed": True,
+            "survey": {"commit": "", "subject": jack.SURVEY_SUBJECT, "at": self.now - 7_200_000, "text": "A look around."}}))
+        old = (self.now - 60_000) / 1000
+        os.utime(self.folder / "project.json", (old, old))
+        empty = {"state": "none", "subject": "", "text": "", "older": []}
+        found = bad(self.found(self.told(True, review=empty)))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("the cache holds 1 review(s), the latest “a first look around this project”", found[0])
+        shown = {"state": "done", "subject": jack.SURVEY_SUBJECT, "text": "A look around.", "older": [{}]}
+        self.assertEqual(bad(self.found(self.told(True, review=shown))), [])
 
     def test_a_bundle_reads_as_one_page(self):
         import contextlib

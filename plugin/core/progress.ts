@@ -187,6 +187,21 @@ export function isPlaceable(record: Pick<ProgressRecord, 'observations' | 'lines
   return record.observations.length >= PLACE_OBSERVATIONS && commitsIn(record.observations) >= PLACE_COMMITS && record.linesRead >= PLACE_LINES
 }
 
+/**
+ * A provisional level the bar no longer supports, withdrawn as the record is
+ * read and not only at the next assessment, which a project of small commits
+ * may never make: the owner's record, placed under the old bar on 2026-10-05
+ * from two toy commits, stood as "beginner" for a day under a Growth tab
+ * that said "Not placed yet" (the second ui-truth pass, 2026-10-06). The
+ * record as it is when there is nothing to withdraw.
+ */
+export function withdrawn(record: ProgressRecord): ProgressRecord {
+  if (record.level === null || !record.isProvisional || isPlaceable(record)) return record
+
+  // The history records levels reached, never one taken away (`LevelChange.to`): the tab's counts say what is short.
+  return { ...record, level: null, isProvisional: true }
+}
+
 /** Where the level goes after new evidence, and why, under the rules above. */
 export function decideLevel(
   record: ProgressRecord,

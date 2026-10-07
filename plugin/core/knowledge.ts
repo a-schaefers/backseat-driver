@@ -304,6 +304,25 @@ export function withDetail(knowledge: FileKnowledge, print: string, detail: Deta
   }
 }
 
+/**
+ * `theirs` with what `mine` explains that theirs does not: two sessions
+ * explaining one file each keep the other's work (the caching audit,
+ * 2026-10-06: a second session's write took the first's explanations away).
+ * Theirs as it is when the two are of different texts.
+ */
+export function mergeKnowledge(mine: FileKnowledge, theirs: FileKnowledge): FileKnowledge {
+  if (theirs.print !== mine.print) return theirs
+  let merged = theirs
+  for (const symbol of mine.symbols) {
+    if (symbol.detail !== undefined && merged.symbols.some(other => other.print === symbol.print && other.detail === undefined)) merged = withDetail(merged, symbol.print, symbol.detail)
+  }
+  for (const region of mine.regions) {
+    if (!merged.regions.some(other => other.print === region.print)) merged = withRegion(merged, region)
+  }
+
+  return merged
+}
+
 export function withRegion(knowledge: FileKnowledge, region: Region): FileKnowledge {
   const others = knowledge.regions.filter(other => other.print !== region.print)
 

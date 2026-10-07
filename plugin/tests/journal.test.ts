@@ -651,3 +651,23 @@ test('the journal says when it next has something to do', async () => {
   expect(wakeAt).toBe(null)
   expect(recorder.journal().entries.some(entry => entry.kind === 'focus' && entry.ms === SLICE_MS)).toBe(true)
 })
+
+test('the driver takes up what another session said, without a write of its own, and keeps what it has not written yet', async () => {
+  const disk = memoryDisk()
+  const driver = world({ 'stats.py': MEAN }, { 'stats.py': MEAN }, disk)
+  const other = world({ 'stats.py': MEAN }, { 'stats.py': MEAN }, disk)
+  await driver.recorder.start(0, 'main', [])
+  await other.recorder.start(0, null, [])
+  driver.recorder.say('mine, unwritten', 500)
+  other.recorder.say('the parser', 1000)
+  await other.recorder.flush(1000, true)
+  expect(driver.recorder.working(1500).said).toBe('mine, unwritten')
+
+  await driver.recorder.resync(2000)
+  // Later wins, and the driver's own unwritten statement is still in its entries, for its next write.
+  expect(driver.recorder.working(2000).said).toBe('the parser')
+  expect(driver.recorder.journal().entries.filter(entry => entry.kind === 'said').map(entry => entry.text)).toEqual(['mine, unwritten', 'the parser'])
+  await driver.recorder.flush(3000, true)
+  expect(driver.stored().entries.filter(entry => entry.kind === 'said').map(entry => entry.text).sort()).toEqual(['mine, unwritten', 'the parser'])
+  expect(driver.stored().said?.text).toBe('the parser')
+})

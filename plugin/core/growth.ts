@@ -226,7 +226,7 @@ export function raiseLine(item: GrowthItem): string {
     case 'place':
       return `Commit work of your own. A level needs ${item.count} more observations from ${item.total} more commits.`
     case 'lines':
-      return `A level also needs ${item.count} more lines of your own read: ${item.total} in all, from real work, not a toy script.`
+      return `A level needs ${item.count} more lines of your own read: ${item.total} in all, from real work, not a toy script.`
     case 'evidence':
       return 'Nothing yet shows a level either way: more of your own work, and the first one shows.'
     case 'skill':

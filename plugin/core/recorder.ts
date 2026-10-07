@@ -256,6 +256,20 @@ export function createRecorder(ports: RecorderPorts) {
       }
     },
 
+    /**
+     * Takes up what another session wrote, without a write of its own: a
+     * session that does not drive says what they are working on straight
+     * into the file, and the driver merged it only at its next write, which
+     * an idle driver never makes (the caching audit, 2026-10-06). What is
+     * held and not yet written stays held.
+     */
+    async resync(now: number): Promise<void> {
+      if (ports.file === '' || isFlushing) return
+      const stored = parseJournal(await ports.store.read(ports.file))
+      held = sync(stored, held, known, now)
+      known = knownEntries(stored)
+    },
+
     /** Forgets everything held, for when the person has the project forgotten. */
     reset(): void {
       held = emptyJournal()
