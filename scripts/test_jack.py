@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -1340,6 +1341,34 @@ class ToldAndBelieved(unittest.TestCase):
         s["state"]["explain"]["editorFocusAt"] = self.now - 60_000
         s["state"]["at"] = self.now - 9000
         self.assertEqual(bad(jack.check_world(world([s], [home], self.now), s)), [])
+
+
+class StateWords(unittest.TestCase):
+    # Claude Code's own rows, as `claude agents --json` gives them on 2.1.292: no `id` and no `short`.
+    ROWS = [
+        {"cwd": "/w", "kind": "interactive", "name": "", "pid": 1, "sessionId": "5825a346-2557-4f80-8cf4-7d8d239b4a33", "startedAt": 0, "status": "idle"},
+        {"cwd": "/w", "kind": "background", "name": "", "pid": 2, "sessionId": "77aa0000-0000-4000-8000-000000000000", "startedAt": 0, "status": "idle", "id": "k3x"},
+    ]
+
+    def test_a_word_names_a_session_or_a_part(self):
+        self.assertTrue(jack.names_a_session("5825", self.ROWS, []))
+        self.assertTrue(jack.names_a_session("1788da52", self.ROWS, []))  # gone: read by its id from its log
+        self.assertTrue(jack.names_a_session("k3x", self.ROWS, []))  # a background session's short id
+        self.assertTrue(jack.names_a_session("bsd", self.ROWS, ["bsd"]))  # a tmux session's name
+        for part in ("lease", "deadlines", "shown.pane.texts", "session", "mode"):
+            self.assertFalse(jack.names_a_session(part, self.ROWS, ["bsd"]), part)
+
+    def test_state_with_a_session_and_no_part(self):
+        # The eleventh ui-truth pass's agent: `jack.py state <session>` crashed with KeyError: 'id' (2026-10-07).
+        seen: dict = {}
+        with mock.patch.object(jack, "claude_sessions", return_value=self.ROWS), mock.patch.object(jack, "tmux_panes", return_value=[]), \
+                mock.patch.object(jack, "cmd_state", side_effect=lambda a: seen.update(session=a.session, path=a.path) or 0):
+            self.assertEqual(jack.main(["state", "5825"]), 0)
+            self.assertEqual(seen, {"session": "5825", "path": None})
+            self.assertEqual(jack.main(["state", "lease"]), 0)
+            self.assertEqual(seen, {"session": None, "path": "lease"})
+            self.assertEqual(jack.main(["state", "5825", "mode"]), 0)
+            self.assertEqual(seen, {"session": "5825", "path": "mode"})
 
 
 class Finding(unittest.TestCase):

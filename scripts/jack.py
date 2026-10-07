@@ -507,6 +507,21 @@ def claude_sessions(procs: dict[int, dict] | None = None) -> list[dict]:
     return rows
 
 
+# A word given to `state` that reads as the start of a session id: four or more hex digits. No part of the state does.
+SESSION_WORD = re.compile(r"[0-9a-f]{4}[0-9a-f-]{0,32}")
+
+
+def names_a_session(name: str, rows: list[dict], tmux_names: list[str]) -> bool:
+    """Whether a word given to `state` names a session rather than a part of its state (`jack.py state lease`): the
+    start of a session's id, running or gone (a gone one is read from its log), a background session's short id, or
+    a tmux session's name. Until 2026-10-07 the check read `id` and `short` off Claude Code's own rows, which carry
+    neither, so `state <session>` with no part crashed (`KeyError: 'id'`, found by the eleventh ui-truth pass's
+    agent on its way out), and a gone session's id would have been taken for a part."""
+    if SESSION_WORD.fullmatch(name) or name in tmux_names:
+        return True
+    return any(isinstance(r, dict) and (str(r.get("sessionId") or "").startswith(name) or r.get("id") == name) for r in rows)
+
+
 def roster(config: str | None = None) -> dict:
     """Claude Code's own record of its background sessions: which terminal each has, and how big."""
     found = read_json(pathlib.Path(config or default_config()) / "daemon" / "roster.json") or {}
@@ -2780,7 +2795,7 @@ def main(argv: list[str] | None = None) -> int:
         front = given[:2] if given[:1] == ["--home"] else [w for w in given[:1] if w.startswith("--home=")]
         args = parser.parse_args(front + ["status"] + given[len(front):])
     # `jack.py state lease` names a part, not a session, when no session is called that.
-    if args.cmd == "state" and args.session and not args.path and not any(s["id"].startswith(args.session) or s["short"].startswith(args.session) for s in claude_sessions()):
+    if args.cmd == "state" and args.session and not args.path and not names_a_session(args.session, claude_sessions(), [p["name"] for p in tmux_panes()]):
         args.path, args.session = args.session, None
     if args.cmd == "model" and args.session and (args.session in ("last", "list") or args.session.isdigit()):
         args.which, args.session = args.session, None
