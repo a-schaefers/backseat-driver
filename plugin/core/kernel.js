@@ -60,7 +60,7 @@ var filterImpl = function(f, xs) {
   return xs.filter(f);
 };
 var sortByImpl = /* @__PURE__ */ (function() {
-  function mergeFromTo(compare3, fromOrdering, xs1, xs2, from, to) {
+  function mergeFromTo(compare5, fromOrdering, xs1, xs2, from, to) {
     var mid;
     var i;
     var j;
@@ -69,15 +69,15 @@ var sortByImpl = /* @__PURE__ */ (function() {
     var y;
     var c;
     mid = from + (to - from >> 1);
-    if (mid - from > 1) mergeFromTo(compare3, fromOrdering, xs2, xs1, from, mid);
-    if (to - mid > 1) mergeFromTo(compare3, fromOrdering, xs2, xs1, mid, to);
+    if (mid - from > 1) mergeFromTo(compare5, fromOrdering, xs2, xs1, from, mid);
+    if (to - mid > 1) mergeFromTo(compare5, fromOrdering, xs2, xs1, mid, to);
     i = from;
     j = mid;
     k = from;
     while (i < mid && j < to) {
       x = xs2[i];
       y = xs2[j];
-      c = fromOrdering(compare3(x)(y));
+      c = fromOrdering(compare5(x)(y));
       if (c > 0) {
         xs1[k++] = y;
         ++j;
@@ -93,11 +93,11 @@ var sortByImpl = /* @__PURE__ */ (function() {
       xs1[k++] = xs2[j++];
     }
   }
-  return function(compare3, fromOrdering, xs) {
+  return function(compare5, fromOrdering, xs) {
     var out;
     if (xs.length < 2) return xs;
     out = xs.slice(0);
-    mergeFromTo(compare3, fromOrdering, out, xs.slice(0), 0, xs.length);
+    mergeFromTo(compare5, fromOrdering, out, xs.slice(0), 0, xs.length);
     return out;
   };
 })();
@@ -277,11 +277,11 @@ var bottomNumber = Number.NEGATIVE_INFINITY;
 
 // output/Data.Ord/foreign.js
 var unsafeCompareImpl = function(lt) {
-  return function(eq4) {
+  return function(eq5) {
     return function(gt) {
       return function(x) {
         return function(y) {
-          return x < y ? lt : x === y ? eq4 : gt;
+          return x < y ? lt : x === y ? eq5 : gt;
         };
       };
     };
@@ -320,10 +320,10 @@ var eq = function(dict) {
 };
 var eq2 = /* @__PURE__ */ eq(eqBoolean);
 var notEq = function(dictEq) {
-  var eq33 = eq(dictEq);
+  var eq34 = eq(dictEq);
   return function(x) {
     return function(y) {
-      return eq2(eq33(x)(y))(false);
+      return eq2(eq34(x)(y))(false);
     };
   };
 };
@@ -350,6 +350,25 @@ var EQ = /* @__PURE__ */ (function() {
   EQ2.value = new EQ2();
   return EQ2;
 })();
+var semigroupOrdering = {
+  append: function(v) {
+    return function(v1) {
+      if (v instanceof LT) {
+        return LT.value;
+      }
+      ;
+      if (v instanceof GT) {
+        return GT.value;
+      }
+      ;
+      if (v instanceof EQ) {
+        return v1;
+      }
+      ;
+      throw new Error("Failed pattern match at Data.Ordering (line 21, column 1 - line 24, column 18): " + [v.constructor.name, v1.constructor.name]);
+    };
+  }
+};
 var eqOrdering = {
   eq: function(v) {
     return function(v1) {
@@ -368,6 +387,13 @@ var eqOrdering = {
       return false;
     };
   }
+};
+
+// output/Data.Ring/foreign.js
+var intSub = function(x) {
+  return function(y) {
+    return x - y | 0;
+  };
 };
 
 // output/Data.Semiring/foreign.js
@@ -412,6 +438,24 @@ var add = function(dict) {
   return dict.add;
 };
 
+// output/Data.Ring/index.js
+var sub = function(dict) {
+  return dict.sub;
+};
+var ringInt = {
+  sub: intSub,
+  Semiring0: function() {
+    return semiringInt;
+  }
+};
+var negate = function(dictRing) {
+  var sub1 = sub(dictRing);
+  var zero2 = zero(dictRing.Semiring0());
+  return function(a) {
+    return sub1(zero2)(a);
+  };
+};
+
 // output/Data.Ord/index.js
 var ordString = /* @__PURE__ */ (function() {
   return {
@@ -441,20 +485,20 @@ var compare = function(dict) {
   return dict.compare;
 };
 var comparing = function(dictOrd) {
-  var compare3 = compare(dictOrd);
+  var compare33 = compare(dictOrd);
   return function(f) {
     return function(x) {
       return function(y) {
-        return compare3(f(x))(f(y));
+        return compare33(f(x))(f(y));
       };
     };
   };
 };
 var greaterThanOrEq = function(dictOrd) {
-  var compare3 = compare(dictOrd);
+  var compare33 = compare(dictOrd);
   return function(a1) {
     return function(a2) {
-      var v = compare3(a1)(a2);
+      var v = compare33(a1)(a2);
       if (v instanceof LT) {
         return false;
       }
@@ -464,10 +508,10 @@ var greaterThanOrEq = function(dictOrd) {
   };
 };
 var lessThanOrEq = function(dictOrd) {
-  var compare3 = compare(dictOrd);
+  var compare33 = compare(dictOrd);
   return function(a1) {
     return function(a2) {
-      var v = compare3(a1)(a2);
+      var v = compare33(a1)(a2);
       if (v instanceof GT) {
         return false;
       }
@@ -477,10 +521,10 @@ var lessThanOrEq = function(dictOrd) {
   };
 };
 var max = function(dictOrd) {
-  var compare3 = compare(dictOrd);
+  var compare33 = compare(dictOrd);
   return function(x) {
     return function(y) {
-      var v = compare3(x)(y);
+      var v = compare33(x)(y);
       if (v instanceof LT) {
         return y;
       }
@@ -498,10 +542,10 @@ var max = function(dictOrd) {
   };
 };
 var min = function(dictOrd) {
-  var compare3 = compare(dictOrd);
+  var compare33 = compare(dictOrd);
   return function(x) {
     return function(y) {
-      var v = compare3(x)(y);
+      var v = compare33(x)(y);
       if (v instanceof LT) {
         return x;
       }
@@ -520,12 +564,27 @@ var min = function(dictOrd) {
 };
 var clamp = function(dictOrd) {
   var min12 = min(dictOrd);
-  var max15 = max(dictOrd);
+  var max16 = max(dictOrd);
   return function(low) {
     return function(hi) {
       return function(x) {
-        return min12(hi)(max15(low)(x));
+        return min12(hi)(max16(low)(x));
       };
+    };
+  };
+};
+var abs = function(dictOrd) {
+  var greaterThanOrEq1 = greaterThanOrEq(dictOrd);
+  return function(dictRing) {
+    var zero2 = zero(dictRing.Semiring0());
+    var negate1 = negate(dictRing);
+    return function(x) {
+      var $99 = greaterThanOrEq1(x)(zero2);
+      if ($99) {
+        return x;
+      }
+      ;
+      return negate1(x);
     };
   };
 };
@@ -592,6 +651,7 @@ var maybe = function(v) {
     };
   };
 };
+var isNothing = /* @__PURE__ */ maybe(true)(/* @__PURE__ */ $$const(false));
 var isJust = /* @__PURE__ */ maybe(false)(/* @__PURE__ */ $$const(true));
 var functorMaybe = {
   map: function(v) {
@@ -617,7 +677,7 @@ var fromJust = function() {
   };
 };
 var eqMaybe = function(dictEq) {
-  var eq4 = eq(dictEq);
+  var eq5 = eq(dictEq);
   return {
     eq: function(x) {
       return function(y) {
@@ -626,7 +686,7 @@ var eqMaybe = function(dictEq) {
         }
         ;
         if (x instanceof Just && y instanceof Just) {
-          return eq4(x.value0)(y.value0);
+          return eq5(x.value0)(y.value0);
         }
         ;
         return false;
@@ -813,11 +873,44 @@ var fst = function(v) {
 };
 
 // output/Data.Foldable/index.js
+var eq12 = /* @__PURE__ */ eq(eqOrdering);
 var foldr = function(dict) {
   return dict.foldr;
 };
 var foldl = function(dict) {
   return dict.foldl;
+};
+var maximumBy = function(dictFoldable) {
+  var foldl22 = foldl(dictFoldable);
+  return function(cmp) {
+    var max$prime = function(v) {
+      return function(v1) {
+        if (v instanceof Nothing) {
+          return new Just(v1);
+        }
+        ;
+        if (v instanceof Just) {
+          return new Just((function() {
+            var $303 = eq12(cmp(v.value0)(v1))(GT.value);
+            if ($303) {
+              return v.value0;
+            }
+            ;
+            return v1;
+          })());
+        }
+        ;
+        throw new Error("Failed pattern match at Data.Foldable (line 441, column 3 - line 441, column 27): " + [v.constructor.name, v1.constructor.name]);
+      };
+    };
+    return foldl22(max$prime)(Nothing.value);
+  };
+};
+var maximum = function(dictOrd) {
+  var compare5 = compare(dictOrd);
+  return function(dictFoldable) {
+    return maximumBy(dictFoldable)(compare5);
+  };
 };
 var sum = function(dictFoldable) {
   var foldl22 = foldl(dictFoldable);
@@ -828,12 +921,12 @@ var sum = function(dictFoldable) {
 var foldMapDefaultR = function(dictFoldable) {
   var foldr2 = foldr(dictFoldable);
   return function(dictMonoid) {
-    var append3 = append(dictMonoid.Semigroup0());
+    var append4 = append(dictMonoid.Semigroup0());
     var mempty2 = mempty(dictMonoid);
     return function(f) {
       return foldr2(function(x) {
         return function(acc) {
-          return append3(f(x))(acc);
+          return append4(f(x))(acc);
         };
       })(mempty2);
     };
@@ -1016,11 +1109,19 @@ var find2 = function(f) {
 };
 var filter = /* @__PURE__ */ runFn2(filterImpl);
 var elemIndex = function(dictEq) {
-  var eq24 = eq(dictEq);
+  var eq25 = eq(dictEq);
   return function(x) {
     return findIndex(function(v) {
-      return eq24(v)(x);
+      return eq25(v)(x);
     });
+  };
+};
+var notElem2 = function(dictEq) {
+  var elemIndex1 = elemIndex(dictEq);
+  return function(a) {
+    return function(arr) {
+      return isNothing(elemIndex1(a)(arr));
+    };
   };
 };
 var elem2 = function(dictEq) {
@@ -1056,7 +1157,7 @@ var mapMaybe = function(f) {
   })());
 };
 var any2 = /* @__PURE__ */ runFn2(anyImpl);
-var nubByEq = function(eq24) {
+var nubByEq = function(eq25) {
   return function(xs) {
     return (function __do() {
       var arr = newSTArray();
@@ -1064,7 +1165,7 @@ var nubByEq = function(eq24) {
         return function __do2() {
           var e = map22((function() {
             var $194 = any2(function(v) {
-              return eq24(v)(x);
+              return eq25(v)(x);
             });
             return function($195) {
               return !$194($195);
@@ -2503,8 +2604,1115 @@ var nextCheck = function(lease) {
   };
 };
 
+// output/Kernel.Ledger/index.js
+var abs3 = /* @__PURE__ */ abs(ordInt)(ringInt);
+var append3 = /* @__PURE__ */ append(semigroupOrdering);
+var compare3 = /* @__PURE__ */ compare(ordNumber);
+var compare12 = /* @__PURE__ */ compare(ordInt);
+var map4 = /* @__PURE__ */ map(functorArray);
+var elem5 = /* @__PURE__ */ elem2(eqInt);
+var compare22 = /* @__PURE__ */ compare(ordString);
+var max6 = /* @__PURE__ */ max(ordInt);
+var maximum2 = /* @__PURE__ */ maximum(ordInt)(foldableArray);
+var elem1 = /* @__PURE__ */ elem2(eqString);
+var append1 = /* @__PURE__ */ append(semigroupArray);
+var notElem3 = /* @__PURE__ */ notElem2(eqInt);
+var Open = /* @__PURE__ */ (function() {
+  function Open2() {
+  }
+  ;
+  Open2.value = new Open2();
+  return Open2;
+})();
+var Partly = /* @__PURE__ */ (function() {
+  function Partly2() {
+  }
+  ;
+  Partly2.value = new Partly2();
+  return Partly2;
+})();
+var Resolved = /* @__PURE__ */ (function() {
+  function Resolved2() {
+  }
+  ;
+  Resolved2.value = new Resolved2();
+  return Resolved2;
+})();
+var Dismissed = /* @__PURE__ */ (function() {
+  function Dismissed2() {
+  }
+  ;
+  Dismissed2.value = new Dismissed2();
+  return Dismissed2;
+})();
+var Critical = /* @__PURE__ */ (function() {
+  function Critical2() {
+  }
+  ;
+  Critical2.value = new Critical2();
+  return Critical2;
+})();
+var High = /* @__PURE__ */ (function() {
+  function High2() {
+  }
+  ;
+  High2.value = new High2();
+  return High2;
+})();
+var Medium = /* @__PURE__ */ (function() {
+  function Medium2() {
+  }
+  ;
+  Medium2.value = new Medium2();
+  return Medium2;
+})();
+var Low = /* @__PURE__ */ (function() {
+  function Low2() {
+  }
+  ;
+  Low2.value = new Low2();
+  return Low2;
+})();
+var Security = /* @__PURE__ */ (function() {
+  function Security2() {
+  }
+  ;
+  Security2.value = new Security2();
+  return Security2;
+})();
+var Bug = /* @__PURE__ */ (function() {
+  function Bug2() {
+  }
+  ;
+  Bug2.value = new Bug2();
+  return Bug2;
+})();
+var EdgeCase = /* @__PURE__ */ (function() {
+  function EdgeCase2() {
+  }
+  ;
+  EdgeCase2.value = new EdgeCase2();
+  return EdgeCase2;
+})();
+var Logic = /* @__PURE__ */ (function() {
+  function Logic2() {
+  }
+  ;
+  Logic2.value = new Logic2();
+  return Logic2;
+})();
+var Robustness = /* @__PURE__ */ (function() {
+  function Robustness2() {
+  }
+  ;
+  Robustness2.value = new Robustness2();
+  return Robustness2;
+})();
+var Quality = /* @__PURE__ */ (function() {
+  function Quality2() {
+  }
+  ;
+  Quality2.value = new Quality2();
+  return Quality2;
+})();
+var Person = /* @__PURE__ */ (function() {
+  function Person2() {
+  }
+  ;
+  Person2.value = new Person2();
+  return Person2;
+})();
+var Review = /* @__PURE__ */ (function() {
+  function Review2() {
+  }
+  ;
+  Review2.value = new Review2();
+  return Review2;
+})();
+var Look = /* @__PURE__ */ (function() {
+  function Look2() {
+  }
+  ;
+  Look2.value = new Look2();
+  return Look2;
+})();
+var statusWord = function(v) {
+  if (v instanceof Open) {
+    return "open";
+  }
+  ;
+  if (v instanceof Partly) {
+    return "partly";
+  }
+  ;
+  if (v instanceof Resolved) {
+    return "resolved";
+  }
+  ;
+  if (v instanceof Dismissed) {
+    return "dismissed";
+  }
+  ;
+  throw new Error("Failed pattern match at Kernel.Ledger (line 233, column 14 - line 237, column 27): " + [v.constructor.name]);
+};
+var statusOf = function(v) {
+  if (v === "open") {
+    return new Just(Open.value);
+  }
+  ;
+  if (v === "partly") {
+    return new Just(Partly.value);
+  }
+  ;
+  if (v === "resolved") {
+    return new Just(Resolved.value);
+  }
+  ;
+  if (v === "dismissed") {
+    return new Just(Dismissed.value);
+  }
+  ;
+  return Nothing.value;
+};
+var severityWord = function(v) {
+  if (v instanceof Critical) {
+    return "critical";
+  }
+  ;
+  if (v instanceof High) {
+    return "high";
+  }
+  ;
+  if (v instanceof Medium) {
+    return "medium";
+  }
+  ;
+  if (v instanceof Low) {
+    return "low";
+  }
+  ;
+  throw new Error("Failed pattern match at Kernel.Ledger (line 200, column 16 - line 204, column 15): " + [v.constructor.name]);
+};
+var severityOf = function(v) {
+  if (v === "critical") {
+    return Critical.value;
+  }
+  ;
+  if (v === "high") {
+    return High.value;
+  }
+  ;
+  if (v === "low") {
+    return Low.value;
+  }
+  ;
+  return Medium.value;
+};
+var ledgerNearLines = 3;
+var ledgerMaxClosed = 60;
+var isSame = function(candidate) {
+  return function(finding) {
+    return finding.file === candidate.file && (finding.topic === candidate.topic && (candidate.lineText !== "" && finding.lineText === candidate.lineText || abs3(finding.line - candidate.line | 0) <= ledgerNearLines));
+  };
+};
+var eqStatus = {
+  eq: function(x) {
+    return function(y) {
+      if (x instanceof Open && y instanceof Open) {
+        return true;
+      }
+      ;
+      if (x instanceof Partly && y instanceof Partly) {
+        return true;
+      }
+      ;
+      if (x instanceof Resolved && y instanceof Resolved) {
+        return true;
+      }
+      ;
+      if (x instanceof Dismissed && y instanceof Dismissed) {
+        return true;
+      }
+      ;
+      return false;
+    };
+  }
+};
+var eq23 = /* @__PURE__ */ eq(eqStatus);
+var notEq22 = /* @__PURE__ */ notEq(eqStatus);
+var isOpen = function(finding) {
+  return eq23(finding.status)(Open.value) || eq23(finding.status)(Partly.value);
+};
+var pruned = function(v) {
+  var closed = take(ledgerMaxClosed)(sortBy(function(a) {
+    return function(b) {
+      return append3(compare3(b.statusAt)(a.statusAt))(compare12(b.id)(a.id));
+    };
+  })(filter(function($144) {
+    return !isOpen($144);
+  })(v.findings)));
+  var kept2 = map4(function(v1) {
+    return v1.id;
+  })(closed);
+  return {
+    nextId: v.nextId,
+    coverage: v.coverage,
+    findings: filter(function(f) {
+      return isOpen(f) || elem5(f.id)(kept2);
+    })(v.findings)
+  };
+};
+var mayRule = function(actor) {
+  return function(from) {
+    return function(to) {
+      var isOpenStatus = function(status) {
+        return eq23(status)(Open.value) || eq23(status)(Partly.value);
+      };
+      if (actor instanceof Person) {
+        return eq23(to)(Dismissed.value) || eq23(from)(Dismissed.value) && eq23(to)(Open.value);
+      }
+      ;
+      if (actor instanceof Review) {
+        return notEq22(from)(Dismissed.value) && notEq22(to)(Dismissed.value);
+      }
+      ;
+      if (actor instanceof Look) {
+        return isOpenStatus(from) && (eq23(to)(Resolved.value) || eq23(to)(Partly.value));
+      }
+      ;
+      throw new Error("Failed pattern match at Kernel.Ledger (line 404, column 25 - line 407, column 64): " + [actor.constructor.name]);
+    };
+  };
+};
+var eqSeverity = {
+  eq: function(x) {
+    return function(y) {
+      if (x instanceof Critical && y instanceof Critical) {
+        return true;
+      }
+      ;
+      if (x instanceof High && y instanceof High) {
+        return true;
+      }
+      ;
+      if (x instanceof Medium && y instanceof Medium) {
+        return true;
+      }
+      ;
+      if (x instanceof Low && y instanceof Low) {
+        return true;
+      }
+      ;
+      return false;
+    };
+  }
+};
+var eq33 = /* @__PURE__ */ eq(eqSeverity);
+var notEq3 = /* @__PURE__ */ notEq(eqSeverity);
+var ordSeverity = {
+  compare: function(x) {
+    return function(y) {
+      if (x instanceof Critical && y instanceof Critical) {
+        return EQ.value;
+      }
+      ;
+      if (x instanceof Critical) {
+        return LT.value;
+      }
+      ;
+      if (y instanceof Critical) {
+        return GT.value;
+      }
+      ;
+      if (x instanceof High && y instanceof High) {
+        return EQ.value;
+      }
+      ;
+      if (x instanceof High) {
+        return LT.value;
+      }
+      ;
+      if (y instanceof High) {
+        return GT.value;
+      }
+      ;
+      if (x instanceof Medium && y instanceof Medium) {
+        return EQ.value;
+      }
+      ;
+      if (x instanceof Medium) {
+        return LT.value;
+      }
+      ;
+      if (y instanceof Medium) {
+        return GT.value;
+      }
+      ;
+      if (x instanceof Low && y instanceof Low) {
+        return EQ.value;
+      }
+      ;
+      throw new Error("Failed pattern match at Kernel.Ledger (line 0, column 0 - line 0, column 0): " + [x.constructor.name, y.constructor.name]);
+    };
+  },
+  Eq0: function() {
+    return eqSeverity;
+  }
+};
+var compare32 = /* @__PURE__ */ compare(ordSeverity);
+var eqCategory = {
+  eq: function(x) {
+    return function(y) {
+      if (x instanceof Security && y instanceof Security) {
+        return true;
+      }
+      ;
+      if (x instanceof Bug && y instanceof Bug) {
+        return true;
+      }
+      ;
+      if (x instanceof EdgeCase && y instanceof EdgeCase) {
+        return true;
+      }
+      ;
+      if (x instanceof Logic && y instanceof Logic) {
+        return true;
+      }
+      ;
+      if (x instanceof Robustness && y instanceof Robustness) {
+        return true;
+      }
+      ;
+      if (x instanceof Quality && y instanceof Quality) {
+        return true;
+      }
+      ;
+      return false;
+    };
+  }
+};
+var ordCategory = {
+  compare: function(x) {
+    return function(y) {
+      if (x instanceof Security && y instanceof Security) {
+        return EQ.value;
+      }
+      ;
+      if (x instanceof Security) {
+        return LT.value;
+      }
+      ;
+      if (y instanceof Security) {
+        return GT.value;
+      }
+      ;
+      if (x instanceof Bug && y instanceof Bug) {
+        return EQ.value;
+      }
+      ;
+      if (x instanceof Bug) {
+        return LT.value;
+      }
+      ;
+      if (y instanceof Bug) {
+        return GT.value;
+      }
+      ;
+      if (x instanceof EdgeCase && y instanceof EdgeCase) {
+        return EQ.value;
+      }
+      ;
+      if (x instanceof EdgeCase) {
+        return LT.value;
+      }
+      ;
+      if (y instanceof EdgeCase) {
+        return GT.value;
+      }
+      ;
+      if (x instanceof Logic && y instanceof Logic) {
+        return EQ.value;
+      }
+      ;
+      if (x instanceof Logic) {
+        return LT.value;
+      }
+      ;
+      if (y instanceof Logic) {
+        return GT.value;
+      }
+      ;
+      if (x instanceof Robustness && y instanceof Robustness) {
+        return EQ.value;
+      }
+      ;
+      if (x instanceof Robustness) {
+        return LT.value;
+      }
+      ;
+      if (y instanceof Robustness) {
+        return GT.value;
+      }
+      ;
+      if (x instanceof Quality && y instanceof Quality) {
+        return EQ.value;
+      }
+      ;
+      throw new Error("Failed pattern match at Kernel.Ledger (line 0, column 0 - line 0, column 0): " + [x.constructor.name, y.constructor.name]);
+    };
+  },
+  Eq0: function() {
+    return eqCategory;
+  }
+};
+var compare4 = /* @__PURE__ */ compare(ordCategory);
+var rankOrder = function(a) {
+  return function(b) {
+    return append3(compare32(a.severity)(b.severity))(append3(compare4(a.category)(b.category))(append3(compare22(a.file)(b.file))(append3(compare12(a.line)(b.line))(compare12(a.id)(b.id)))));
+  };
+};
+var eqActor = {
+  eq: function(x) {
+    return function(y) {
+      if (x instanceof Person && y instanceof Person) {
+        return true;
+      }
+      ;
+      if (x instanceof Review && y instanceof Review) {
+        return true;
+      }
+      ;
+      if (x instanceof Look && y instanceof Look) {
+        return true;
+      }
+      ;
+      return false;
+    };
+  }
+};
+var notEq4 = /* @__PURE__ */ notEq(eqActor);
+var eq4 = /* @__PURE__ */ eq(eqActor);
+var categoryWord = function(v) {
+  if (v instanceof Security) {
+    return "security";
+  }
+  ;
+  if (v instanceof Bug) {
+    return "bug";
+  }
+  ;
+  if (v instanceof EdgeCase) {
+    return "edge-case";
+  }
+  ;
+  if (v instanceof Logic) {
+    return "logic";
+  }
+  ;
+  if (v instanceof Robustness) {
+    return "robustness";
+  }
+  ;
+  if (v instanceof Quality) {
+    return "quality";
+  }
+  ;
+  throw new Error("Failed pattern match at Kernel.Ledger (line 216, column 16 - line 222, column 23): " + [v.constructor.name]);
+};
+var findingToWire = function(f) {
+  return {
+    id: f.id,
+    file: f.file,
+    line: f.line,
+    lineText: f.lineText,
+    severity: severityWord(f.severity),
+    category: categoryWord(f.category),
+    topic: f.topic,
+    title: f.title,
+    text: f.text,
+    condition: f.condition,
+    origin: f.origin,
+    commit: f.commit,
+    at: f.at,
+    status: statusWord(f.status),
+    statusAt: f.statusAt,
+    statusBy: f.statusBy,
+    statusNote: f.statusNote,
+    isPinned: f.isPinned
+  };
+};
+var toWire = function(v) {
+  return {
+    nextId: v.nextId,
+    findings: map4(findingToWire)(v.findings),
+    coverage: v.coverage
+  };
+};
+var categoryOf = function(v) {
+  if (v === "security") {
+    return Security.value;
+  }
+  ;
+  if (v === "bug") {
+    return Bug.value;
+  }
+  ;
+  if (v === "edge-case") {
+    return EdgeCase.value;
+  }
+  ;
+  if (v === "logic") {
+    return Logic.value;
+  }
+  ;
+  if (v === "robustness") {
+    return Robustness.value;
+  }
+  ;
+  return Quality.value;
+};
+var findingFromWire = function(w) {
+  return {
+    id: w.id,
+    file: w.file,
+    line: max6(0)(w.line),
+    lineText: w.lineText,
+    severity: severityOf(w.severity),
+    category: categoryOf(w.category),
+    topic: w.topic,
+    title: w.title,
+    text: w.text,
+    condition: w.condition,
+    origin: w.origin,
+    commit: w.commit,
+    at: w.at,
+    status: fromMaybe(Open.value)(statusOf(w.status)),
+    statusAt: w.statusAt,
+    statusBy: w.statusBy,
+    statusNote: w.statusNote,
+    isPinned: w.isPinned && (w.status !== "dismissed" && w.status !== "resolved")
+  };
+};
+var fromWire = function(w) {
+  var kept2 = nubByEq(function(a) {
+    return function(b) {
+      return a.id === b.id;
+    };
+  })(filter(function(f) {
+    return f.id > 0 && (f.file !== "" && f.text !== "");
+  })(map4(findingFromWire)(w.findings)));
+  var top3 = fromMaybe(0)(maximum2(map4(function(v) {
+    return v.id;
+  })(kept2)));
+  return pruned({
+    nextId: max6(w.nextId)(top3 + 1 | 0),
+    findings: kept2,
+    coverage: w.coverage
+  });
+};
+var ledgerAskedWire = function(files) {
+  return function(ledger) {
+    var v = fromWire(ledger);
+    var isAsked = function(f) {
+      return $$null(files) || elem1(f.file)(files);
+    };
+    return {
+      open: map4(function(v1) {
+        return v1.id;
+      })(sortBy(rankOrder)(filter(function(f) {
+        return isOpen(f) && isAsked(f);
+      })(v.findings))),
+      dismissed: map4(function(v1) {
+        return v1.id;
+      })(filter(function(f) {
+        return eq23(f.status)(Dismissed.value) && isAsked(f);
+      })(v.findings))
+    };
+  };
+};
+var ledgerCoveredWire = function(coverage) {
+  return function(ledger) {
+    var v = fromWire(ledger);
+    return toWire({
+      nextId: v.nextId,
+      findings: v.findings,
+      coverage
+    });
+  };
+};
+var ledgerNormalWire = function($145) {
+  return toWire(fromWire($145));
+};
+var ledgerPersonWire = function(action) {
+  return function(id) {
+    return function(at) {
+      return function(ledger) {
+        var change = function(f) {
+          if (f.id !== id) {
+            return f;
+          }
+          ;
+          if (otherwise) {
+            if (action === "dismiss" && notEq22(f.status)(Dismissed.value)) {
+              return {
+                id: f.id,
+                at: f.at,
+                category: f.category,
+                commit: f.commit,
+                condition: f.condition,
+                file: f.file,
+                line: f.line,
+                lineText: f.lineText,
+                origin: f.origin,
+                severity: f.severity,
+                text: f.text,
+                title: f.title,
+                topic: f.topic,
+                status: Dismissed.value,
+                statusAt: at,
+                statusBy: "person",
+                statusNote: "",
+                isPinned: false
+              };
+            }
+            ;
+            if (action === "restore" && eq23(f.status)(Dismissed.value)) {
+              return {
+                id: f.id,
+                isPinned: f.isPinned,
+                at: f.at,
+                category: f.category,
+                commit: f.commit,
+                condition: f.condition,
+                file: f.file,
+                line: f.line,
+                lineText: f.lineText,
+                origin: f.origin,
+                severity: f.severity,
+                text: f.text,
+                title: f.title,
+                topic: f.topic,
+                status: Open.value,
+                statusAt: at,
+                statusBy: "person",
+                statusNote: ""
+              };
+            }
+            ;
+            if (action === "pin" && isOpen(f)) {
+              return {
+                at: f.at,
+                category: f.category,
+                commit: f.commit,
+                condition: f.condition,
+                file: f.file,
+                id: f.id,
+                line: f.line,
+                lineText: f.lineText,
+                origin: f.origin,
+                severity: f.severity,
+                status: f.status,
+                statusAt: f.statusAt,
+                statusBy: f.statusBy,
+                statusNote: f.statusNote,
+                text: f.text,
+                title: f.title,
+                topic: f.topic,
+                isPinned: true
+              };
+            }
+            ;
+            if (action === "unpin") {
+              return {
+                at: f.at,
+                category: f.category,
+                commit: f.commit,
+                condition: f.condition,
+                file: f.file,
+                id: f.id,
+                line: f.line,
+                lineText: f.lineText,
+                origin: f.origin,
+                severity: f.severity,
+                status: f.status,
+                statusAt: f.statusAt,
+                statusBy: f.statusBy,
+                statusNote: f.statusNote,
+                text: f.text,
+                title: f.title,
+                topic: f.topic,
+                isPinned: false
+              };
+            }
+            ;
+            return f;
+          }
+          ;
+          throw new Error("Failed pattern match at Kernel.Ledger (line 447, column 3 - line 454, column 15): " + [f.constructor.name]);
+        };
+        var v = fromWire(ledger);
+        return toWire(pruned({
+          nextId: v.nextId,
+          coverage: v.coverage,
+          findings: map4(change)(v.findings)
+        }));
+      };
+    };
+  };
+};
+var ledgerViewsWire = function(facts) {
+  return function(ledger) {
+    var v = fromWire(ledger);
+    var opened = sortBy(rankOrder)(filter(isOpen)(v.findings));
+    var isSerious = function(f) {
+      return eq33(f.severity)(Critical.value) || eq33(f.severity)(High.value);
+    };
+    var isNearby = function(f) {
+      return elem1(f.file)(facts.savedFiles);
+    };
+    var wanted = append1(filter(function(v1) {
+      return v1.isPinned;
+    })(opened))(filter(function(f) {
+      return !f.isPinned && (isSerious(f) && isNearby(f));
+    })(opened));
+    var play = map4(function(v1) {
+      return v1.id;
+    })(take(max6(0)(facts.cap))(wanted));
+    var count = function(severity) {
+      return length(filter(function(f) {
+        return eq33(f.severity)(severity);
+      })(opened));
+    };
+    var closed = sortBy(function(a) {
+      return function(b) {
+        return append3(compare3(b.statusAt)(a.statusAt))(compare12(b.id)(a.id));
+      };
+    })(filter(function($146) {
+      return !isOpen($146);
+    })(v.findings));
+    return {
+      ranked: map4(function(v1) {
+        return v1.id;
+      })(filter(function(f) {
+        return notEq3(f.severity)(Low.value);
+      })(opened)),
+      folded: map4(function(v1) {
+        return v1.id;
+      })(filter(function(f) {
+        return eq33(f.severity)(Low.value);
+      })(opened)),
+      closed: map4(function(v1) {
+        return v1.id;
+      })(closed),
+      counts: {
+        critical: count(Critical.value),
+        high: count(High.value),
+        medium: count(Medium.value),
+        low: count(Low.value)
+      },
+      serious: count(Critical.value) + count(High.value) | 0,
+      play,
+      playMore: length(filter(function(f) {
+        return (f.isPinned || isNearby(f)) && notElem3(f.id)(play);
+      })(opened))
+    };
+  };
+};
+var actorWord = function(v) {
+  if (v instanceof Person) {
+    return "person";
+  }
+  ;
+  if (v instanceof Review) {
+    return "review";
+  }
+  ;
+  if (v instanceof Look) {
+    return "look";
+  }
+  ;
+  throw new Error("Failed pattern match at Kernel.Ledger (line 246, column 13 - line 249, column 17): " + [v.constructor.name]);
+};
+var freshFinding = function(actor) {
+  return function(at) {
+    return function(origin) {
+      return function(commit) {
+        return function(candidate) {
+          return function(id) {
+            return {
+              id,
+              file: candidate.file,
+              line: max6(0)(candidate.line),
+              lineText: candidate.lineText,
+              severity: severityOf(candidate.severity),
+              category: categoryOf(candidate.category),
+              topic: candidate.topic,
+              title: candidate.title,
+              text: candidate.text,
+              condition: candidate.condition,
+              origin,
+              commit,
+              at,
+              status: Open.value,
+              statusAt: at,
+              statusBy: actorWord(actor),
+              statusNote: "",
+              isPinned: false
+            };
+          };
+        };
+      };
+    };
+  };
+};
+var raisedAgain = function(actor) {
+  return function(at) {
+    return function(candidate) {
+      return function(finding) {
+        var isBack = eq23(finding.status)(Resolved.value);
+        return {
+          id: finding.id,
+          file: finding.file,
+          topic: finding.topic,
+          origin: finding.origin,
+          commit: finding.commit,
+          at: finding.at,
+          isPinned: finding.isPinned,
+          line: candidate.line,
+          lineText: candidate.lineText,
+          severity: severityOf(candidate.severity),
+          category: categoryOf(candidate.category),
+          title: candidate.title,
+          text: candidate.text,
+          condition: candidate.condition,
+          status: (function() {
+            if (isBack) {
+              return Open.value;
+            }
+            ;
+            return finding.status;
+          })(),
+          statusAt: (function() {
+            if (isBack) {
+              return at;
+            }
+            ;
+            return finding.statusAt;
+          })(),
+          statusBy: (function() {
+            if (isBack) {
+              return actorWord(actor);
+            }
+            ;
+            return finding.statusBy;
+          })(),
+          statusNote: (function() {
+            if (isBack) {
+              return "";
+            }
+            ;
+            return finding.statusNote;
+          })()
+        };
+      };
+    };
+  };
+};
+var foundStep = function(actor) {
+  return function(at) {
+    return function(origin) {
+      return function(commit) {
+        return function(acc) {
+          return function(v) {
+            var $130 = notEq4(actor)(Review.value) || (v.candidate.file === "" || v.candidate.text === "");
+            if ($130) {
+              return {
+                ledger: acc.ledger,
+                added: acc.added,
+                matched: acc.matched,
+                refused: snoc(acc.refused)(v.index)
+              };
+            }
+            ;
+            var v1 = find2(isSame(v.candidate))(acc.ledger.findings);
+            if (v1 instanceof Just) {
+              if (eq23(v1.value0.status)(Dismissed.value)) {
+                return {
+                  ledger: acc.ledger,
+                  added: acc.added,
+                  matched: acc.matched,
+                  refused: snoc(acc.refused)(v.index)
+                };
+              }
+              ;
+              if (otherwise) {
+                return {
+                  added: acc.added,
+                  refused: acc.refused,
+                  ledger: {
+                    nextId: acc.ledger.nextId,
+                    coverage: acc.ledger.coverage,
+                    findings: map4(function(f) {
+                      var $132 = f.id === v1.value0.id;
+                      if ($132) {
+                        return raisedAgain(actor)(at)(v.candidate)(f);
+                      }
+                      ;
+                      return f;
+                    })(acc.ledger.findings)
+                  },
+                  matched: snoc(acc.matched)(v1.value0.id)
+                };
+              }
+              ;
+            }
+            ;
+            if (v1 instanceof Nothing) {
+              return {
+                matched: acc.matched,
+                refused: acc.refused,
+                ledger: {
+                  coverage: acc.ledger.coverage,
+                  nextId: acc.ledger.nextId + 1 | 0,
+                  findings: snoc(acc.ledger.findings)(freshFinding(actor)(at)(origin)(commit)(v.candidate)(acc.ledger.nextId))
+                },
+                added: snoc(acc.added)(acc.ledger.nextId)
+              };
+            }
+            ;
+            throw new Error("Failed pattern match at Kernel.Ledger (line 379, column 12 - line 391, column 14): " + [v1.constructor.name]);
+          };
+        };
+      };
+    };
+  };
+};
+var ruledStep = function(actor) {
+  return function(at) {
+    return function(acc) {
+      return function(ruling) {
+        var v = find2(function(f) {
+          return f.id === ruling.id;
+        })(acc.ledger.findings);
+        var v1 = statusOf(ruling.status);
+        if (v1 instanceof Just && (v instanceof Just && mayRule(actor)(v.value0.status)(v1.value0))) {
+          var changed2 = {
+            at: v.value0.at,
+            category: v.value0.category,
+            commit: v.value0.commit,
+            condition: v.value0.condition,
+            file: v.value0.file,
+            id: v.value0.id,
+            line: v.value0.line,
+            lineText: v.value0.lineText,
+            origin: v.value0.origin,
+            text: v.value0.text,
+            title: v.value0.title,
+            topic: v.value0.topic,
+            status: v1.value0,
+            statusAt: at,
+            statusBy: actorWord(actor),
+            statusNote: ruling.note,
+            severity: (function() {
+              var $139 = eq4(actor)(Review.value) && ruling.severity !== "";
+              if ($139) {
+                return severityOf(ruling.severity);
+              }
+              ;
+              return v.value0.severity;
+            })(),
+            isPinned: v.value0.isPinned && (notEq22(v1.value0)(Dismissed.value) && notEq22(v1.value0)(Resolved.value))
+          };
+          return {
+            refused: acc.refused,
+            ledger: {
+              nextId: acc.ledger.nextId,
+              coverage: acc.ledger.coverage,
+              findings: map4(function(f) {
+                var $140 = f.id === ruling.id;
+                if ($140) {
+                  return changed2;
+                }
+                ;
+                return f;
+              })(acc.ledger.findings)
+            },
+            applied: snoc(acc.applied)(ruling.id)
+          };
+        }
+        ;
+        return {
+          ledger: acc.ledger,
+          applied: acc.applied,
+          refused: snoc(acc.refused)(ruling.id)
+        };
+      };
+    };
+  };
+};
+var actorOf = function(v) {
+  if (v === "person") {
+    return Person.value;
+  }
+  ;
+  if (v === "review") {
+    return Review.value;
+  }
+  ;
+  return Look.value;
+};
+var ledgerFoundWire = function(actor) {
+  return function(at) {
+    return function(origin) {
+      return function(commit) {
+        return function(candidates) {
+          return function(ledger) {
+            var done = foldl2(foundStep(actorOf(actor))(at)(origin)(commit))({
+              ledger: fromWire(ledger),
+              added: [],
+              matched: [],
+              refused: []
+            })(mapWithIndex2(function(index2) {
+              return function(candidate) {
+                return {
+                  index: index2,
+                  candidate
+                };
+              };
+            })(candidates));
+            return {
+              ledger: toWire(pruned(done.ledger)),
+              added: done.added,
+              matched: done.matched,
+              refused: done.refused
+            };
+          };
+        };
+      };
+    };
+  };
+};
+var ledgerRuledWire = function(actor) {
+  return function(at) {
+    return function(rulings) {
+      return function(ledger) {
+        var done = foldl2(ruledStep(actorOf(actor))(at))({
+          ledger: fromWire(ledger),
+          applied: [],
+          refused: []
+        })(rulings);
+        return {
+          ledger: toWire(pruned(done.ledger)),
+          applied: done.applied,
+          refused: done.refused
+        };
+      };
+    };
+  };
+};
+
 // output/Kernel.License/index.js
-var max6 = /* @__PURE__ */ max(ordNumber);
+var max7 = /* @__PURE__ */ max(ordNumber);
 var Unchosen = /* @__PURE__ */ (function() {
   function Unchosen2() {
   }
@@ -2680,7 +3888,7 @@ var standingText = function(v) {
   ;
   throw new Error("Failed pattern match at Kernel.License (line 161, column 16 - line 169, column 27): " + [v.constructor.name]);
 };
-var fromWire = function(w) {
+var fromWire2 = function(w) {
   var useOf = function(v) {
     if (v === "personal") {
       return Personal.value;
@@ -2765,8 +3973,8 @@ var eqKeyState = {
     };
   }
 };
-var eq12 = /* @__PURE__ */ eq(eqKeyState);
-var notEq3 = /* @__PURE__ */ notEq(eqKeyState);
+var eq13 = /* @__PURE__ */ eq(eqKeyState);
+var notEq5 = /* @__PURE__ */ notEq(eqKeyState);
 var eqAnswer = {
   eq: function(x) {
     return function(y) {
@@ -2790,7 +3998,7 @@ var eqAnswer = {
     };
   }
 };
-var eq23 = /* @__PURE__ */ eq(eqAnswer);
+var eq24 = /* @__PURE__ */ eq(eqAnswer);
 var dayMs = 864e5;
 var everyMs = /* @__PURE__ */ (function() {
   return 7 * dayMs;
@@ -2808,11 +4016,11 @@ var standingOf = function(facts) {
   }
   ;
   if (facts.use instanceof Commercial) {
-    if (eq12(facts.key)(NoKey.value)) {
+    if (eq13(facts.key)(NoKey.value)) {
       return NeedsKey.value;
     }
     ;
-    if (eq12(facts.key)(Malformed.value) || eq12(facts.key)(Forged.value)) {
+    if (eq13(facts.key)(Malformed.value) || eq13(facts.key)(Forged.value)) {
       return BadKey.value;
     }
     ;
@@ -2820,11 +4028,11 @@ var standingOf = function(facts) {
       return Expired.value;
     }
     ;
-    if (eq23(facts.answer)(Revoked.value)) {
+    if (eq24(facts.answer)(Revoked.value)) {
       return Withdrawn.value;
     }
     ;
-    if (facts.hasServer && facts.now - max6(facts.answeredAt)(facts.keySince) >= quietMs) {
+    if (facts.hasServer && facts.now - max7(facts.answeredAt)(facts.keySince) >= quietMs) {
       return Unchecked.value;
     }
     ;
@@ -2837,11 +4045,11 @@ var standingOf = function(facts) {
   throw new Error("Failed pattern match at Kernel.License (line 94, column 20 - line 103, column 28): " + [facts.use.constructor.name]);
 };
 var licenseStandingWire = function($34) {
-  return standingText(standingOf(fromWire($34)));
+  return standingText(standingOf(fromWire2($34)));
 };
 var retryMs = dayMs;
 var nextCheckAt = function(facts) {
-  if (facts.use instanceof Commercial && (facts.hasServer && (notEq3(facts.key)(NoKey.value) && (notEq3(facts.key)(Malformed.value) && notEq3(facts.key)(Forged.value))))) {
+  if (facts.use instanceof Commercial && (facts.hasServer && (notEq5(facts.key)(NoKey.value) && (notEq5(facts.key)(Malformed.value) && notEq5(facts.key)(Forged.value))))) {
     var $32 = facts.triedAt === 0;
     if ($32) {
       return facts.now;
@@ -2858,11 +4066,11 @@ var nextCheckAt = function(facts) {
   return 0;
 };
 var licenseNextCheckWire = function($35) {
-  return nextCheckAt(fromWire($35));
+  return nextCheckAt(fromWire2($35));
 };
 
 // output/Kernel.Pace/index.js
-var max7 = /* @__PURE__ */ max(ordNumber);
+var max8 = /* @__PURE__ */ max(ordNumber);
 var min6 = /* @__PURE__ */ min(ordNumber);
 var slowedGapMs = function(minGapMs) {
   return function(factor) {
@@ -2871,7 +4079,7 @@ var slowedGapMs = function(minGapMs) {
     }
     ;
     if (otherwise) {
-      return max7(minGapMs)(6e4) * factor;
+      return max8(minGapMs)(6e4) * factor;
     }
     ;
     throw new Error("Failed pattern match at Kernel.Pace (line 59, column 1 - line 59, column 42): " + [minGapMs.constructor.name, factor.constructor.name]);
@@ -2924,7 +4132,7 @@ var backoffMs = function(failures) {
 };
 
 // output/Kernel.Play/index.js
-var max8 = /* @__PURE__ */ max(ordNumber);
+var max9 = /* @__PURE__ */ max(ordNumber);
 var LookFailed = /* @__PURE__ */ (function() {
   function LookFailed2(value0) {
     this.value0 = value0;
@@ -3295,7 +4503,7 @@ var paced = function(facts) {
       }
       ;
       if (facts.lastLookAt instanceof Just) {
-        return max8(facts.lastChangeAt.value0 + facts.quietMs)(facts.lastLookAt.value0 + slowedGapMs(facts.minGapMs)(gapFactor(facts.pressure.percent)) + backoffMs(facts.failures));
+        return max9(facts.lastChangeAt.value0 + facts.quietMs)(facts.lastLookAt.value0 + slowedGapMs(facts.minGapMs)(gapFactor(facts.pressure.percent)) + backoffMs(facts.failures));
       }
       ;
       throw new Error("Failed pattern match at Kernel.Play (line 98, column 7 - line 101, column 110): " + [facts.lastLookAt.constructor.name]);
@@ -3387,7 +4595,7 @@ var playOf = function(facts) {
         ;
         if (facts.health instanceof Waiting) {
           return new Waiting2({
-            until: new Just(max8(facts.health.value0.until)(dueAt)),
+            until: new Just(max9(facts.health.value0.until)(dueAt)),
             why: orTrouble(facts.health.value0.trouble)(facts.health.value0.detail)
           });
         }
@@ -3534,8 +4742,8 @@ var wakeAtWire = function(facts) {
 };
 
 // output/Kernel.Queue/index.js
-var max9 = /* @__PURE__ */ max(ordInt);
-var map4 = /* @__PURE__ */ map(functorMaybe);
+var max10 = /* @__PURE__ */ max(ordInt);
+var map5 = /* @__PURE__ */ map(functorMaybe);
 var max13 = /* @__PURE__ */ max(ordNumber);
 var map12 = /* @__PURE__ */ map(functorArray);
 var ToReview = /* @__PURE__ */ (function() {
@@ -3589,7 +4797,7 @@ var toCommits = function(v) {
 };
 var retryBaseMs = 6e4;
 var retryMs2 = function(attempts) {
-  return retryBaseMs * pow(2)(toNumber(max9(0)(attempts - 1 | 0)));
+  return retryBaseMs * pow(2)(toNumber(max10(0)(attempts - 1 | 0)));
 };
 var planHeld = "you are close to your plan limit. Press r to run it anyway.";
 var maxWaiting = 3;
@@ -3622,7 +4830,7 @@ var maxWaitMs = /* @__PURE__ */ (function() {
 var maxAttempts = 3;
 var isSpent = function(hash) {
   return function(v) {
-    return fromMaybe(0)(map4(function(v1) {
+    return fromMaybe(0)(map5(function(v1) {
       return v1.attempts;
     })(find2(function(commit) {
       return commit.hash === hash;
@@ -3719,7 +4927,7 @@ var fromCommits = /* @__PURE__ */ (function() {
     return Queue($73($74($75)));
   };
 })();
-var fromWire2 = /* @__PURE__ */ (function() {
+var fromWire3 = /* @__PURE__ */ (function() {
   var $76 = map12(waitingFromWire);
   return function($77) {
     return fromCommits($76($77));
@@ -3727,7 +4935,7 @@ var fromWire2 = /* @__PURE__ */ (function() {
 })();
 var isSpentWire = function(commits) {
   return function(hash) {
-    return isSpent(hash)(fromWire2(commits));
+    return isSpent(hash)(fromWire3(commits));
   };
 };
 var failedText = function(clock) {
@@ -3775,10 +4983,10 @@ var eqStage = {
     };
   }
 };
-var eq13 = /* @__PURE__ */ eq(eqStage);
+var eq14 = /* @__PURE__ */ eq(eqStage);
 var isPastReview = function(wanted) {
   return function(commit) {
-    return eq13(commit.stage)(ToAssess.value) || !wanted.wantsReview;
+    return eq14(commit.stage)(ToAssess.value) || !wanted.wantsReview;
   };
 };
 var nextToAssess = function(wanted) {
@@ -3811,14 +5019,14 @@ var settledIn = function(wanted) {
 };
 var settledInWire = function(commits) {
   return function(wanted) {
-    return settledIn(wanted)(fromWire2(commits));
+    return settledIn(wanted)(fromWire3(commits));
   };
 };
 var nextToReview = function(wanted) {
   return function(v) {
     if (wanted.wantsReview) {
       return find2(function(commit) {
-        return eq13(commit.stage)(ToReview.value);
+        return eq14(commit.stage)(ToReview.value);
       })(v);
     }
     ;
@@ -3834,7 +5042,7 @@ var waitingToWire = function(w) {
     hash: w.hash,
     title: w.title,
     at: w.at,
-    isReviewed: eq13(w.stage)(ToAssess.value),
+    isReviewed: eq14(w.stage)(ToAssess.value),
     attempts: w.attempts
   };
 };
@@ -3863,15 +5071,15 @@ var nextToWire = function(v) {
 };
 var nextToAssessWire = function(commits) {
   return function(wanted) {
-    return nextToWire(nextToAssess(wanted)(fromWire2(commits)));
+    return nextToWire(nextToAssess(wanted)(fromWire3(commits)));
   };
 };
 var nextToReviewWire = function(commits) {
   return function(wanted) {
-    return nextToWire(nextToReview(wanted)(fromWire2(commits)));
+    return nextToWire(nextToReview(wanted)(fromWire3(commits)));
   };
 };
-var toWire = /* @__PURE__ */ (function() {
+var toWire2 = /* @__PURE__ */ (function() {
   var $78 = map12(waitingToWire);
   return function($79) {
     return $78(toCommits($79));
@@ -3879,7 +5087,7 @@ var toWire = /* @__PURE__ */ (function() {
 })();
 var through = function(change) {
   return function($80) {
-    return toWire(change(fromWire2($80)));
+    return toWire2(change(fromWire3($80)));
   };
 };
 var withCommitWire = function(commits) {
@@ -3960,10 +5168,10 @@ var withAttemptWire = function(commits) {
 
 // output/Kernel.Schedule/index.js
 var min7 = /* @__PURE__ */ min(ordNumber);
-var map5 = /* @__PURE__ */ map(functorArray);
+var map6 = /* @__PURE__ */ map(functorArray);
 var sortWith2 = /* @__PURE__ */ sortWith(ordNumber);
-var max10 = /* @__PURE__ */ max(ordNumber);
-var eq14 = /* @__PURE__ */ eq(/* @__PURE__ */ eqMaybe(eqNumber));
+var max11 = /* @__PURE__ */ max(ordNumber);
+var eq15 = /* @__PURE__ */ eq(/* @__PURE__ */ eqMaybe(eqNumber));
 var Keep = /* @__PURE__ */ (function() {
   function Keep2() {
   }
@@ -4005,7 +5213,7 @@ var earliest = /* @__PURE__ */ (function() {
   return foldl2(first)(Nothing.value);
 })();
 var dueNow = function(now) {
-  var $32 = map5(function(v) {
+  var $32 = map6(function(v) {
     return v.name;
   });
   var $33 = sortWith2(function(v) {
@@ -4025,14 +5233,14 @@ var dueNowWire = function(deadlines) {
 };
 var delayMs = function(at) {
   return function(now) {
-    return max10(0)(at - now);
+    return max11(0)(at - now);
   };
 };
 var delayMsWire = delayMs;
 var arming = function(armedFor) {
   return function(deadlines) {
     var v = earliest(deadlines);
-    if (eq14(v)(armedFor)) {
+    if (eq15(v)(armedFor)) {
       return Keep.value;
     }
     ;
@@ -4085,7 +5293,7 @@ var armingWire = function(isArmed) {
 
 // output/Kernel.Sensor/index.js
 var min8 = /* @__PURE__ */ min(ordNumber);
-var max11 = /* @__PURE__ */ max(ordNumber);
+var max14 = /* @__PURE__ */ max(ordNumber);
 var slowScanWaitMs = 2e3;
 var slowScanStepMs = 250;
 var scanMs = 2e3;
@@ -4148,15 +5356,15 @@ var focusGapMs = function(facts) {
   }
   ;
   if (otherwise) {
-    return min8(longestFocusGapMs)(max11(focusScanMs)(facts.tookMs * 4));
+    return min8(longestFocusGapMs)(max14(focusScanMs)(facts.tookMs * 4));
   }
   ;
   throw new Error("Failed pattern match at Kernel.Sensor (line 134, column 1 - line 134, column 35): " + [facts.constructor.name]);
 };
 
 // output/Kernel.Sessions/index.js
-var max14 = /* @__PURE__ */ max(ordNumber);
-var map6 = /* @__PURE__ */ map(functorArray);
+var max15 = /* @__PURE__ */ max(ordNumber);
+var map7 = /* @__PURE__ */ map(functorArray);
 var sortWith3 = /* @__PURE__ */ sortWith(ordNumber);
 var Drawn = /* @__PURE__ */ (function() {
   function Drawn2() {
@@ -4192,7 +5400,7 @@ var keepMs = 864e5;
 var kept = function(entries) {
   return function(now) {
     return filter(function(entry) {
-      return now - max14(entry.at)(entry.leftAt) <= keepMs;
+      return now - max15(entry.at)(entry.leftAt) <= keepMs;
     })(entries);
   };
 };
@@ -4217,7 +5425,7 @@ var left = function(entries) {
         ;
         throw new Error("Failed pattern match at Kernel.Sessions (line 136, column 3 - line 138, column 24): " + [entry.constructor.name]);
       };
-      return kept(map6(mark)(entries))(now);
+      return kept(map7(mark)(entries))(now);
     };
   };
 };
@@ -4382,7 +5590,7 @@ var fixed = /* @__PURE__ */ (function() {
 })();
 
 // output/Kernel.Status/index.js
-var append1 = /* @__PURE__ */ append(semigroupArray);
+var append12 = /* @__PURE__ */ append(semigroupArray);
 var watchState = function(v) {
   if (v instanceof Starting) {
     return "starting";
@@ -4611,7 +5819,7 @@ var healthLine = function(clock) {
       return "";
     }
     ;
-    return joinWith(" ")(append1(service)(append1(slowGit)(keepsFailing)));
+    return joinWith(" ")(append12(service)(append12(slowGit)(keepsFailing)));
   };
 };
 var healthLineWire = function(clock) {
@@ -4926,6 +6134,15 @@ export {
   leaseReleased,
   leaseSlackMs,
   leaseTtlMs,
+  ledgerAskedWire,
+  ledgerCoveredWire,
+  ledgerFoundWire,
+  ledgerMaxClosed,
+  ledgerNearLines,
+  ledgerNormalWire,
+  ledgerPersonWire,
+  ledgerRuledWire,
+  ledgerViewsWire,
   licenseNextCheckWire,
   licenseStandingWire,
   longestFocusGapMs,

@@ -52,6 +52,13 @@ export type ReviewScope =
     }
   /** No change at all: a first look around a project the tutor has not seen before. */
   | { kind: 'survey' }
+  /**
+   * No change at all: a look through the code as it is, for issues, ranked
+   * (owner, 2026-10-07: in a real codebase the pane said nothing, and its
+   * silence read as "he wrote a perfect codebase"). `files` are their source
+   * files as git lists them; `vendored` the folders that look generated.
+   */
+  | { kind: 'audit'; files: readonly string[]; vendored: readonly string[] }
 
 export function showCommitArgs(hash: string): string[] {
   return ['show', '--no-color', '--stat', '--patch', '--format=commit %H%nAuthor: %an%nDate:   %ad%n%n%s%n%n%b', hash]
@@ -69,9 +76,27 @@ function capped(text: string): string {
 /** What the pane calls a survey, which reviews nothing. */
 export const SURVEY_SUBJECT = 'a first look around this project'
 
+/** What the pane calls an audit, which looks through the whole codebase for issues. */
+export const AUDIT_SUBJECT = 'an audit of this project'
+
+/** How many of their files an audit's request names. */
+const MAX_AUDIT_FILES = 300
+
+/** The files a patch or diff changes, by their path after the change. */
+export function changedFilesOf(patch: string): string[] {
+  const files: string[] = []
+  for (const match of patch.matchAll(/^diff --git a\/.+ b\/(.+)$/gm)) {
+    const path = match[1] ?? ''
+    if (path !== '' && !files.includes(path)) files.push(path)
+  }
+
+  return files
+}
+
 /** What the pane calls the thing under review. */
 export function scopeSubject(scope: ReviewScope): string {
   if (scope.kind === 'survey') return SURVEY_SUBJECT
+  if (scope.kind === 'audit') return AUDIT_SUBJECT
   if (scope.kind === 'commit') return `commit ${shortHash(scope.hash)}: ${scope.title}`
 
   return scope.log.trim() === '' ? 'your uncommitted work' : `your work since ${shortHash(scope.from)}`
@@ -88,6 +113,8 @@ export type ReviewContext = {
   overview: string
   /** The reviewer's own recent reviews, newest first, or ''. */
   earlier: string
+  /** The issues on record for what it looks at, each a line or two with its id, and the ones the person dismissed. */
+  issues?: { open: readonly string[]; dismissed: readonly string[] }
 }
 
 function background(context: ReviewContext): string[] {
@@ -96,6 +123,19 @@ function background(context: ReviewContext): string[] {
     ...(context.earlier === ''
       ? []
       : ['', 'Your earlier reviews, newest first. Where this change answers something you raised, say so. Do not repeat a point that still stands unless it matters more now:', context.earlier]),
+    ...issuesOnRecord(context.issues),
+  ]
+}
+
+/** The issues on record, for the reviewer to rule on by id, and the dismissed ones it never raises again. */
+function issuesOnRecord(issues: ReviewContext['issues']): string[] {
+  if (issues === undefined || (issues.open.length === 0 && issues.dismissed.length === 0)) return []
+
+  return [
+    '',
+    'Issues on record here, with their ids. Rule on each in your fence: still open, partly fixed (say what remains) or resolved. Raise none of them again as a new issue:',
+    ...(issues.open.length === 0 ? ['(none open)'] : issues.open),
+    ...(issues.dismissed.length === 0 ? [] : ['', 'Issues the person dismissed. Never raise them again:', ...issues.dismissed]),
   ]
 }
 
@@ -113,6 +153,20 @@ export function reviewRequest(scope: ReviewScope, context: ReviewContext = { ove
     return [
       'Survey this project. Nothing has changed: this is a first look around, so that later reviews and explanations start from the big picture.',
       'The repository is your working directory. Look at its layout, its entry points, its main modules and its tests. A dozen files read is plenty.',
+    ].join('\n')
+  }
+  if (scope.kind === 'audit') {
+    return [
+      'Audit this project for issues. Nothing has changed: this is a look through the code as it is, for what is wrong or will bite, ranked from critical to low.',
+      'The repository is your working directory. Read the code that takes input from outside first (requests, files, the command line, the database), then what it calls. About 25 files read is plenty: say in your fence which you read, and what you skipped and why.',
+      ...background(context),
+      '',
+      'Their source files, as git lists them:',
+      ...(scope.files.length === 0 ? ['(none listed)'] : scope.files.slice(0, MAX_AUDIT_FILES).map(path => `- ${path}`)),
+      ...(scope.files.length > MAX_AUDIT_FILES ? [`[and ${scope.files.length - MAX_AUDIT_FILES} more]`] : []),
+      ...(scope.vendored.length === 0
+        ? []
+        : ['', 'Folders that look generated or vendored. Do not audit their insides; a known-vulnerable version of what is in one is one issue:', ...scope.vendored.map(path => `- ${path}`)]),
     ].join('\n')
   }
   if (scope.kind === 'commit') {
@@ -139,7 +193,7 @@ export function reviewRequest(scope: ReviewScope, context: ReviewContext = { ove
 /** A cheap fingerprint of a scope, to tell whether anything changed since the previous review. */
 export function scopePrint(scope: ReviewScope): string {
   const text =
-    scope.kind === 'survey' ? 'survey' : scope.kind === 'commit' ? scope.hash : `${scope.from}\n${scope.diff}\n${scope.untracked.join('\n')}`
+    scope.kind === 'survey' || scope.kind === 'audit' ? scope.kind : scope.kind === 'commit' ? scope.hash : `${scope.from}\n${scope.diff}\n${scope.untracked.join('\n')}`
   let hash = 5381
   for (let i = 0; i < text.length; i += 1) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0
 

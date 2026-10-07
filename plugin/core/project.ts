@@ -1,4 +1,5 @@
 import type { DecisionPoint, ReviewText } from '../types'
+import { withoutFindingsFence } from './findings'
 
 /**
  * What is known about a project as a whole: the part of the per-project
@@ -55,6 +56,12 @@ export type ProjectKnowledge = {
   /** True once the deep review model has surveyed the project. */
   isSurveyed: boolean
   /**
+   * True once an audit of the project was started: one per project, after its
+   * first look around, and again only when the person asks (`a`). Marked when
+   * it starts, so that one that fails is not started again at every switch-on.
+   */
+  isAudited: boolean
+  /**
    * The first look around, as the Deep review tab showed it, so that a new project's tab has it back after a
    * restart (owner, 2026-10-06). Kept here and not with the reviews: it reviewed nobody's work, and the next
    * reviewer is not told of it as an earlier review. Null until the survey.
@@ -80,7 +87,7 @@ const MAX_TEXT = 600
 const MAX_OVERVIEW = 900
 
 export function emptyProject(root: string): ProjectKnowledge {
-  return { v: 1, root, overview: '', overviewCommit: '', overviewAt: 0, roles: {}, insights: [], isSurveyed: false, survey: null }
+  return { v: 1, root, overview: '', overviewCommit: '', overviewAt: 0, roles: {}, insights: [], isSurveyed: false, isAudited: false, survey: null }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -118,7 +125,8 @@ export function splitReview(answer: string): { text: string; notes: ReviewNotes 
     notes = parseNotes(match[1] ?? '') ?? notes
   }
 
-  return { text: answer.replace(FENCE, '').trim(), notes }
+  // The fence of issues goes too: its issues are the ledger's (`findings.ts`), never the review's text.
+  return { text: withoutFindingsFence(answer.replace(FENCE, '')).trim(), notes }
 }
 
 function parseNotes(block: string): ReviewNotes | null {
@@ -203,8 +211,14 @@ export function parseProject(value: unknown, root: string): ProjectKnowledge {
     roles,
     insights: insights.slice(0, MAX_INSIGHTS),
     isSurveyed: stored.isSurveyed === true,
+    isAudited: stored.isAudited === true,
     survey: parseReviews([stored.survey])[0] ?? null,
   }
+}
+
+/** The project with its audit started. The same object when it was already. */
+export function withAudited(project: ProjectKnowledge): ProjectKnowledge {
+  return project.isAudited ? project : { ...project, isAudited: true }
 }
 
 /**

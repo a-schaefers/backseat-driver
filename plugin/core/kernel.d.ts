@@ -213,3 +213,45 @@ export type GrowthWire = {
   encouragement: GrowthItemWire[]
 }
 export const growthWire: (facts: GrowthFactsWire) => GrowthWire
+
+// Ledger: the project's issues (Kernel.Ledger). Flat, every field present.
+export type LedgerFindingWire = {
+  id: number
+  file: string
+  line: number
+  lineText: string
+  severity: string
+  category: string
+  topic: string
+  title: string
+  text: string
+  condition: string
+  origin: string
+  commit: string
+  at: number
+  status: string
+  statusAt: number
+  statusBy: string
+  statusNote: string
+  isPinned: boolean
+}
+export type LedgerSkippedWire = { path: string; why: string }
+export type LedgerCoverageWire = { at: number; commit: string; files: number; read: string[]; skipped: LedgerSkippedWire[] }
+export type LedgerWire = { nextId: number; findings: LedgerFindingWire[]; coverage: LedgerCoverageWire }
+export type LedgerCandidateWire = { file: string; line: number; lineText: string; severity: string; category: string; topic: string; title: string; text: string; condition: string }
+export type LedgerRulingWire = { id: number; status: string; note: string; severity: string }
+export type LedgerFoundWire = { ledger: LedgerWire; added: number[]; matched: number[]; refused: number[] }
+export type LedgerRuledWire = { ledger: LedgerWire; applied: number[]; refused: number[] }
+export type LedgerFactsWire = { savedFiles: string[]; cap: number }
+export type LedgerCountsWire = { critical: number; high: number; medium: number; low: number }
+export type LedgerViewsWire = { ranked: number[]; folded: number[]; closed: number[]; counts: LedgerCountsWire; serious: number; play: number[]; playMore: number }
+export type LedgerAskedWire = { open: number[]; dismissed: number[] }
+export const ledgerNormalWire: (ledger: LedgerWire) => LedgerWire
+export const ledgerFoundWire: (actor: string) => (at: number) => (origin: string) => (commit: string) => (candidates: LedgerCandidateWire[]) => (ledger: LedgerWire) => LedgerFoundWire
+export const ledgerRuledWire: (actor: string) => (at: number) => (rulings: LedgerRulingWire[]) => (ledger: LedgerWire) => LedgerRuledWire
+export const ledgerPersonWire: (action: string) => (id: number) => (at: number) => (ledger: LedgerWire) => LedgerWire
+export const ledgerCoveredWire: (coverage: LedgerCoverageWire) => (ledger: LedgerWire) => LedgerWire
+export const ledgerViewsWire: (facts: LedgerFactsWire) => (ledger: LedgerWire) => LedgerViewsWire
+export const ledgerAskedWire: (files: string[]) => (ledger: LedgerWire) => LedgerAskedWire
+export const ledgerMaxClosed: number
+export const ledgerNearLines: number

@@ -98,6 +98,8 @@ class Numbers(unittest.TestCase):
         self.assertEqual(jack.PLACE_OBSERVATIONS, self.number("plugin/core/progress.ts", "PLACE_OBSERVATIONS"))
         self.assertEqual(jack.PLACE_COMMITS, self.number("plugin/core/progress.ts", "PLACE_COMMITS"))
         self.assertEqual(jack.PLACE_LINES, self.number("plugin/core/progress.ts", "PLACE_LINES"))
+        self.assertEqual(jack.SHARED_CHECK_MS, self.number("plugin/hooks/register.tsx", "SHARED_CHECK_MS"))
+        self.assertEqual(jack.PUSHED_SCAN_MS, self.number("kernel/src/Kernel/Sensor.purs", "pushedScanMs"))
         pane = (REPO / "plugin" / "hooks" / "pane.tsx").read_text()
         for mark in jack.SPINNER:
             self.assertIn(f"'{mark}'", pane.split("export const SPINNER")[1].split("\n")[0], mark)
@@ -189,6 +191,8 @@ class Numbers(unittest.TestCase):
         self.assertEqual(jack.is_busy({"pane": {"watch": {"state": "watching"}, "review": {"state": "done"}}}), "")
         self.assertEqual(jack.is_busy({"pane": {"watch": {"state": "looking"}}}), "a look is running")
         self.assertEqual(jack.is_busy({"pane": {"watch": {"state": "watching"}, "review": {"state": "running"}}}), "a deep review is running")
+        # An audit runs in the deep review's place: a reload would cut it short too, and it is named.
+        self.assertEqual(jack.is_busy({"pane": {"watch": {"state": "watching"}, "review": {"state": "running", "subject": jack.AUDIT_SUBJECT}}}), "an audit is running")
 
 
 class Screen(unittest.TestCase):
@@ -737,6 +741,120 @@ class Disagreements(unittest.TestCase):
         self.assertIs(jack.pick(w, "off"), off)
         self.assertIs(jack.pick(w, "bsd"), on)
         self.assertIsNone(jack.pick(w, "nobody"))
+
+
+class Issues(unittest.TestCase):
+    """The project's ledger of issues (findings.json) against the pane. The owner's 2026-10-07: a real codebase with a
+    critical issue showed nothing in either view, and the silence read as "he wrote a perfect codebase"."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = pathlib.Path(self.tmp.name) / "home"
+        self.root = str(pathlib.Path(self.tmp.name) / "ride")
+        pathlib.Path(self.root).mkdir()
+        self.now = jack.now_ms()
+        self.folder = self.home / "projects" / jack.project_id(self.root)
+        self.folder.mkdir(parents=True)
+        (self.folder / "project.json").write_text(json.dumps({"v": 1, "root": self.root, "isSurveyed": True, "isAudited": True}))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def issue(self, id_: int, severity: str, title: str, status: str = "open", file: str = "stats.py") -> dict:
+        return {"id": id_, "file": file, "line": id_, "lineText": "x = 1", "severity": severity, "category": "bug", "topic": f"t{id_}", "title": title,
+                "text": "Why it matters.", "condition": "", "origin": "audit", "commit": "abc1234", "at": 1, "status": status, "statusAt": 1,
+                "statusBy": "review", "statusNote": "", "isPinned": False}
+
+    def keep(self, findings: list[dict], coverage: dict | None = None, age_ms: int = 120_000) -> dict:
+        ledger = {"v": 1, "nextId": len(findings) + 1, "findings": findings, "coverage": coverage or {"at": 0, "commit": "", "files": 0, "read": [], "skipped": []}}
+        path = self.folder / "findings.json"
+        path.write_text(json.dumps(ledger))
+        written = (self.now - age_ms) / 1000
+        os.utime(path, (written, written))
+        return ledger
+
+    def found(self, ledger: dict, tab: str, texts: list[str], **pane) -> list[tuple[str, str]]:
+        made = state(self.now, repoRoot=self.root)
+        made["pane"] = {**made["pane"], "tab": tab, "notes": [], "watch": {"state": "idle"}, "review": {"state": "done", "subject": "x"},
+                        "issues": {"ledger": ledger, "placed": {}, "isAudited": True}, **pane}
+        made["shown"] = {**made["shown"], "pane": {**made["shown"]["pane"], "texts": texts}}
+        s = session(home=self.home, state=made)
+        return jack.check_issues(world([s], [self.home], self.now), s, jack.projects(self.home)[0])
+
+    def test_the_pane_holds_the_open_issues_of_the_file(self):
+        high, gone = self.issue(1, "high", "mean of an empty list"), self.issue(2, "low", "a name", "dismissed")
+        ledger = self.keep([high, gone])
+        self.assertIn("ledger has findings.json's 1 open issue(s)", " ".join(text for _, text in self.found(ledger, "explain", [])))
+        # The pane lost one, or kept one open that was dismissed elsewhere.
+        self.assertIn("lacks open issue(s) 1", bad(self.found({**ledger, "findings": [gone]}, "explain", []))[0])
+        self.assertIn("holds issue(s) 2 open", bad(self.found({**ledger, "findings": [high, {**gone, "status": "open"}]}, "explain", []))[0])
+        # Written a moment ago: the sessions have their look at the shared files to take it up.
+        ledger = self.keep([high, gone], age_ms=10_000)
+        found = self.found({**ledger, "findings": []}, "explain", [])
+        self.assertEqual(bad(found), [])
+        self.assertTrue(any(level == jack.NOTE for level, _ in found))
+
+    def test_the_tab_draws_the_open_issues_worst_first_and_never_a_closed_one(self):
+        ledger = self.keep([self.issue(1, "high", "mean of an empty list"), self.issue(2, "medium", "unescaped output", file="index.php"),
+                            self.issue(3, "critical", "the password in the web root", "dismissed", file=".")],
+                           {"at": self.now - 600_000, "commit": "abc1234", "files": 2, "read": ["stats.py"], "skipped": []})
+        status = "Audited 11:42 at abc1234: read 1 of 2 source files."
+        high = ["❯ high · stats.py:1", "mean of an empty list", "Why it matters."]
+        medium = ["medium · index.php:2", "unescaped output", "Why it matters."]
+        right = [status, "Open: 1 high, 1 medium", *high, *medium]
+        self.assertEqual(bad(self.found(ledger, "review", right)), [])
+        # A row placed elsewhere, or whose line changed since, is the same row.
+        self.assertEqual(bad(self.found(ledger, "review", [status, "Open: 1 high, 1 medium", "high · stats.py:9", "mean of an empty list", "medium · index.php:2, changed since", "unescaped output"])), [])
+        # A dismissed issue drawn as open.
+        self.assertIn("draws issue 3 “the password in the web root” as open", " ".join(bad(self.found(ledger, "review", right + ["critical · the project", "the password in the web root"]))))
+        # Out of order, a row missing, the counts wrong.
+        self.assertIn("out of order: medium, high", " ".join(bad(self.found(ledger, "review", [status, "Open: 1 high, 1 medium", *medium, *high]))))
+        self.assertIn("lacks the row of 1 open issue(s) above low: 2 “unescaped output”", " ".join(bad(self.found(ledger, "review", [status, "Open: 1 high, 1 medium", *high]))))
+        # A label without its title under it is no row.
+        self.assertIn("lacks the row of 1 open issue(s) above low: 2 “unescaped output”", " ".join(bad(self.found(ledger, "review", [status, "Open: 1 high, 1 medium", *high, "medium · index.php:2"]))))
+        self.assertIn("says “Open: 1 high”, and findings.json has 1 high, 1 medium open", " ".join(bad(self.found(ledger, "review", [status, "Open: 1 high", *high, *medium]))))
+        self.assertIn("says nothing of the 1 high, 1 medium open", " ".join(bad(self.found(ledger, "review", [status, *high, *medium]))))
+        # What was read: said, or that no audit ran.
+        self.assertIn("does not say what the audit of", " ".join(bad(self.found(ledger, "review", right[1:]))))
+        never = self.keep([])
+        self.assertIn("says nothing of an audit, and none is on record", " ".join(bad(self.found(never, "review", ["Fine."]))))
+        self.assertEqual(bad(self.found(never, "review", ["Not audited for issues yet. a: audit the codebase."])), [])
+        # While the audit runs, it says so instead.
+        self.assertEqual(bad(self.found(never, "review", ["Auditing this project since 11:40."], review={"state": "running", "subject": jack.AUDIT_SUBJECT})), [])
+
+    def test_the_empty_play_by_play_says_what_the_ledger_holds(self):
+        ledger = self.keep([self.issue(1, "high", "mean of an empty list"), self.issue(2, "low", "a name")])
+        self.assertEqual(bad(self.found(ledger, "play", ["On. Watching for your next save.", "The deep review has 1 high open: 2: Deep review."])), [])
+        self.assertIn("says “Not audited for issues yet: 2: Deep review.”, and findings.json makes it “The deep review has 1 high open",
+                      " ".join(bad(self.found(ledger, "play", ["On.", "Not audited for issues yet: 2: Deep review."]))))
+        self.assertIn("says nothing of the ledger", " ".join(bad(self.found(ledger, "play", ["On. Watching for your next save."]))))
+        # With notes open, the tab shows them and not the line.
+        self.assertEqual(bad(self.found(ledger, "play", ["On."], notes=[{"id": 1}])), [])
+        self.assertEqual(jack.ledger_line(jack.ledger_counts([]), False, {}), "Not audited for issues yet: 2: Deep review.")
+        self.assertEqual(jack.ledger_line(jack.ledger_counts([]), True, {"at": 5, "read": ["a", "b"]}), "The audit found nothing open in the 2 files it read.")
+        self.assertEqual(jack.ledger_line(jack.ledger_counts([self.issue(1, "low", "x"), self.issue(2, "medium", "y")]), True, {}), "The deep review has 2 lesser issues open: 2: Deep review.")
+
+    def test_what_the_audit_read_is_in_the_repository(self):
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@x"}
+        subprocess.run(["git", "init", "-q", self.root], check=True, env=env)
+        (pathlib.Path(self.root) / "stats.py").write_text("x = 1\n")
+        subprocess.run(["git", "-C", self.root, "add", "stats.py"], check=True, env=env)
+        subprocess.run(["git", "-C", self.root, "commit", "-q", "-m", "Add stats"], check=True, env=env)
+        ledger = self.keep([], {"at": self.now - 600_000, "commit": "abc1234", "files": 5, "read": ["stats.py", "ghost.php"], "skipped": []})
+        found = " ".join(bad(self.found(ledger, "explain", [])))
+        self.assertIn("says it read 1 file(s) the repository does not have: ghost.php", found)
+        self.assertIn("counts 5 source files, and git lists 1 files in all", found)
+        ledger = self.keep([], {"at": self.now - 600_000, "commit": "abc1234", "files": 1, "read": ["stats.py"], "skipped": []})
+        self.assertEqual(bad(self.found(ledger, "explain", [])), [])
+
+    def test_the_words_are_the_mods(self):
+        findings = (REPO / "plugin" / "core" / "findings.ts").read_text()
+        self.assertIn("export const SEVERITIES: readonly Severity[] = ['critical', 'high', 'medium', 'low']", findings)
+        self.assertEqual(jack.SEVERITIES, ("critical", "high", "medium", "low"))
+        for start in jack.LEDGER_LINE_STARTS:
+            self.assertIn(start.split(" open")[0] if start.startswith("The deep review") else start, findings)
+        self.assertIn(f"export const AUDIT_SUBJECT = '{jack.AUDIT_SUBJECT}'", (REPO / "plugin" / "core" / "review.ts").read_text())
+        self.assertEqual(jack.counts_words({"critical": 1, "high": 2, "medium": 0, "low": 3}), "1 critical, 2 high, 3 low")
 
 
 class Cache(unittest.TestCase):

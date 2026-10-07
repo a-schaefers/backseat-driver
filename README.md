@@ -35,7 +35,7 @@ Type `/backseat`. A pane opens beside your conversation, with six tabs.
 - **Your call.** When your code hits a real design choice (how errors are handled, which data structure, what the user sees), the note says so, lays out what each way costs, and leaves the choice to you.
 - **★ Insight.** Now and then, something about how *this* codebase does things. Never a lecture you could read anywhere.
 
-**2. Deep review.** Commit, and a stronger model reviews the commit in the context of the whole project: design, correctness, what to do next. In its own tab, not in your chat. Commits made while Claude is down or you're at your plan limit get reviewed when it's back.
+**2. Deep review.** Everything wrong with your code, worst first. Switch it on in a project and a stronger model audits the codebase as it stands: critical to low, file and line, and what it read. Every commit after that gets reviewed against the whole project. New issues go on the list, fixed ones come off, dismissed ones stay gone. An empty list means nothing found in what it read, never "perfect code". In its own tab, not in your chat. Commits made while Claude is down or you're at your plan limit get reviewed when it's back.
 
 **3. Explain.** Move your cursor (with an editor plugin, below), point at a line (`/backseat explain src/app.py:42`), or just save, and it tells you what that code does, how, why it's there, what to watch out for and what it relies on. Step through a file symbol by symbol with `n` and `p`. Change the code and the old explanation disappears before it can lie to you.
 
@@ -86,7 +86,7 @@ Type `/backseat` in Claude Code. The first time you work in a language, it asks 
 | `/backseat update`, `/backseat uninstall` | Fetch a newer release when it announces one, or remove the plugin |
 | `/backseat help` | Every command and key |
 
-`Ctrl+X Tab` hands it the keyboard, and `Esc` takes it back. `1` to `6` open the tabs. `x`, or the pane's own ×, puts it away as a strip above the prompt; a click on the strip brings it back, and only `/backseat off` switches it off. On a note, `e` explains it, `d` dismisses it, `m` mutes that topic for good. `l` looks at your changes now, `r` reviews now. It draws in the terminal and in the desktop app's Code tab. Send the conversation to the background and the tutor goes with it.
+`Ctrl+X Tab` hands it the keyboard, and `Esc` takes it back. `1` to `6` open the tabs. `x`, or the pane's own ×, puts it away as a strip above the prompt; a click on the strip brings it back, and only `/backseat off` switches it off. On a note, `e` explains it, `d` dismisses it, `m` mutes that topic for good. On an issue in Deep review, `e` and `d` do the same, `a` audits the whole codebase again and `v` shows the map of the project. `l` looks at your changes now, `r` reviews now. It draws in the terminal and in the desktop app's Code tab. Send the conversation to the background and the tutor goes with it.
 
 Models, thinking levels, pacing and personas live in tab `6`, Settings, or `/backseat settings`. They're in `/config` too.
 

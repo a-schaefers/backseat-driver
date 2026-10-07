@@ -162,15 +162,15 @@ sessionTest('the conversation is told which notes are open', async ($, on) => {
   await session.clock.settle()
 
   await $.prompt.submit({ text: 'hello', wait: false, origin: { kind: 'composer' } })
-  // With no notes open, nothing is attached.
-  expect(session.contexts).toEqual([[]])
+  // With no notes open, none are attached: only what the ledger holds, which here is nothing, from no audit.
+  expect(session.contexts).toEqual([['Issues on record: none, and the codebase has not been audited, so that says nothing about its health.']])
 
   session.write('stats.py', MEAN)
   await session.clock.advance(14_000)
   await $.prompt.submit({ text: 'explain note 1', wait: false, origin: { kind: 'composer' } })
   expect(session.submitted).toEqual(['hello', 'explain note 1'])
-  // The notes, and after them what the journal says they are doing.
-  expect(session.contexts[1]?.length).toBe(2)
+  // The notes, after them what the journal says they are doing, and what the ledger holds.
+  expect(session.contexts[1]?.length).toBe(3)
   expect(session.contexts[1]?.[0]).toMatch('1. [bug] stats.py:2 (empty-input) What does this do for an empty list?')
 })
 

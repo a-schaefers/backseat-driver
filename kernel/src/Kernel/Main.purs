@@ -7,6 +7,7 @@
 module Kernel.Main
   ( module Kernel.Growth
   , module Kernel.Health
+  , module Kernel.Ledger
   , module Kernel.License
   , module Kernel.Pace
   , module Kernel.Play
@@ -39,6 +40,7 @@ module Kernel.Main
 import Kernel.Growth (growthWire)
 import Kernel.Health (mayAskWire, outcomeOfErrorWire, outcomeOfWire, retryDelayMsWire, stepWire, troubleOfWire)
 import Kernel.Lease (Lease)
+import Kernel.Ledger (ledgerAskedWire, ledgerCoveredWire, ledgerFoundWire, ledgerMaxClosed, ledgerNearLines, ledgerNormalWire, ledgerPersonWire, ledgerRuledWire, ledgerViewsWire)
 import Kernel.Lease as Lease
 import Kernel.License (licenseNextCheckWire, licenseStandingWire)
 import Kernel.Pace (backoffMs, gapFactor, isHeldAt, slowedGapMs)

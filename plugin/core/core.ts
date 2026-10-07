@@ -2,7 +2,8 @@ import type { Watch } from '../types'
 import type { Throttle } from './gate'
 import type { Health, HealthEvent, ModelResult, Outcome, Pressure, Trouble } from './health'
 import * as K from './kernel.js'
-import type { HealthWire, PlayFactsWire, WaitingWire } from './kernel.js'
+import type { HealthWire, LedgerWire, PlayFactsWire, WaitingWire } from './kernel.js'
+import type { Actor, Candidate, Coverage, IssueOrigin, Ledger, LedgerViews, PersonAction, Ruling } from './findings'
 import type { Growth, GrowthFacts } from './growth'
 import type { Lease } from './lease'
 import type { LicenseFacts, Standing } from './license'
@@ -638,3 +639,71 @@ export function growthOfFacts(facts: GrowthFacts): Growth {
     encouragement: wire.encouragement[0] ?? null,
   }
 }
+
+// --- The ledger of issues (Kernel.Ledger)
+
+function int(value: number): number {
+  return Number.isFinite(value) ? Math.trunc(value) : 0
+}
+
+function ledgerToWire(ledger: Ledger): LedgerWire {
+  return {
+    nextId: int(ledger.nextId),
+    findings: ledger.findings.map(finding => ({ ...finding, id: int(finding.id), line: int(finding.line) })),
+    coverage: { ...ledger.coverage, files: int(ledger.coverage.files) },
+  }
+}
+
+/** The kernel writes only the words it knows, so its answer is read as the types say. */
+function ledgerFromWire(wire: LedgerWire): Ledger {
+  return wire as Ledger
+}
+
+/** A ledger as the kernel keeps it: issues without a file or a text dropped, an id once, the counter past every id, closed issues pruned. */
+export function normalLedger(ledger: Ledger): Ledger {
+  return ledgerFromWire(K.ledgerNormalWire(ledgerToWire(ledger)))
+}
+
+/** Issues a review raised, each new or an issue on record raised again; the dismissed ones refused. */
+export function foundIssues(
+  ledger: Ledger,
+  actor: Actor,
+  at: number,
+  origin: IssueOrigin,
+  commit: string,
+  candidates: readonly Candidate[],
+): { ledger: Ledger; added: number[]; matched: number[]; refused: number[] } {
+  const found = K.ledgerFoundWire(actor)(at)(origin)(commit)(candidates.map(candidate => ({ ...candidate, line: int(candidate.line) })))(ledgerToWire(ledger))
+
+  return { ...found, ledger: ledgerFromWire(found.ledger) }
+}
+
+/** What a review or the play-by-play says of issues on record, applied where the actor may say it. */
+export function ruledIssues(ledger: Ledger, actor: Actor, at: number, rulings: readonly Ruling[]): { ledger: Ledger; applied: number[]; refused: number[] } {
+  const ruled = K.ledgerRuledWire(actor)(at)(rulings.map(ruling => ({ ...ruling, id: int(ruling.id) })))(ledgerToWire(ledger))
+
+  return { ...ruled, ledger: ledgerFromWire(ruled.ledger) }
+}
+
+/** What the person does to one issue. */
+export function personIssue(ledger: Ledger, action: PersonAction, id: number, at: number): Ledger {
+  return ledgerFromWire(K.ledgerPersonWire(action)(int(id))(at)(ledgerToWire(ledger)))
+}
+
+/** What an audit read, kept with the ledger. */
+export function coveredLedger(ledger: Ledger, coverage: Coverage): Ledger {
+  return ledgerFromWire(K.ledgerCoveredWire({ ...coverage, files: int(coverage.files) })(ledgerToWire(ledger)))
+}
+
+/** The views every surface draws, as ids. */
+export function ledgerViews(ledger: Ledger, facts: { savedFiles: readonly string[]; cap: number }): LedgerViews {
+  return K.ledgerViewsWire({ savedFiles: [...facts.savedFiles], cap: int(facts.cap) })(ledgerToWire(ledger))
+}
+
+/** The issues a request lists for some files, or all when none are named: the open ones in order, and the dismissed. */
+export function askedIssues(ledger: Ledger, files: readonly string[]): { open: number[]; dismissed: number[] } {
+  return K.ledgerAskedWire([...files])(ledgerToWire(ledger))
+}
+
+export const LEDGER_MAX_CLOSED: number = K.ledgerMaxClosed
+export const LEDGER_NEAR_LINES: number = K.ledgerNearLines

@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, PluginOptions, Register, Timer, UiFocusResult } from 'claude-code'
 
-import type { ExplainView, Hush, LessonsView, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, ReviewText, SettingRow, Speech, Spot, Tab, Watch, Working } from '../types'
+import type { ExplainView, Hush, IssuesState, LessonsView, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, ReviewText, SettingRow, Speech, Spot, Tab, Watch, Working } from '../types'
 import { avatarFor, BLINK_MS, BLINK_SHUT_MS, closingLine, finished, isTalking, lineAtReload, nextTick, SILENT, speech, SURVEY_LINE, TALK_MS } from '../core/avatar'
 import { backdropOf } from '../core/sprite'
 import type { Backdrop } from '../core/sprite'
@@ -142,7 +142,9 @@ import {
 } from '../core/progressing'
 import type { ProgressPorts, ProgressState } from '../core/progressing'
 import { helpText, isModeRequest, parseRequest, REPOSITORY_APPEARED, SETTINGS_OFF, transition } from '../core/mode'
-import { isNoiseFile } from '../core/noise'
+import {
+  isNoiseFile,
+} from '../core/noise'
 import { isLookDue, playOf, wakeAt } from '../core/play'
 import type { Play, PlayFacts } from '../core/play'
 import { isProblem, keepNotes, parseKeptNotes, stillOpen, withDismissed } from '../core/notes'
@@ -173,6 +175,7 @@ import {
 } from '../core/profiles'
 import {
   emptyProject,
+  historyTexts,
   insightLine,
   insightLines,
   insightsFor,
@@ -181,8 +184,8 @@ import {
   parseReviews,
   projectBrief,
   reviewDigest,
-  historyTexts,
   splitReview,
+  withAudited,
   withReview,
   withReviewNotes,
   withSurvey,
@@ -219,6 +222,7 @@ import type { Shown } from './shown'
 import { healthLine, playLine, watchOf } from '../core/status'
 import type { Recorder } from '../core/recorder'
 import {
+  changedFilesOf,
   commitTitle,
   fitReview,
   isCommit,
@@ -302,6 +306,8 @@ import { checkKey, cleanKey, looksLikeKey } from '../core/licensekey'
 import type { KeyCheck } from '../core/licensekey'
 import type { Watcher } from '../core/watcher'
 import { chosen, parseWorking, tidy, WORKING_HEADER, WORKING_QUESTION, workingChoices } from '../core/working'
+import { anchorIssue, askedIssues, auditLine, coveredLedger, dismissedForRequest, EMPTY_LEDGER, FINDINGS_FILE, foundIssues, issueQuestion, issuesBrief, issuesForRequest, ledgerViews, MAX_FROM_AUDIT, MAX_FROM_REVIEW, parseFindingsFence, parseLedger, personIssue, placeIssues, ruledIssues } from '../core/findings'
+import type { Candidate, Finding, Ledger, PersonAction } from '../core/findings'
 
 const IDLE: Watch = { state: 'idle', lastLookAt: null, line: playLine({ at: 'watching' }) }
 const NO_REVIEW: Review = { state: 'none', subject: '', text: '', isUnseen: false, decisions: [], insights: [] }
@@ -312,6 +318,10 @@ const tabAtom = atom({ plugin: 'backseat-driver', key: 'tab' } as const, 'play')
 const notesAtom = atom({ plugin: 'backseat-driver', key: 'notes' } as const, [])
 const dismissedAtom = atom({ plugin: 'backseat-driver', key: 'dismissed' } as const, [])
 const selectedAtom = atom({ plugin: 'backseat-driver', key: 'selected' } as const, null)
+/** The project's ledger of issues, as the pane holds it. Nothing before it is read from the project's folder. */
+const NO_ISSUES: IssuesState = { ledger: EMPTY_LEDGER, placed: {}, isAudited: false }
+const issuesAtom = atom({ plugin: 'backseat-driver', key: 'issues' } as const, NO_ISSUES)
+const selectedIssueAtom = atom({ plugin: 'backseat-driver', key: 'selectedIssue' } as const, null)
 const watchAtom = atom({ plugin: 'backseat-driver', key: 'watch' } as const, IDLE)
 const reviewAtom = atom({ plugin: 'backseat-driver', key: 'review' } as const, NO_REVIEW)
 const profilesAtom = atom({ plugin: 'backseat-driver', key: 'profiles' } as const, NO_PROFILES)
@@ -388,6 +398,8 @@ const FAILING_FOR_MS = 300_000
 /** The pane's state as it was when the conversation was cleared, until it is put back (`carryPane`). */
 let carried: {
   tab: Tab
+  issues: IssuesState
+  selectedIssue: number | null
   notes: Note[]
   dismissed: Note[]
   selected: number | null
@@ -570,6 +582,10 @@ const learningState: LearningState = freshLearningState()
 const notePrints = new Map<string, string>()
 let progressInstructions = ''
 let reviews: ReviewRecord[] = []
+/** The project's ledger of issues, as last read or written (`findings.json`). */
+let ledger: Ledger = EMPTY_LEDGER
+/** The ledger file as last read or written, its size and time: another session's change to it is taken up. */
+let findingsStamp = ''
 
 /** The deep review's working state. */
 let repoRoot = ''
@@ -739,6 +755,8 @@ async function fullState($: EngineInterface): Promise<Record<string, unknown>> {
       selected: await read($, selectedAtom),
       watch: await read($, watchAtom),
       review: await read($, reviewAtom),
+      issues: await read($, issuesAtom),
+      selectedIssue: await read($, selectedIssueAtom),
       explain: await read($, explainAtom),
       working: await read($, workingAtom),
       progress: await read($, progressAtom),
@@ -2458,7 +2476,7 @@ async function startReview($: EngineInterface, settings: Settings, scope: Review
   try {
     const prompt = reviewRequest(
       scope,
-      { overview: project === null ? '' : overviewLine(project), earlier: reviewDigest(reviews) },
+      { overview: project === null ? '' : overviewLine(project), earlier: reviewDigest(reviews), issues: issuesContext(scope) },
       journalState.recorder?.glance(await $.clock.now()) ?? '',
     )
     const started = Date.now()
@@ -2496,8 +2514,10 @@ async function startReview($: EngineInterface, settings: Settings, scope: Review
  * starts.
  */
 async function carryPane($: EngineInterface): Promise<void> {
-  const [tab, notes, dismissed, selected, watch, review, shownProfiles, explain, progress, release, working] = await Promise.all([
+  const [tab, issues, selectedIssue, notes, dismissed, selected, watch, review, shownProfiles, explain, progress, release, working] = await Promise.all([
     read($, tabAtom),
+    read($, issuesAtom),
+    read($, selectedIssueAtom),
     read($, notesAtom),
     read($, dismissedAtom),
     read($, selectedAtom),
@@ -2509,7 +2529,7 @@ async function carryPane($: EngineInterface): Promise<void> {
     read($, updateAtom),
     read($, workingAtom),
   ])
-  carried = { tab, notes, dismissed, selected, watch, review, profiles: shownProfiles, explain, progress, update: release, working }
+  carried = { tab, issues, selectedIssue, notes, dismissed, selected, watch, review, profiles: shownProfiles, explain, progress, update: release, working }
 }
 
 /** Puts back what `carryPane` read out. Without it, as after `/branch`, what this module can work out again is shown again. */
@@ -2539,6 +2559,8 @@ async function restorePane($: EngineInterface, settings: Settings): Promise<void
   trace($, 'state', 'pane restored', () => ({ notes: kept.notes.length, review: kept.review.state, tab: kept.tab }))
   await Promise.all([
     update($, tabAtom, () => kept.tab),
+    update($, issuesAtom, (): IssuesState => kept.issues),
+    update($, selectedIssueAtom, () => kept.selectedIssue),
     update($, notesAtom, () => kept.notes),
     update($, dismissedAtom, () => kept.dismissed),
     update($, selectedAtom, () => kept.selected),
@@ -2782,7 +2804,7 @@ async function followDriver($: EngineInterface, settings: Settings): Promise<voi
 }
 
 /** The files the driver writes for the pane. A change in one is what makes a session that does not drive read it again. */
-const FOLLOWED_FILES: readonly string[] = ['notes.json', 'reviews.json', 'queue.json', 'journal.json', 'project.json']
+const FOLLOWED_FILES: readonly string[] = ['notes.json', 'reviews.json', 'queue.json', 'journal.json', 'project.json', FINDINGS_FILE]
 
 /** Those files as they are now, each as its size and time. One listing. */
 async function projectStamps($: EngineInterface): Promise<Record<string, string>> {
@@ -2819,6 +2841,7 @@ async function followProject($: EngineInterface, settings: Settings): Promise<vo
     if (isChanged('notes.json')) await followNotes($, isFirst)
     if (isChanged('reviews.json') || isChanged('queue.json') || isChanged('project.json')) await followReviews($, settings, isFirst)
     if (isChanged('journal.json')) await showStoredWorkingOf(journalPortsOf($), journalState, repoRoot)
+    if (isChanged(FINDINGS_FILE)) await loadIssues($)
   } catch (error) {
     fail($, 'could not take up what the driver wrote', error)
   }
@@ -2935,6 +2958,8 @@ async function refreshShared($: EngineInterface, settings: Settings): Promise<vo
   if (dataRoot === '' || mode === 'off') return
   sharedCheckedAt = await $.clock.now()
   await resyncJournal($)
+  // An issue dismissed or brought back in another session: the ledger is read again.
+  if (leaseState.isDriver && findingsPath() !== '' && (await fileStamp($, findingsPath())) !== findingsStamp) await loadIssues($)
   const print = await sharedPrint($)
   const lessons = await lessonsPrint($)
   const areLessonsNew = lessonsStamp !== null && lessons !== lessonsStamp
@@ -3019,6 +3044,7 @@ async function printsNow($: EngineInterface, kept: KeptNotes): Promise<Map<strin
 async function restorePaneFromDisk($: EngineInterface, isFresh: boolean): Promise<void> {
   const path = notesPath()
   if (path === '') return
+  await loadIssues($)
   const kept = parseKeptNotes(await storeOf($).read(path))
   const now = await printsNow($, kept)
   for (const [file, print] of Object.entries(kept.prints)) {
@@ -3036,6 +3062,178 @@ async function restorePaneFromDisk($: EngineInterface, isFresh: boolean): Promis
     await setReview($, { state: 'done', subject: last.subject, text: last.text, isUnseen: false, decisions: last.decisions ?? [], insights: last.insights ?? [], older: historyOf() })
   }
   trace($, 'state', 'pane taken up from disk', () => ({ notes: open.length, of: kept.notes.length, review: last?.subject ?? null }))
+}
+
+/** A review's text with the issues it found, for the look at the person's progress that follows it. */
+function withIssues(text: string, issues: readonly string[]): string {
+  return issues.length === 0 ? text : `${text}\n\nIssues this review found:\n${issues.join('\n')}`
+}
+
+/** The project's ledger of issues. '' outside a repository or without a data folder. */
+function findingsPath(): string {
+  return repoRoot === '' || dataRoot === '' ? '' : `${projectDir(dataRoot, repoRoot)}/${FINDINGS_FILE}`
+}
+
+/** A file of the repository as lines, or null when it cannot be read. */
+async function repoLines($: EngineInterface, file: string): Promise<string[] | null> {
+  try {
+    return (await $.fs.read(`${repoRoot}/${file}`)).split('\n')
+  } catch {
+    return null
+  }
+}
+
+/** Where each open issue's line stands in its file now: one read per file with an open issue. Placement changes no status. */
+async function placedNow($: EngineInterface, of: Ledger): Promise<Record<string, number | null>> {
+  const placed: Record<string, number | null> = {}
+  const isOpen = (finding: Finding) => finding.status === 'open' || finding.status === 'partly'
+  for (const file of new Set(of.findings.filter(isOpen).map(finding => finding.file))) {
+    if (file === '.') continue
+    const lines = await repoLines($, file)
+    const stands = lines === null ? new Map<number, number | null>() : placeIssues(of, file, lines)
+    for (const finding of of.findings) if (finding.file === file && isOpen(finding)) placed[String(finding.id)] = stands.get(finding.id) ?? null
+  }
+  for (const finding of of.findings) if (finding.file === '.' && isOpen(finding)) placed[String(finding.id)] = 0
+
+  return placed
+}
+
+/** Shows the ledger in the pane, each open issue where its line stands now. */
+async function showIssues($: EngineInterface): Promise<void> {
+  const placed = await placedNow($, ledger)
+  await update($, issuesAtom, (): IssuesState => ({ ledger, placed, isAudited: project?.isAudited ?? false }))
+}
+
+/** Reads the ledger from the project's folder and shows it. */
+async function loadIssues($: EngineInterface): Promise<void> {
+  const path = findingsPath()
+  ledger = path === '' ? EMPTY_LEDGER : parseLedger(await storeOf($).read(path))
+  findingsStamp = await fileStamp($, path)
+  await showIssues($)
+}
+
+/**
+ * Changes the ledger in the project's folder, on top of what is written
+ * there, and shows it. Any session may: what the person does to an issue in
+ * a session that does not drive reaches every session. `step` may run again.
+ */
+async function changeIssues($: EngineInterface, step: (current: Ledger) => Ledger): Promise<void> {
+  const path = findingsPath()
+  try {
+    ledger = path === '' ? step(ledger) : await updateJson(storeOf($), path, parseLedger, step)
+    findingsStamp = await fileStamp($, path)
+  } catch (error) {
+    fail($, 'could not keep the issues', error)
+  }
+  await showIssues($)
+}
+
+/** What the person does to one issue, from either view: written once, gone or back everywhere. */
+async function personOnIssue($: EngineInterface, action: PersonAction, id: number): Promise<void> {
+  const at = await $.clock.now()
+  trace($, 'state', `issue ${action}`, () => ({ id }))
+  await changeIssues($, current => personIssue(current, action, id, at))
+}
+
+/**
+ * A review's issues into the ledger: each placed at the line it quotes (in
+ * the file as it is now, else as the reviewed commit left it), the rulings
+ * on issues on record applied, and what an audit read kept. Resolves the
+ * lines that tell a progress look what this review found.
+ */
+async function keepIssues($: EngineInterface, scope: ReviewScope, answer: string, commit: string, at: number): Promise<string[]> {
+  const fence = parseFindingsFence(answer)
+  if (fence.issues.length === 0 && fence.rulings.length === 0 && fence.coverage === null) return []
+  const ref = scope.kind === 'commit' ? scope.hash : 'HEAD'
+  const texts = new Map<string, { now: string[] | null; then: string[] | null }>()
+  const candidates: Candidate[] = []
+  for (const issue of fence.issues.slice(0, scope.kind === 'audit' ? MAX_FROM_AUDIT : MAX_FROM_REVIEW)) {
+    if (issue.file !== '.' && !texts.has(issue.file)) {
+      const shown = await git($, repoRoot, ['show', `${ref}:${issue.file}`])
+      texts.set(issue.file, { now: await repoLines($, issue.file), then: shown.exitCode === 0 ? shown.stdout.split('\n') : null })
+    }
+    const lines = texts.get(issue.file)
+    const placed = anchorIssue(issue, lines?.now ?? null, lines?.then ?? null)
+    if (placed !== null) candidates.push(placed)
+  }
+  const origin = scope.kind === 'audit' ? 'audit' : 'review'
+  // An audit adopted after a reload has no list of its own: the files are counted again, as they stand.
+  const files = scope.kind !== 'audit' ? 0 : scope.files.length > 0 ? scope.files.length : (await sourceFiles($)).own.length
+  let raised: number[] = []
+  await changeIssues($, current => {
+    const found = foundIssues(current, 'review', at, origin, commit, candidates)
+    raised = [...found.added, ...found.matched]
+    const ruled = ruledIssues(found.ledger, 'review', at, fence.rulings).ledger
+
+    return scope.kind === 'audit' && fence.coverage !== null ? coveredLedger(ruled, { at, commit, files, read: fence.coverage.read, skipped: fence.coverage.skipped }) : ruled
+  })
+  trace($, 'state', 'issues kept', () => ({ subject: scopeSubject(scope), issues: fence.issues.length, placed: candidates.length, raised, rulings: fence.rulings.length, coverage: fence.coverage }))
+
+  return issuesForRequest(ledger, raised)
+}
+
+/** The issues on record a review is told about: those of the files it looks at, or all of them for an audit. */
+function issuesContext(scope: ReviewScope): { open: string[]; dismissed: string[] } | undefined {
+  if (scope.kind === 'survey') return undefined
+  const files = scope.kind === 'commit' ? changedFilesOf(scope.patch) : scope.kind === 'since' ? changedFilesOf(scope.diff) : []
+  if (scope.kind !== 'audit' && files.length === 0) return undefined
+  const asked = askedIssues(ledger, files)
+
+  return { open: issuesForRequest(ledger, asked.open), dismissed: dismissedForRequest(ledger, asked.dismissed) }
+}
+
+/** Their source files as git lists them, and the folders among them that look generated or vendored. */
+async function sourceFiles($: EngineInterface): Promise<{ own: string[]; vendored: string[] }> {
+  const listed = await git($, repoRoot, ['ls-files', '-z'])
+  if (listed.exitCode !== 0) return { own: [], vendored: [] }
+  const own: string[] = []
+  const vendored = new Set<string>()
+  for (const path of listed.stdout.split('\0')) {
+    if (path === '' || languageOf(path) === null) continue
+    if (isNoiseFile(path)) vendored.add(path.includes('/') ? `${path.split('/')[0]}/` : path)
+    else own.push(path)
+  }
+
+  return { own, vendored: [...vendored].slice(0, 40) }
+}
+
+/** Marks the project audited, when its audit starts: one that fails is not started again at every switch-on. */
+async function markAudited($: EngineInterface): Promise<void> {
+  if (repoRoot === '' || dataRoot === '' || project === null) return
+  const root = repoRoot
+  try {
+    project = await updateJson(storeOf($), `${projectDir(dataRoot, repoRoot)}/project.json`, stored => parseProject(stored, root), current => withAudited(current))
+  } catch (error) {
+    fail($, 'could not mark the project audited', error)
+  }
+  await update($, issuesAtom, (state): IssuesState => (state.isAudited ? state : { ...state, isAudited: true }))
+}
+
+/**
+ * One audit per project: the codebase as it is, for issues, ranked (owner,
+ * 2026-10-07: in a real codebase the pane said nothing, and its silence read
+ * as "he wrote a perfect codebase"). It comes after the project's first look
+ * around and behind any commit waiting for its review, and is held back as a
+ * review is. `isAsked` is the person's `a`, which audits again, whatever holds
+ * a background review back.
+ */
+async function maybeAudit($: EngineInterface, settings: Settings, run: number, isAsked = false): Promise<void> {
+  if (project === null || !leaseState.isDriver || !isReviewFree() || mode !== 'on' || repoRoot === '') return
+  if (!isAsked) {
+    if (project.isAudited || !project.isSurveyed) return
+    if (!settings.deepReview.isAfterCommit && settings.deepReview.everyMs === 0) return
+    if (settings.deepReview.isAfterCommit && reviewState.waiting.commits.some(commit => !commit.isReviewed)) return
+  }
+  await withReviewSlot($, settings, async () => {
+    if (!isAsked) {
+      const held = await readPressure($)
+      if (held.level !== 'none' || !mayAsk(health)) return
+    }
+    if (run !== engagement || mode !== 'on') return
+    const files = await sourceFiles($)
+    await markAudited($)
+    await startReview($, settings, { kind: 'audit', files: files.own, vendored: files.vendored })
+  })
 }
 
 /** The file that holds the commits waiting in this project. */
@@ -3103,6 +3301,8 @@ async function settleAssessment($: EngineInterface, settings: Settings, commit: 
 /** Starts whatever the waiting commits need next, and says in the Deep review tab what stands in the way (`core/reviewing.ts`). */
 async function planReview($: EngineInterface, settings: Settings): Promise<void> {
   await planWaitingReviews(reviewPortsOf($, settings), reviewState)
+  // With nothing waiting for its review, a project that has had no audit gets one.
+  void maybeAudit($, settings, engagement)
 }
 
 /** Reviews one commit now. Resolves false when no review started. The caller holds the review slot. */
@@ -3127,7 +3327,11 @@ function reviewPortsOf($: EngineInterface, settings: Settings): ReviewPorts {
     isActive: () => mode === 'on' && repoRoot !== '' && leaseState.isDriver,
     agents: async () => await $.agent.list(),
     startReview: scope => startReview($, settings, scope),
-    reviewText: commit => reviews.find(known => known.commit === commit)?.text,
+    reviewText: commit => {
+      const text = reviews.find(known => known.commit === commit)?.text
+      // The review's issues go with it: its text no longer lists them (2026-10-07).
+      return text === undefined ? undefined : withIssues(text, issuesForRequest(ledger, ledger.findings.filter(finding => finding.commit === commit && finding.origin === 'review').map(finding => finding.id)))
+    },
     assess: (hash, review) => assessCommit($, settings, hash, review),
     queueProgress: work => queueProgress($, work),
   }
@@ -3172,6 +3376,7 @@ async function loadProject($: EngineInterface): Promise<void> {
   if (repoRoot === '' || dataRoot === '') {
     project = null
     reviews = []
+    ledger = EMPTY_LEDGER
 
     return
   }
@@ -3185,13 +3390,15 @@ async function loadProject($: EngineInterface): Promise<void> {
  * Explain and the play-by-play to read, and its text is kept for the next
  * review to follow up on. Resolves to the review as the person reads it.
  */
-async function keepReview($: EngineInterface, scope: ReviewScope, answer: string): Promise<{ text: string; notes: ReviewNotes | null }> {
+async function keepReview($: EngineInterface, scope: ReviewScope, answer: string): Promise<{ text: string; notes: ReviewNotes | null; issues: string[] }> {
   const { text, notes } = splitReview(answer)
-  if (repoRoot === '' || dataRoot === '') return { text, notes }
+  let issues: string[] = []
+  if (repoRoot === '' || dataRoot === '') return { text, notes, issues }
   try {
     const at = await $.clock.now()
-    // A survey looked at the project as of HEAD. Work since a review may include uncommitted changes, so it names no commit.
-    const commit = scope.kind === 'commit' ? shortHash(scope.hash) : scope.kind === 'survey' && lastHead !== '' ? shortHash(lastHead) : ''
+    // A survey or an audit looked at the project as of HEAD. Work since a review may include uncommitted changes, so it names no commit.
+    const commit = scope.kind === 'commit' ? shortHash(scope.hash) : (scope.kind === 'survey' || scope.kind === 'audit') && lastHead !== '' ? shortHash(lastHead) : ''
+    issues = await keepIssues($, scope, answer, commit, at)
     const prints = new Map<Insight, { print: string; of: 'symbol' | 'file' } | null>()
     // A commit's review is about the code as committed. A file changed since then would tie the insight to code it was not written about.
     const asCommitted = new Map<string, boolean>()
@@ -3219,8 +3426,11 @@ async function keepReview($: EngineInterface, scope: ReviewScope, answer: string
       },
     )
     if (scope.kind !== 'survey') {
+      // An audit is kept in the history by its subject and names no commit: it reviewed nobody's commit, and a record
+      // naming HEAD would be taken for a review of it (the look at progress would call HEAD reviewed and never looked at).
+      const named = scope.kind === 'audit' ? '' : commit
       reviews = await updateJson(storeOf($), `${folder}/reviews.json`, parseReviews, kept =>
-        withReview(kept, { commit, subject: scopeSubject(scope), at, text, decisions: notes?.decisions ?? [], insights: insightLines(notes) }),
+        withReview(kept, { commit: named, subject: scopeSubject(scope), at, text, decisions: notes?.decisions ?? [], insights: insightLines(notes) }),
       )
     }
     await setReview($, { older: historyOf() })
@@ -3228,7 +3438,7 @@ async function keepReview($: EngineInterface, scope: ReviewScope, answer: string
     fail($, "could not keep the deep review's notes", error)
   }
 
-  return { text, notes }
+  return { text, notes, issues }
 }
 
 /**
@@ -3566,6 +3776,8 @@ function stopWatching(): void {
   notePrints.clear()
   project = null
   reviews = []
+  ledger = EMPTY_LEDGER
+  findingsStamp = ''
   followedStamps = null
   followState.focus = null
   followState.editorFiles.clear()
@@ -4142,6 +4354,9 @@ async function forget($: EngineInterface, settings: Settings, named: Scope | nul
     if (scope.kind !== 'language') {
       project = repoRoot === '' ? null : emptyProject(repoRoot)
       reviews = []
+      ledger = EMPTY_LEDGER
+      findingsStamp = ''
+      void update($, issuesAtom, () => NO_ISSUES)
       followedStamps = null
       reviewState.waiting = EMPTY_QUEUE
       reviewState.reviewRetryAt = null
@@ -4184,7 +4399,7 @@ async function drawTutor(
 ) {
   quiet.renders += 1
   // One round for everything the pane shows, not a dozen in a row for every frame.
-  const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, shownSettings, licensing, backdrop, lessons, openList, spin, now] = await Promise.all([
+  const [shownMode, tab, notes, selected, watch, review, shownProfiles, explain, working, progress, release, speech, shownSettings, licensing, backdrop, lessons, openList, spin, now, issues, selectedIssue] = await Promise.all([
     read($, modeAtom),
     read($, tabAtom),
     read($, notesAtom),
@@ -4205,6 +4420,8 @@ async function drawTutor(
     read($, openListAtom),
     read($, spinAtom),
     $.clock.now(),
+    read($, issuesAtom),
+    read($, selectedIssueAtom),
   ])
   // While a lookup runs, the area the explanation stood in keeps its height (`estimatedRows`).
   if (explain.detail !== null) explainRows = estimatedRows(detailMarkdown(explain.detail), where.columns) + explain.insights.length
@@ -4238,6 +4455,7 @@ async function drawTutor(
     now,
     settings: shownSettings,
     explainHold,
+    issues: { state: issues, views: ledgerViews(issues.ledger, { savedFiles: [], cap: 3 }), selected: selectedIssue },
   }
 
   const tree = renderPane(kit, view, {
@@ -4325,6 +4543,60 @@ async function drawTutor(
 
         return next === index ? review : { ...review, opened: next }
       })
+    },
+    onIssueSelect: (id: number) => {
+      touched($, settings, 'issue select', () => id)
+      void update($, selectedIssueAtom, () => id)
+    },
+    onIssueStep: (step: 1 | -1) => {
+      touched($, settings, 'issue step', () => step)
+      void (async () => {
+        const [state, chosen, open] = await Promise.all([read($, issuesAtom), read($, selectedIssueAtom), read($, openListAtom)])
+        const views = ledgerViews(state.ledger, { savedFiles: [], cap: 0 })
+        const drawn = [...views.ranked, ...(open === 'issues-low' ? views.folded : [])]
+        if (drawn.length === 0) return
+        const at = Math.max(0, chosen === null ? 0 : drawn.indexOf(chosen))
+        await update($, selectedIssueAtom, () => drawn[(at + step + drawn.length) % drawn.length] ?? null)
+      })()
+    },
+    onIssueDismiss: (id: number) => {
+      touched($, settings, 'issue dismiss', () => id)
+      void personOnIssue($, 'dismiss', id)
+    },
+    onIssueRestore: (id: number) => {
+      touched($, settings, 'issue restore', () => id)
+      void personOnIssue($, 'restore', id)
+    },
+    onIssueExplain: (id: number) => {
+      touched($, settings, 'issue explain', () => id)
+      const finding = ledger.findings.find(candidate => candidate.id === id)
+      if (finding !== undefined) void submitForPerson($, issueQuestion(finding))
+    },
+    ...(settings.editorCommand === ''
+      ? {}
+      : {
+          onIssueOpen: (id: number) => {
+            touched($, settings, 'issue open', () => id)
+            const finding = ledger.findings.find(candidate => candidate.id === id)
+            if (finding !== undefined && finding.file !== '.') openInEditor($, settings, finding.file, Math.max(1, finding.line))
+          },
+        }),
+    ...(leaseState.isDriver
+      ? {
+          onAudit: () => {
+            touched($, settings, 'audit')
+            if (!isReviewFree()) {
+              toastPerson($, 'A deep review is running. The audit can start when it is done.')
+
+              return
+            }
+            void maybeAudit($, settings, engagement, true)
+          },
+        }
+      : {}),
+    onIssuesFold: (which: 'low' | 'closed') => {
+      touched($, settings, 'issues fold', () => which)
+      void update($, openListAtom, (open: string): string => (open === `issues-${which}` ? '' : `issues-${which}`))
     },
     onReviewOpen: (index: number) => {
       touched($, settings, 'review open', () => index)
@@ -4647,6 +4919,8 @@ export const register: Register = (on, options) => {
       paneContext(await read($, notesAtom), await read($, reviewAtom), isHello ? '' : said),
       explainContext(await read($, explainAtom)),
       journalState.recorder === null ? await storedJournalText($, 'brief') : journalState.recorder.brief(await $.clock.now()),
+      // What the ledger holds, so that "is my code healthy?" is answered from what was found and read (2026-10-07).
+      repoRoot === '' ? '' : issuesBrief(ledger, ledgerViews(ledger, { savedFiles: [], cap: 0 }), clockTime),
     ].filter(part => part !== '')
     // Another session may have recorded something about the person since the last look at the files.
     await refreshShared($, settings)
@@ -4684,7 +4958,7 @@ export const register: Register = (on, options) => {
       trace($, 'agent', 'finished', () => ({ agentId, reason: e.reason, subject: scope === null ? null : scopeSubject(scope), answer: e.reason === 'answer' ? e.answer : undefined }))
 
       if (e.reason === 'answer' && e.answer.trim() !== '' && scope !== null) {
-        if (scope.kind !== 'survey') {
+        if (scope.kind !== 'survey' && scope.kind !== 'audit') {
           reviewedHead = scope.kind === 'commit' ? scope.hash : lastHead
           reviewedPrint = scope.kind === 'commit' ? '' : scopePrint(scope)
         }
@@ -4701,7 +4975,10 @@ export const register: Register = (on, options) => {
         if (isUnseen) toastPerson($, `Deep review ready: ${scopeSubject(scope)}`)
         // The review ends on the one thing most worth doing next, which is worth saying out loud.
         // Its last line as shown: the notes after it are not for the person.
-        if (settings.isAnimated) await say($, scope.kind === 'survey' ? SURVEY_LINE : `Review's in. ${closingLine(shown)}`)
+        if (settings.isAnimated) {
+          const line = scope.kind === 'survey' ? SURVEY_LINE : scope.kind === 'audit' ? auditLine(ledgerViews(ledger, { savedFiles: [], cap: 0 }).counts) : `Review's in. ${closingLine(shown)}`
+          await say($, line)
+        }
         // What it said may be about the spot the Explain tab is on.
         void refreshView($)
         reviewState.reviewRetryAt = null
@@ -4709,7 +4986,7 @@ export const register: Register = (on, options) => {
           // A commit's review is also when the person's progress is brought up to date, with the review for context.
           // A waiting commit moves on to that. One reviewed by hand that was not waiting gets it directly.
           if (reviewState.waiting.commits.some(commit => commit.hash === scope.hash)) await changeQueue($, queue => reviewed(queue, scope.hash))
-          else queueProgress($, async () => void (await assessCommit($, settings, scope.hash, shown)))
+          else queueProgress($, async () => void (await assessCommit($, settings, scope.hash, withIssues(shown, kept.issues))))
         }
         // The reviewer answered, so Claude is answering.
         await noteOutcome($, settings, 'deep-review', { ok: true })
@@ -4732,6 +5009,8 @@ export const register: Register = (on, options) => {
         await reviewFailed($, settings, scope, e.reason === 'aborted' ? 'it was stopped' : 'the model refused', 'final')
       }
     })
+    // The slot is free again: a project that has had no audit gets one, when nothing waits for its review.
+    void maybeAudit($, settings, engagement)
 
     return next(e)
   })
@@ -5011,6 +5290,8 @@ export const register: Register = (on, options) => {
     if (result.deny !== undefined) return result
     const note = /^note-(\d+)$/.exec(e.element ?? '')
     if (note !== null) await update($, selectedAtom, () => Number(note[1]))
+    const issue = /^issue-(\d+)$/.exec(e.element ?? '')
+    if (issue !== null) await update($, selectedIssueAtom, () => Number(issue[1]))
 
     return result
   })

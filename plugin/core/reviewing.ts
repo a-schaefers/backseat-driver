@@ -15,7 +15,7 @@ import type { Health, Pressure } from './health'
 import type { Host } from './host'
 import { commitSubject, EMPTY_QUEUE } from './reviewqueue'
 import type { ReviewQueue, Waiting } from './reviewqueue'
-import { scopeSubject, shortHash, showCommitArgs } from './review'
+import { AUDIT_SUBJECT, scopeSubject, shortHash, showCommitArgs } from './review'
 import type { ReviewScope } from './review'
 import type { Settings } from './settings'
 
@@ -243,23 +243,29 @@ export async function reviewWatchdog(ports: ReviewPorts, state: ReviewState): Pr
 export async function adoptReview(ports: ReviewPorts, state: ReviewState): Promise<void> {
   if (state.reviewAgentId !== null || (await ports.readReview()).state !== 'running') return
   const commit = nextToReview(state.waiting, { wantsReview: true, wantsAssessment: false })
+  // The first waiting commit's reviewer, else an audit's: an audit runs for many minutes, and a reload while it ran
+  // lost its answer until 2026-10-07.
+  const wanted = [...(commit === null ? [] : [{ described: `Deep review of ${commitSubject(commit)}`, isAudit: false }]), { described: `Deep review of ${AUDIT_SUBJECT}`, isAudit: true }]
   let agentId: string | undefined
-  if (commit !== null) {
-    const described = `Deep review of ${commitSubject(commit)}`
-    try {
-      agentId = (await ports.agents()).find(agent => agent.description === described && (agent.status === 'running' || agent.status === 'pending' || agent.status === 'waiting'))?.id
-    } catch {
-      // No list: it cannot be found.
+  let isAudit = false
+  try {
+    const agents = await ports.agents()
+    for (const one of wanted) {
+      agentId = agents.find(agent => agent.description === one.described && (agent.status === 'running' || agent.status === 'pending' || agent.status === 'waiting'))?.id
+      isAudit = one.isAudit
+      if (agentId !== undefined) break
     }
+  } catch {
+    // No list: it cannot be found.
   }
-  ports.trace('agent', 'adopt', () => ({ commit, agentId }))
-  if (commit === null || agentId === undefined || state.reviewAgentId !== null) {
+  ports.trace('agent', 'adopt', () => ({ commit, agentId, isAudit }))
+  if (agentId === undefined || (commit === null && !isAudit) || state.reviewAgentId !== null) {
     if (state.reviewAgentId === null) await ports.setReview({ state: 'failed', text: 'the plugin reloaded while it was running' })
 
     return
   }
   state.reviewAgentId = agentId
-  state.reviewScope = { kind: 'commit', hash: commit.hash, title: commit.title, patch: '' }
+  state.reviewScope = isAudit || commit === null ? { kind: 'audit', files: [], vendored: [] } : { kind: 'commit', hash: commit.hash, title: commit.title, patch: '' }
   state.reviewFailure = ''
   state.reviewFailureNoted = null
   // When it started is not known any more. The time it gets counts from here.

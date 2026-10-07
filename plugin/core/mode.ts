@@ -73,6 +73,8 @@ export const HELP = [
   '  e d m     explain, dismiss or mute the selected note',
   '  l         look at your changes now',
   '  r         run a deep review now',
+  '  a v       in Deep review: audit the whole codebase now, show the map of the project',
+  '  j k e d o in Deep review: next issue, previous, ask about it, dismiss it, open it in the editor',
   '  n p e     in Explain: next symbol, previous symbol, ask about this one',
   '  w         say what you are working on',
   '  q         answer the questions again',

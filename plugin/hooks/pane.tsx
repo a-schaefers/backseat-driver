@@ -1,6 +1,6 @@
 import type { Elements, RenderChildren } from 'claude-code'
 
-import type { ExplainView, LessonsView, LessonView, Mode, Note, OutlineRow, Profile, Profiles, ProgressRecord, ProgressView, Review, ReviewText, SettingRow, Speech, Tab, Watch, Working } from '../types'
+import type { ExplainView, IssuesState, LessonsView, LessonView, Mode, Note, OutlineRow, Profile, Profiles, ProgressRecord, ProgressView, Review, ReviewText, SettingRow, Speech, Tab, Watch, Working } from '../types'
 import { bubbleColumn, bubbleWidth, isTalking, poseOf, saidSoFar, wordsSaid } from '../core/avatar'
 import type { Avatar } from '../core/avatar'
 import { artShape, characterArt } from './character'
@@ -12,11 +12,13 @@ import { encouragementLine, growthCounts, growthHeadline, growthLadder, growthMe
 import type { Growth, GrowthBand } from '../core/growth'
 import { lessonLanguage, lessonProgress } from '../core/lessons'
 import { lately, levelPhrase } from '../core/progress'
-import { readableReview, reviewHistory, shownReview, spotsIn, SURVEY_SUBJECT } from '../core/review'
+import { AUDIT_SUBJECT, readableReview, reviewHistory, shownReview, spotsIn, SURVEY_SUBJECT } from '../core/review'
 import { DEFAULT_PERSONA } from '../core/settings'
 import { dayTime } from '../core/clock'
 import { clockTime, playLine } from '../core/status'
 import type { Persona } from '../core/settings'
+import { AUDIT_UNFINISHED, countsWords, coverageLine, issueWhere, ledgerLine, NOT_AUDITED } from '../core/findings'
+import type { Finding, LedgerViews, Severity } from '../core/findings'
 
 /** The elements the pane is built from. Every surface that draws panes has them, save `Select`, which some lack, and `Raster`, which only the terminal has. */
 export type Kit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdown'> & Partial<Pick<Elements['terminal'], 'Select' | 'Raster'>>
@@ -25,6 +27,8 @@ export type Kit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdo
 export type PaneView = {
   mode: Mode
   tab: Tab
+  /** The project's ledger of issues, its views, and the issue the Deep review tab's keys act on. Absent in tests that draw no tutor. */
+  issues?: { state: IssuesState; views: LedgerViews; selected: number | null }
   persona: Persona
   notes: readonly Note[]
   /** The id of the note the keys act on, or null for the first one. */
@@ -109,6 +113,17 @@ export type PaneActions = {
   onJumpFold?: (subject: string) => void
   /** Deep review: open the review at this place in the history (0 the latest). */
   onReviewOpen?: (index: number) => void
+  /** The issue the Deep review tab's keys act on. */
+  onIssueSelect?: (id: number) => void
+  onIssueStep?: (step: 1 | -1) => void
+  onIssueDismiss?: (id: number) => void
+  onIssueRestore?: (id: number) => void
+  onIssueExplain?: (id: number) => void
+  /** Present only with an editor command set. */
+  onIssueOpen?: (id: number) => void
+  /** Audits the codebase now. Absent in a session that does not drive. */
+  onAudit?: () => void
+  onIssuesFold?: (which: 'low' | 'closed') => void
   /** Open the list of every review, or fold it again. */
   onReviewsFold?: () => void
   /** Open a setting's options under its row, or fold them again. */
@@ -149,7 +164,7 @@ export function spinFrame(spin: number | undefined): string {
  * are open, that a review is new, running or stuck, that Explain or Progress
  * is at work. '' when there is nothing to say.
  */
-export function tabBadge(tab: Tab, view: Partial<Pick<PaneView, 'notes' | 'review' | 'explain' | 'progress' | 'spin'>>): string {
+export function tabBadge(tab: Tab, view: Partial<Pick<PaneView, 'notes' | 'review' | 'explain' | 'progress' | 'spin' | 'issues'>>): string {
   // The spinner stands bare after the name (owner, 2026-10-06: "it should not be parenth'd"); the other badges keep their parentheses.
   const busy = ` ${spinFrame(view.spin)}`
   if (tab === 'play') return view.notes === undefined || view.notes.length === 0 ? '' : ` (${view.notes.length})`
@@ -157,8 +172,12 @@ export function tabBadge(tab: Tab, view: Partial<Pick<PaneView, 'notes' | 'revie
     const review = view.review
     if (review === undefined) return ''
     if (review.isUnseen) return NEW
+    if (review.state === 'running') return busy
+    if (review.state === 'failed') return TROUBLE
+    // The serious issues open, so that the tab says there is something to see (the owner, 2026-10-07: silence read as health).
+    const serious = view.issues?.views.serious ?? 0
 
-    return review.state === 'running' ? busy : review.state === 'failed' ? TROUBLE : ''
+    return serious > 0 ? ` (${serious})` : ''
   }
   if (tab === 'explain') return view.explain?.status === 'updating' ? busy : ''
   if (tab === 'settings' || tab === 'lessons') return ''
@@ -173,7 +192,7 @@ export function tabBadge(tab: Tab, view: Partial<Pick<PaneView, 'notes' | 'revie
  * for as long as the row has room for it.
  */
 export function tabRow(
-  view: Pick<PaneView, 'columns' | 'review'> & Partial<Pick<PaneView, 'notes' | 'explain' | 'progress' | 'spin'>>,
+  view: Pick<PaneView, 'columns' | 'review'> & Partial<Pick<PaneView, 'notes' | 'explain' | 'progress' | 'spin' | 'issues'>>,
 ): { labels: string[]; gap: number } {
   return labelsFor(view, TABS)
 }
@@ -185,7 +204,7 @@ function rowFits(labels: readonly string[], gap: number, columns: number): boole
 
 /** `tabRow`'s choice of names, for the tabs given: all of them, or one row of them. */
 function labelsFor(
-  view: Pick<PaneView, 'columns' | 'review'> & Partial<Pick<PaneView, 'notes' | 'explain' | 'progress' | 'spin'>>,
+  view: Pick<PaneView, 'columns' | 'review'> & Partial<Pick<PaneView, 'notes' | 'explain' | 'progress' | 'spin' | 'issues'>>,
   entries: readonly (typeof TABS)[number][],
 ): { labels: string[]; gap: number } {
   const fits = (labels: readonly string[], gap: number): boolean => rowFits(labels, gap, view.columns)
@@ -220,7 +239,7 @@ export type TabRowView = { from: number; labels: string[]; gap: number }
  * by itself, so the badges come back.
  */
 export function tabRows(
-  view: Pick<PaneView, 'columns' | 'review'> & Partial<Pick<PaneView, 'notes' | 'explain' | 'progress' | 'spin'>>,
+  view: Pick<PaneView, 'columns' | 'review'> & Partial<Pick<PaneView, 'notes' | 'explain' | 'progress' | 'spin' | 'issues'>>,
 ): TabRowView[] {
   const one = tabRow(view)
   if (rowFits(one.labels, one.gap, view.columns)) return [{ from: 0, ...one }]
@@ -719,6 +738,7 @@ function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
 export function reviewBanner(review: Review): string {
   if (review.state === 'running') {
     if (review.subject === SURVEY_SUBJECT) return 'Taking a first look around this project.'
+    if (review.subject === AUDIT_SUBJECT) return review.since === undefined || review.since === 0 ? 'Auditing this project.' : `Auditing this project since ${clockTime(review.since)}.`
 
     return review.since === undefined || review.since === 0 ? `Reviewing ${review.subject}.` : `Reviewing ${review.subject} since ${clockTime(review.since)}.`
   }
@@ -822,6 +842,117 @@ function jumpList({ Box, Button }: Pick<Kit, 'Box' | 'Button'>, view: Pick<PaneV
   )
 }
 
+/** The marks before an issue's row: how bad it is, at a glance. */
+const SEVERITY_MARKS: Record<Severity, { mark: string; color: string | undefined }> = {
+  critical: { mark: '◆', color: 'red' },
+  high: { mark: '●', color: 'red' },
+  medium: { mark: '●', color: 'yellow' },
+  low: { mark: '·', color: undefined },
+}
+
+/** The issues as the Deep review tab draws them, in order: the ranked, then the low ones when their list is open. */
+export function drawnIssues(view: Pick<PaneView, 'issues' | 'openList'>): number[] {
+  const views = view.issues?.views
+  if (views === undefined) return []
+
+  return [...views.ranked, ...(view.openList === 'issues-low' ? views.folded : [])]
+}
+
+/** The issue the keys act on: the selected one while it is drawn, else the first. */
+export function currentIssue(view: Pick<PaneView, 'issues' | 'openList'>): Finding | undefined {
+  const drawn = drawnIssues(view)
+  const issues = view.issues
+  if (issues === undefined || drawn.length === 0) return undefined
+  const id = issues.selected !== null && drawn.includes(issues.selected) ? issues.selected : drawn[0]
+
+  return issues.state.ledger.findings.find(finding => finding.id === id)
+}
+
+/** One issue: its mark, where it is now, its title, and under them what is wrong and where it came from. */
+function issueRow({ Box, Text, Button }: Pick<Kit, 'Box' | 'Text' | 'Button'>, finding: Finding, placed: number | null | undefined, isCurrent: boolean, actions: PaneActions) {
+  const where = placed === null ? `${issueWhere(finding)}, changed since` : issueWhere(finding, placed)
+  const from = finding.origin === 'audit' ? 'audit' : finding.commit === '' ? 'deep review' : `review of ${finding.commit}`
+  const details = [finding.category, from, finding.condition, finding.status === 'partly' ? `partly fixed: ${finding.statusNote}` : ''].filter(part => part !== '').join(' · ')
+  const { mark, color } = SEVERITY_MARKS[finding.severity]
+
+  return (
+    <Box flexDirection="column">
+      <Box flexDirection="row" columnGap={1}>
+        <Box flexShrink={0}>
+          <Text color={color} dimColor={color === undefined}>
+            {mark}
+          </Text>
+        </Box>
+        <Button key={`issue-${finding.id}`} label={`${isCurrent ? '❯' : ' '} ${finding.severity} · ${where}`} plain dimColor={!isCurrent} onPress={() => actions.onIssueSelect?.(finding.id)} />
+      </Box>
+      {/* The label stays short, as a note's does, so that a narrow dock never cuts it: the title goes under it, whole. */}
+      <Box flexDirection="column" paddingLeft={4}>
+        <Text bold>{finding.title}</Text>
+        <Text>{finding.text}</Text>
+        {details !== '' && <Text dimColor>{details}</Text>}
+      </Box>
+    </Box>
+  )
+}
+
+/** A resolved or dismissed issue, dim, with the way back for a dismissed one. */
+function closedRow({ Box, Text, Button }: Pick<Kit, 'Box' | 'Text' | 'Button'>, finding: Finding, actions: PaneActions) {
+  const isFixed = finding.status === 'resolved'
+
+  return (
+    <Box flexDirection="row" columnGap={1}>
+      <Box flexShrink={1}>
+        <Text dimColor wrap="truncate-end">{`${isFixed ? '✓' : '✗'} ${issueWhere(finding)}  ${finding.title} · ${isFixed ? 'fixed' : 'dismissed'}`}</Text>
+      </Box>
+      {!isFixed && <Button key={`issue-restore-${finding.id}`} label="restore" onPress={() => actions.onIssueRestore?.(finding.id)} />}
+    </Box>
+  )
+}
+
+/**
+ * The project's issues at the top of the Deep review tab, worst first: what
+ * the last audit read, the counts, the ranked issues, the low ones folded,
+ * and the closed ones folded (owner, 2026-10-07: the pane's silence read as
+ * "he wrote a perfect codebase"). Never silent: before any audit it says so.
+ */
+function issuesSection(kit: Kit, view: PaneView, actions: PaneActions) {
+  const { Box, Text, Button } = kit
+  const issues = view.issues
+  if (issues === undefined) return null
+  const { state, views } = issues
+  const byId = new Map(state.ledger.findings.map(finding => [finding.id, finding]))
+  const current = currentIssue(view)
+  const isAuditing = view.review.state === 'running' && view.review.subject === AUDIT_SUBJECT
+  const coverage = coverageLine(state.ledger.coverage, clockTime)
+  const status = isAuditing ? '' : coverage !== '' ? coverage : state.isAudited ? AUDIT_UNFINISHED : NOT_AUDITED
+  const counts = countsWords(views.counts)
+  const row = (id: number) => {
+    const finding = byId.get(id)
+
+    return finding === undefined ? null : issueRow(kit, finding, state.placed[String(id)], finding.id === current?.id, actions)
+  }
+  const isLowOpen = view.openList === 'issues-low'
+  const isClosedOpen = view.openList === 'issues-closed'
+
+  return (
+    <Box flexDirection="column">
+      {status !== '' && <Text dimColor>{status}</Text>}
+      {counts !== '' && <Text bold>{`Open: ${counts}`}</Text>}
+      {views.ranked.map(row)}
+      {views.folded.length > 0 && <Button key="issues-low" label={`${isLowOpen ? '▾' : '▸'} Low (${views.folded.length})`} plain onPress={() => actions.onIssuesFold?.('low')} />}
+      {isLowOpen && views.folded.map(row)}
+      {views.closed.length > 0 && <Button key="issues-closed" label={`${isClosedOpen ? '▾' : '▸'} Closed (${views.closed.length})`} plain onPress={() => actions.onIssuesFold?.('closed')} />}
+      {isClosedOpen &&
+        views.closed.slice(0, 20).map(id => {
+          const finding = byId.get(id)
+
+          return finding === undefined ? null : closedRow(kit, finding, actions)
+        })}
+      {(status !== '' || counts !== '' || views.closed.length > 0) && rule({ Text }, view.columns)}
+    </Box>
+  )
+}
+
 function deepReview({ Box, Text, Button, Markdown }: Kit, view: PaneView, actions: PaneActions) {
   const { review } = view
   const banner = reviewBanner(review)
@@ -833,6 +964,7 @@ function deepReview({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
 
   return (
     <Box flexDirection="column">
+      {issuesSection({ Box, Text, Button, Markdown } as Kit, view, actions)}
       {review.state === 'none' && <Text dimColor>No deep review yet. One runs {view.reviewSchedule}.</Text>}
       {banner !== '' && <Text dimColor={review.state === 'running'}>{banner}</Text>}
       {behind !== '' && <Text dimColor>{behind}</Text>}
@@ -874,12 +1006,27 @@ function deepReview({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
 
 /** The Deep review tab's controls: a review now, and the way through the history. Another session driving, that is said in their place. */
 function reviewControls({ Text, Button }: Pick<Kit, 'Text' | 'Button'>, view: PaneView, actions: PaneActions): RenderChildren[] {
-  if (view.watch.state === 'following') return [<Text dimColor>{followingLine(view.watch.driver)}</Text>]
   const history = reviewHistory(view.review)
   const { index } = shownReview(view.review)
+  const current = currentIssue(view)
+  const drawn = drawnIssues(view)
+  // The map of the project, which the first look around wrote: one key away, not a tab of its own (2026-10-07).
+  const overview = history.findIndex(entry => entry.subject === SURVEY_SUBJECT)
+  // Any session acts on an issue: what it does is written to the project's ledger, which every session reads.
+  const issueKeys = [
+    current !== undefined && <Button key="issue-explain" label="explain" hotkey="e" plain onPress={() => actions.onIssueExplain?.(current.id)} />,
+    current !== undefined && <Button key="issue-dismiss" label="dismiss" hotkey="d" plain onPress={() => actions.onIssueDismiss?.(current.id)} />,
+    drawn.length > 1 && <Button key="issue-next" label="next issue" hotkey="j" plain onPress={() => actions.onIssueStep?.(1)} />,
+    drawn.length > 1 && <Button key="issue-previous" label="previous" hotkey="k" plain onPress={() => actions.onIssueStep?.(-1)} />,
+    current !== undefined && actions.onIssueOpen !== undefined && <Button key="issue-open" label="open in editor" hotkey="o" plain onPress={() => actions.onIssueOpen?.(current.id)} />,
+    overview >= 0 && overview !== index && <Button key="overview" label="overview" hotkey="v" plain onPress={() => actions.onReviewOpen?.(overview)} />,
+  ]
+  if (view.watch.state === 'following') return [...issueKeys, <Text dimColor>{followingLine(view.watch.driver)}</Text>]
 
   return [
     <Button key="review-now" label="review now" hotkey="r" plain onPress={() => actions.onReview()} />,
+    actions.onAudit !== undefined && <Button key="audit" label="audit" hotkey="a" plain onPress={() => actions.onAudit?.()} />,
+    ...issueKeys,
     index + 1 < history.length && <Button key="review-older" label="older" hotkey="p" plain onPress={() => actions.onReviewStep?.(1)} />,
     index > 0 && <Button key="review-newer" label="newer" hotkey="n" plain onPress={() => actions.onReviewStep?.(-1)} />,
   ]
@@ -951,7 +1098,17 @@ function playByPlay(kit: Kit, view: PaneView, actions: PaneActions) {
   const { Box, Text } = kit
   const notes = drawnOrder(view.notes)
   const current = currentNote(view)
-  if (current === undefined) return <Text dimColor>{emptyPlayLine(view)}</Text>
+  if (current === undefined) {
+    // Under an empty tab, what the ledger holds: its silence must never read as an all-clear (2026-10-07).
+    const ledger = view.issues === undefined || view.mode !== 'on' || view.watch.state === 'no-git' ? '' : ledgerLine(view.issues.views, view.issues.state.isAudited, view.issues.state.ledger.coverage)
+
+    return (
+      <Box flexDirection="column">
+        <Text dimColor>{emptyPlayLine(view)}</Text>
+        {ledger !== '' && <Text dimColor>{ledger}</Text>}
+      </Box>
+    )
+  }
 
   const decisions = notes.filter(note => note.kind === 'decision')
   const insights = notes.filter(note => note.kind === 'insight')

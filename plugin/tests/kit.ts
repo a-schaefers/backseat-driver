@@ -454,7 +454,7 @@ export function stubSession(on: On, options: StubOptions = {}) {
     session.disk.set(`${HOME}/.claude/plugins/installed_plugins.json`, JSON.stringify({ version: 2, plugins: { 'backseat-driver@backseat-driver': [{ installPath: '/' }] } }))
   }
   if (options.isNewProject !== true && !session.disk.has(`${session.projectFolder}/project.json`)) {
-    session.disk.set(`${session.projectFolder}/project.json`, JSON.stringify({ ...emptyProject(ROOT), isSurveyed: true }))
+    session.disk.set(`${session.projectFolder}/project.json`, JSON.stringify({ ...emptyProject(ROOT), isSurveyed: true, isAudited: true }))
   }
 
   on('session.start', () => ({ cwd: ROOT }))
@@ -776,9 +776,14 @@ export function stubSession(on: On, options: StubOptions = {}) {
       return ok(changed.map(path => `diff --git a/${path} b/${path}\n+${files[path] ?? ''}`).join('\n'))
     }
     if (args[0] === 'show' && !String(args[1]).includes(':')) {
-      const commit = commits.find(known => known.hash === args[args.length - 1])
+      const at = commits.findIndex(known => known.hash === args[args.length - 1])
+      const commit = commits[at]
+      if (commit === undefined) return failed
+      // A header for each file the commit changed, as git writes one: the files a review of it is about.
+      const before = commits[at - 1]?.tree ?? {}
+      const touched = Object.keys(commit.tree).filter(path => commit.tree[path] !== before[path])
 
-      return commit === undefined ? failed : ok(`commit ${commit.hash}\n\n${commit.message}\n\n+patch of ${commit.message}`)
+      return ok(`commit ${commit.hash}\n\n${commit.message}\n\n${touched.map(path => `diff --git a/${path} b/${path}\n`).join('')}+patch of ${commit.message}`)
     }
     if (args[0] === 'status') {
       session.scans += 1

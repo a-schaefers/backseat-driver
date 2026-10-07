@@ -248,11 +248,18 @@ sessionTest('a project the tutor has not seen is surveyed once', async ($, on) =
   // A survey is not a review of anyone's work, so the next review is not told about it as one.
   expect(session.data(`projects/${projectId(ROOT)}/reviews.json`)).toBeUndefined()
 
-  // Switched off and on again: no second survey.
+  // Its audit follows the first look around, once (2026-10-07).
+  expect(session.spawned.length).toBe(2)
+  expect(session.spawned[1]?.prompt).toMatch('Audit this project for issues.')
+  expect(parseProject(session.data(`projects/${projectId(ROOT)}/project.json`), ROOT).isAudited).toBe(true)
+  await $.turn.complete(session.finish(2, 'I read stats.py. Nothing serious.'))
+  await session.clock.settle()
+
+  // Switched off and on again: no second survey, and no second audit.
   await $.command.run(typed('backseat', 'off'))
   await $.command.run(typed('backseat'))
   await session.clock.settle()
-  expect(session.spawned.length).toBe(1)
+  expect(session.spawned.length).toBe(2)
 })
 
 sessionTest('no survey when deep reviews only run on request', { options: { deep_review_after_commit: false } }, async ($, on) => {

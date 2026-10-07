@@ -107,6 +107,18 @@ DRIVER_GRACE_MS = 5_000
 SHARED_GRACE_MS = 15_000
 # What the pane calls the first look around a project, which reviews nothing and is kept in project.json, not reviews.json (plugin/core/review.ts).
 SURVEY_SUBJECT = "a first look around this project"
+# What the pane calls an audit of the codebase for issues, kept in reviews.json under no commit (plugin/core/review.ts).
+AUDIT_SUBJECT = "an audit of this project"
+# How bad an issue is, worst first (plugin/core/findings.ts `SEVERITIES`): the Deep review tab ranks by it.
+SEVERITIES = ("critical", "high", "medium", "low")
+# The driver takes another session's change to the ledger up at its next look at the shared files, at most every
+# SHARED_CHECK_MS from its scan (plugin/hooks/register.tsx), which a watched tree spaces PUSHED_SCAN_MS apart
+# (Kernel.Sensor); a session that does not drive, at its next beat of the lease.
+SHARED_CHECK_MS = 5_000
+PUSHED_SCAN_MS = 30_000
+LEDGER_GRACE_MS = PUSHED_SCAN_MS + SHARED_CHECK_MS + 5_000
+# The lines the empty play-by-play draws about the ledger (plugin/core/findings.ts `ledgerLine`): one of them, always.
+LEDGER_LINE_STARTS = ("The deep review has ", "The audit found nothing open", "The audit has not finished", "Not audited for issues yet:")
 # The bar for a first placement (plugin/core/progress.ts): a level on a record under it is one the rules no longer support.
 PLACE_OBSERVATIONS = 8
 PLACE_COMMITS = 3
@@ -293,6 +305,7 @@ def projects(home: pathlib.Path) -> list[dict]:
         queue = read_json(folder / "queue.json")
         reviews = read_json(folder / "reviews.json")
         journal = read_json(folder / "journal.json")
+        findings = read_json(folder / "findings.json")
         out.append({
             "id": folder.name,
             "dir": folder,
@@ -310,6 +323,9 @@ def projects(home: pathlib.Path) -> list[dict]:
             "reviews_at": mtime_ms(folder / "reviews.json"),
             "journal": journal if isinstance(journal, dict) else {},
             "journal_at": mtime_ms(folder / "journal.json"),
+            "findings": findings if isinstance(findings, dict) else None,
+            "findings_at": mtime_ms(folder / "findings.json"),
+            "is_audited": known.get("isAudited") is True,
         })
     return out
 
@@ -626,7 +642,7 @@ def is_busy(state: dict | None) -> str:
     if play in ("looking", "settling"):
         return "a look is " + ("running" if play == "looking" else "about to start")
     if dig(state, "pane.review.state") == "running":
-        return "a deep review is running"
+        return "an audit is running" if dig(state, "pane.review.subject") == AUDIT_SUBJECT else "a deep review is running"
     if dig(state, "pane.progress.busy"):
         return "a look at progress is running"
     return ""
@@ -1269,6 +1285,7 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
         if lost and now - (project["notes_at"] or 0) > (DRIVER_GRACE_MS if is_driver is True else FOLLOW_GRACE_MS):
             out.append((BAD, f"{who} has {len(notes)} open note(s) in its pane, and notes.json, written {ago(now - (project['notes_at'] or 0))} ago, lacks {len(lost)} of them: a restart would lose them"))
     out += check_cache(w, s, project)
+    out += check_issues(w, s, project)
     out += check_notes_lines(who, state, root)
     out += check_explain_fresh(who, state, root, project)
     out += check_explain_insights(who, state, root, project)
@@ -1646,6 +1663,137 @@ def unchanged_since(root: str, path: str, at: float | None, now: int) -> bool:
     return written is not None and written < at
 
 
+def ledger_counts(findings: list[dict]) -> dict[str, int]:
+    """The open issues by severity, partly fixed ones included, as the pane counts them."""
+    counts = {severity: 0 for severity in SEVERITIES}
+    for finding in findings:
+        if finding.get("status") in ("open", "partly") and finding.get("severity") in counts:
+            counts[finding["severity"]] += 1
+    return counts
+
+
+def counts_words(counts: dict[str, int]) -> str:
+    """`countsWords` (plugin/core/findings.ts): "1 critical, 2 high", worst first, none left out but those at 0."""
+    return ", ".join(f"{counts[severity]} {severity}" for severity in SEVERITIES if counts.get(severity, 0) > 0)
+
+
+def ledger_line(counts: dict[str, int], is_audited: bool, coverage: dict) -> str:
+    """`ledgerLine` (plugin/core/findings.ts): what the empty play-by-play says of the ledger, so that its silence never
+    reads as an all-clear."""
+    if counts["critical"] + counts["high"] > 0:
+        return f"The deep review has {counts_words({**counts, 'medium': 0, 'low': 0})} open: 2: Deep review."
+    lesser = counts["medium"] + counts["low"]
+    if lesser > 0:
+        return f"The deep review has {lesser} lesser {'issue' if lesser == 1 else 'issues'} open: 2: Deep review."
+    if (coverage.get("at") or 0) > 0:
+        return f"The audit found nothing open in the {len(coverage.get('read') or [])} files it read."
+    if is_audited:
+        return "The audit has not finished: 2: Deep review."
+    return "Not audited for issues yet: 2: Deep review."
+
+
+def issue_label(finding: dict) -> re.Pattern:
+    """An issue's row label as the Deep review tab draws it, tidied as the drawing's pieces are: the mark of the one the
+    keys act on, its severity, where it stands now (a line that moved, or "changed since"). Its title is the next piece."""
+    file = str(finding.get("file", ""))
+    where = "the project" if file == "." else re.escape(file) + r"(?::\d+)?(?:, changed since)?"
+    return re.compile(rf"^(?:❯ )?{re.escape(str(finding.get('severity', '')))} · {where}$")
+
+
+def drawn_issue_rows(texts: list[str], findings: list[dict]) -> list[list[dict]]:
+    """The issue rows a drawing holds, in order: a label piece and the issue's title after it. Each row is the findings
+    it can be, which is more than one only for issues alike in severity, place and title."""
+    rows = []
+    for i in range(len(texts) - 1):
+        matching = [f for f in findings if issue_label(f).match(texts[i]) and texts[i + 1] == " ".join(str(f.get("title", "")).split())]
+        if matching:
+            rows.append(matching)
+    return rows
+
+
+def check_issues(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]]:
+    """The project's ledger of issues (findings.json) against the pane: what it holds, what the Deep review tab draws of
+    it, and what the empty play-by-play says of it. The owner's 2026-10-07: a real codebase with a critical issue showed
+    nothing in either view, and the silence read as "he wrote a perfect codebase"."""
+    out: list[tuple[str, str]] = []
+    state = s["state"]
+    if state is None or tutor_mode(s) == "off" or project is None or not isinstance(dig(state, "pane.issues"), dict):
+        return out
+    now = w["now"]
+    who = s["short"]
+    stored = project.get("findings") if isinstance(project.get("findings"), dict) else {}
+    on_disk = [f for f in (stored.get("findings") or []) if isinstance(f, dict)]
+    coverage = stored.get("coverage") if isinstance(stored.get("coverage"), dict) else {}
+    written = project.get("findings_at")
+    if written is not None and now - written <= LEDGER_GRACE_MS:
+        out.append((NOTE, f"findings.json of {project['id']} was written {ago(now - written)} ago: {who}'s issues are held against it next time"))
+        return out
+    is_open = lambda f: f.get("status") in ("open", "partly")
+
+    # What the pane holds, against the file every session reads.
+    in_pane = [f for f in (dig(state, "pane.issues.ledger.findings") or []) if isinstance(f, dict)]
+    disk_open = {f.get("id") for f in on_disk if is_open(f)}
+    pane_open = {f.get("id") for f in in_pane if is_open(f)}
+    if disk_open != pane_open:
+        lacks = sorted(disk_open - pane_open, key=str)
+        extra = sorted(pane_open - disk_open, key=str)
+        parts = ([f"lacks open issue(s) {', '.join(map(str, lacks))}"] if lacks else []) + ([f"holds issue(s) {', '.join(map(str, extra))} open, which findings.json has closed or lacks"] if extra else [])
+        out.append((BAD, f"{who}'s ledger {' and '.join(parts)}: findings.json has {len(disk_open)} open"))
+    else:
+        out.append((FINE, f"{who}'s ledger has findings.json's {len(disk_open)} open issue(s)"))
+
+    texts = [" ".join(t.split()) for t in (dig(state, "shown.pane.texts") or []) if isinstance(t, str)]
+    tab = dig(state, "pane.tab")
+    counts = ledger_counts(on_disk)
+    if tab == "review" and texts:
+        # Nothing closed is drawn as open, the open ones are drawn worst first, and none above low is left out.
+        rows = drawn_issue_rows(texts, on_disk)
+        for row in rows:
+            if not any(is_open(f) for f in row):
+                out.append((BAD, f"{who}'s Deep review tab draws issue {row[0].get('id')} “{row[0].get('title')}” as open, and findings.json has it {row[0].get('status')}"))
+        drawn = [next(f for f in row if is_open(f)) for row in rows if any(is_open(f) for f in row)]
+        ranks = [SEVERITIES.index(f["severity"]) for f in drawn if f.get("severity") in SEVERITIES]
+        if ranks != sorted(ranks):
+            out.append((BAD, f"{who}'s Deep review tab draws its issues out of order: {', '.join(str(f.get('severity')) for f in drawn)}"))
+        shown_ids = {f.get("id") for row in rows for f in row}
+        missing = [f for f in on_disk if is_open(f) and f.get("severity") != "low" and f.get("id") not in shown_ids]
+        if missing:
+            out.append((BAD, f"{who}'s Deep review tab lacks the row of {len(missing)} open issue(s) above low: " + ", ".join(f"{f.get('id')} “{f.get('title')}”" for f in missing[:3])))
+        said = next((t for t in texts if t.startswith("Open: ")), None)
+        expected = counts_words(counts)
+        if expected and said is None:
+            out.append((BAD, f"{who}'s Deep review tab says nothing of the {expected} open in findings.json"))
+        elif said is not None and said != f"Open: {expected}":
+            out.append((BAD, f"{who}'s Deep review tab says “{said}”, and findings.json has {expected or 'none'} open"))
+        # What was read, or that nothing was: the tab is never silent about it.
+        is_auditing = dig(state, "pane.review.state") == "running" and dig(state, "pane.review.subject") == AUDIT_SUBJECT
+        if not is_auditing:
+            if (coverage.get("at") or 0) > 0 and not any(t.startswith("Audited ") for t in texts):
+                out.append((BAD, f"{who}'s Deep review tab does not say what the audit of {day_clock(coverage['at'], now)} read"))
+            elif (coverage.get("at") or 0) <= 0 and not any(t.startswith(("Not audited for issues yet.", "The audit did not finish.")) for t in texts):
+                out.append((BAD, f"{who}'s Deep review tab says nothing of an audit, and none is on record: its silence reads as an all-clear"))
+    if tab == "play" and texts and not (dig(state, "pane.notes") or []) and dig(state, "pane.watch.state") != "no-git" and tutor_mode(s) == "on":
+        expected = ledger_line(counts, project.get("is_audited") is True, coverage)
+        said = next((t for t in texts if t.startswith(LEDGER_LINE_STARTS)), None)
+        if said is None:
+            out.append((BAD, f"{who}'s empty play-by-play says nothing of the ledger, which makes it “{expected}”: its silence reads as an all-clear"))
+        elif said != expected:
+            out.append((BAD, f"{who}'s empty play-by-play says “{said}”, and findings.json makes it “{expected}”"))
+
+    # What the audit says it read, against the repository: a file that is not there, or more source files than git lists.
+    root = state.get("repoRoot") or ""
+    if (coverage.get("at") or 0) > 0 and root:
+        listed = git_out(root, "ls-files", "-z")
+        if listed is not None:
+            files = {path for path in listed.split("\0") if path}
+            unknown = [str(path) for path in (coverage.get("read") or []) if str(path) not in files and not (pathlib.Path(root) / str(path)).exists()]
+            if unknown:
+                out.append((BAD, f"the audit of {project['id']} says it read {len(unknown)} file(s) the repository does not have: {', '.join(unknown[:3])}"))
+            if (coverage.get("files") or 0) > len(files):
+                out.append((BAD, f"the audit of {project['id']} counts {coverage.get('files')} source files, and git lists {len(files)} files in all"))
+    return out
+
+
 def check_cache(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]]:
     """The pane against the project's cache on disk and the person's record: what a restart, a takeover and a
     session that does not drive take up from the folder, and what every session keeps in step with. The deep
@@ -1838,6 +1986,9 @@ def print_bundle(w: dict, s: dict) -> None:
     print(f"notes: {len(notes)} open, {len(dismissed)} dismissed")
     for n in notes:
         print(f"  #{n.get('id')} {n.get('kind')} {n.get('file')}:{n.get('line')} “{brief(n.get('text'), 110)}”")
+    issues = pane.get("issues") if isinstance(pane.get("issues"), dict) else {}
+    held = [f for f in (dig(issues, "ledger.findings") or []) if isinstance(f, dict)]
+    print(f"issues: {len(held)} in the ledger, open {counts_words(ledger_counts(held)) or 'none'} · selected {pane.get('selectedIssue')} · audited {'yes' if issues.get('isAudited') else 'no'} · placed " + ", ".join(f"{k}: {v}" for k, v in (issues.get("placed") or {}).items()))
     review = pane.get("review") if isinstance(pane.get("review"), dict) else {}
     older = review.get("older") if isinstance(review.get("older"), list) else []
     print(f"review: state {review.get('state')} · subject “{review.get('subject')}” · {'unseen' if review.get('isUnseen') else 'seen'} · {len(older)} in history · opened {review.get('opened', 0)} · waiting {review.get('waiting') or 0}")
@@ -1872,6 +2023,15 @@ def print_bundle(w: dict, s: dict) -> None:
         said = dig(project["journal"], "said") or {}
         inferred = dig(project["journal"], "inferred") or {}
         print(f"journal.json ({since(project['journal_at'])}): said “{said.get('text', '') if isinstance(said, dict) else ''}” at {day_clock(said.get('at'), now) if isinstance(said, dict) and said.get('at') else '-'} · inferred “{inferred.get('text', '') if isinstance(inferred, dict) else ''}” · {len(dig(project['journal'], 'entries') or [])} entries in this sitting")
+        # The ledger, by title and place: never the quoted line, which can hold what a secret's line holds.
+        ledger = project.get("findings") or {}
+        found = [f for f in (ledger.get("findings") or []) if isinstance(f, dict)]
+        cov = ledger.get("coverage") if isinstance(ledger.get("coverage"), dict) else {}
+        audit = (f"audited {day_clock(cov.get('at'), now)} at {cov.get('commit') or '-'}: read {len(cov.get('read') or [])} of {cov.get('files')} source files, skipped {len(cov.get('skipped') or [])}"
+                 if (cov.get("at") or 0) > 0 else "an audit started and never finished" if project.get("is_audited") else "never audited")
+        print(f"findings.json ({since(project['findings_at'])}): {len(found)} issue(s), open {counts_words(ledger_counts(found)) or 'none'} · {audit}")
+        for f in found:
+            print(f"  #{f.get('id')} {f.get('status')} {f.get('severity')} {f.get('category')} {f.get('file')}:{f.get('line')} “{brief(f.get('title'), 80)}” · {f.get('origin')} {f.get('commit') or ''}{' · ' + brief(f.get('condition'), 60) if f.get('condition') else ''}")
     if s["home"] is not None:
         for file in sorted((s["home"] / "progress").glob("*.json")):
             stored = read_json(file) or {}

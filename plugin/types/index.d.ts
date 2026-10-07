@@ -324,6 +324,57 @@ export type ProgressView = {
   skipped: string
 }
 
+/** The project's ledger of issues (`findings.json`, plugin/core/findings.ts). */
+export type Severity = 'critical' | 'high' | 'medium' | 'low'
+export type Category = 'security' | 'bug' | 'edge-case' | 'logic' | 'robustness' | 'quality'
+export type IssueStatus = 'open' | 'partly' | 'resolved' | 'dismissed'
+/** Who says something of an issue: the person, a deep review or audit, the play-by-play. */
+export type Actor = 'person' | 'review' | 'look'
+export type IssueOrigin = 'audit' | 'review'
+export type PersonAction = 'dismiss' | 'restore' | 'pin' | 'unpin'
+
+
+export type Finding = {
+  id: number
+  /** The path from the repository's root, or `.` for the project as a whole. */
+  file: string
+  /** 0 for an issue about the whole file or project. */
+  line: number
+  /** The line as it read when the issue was found, trimmed: where to look for it after the file has changed. */
+  lineText: string
+  severity: Severity
+  category: Category
+  topic: string
+  /** A few words to scan a list by. */
+  title: string
+  /** What is wrong and why it matters, naming the idea; never the fix, never a secret's value. */
+  text: string
+  /** '' or the condition it depends on: "only if the site is deployed with its .git folder". */
+  condition: string
+  origin: IssueOrigin
+  commit: string
+  at: number
+  status: IssueStatus
+  statusAt: number
+  statusBy: '' | Actor
+  statusNote: string
+  isPinned: boolean
+}
+
+/** What the last audit read. `files` is how many source files git listed; `read` and `skipped` are its own account. */
+export type Coverage = { at: number; commit: string; files: number; read: string[]; skipped: { path: string; why: string }[] }
+
+export type Ledger = { nextId: number; findings: Finding[]; coverage: Coverage }
+
+/** The project's ledger of issues as the pane holds it: the ledger, where each open issue's line stands now, and whether an audit was started. */
+export type IssuesState = {
+  ledger: Ledger
+  /** By id: the issue's line in its file as the file reads now, 0 for a whole file, null when its line changed since it was found. */
+  placed: Record<string, number | null>
+  /** True once an audit of the project was started. */
+  isAudited: boolean
+}
+
 declare module 'claude-code' {
   /** The tools this plugin registers for the tutor, so that a `tool.call` hook on one is typed. */
   interface McpToolInputs {
@@ -347,6 +398,10 @@ declare module 'claude-code' {
       dismissed: Note[]
       /** The id of the note the pane's keys act on, or null for the first one. */
       selected: number | null
+      /** The project's ledger of issues, which the Deep review tab ranks and every view draws. */
+      issues: IssuesState
+      /** The id of the issue the Deep review tab's keys act on, or null for the first one. */
+      selectedIssue: number | null
       watch: Watch
       review: Review
       profiles: Profiles
