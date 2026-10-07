@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Note, OutlineRow, Watch } from '../types'
 import { NO_VIEW } from '../core/explainer'
-import { currentNote, detailMarkdown, explainNotice, FOCUSED_HINT, followingLine, jumpHeading, KEYBOARD_HINT, keysRowFits, reviewRow, reviewsHeading, spinFrame, nameColumns, outlineName, personaLine, reviewBanner, reviewPlace, reviewSpots, stateMark, statusLine, tabBadge, tabRow, tabRows, underlineSpans, waitingLine } from '../hooks/pane'
+import { currentNote, detailMarkdown, emptyPlayLine, explainNotice, FOCUSED_HINT, followingLine, jumpHeading, KEYBOARD_HINT, keysRowFits, nameColumns, NO_LOOK_YET, NO_NOTES, outlineName, personaLine, reviewBanner, reviewPlace, reviewRow, reviewsHeading, reviewSpots, spinFrame, stateMark, statusLine, tabBadge, tabRow, tabRows, underlineSpans, waitingLine, workingRowFits } from '../hooks/pane'
 import type { PaneView } from '../hooks/pane'
 import { paneContext } from '../core/prompts'
 import { readableReview, reviewHistory, shownReview, spotsIn, SURVEY_SUBJECT, withReviewChange } from '../core/review'
@@ -81,7 +81,8 @@ sessionTest('the pane opens on the play-by-play and switches tabs, on every surf
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    expect(await ui.find({ type: 'Text', text: 'No notes. Keep going.' })).toBeDefined()
+    // Before any look the tab says so, not "No notes" (the owner read that as an all-clear, 2026-10-06).
+    expect(await ui.find({ type: 'Text', text: NO_LOOK_YET })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'On. Watching for your next save.' })).toBeDefined()
 
     await ui.press({ key: 'tab-review' })
@@ -408,4 +409,36 @@ sessionTest('a change of tab scrolls the pane back to its top, and the log says 
   await session.clock.advance(FLUSH_MS)
   expect(session.debugLog().filter(record => record.k === 'ui' && record.n === 'scroll to top').length).toBe(before + 1)
   await ui.unmount()
+})
+
+test('the empty Play-by-play tab says that nothing has been looked at yet, where a look can come', () => {
+  const watch = { state: 'idle', lastLookAt: null, line: 'On.' } as const
+  expect(emptyPlayLine({ mode: 'on', watch })).toBe(NO_LOOK_YET)
+  expect(emptyPlayLine({ mode: 'on', watch: { ...watch, state: 'settling' } })).toBe(NO_LOOK_YET)
+  expect(emptyPlayLine({ mode: 'on', watch: { ...watch, lastLookAt: 1000 } })).toBe(NO_NOTES)
+  // Another session looks, there is no repository, or the tutor is paused: nothing to wait for here.
+  expect(emptyPlayLine({ mode: 'on', watch: { ...watch, state: 'following' } })).toBe(NO_NOTES)
+  expect(emptyPlayLine({ mode: 'on', watch: { ...watch, state: 'no-git' } })).toBe(NO_NOTES)
+  expect(emptyPlayLine({ mode: 'paused', watch })).toBe(NO_NOTES)
+})
+
+test('the "Working on" value goes on a row of its own when the label and the control leave it no room', () => {
+  // At 23 columns "Working on:", the gaps and "w: change" took every column (the eighth ui-truth pass, 2026-10-06).
+  expect(workingRowFits(23, 'change')).toBe(false)
+  expect(workingRowFits(30, 'change')).toBe(false)
+  expect(workingRowFits(31, 'change')).toBe(true)
+  expect(workingRowFits(64, 'say what')).toBe(true)
+})
+
+test('the tab bar falls to three rows of two, and then one tab a row, when two rows of three do not fit', () => {
+  const review = VIEW.review
+  expect(tabRows({ columns: 46, review }).length).toBe(2)
+  // 23 columns (Claude Code's dock on the owner's 157-column terminal, 2026-10-06): two rows of three cut "3:" and "6:" off.
+  const three = tabRows({ columns: 23, review })
+  expect(three.map(row => row.from)).toEqual([0, 2, 4])
+  // Each row chooses its own names: two of them fit their full names.
+  expect(three.map(row => row.labels.join(' '))).toEqual(['Play Review', 'Explain Growth', 'Lessons Settings'])
+  const six = tabRows({ columns: 12, review })
+  expect(six.length).toBe(6)
+  expect(six[0]?.labels).toEqual(['Play'])
 })

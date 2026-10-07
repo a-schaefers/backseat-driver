@@ -1129,10 +1129,22 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
     if mode == "on" and "self" not in deadlines and isinstance(loaded_for_self, (int, float)) and (state.get("at") or now) - loaded_for_self > SELF_GRACE_MS:
         out.append((BAD, f"{who} has the tutor on and no `self` deadline: its look at itself (the goodbye at a handoff, the debug switch) is not armed"))
 
+    # Before any look, "l" says that the tree at switch-on is the baseline, and the Play-by-play tab that nothing has
+    # been looked at: "Nothing has changed since the last look" and "No notes. Keep going." read as an all-clear on
+    # code nothing had looked at (the eighth ui-truth pass, 2026-10-06; the owner asked whether the codebase was healthy).
+    drawn_now = [t for t in (dig(state, "shown.pane.texts") or []) if isinstance(t, str)]
+    if dig(state, "look.lastLookAt") is None and mode == "on":
+        for told in state.get("said") or []:
+            if isinstance(told, dict) and told.get("how") == "toast" and told.get("text") == "Nothing has changed since the last look.":
+                out.append((BAD, f"{who} told the person “Nothing has changed since the last look.” at {clock(told.get('at'))}, and no look has ever run: what was changed at switch-on is the baseline, and nothing says so"))
+                break
+        watch_state = dig(state, "pane.watch.state")
+        if dig(state, "pane.tab") == "play" and watch_state not in ("following", "no-git", "paused", "starting") and "No notes. Keep going." in drawn_now:
+            out.append((BAD, f"{who}'s Play-by-play tab says “No notes. Keep going.” and no look has ever run: it reads as an all-clear on code nothing has looked at"))
+
     # The Growth tab under no level never says what the next level needs: those are the model's words for a level it
     # was not given (the seventh ui-truth pass, 2026-10-06: "Not placed yet" over "Next level: To reach junior, …").
     records = dig(state, "pane.progress.records")
-    drawn_now = [t for t in (dig(state, "shown.pane.texts") or []) if isinstance(t, str)]
     if dig(state, "pane.tab") == "profile" and isinstance(records, list) and records and all(isinstance(r, dict) and r.get("level") is None for r in records):
         if any(t.startswith("Next level:") for t in drawn_now):
             out.append((BAD, f"{who}'s Growth tab says “Not placed yet” and under it what the next level needs: the model's words for a level it was not given"))
@@ -1218,6 +1230,12 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
             quoted = "; ".join(f"“{t[:60]}”" for t in head[:3])
             cut = " The first piece is on the screen, so the row is cut, not scrolled." if is_top_there else ""
             out.append((BAD, f"{who} says its {where} shows {quoted}{' and more' if len(head) > 3 else ''}: not on its screen (drawn {ago(now - (drawing.get('at') or now))} ago, {drawing.get('placement') or 'above the prompt'}, {drawing.get('columns')} columns).{cut}"))
+            # The middle is held against the screen whether or not the top is whole: at 23 columns the "Working on" value
+            # and the character's line went missing under a cut tab row, and went unreported (the eighth ui-truth pass, 2026-10-06).
+            squeezed = [t for t in squeezed_pieces(texts, rows) if t not in head]
+            if squeezed:
+                quoted = "; ".join(f"“{t[:50]}”" for t in squeezed[:3])
+                out.append((BAD, f"{who}'s {where} is squeezed as well: {len(squeezed)} piece(s) missing from its middle while pieces below them are on the screen ({quoted}{' and more' if len(squeezed) > 3 else ''})"))
         else:
             squeezed = squeezed_pieces(texts, rows)
             if squeezed:
@@ -1322,6 +1340,10 @@ def check_speech(who: str, state: dict) -> list[tuple[str, str]]:
     the second ui-truth pass, 2026-10-06)."""
     said = dig(state, "pane.speech.text")
     hellos = hellos_by_voice()
+    # A bubble holds one short line: a line cut at its length ("…", by `speakable`) is a paragraph that got in (the
+    # owner's character spoke a survey's four-sentence paragraph, cut twice mid-sentence: the eighth ui-truth pass, 2026-10-06).
+    if isinstance(said, str) and said.endswith("…"):
+        return [(BAD, f"{who}'s character says a line cut mid-sentence: “{said[:60]}…”: a bubble holds one short line, and this was a paragraph")]
     if not isinstance(said, str) or said == "" or said not in hellos.values():
         return []
     voice = dig(state, "loaded.options.voice") or "default"
@@ -1947,7 +1969,12 @@ def check_world(w: dict, s: dict) -> list[tuple[str, str]]:
                 out.append((BAD, f"{who} last followed the editor {ago(now - followed) if followed else 'never'} ago, and {d.get('editor')} moved to {tilde(str(d.get('file')))}:{d.get('line')} {ago(now - moved)} ago"))
             elif moved and is_under(str(d.get("file", "")), root):
                 focus = dig(state, "explain.focus") or {}
-                out.append((FINE, f"{who} follows {d.get('editor')}'s caret: {focus.get('path')}:{focus.get('line')}"))
+                if focus.get("source") not in (None, "", "editor"):
+                    # A pick in the outline, `n`, `p` or /backseat explain moved the spot after the caret was followed: the
+                    # spot is that one's, not the caret's (the eighth ui-truth pass, 2026-10-06: "follows emacs's caret: index.php:98" at a caret on line 18).
+                    out.append((FINE, f"{who}'s Explain spot is the {focus.get('source')}'s, {focus.get('path')}:{focus.get('line')}; {d.get('editor')}'s caret, {tilde(str(d.get('file')))}:{d.get('line')}, was followed at {clock(followed)}"))
+                else:
+                    out.append((FINE, f"{who} follows {d.get('editor')}'s caret: {focus.get('path')}:{focus.get('line')}"))
             elif moved:
                 # Connected through an open buffer, with its caret in another repository: the spot is not its (the third ui-truth pass, 2026-10-06).
                 focus = dig(state, "explain.focus") or {}

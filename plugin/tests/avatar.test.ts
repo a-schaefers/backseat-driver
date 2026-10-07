@@ -1,22 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import {
-  AVATARS,
-  avatarFor,
-  bubble,
-  bubbleColumn,
-  bubbleWidth,
-  closingLine,
-  finished,
-  isTalking,
-  nextTick,
-  poseOf,
-  saidSoFar,
-  speakable,
-  speech,
-  wordsSaid,
-  wrap,
-isHello } from '../core/avatar'
+import { avatarFor, AVATARS, bubble, bubbleColumn, bubbleWidth, closingLine, finished, isHello, isTalking, nextTick, poseOf, saidSoFar, speakable, speech, SURVEY_LINE, wordsSaid, wrap } from '../core/avatar'
 import type { Pose } from '../core/avatar'
 import { backdropOf, base64, cellWords, dimmed, pixels, poseGrid, rasterCells, spriteSize } from '../core/sprite'
 
@@ -220,4 +204,12 @@ test('a hello is any voice\'s, and nothing else is', () => {
   expect(isHello('Ready. Save something.')).toBe(true)
   expect(isHello("Review's in. Nice and small.")).toBe(false)
   expect(isHello('')).toBe(false)
+})
+
+test('a review that ends in a paragraph gives its last sentence to the bubble, and a survey has its own line', () => {
+  // The owner's character spoke a survey's four-sentence conventions paragraph, cut twice mid-sentence (2026-10-06).
+  const paragraph = 'HTML is built up in strings and printed at the end. The database login details are typed straight into includes/db-connect.php, which is committed to git. head.php turns errors on screen on, and .user.ini turns them off on the server.'
+  expect(closingLine(`Some review.\n\n${paragraph}`)).toBe('head.php turns errors on screen on, and .user.ini turns them off on the server.')
+  expect(closingLine('Some review.\n\nFix the empty case first.')).toBe('Fix the empty case first.')
+  expect(SURVEY_LINE.length).toBeLessThan(80)
 })

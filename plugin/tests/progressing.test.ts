@@ -183,3 +183,16 @@ test('a record never placed that keeps the model\'s words for a level is mended 
   expect(state.records.get('python')?.report).toEqual({ why: '', next: '', working: ['forms'], encouragement: 'Keep going.', at: 5 })
   expect((await store.read(progressPath('/data', 'python')) as { report: { why: string; next: string } }).report).toMatchObject({ why: '', next: '' })
 })
+
+test('a first placement that counts none of their commits says why the newest did not count', async () => {
+  // The owner's first commit in a project was an import of 385 files, and the Growth tab said nothing of it (the eighth ui-truth pass, 2026-10-06).
+  const hash = 'c'.repeat(40)
+  const info = [hash, 'p'.repeat(40), 'someone@example.com', 'Someone', 'Import the site'].join('\0')
+  const git = async (args: readonly string[]) => ({ exitCode: 0, stdout: args[0] === 'log' ? `${hash}\0me@example.com\n` : args.includes('-s') ? info : args[0] === 'show' ? '' : 'me@example.com' })
+  const store = plainStore(memoryDisk())
+  const w = world({ store: () => store, git })
+  const state = freshProgressState()
+  await placeFirst(w.ports, state, 1)
+  expect(state.skipped).toBe('Commit ccccccc does not count toward your progress: it was written by Someone <someone@example.com>.')
+  expect((await store.read(watchedPath('/data', '/work')) as { skipped: string }).skipped).toBe(state.skipped)
+})

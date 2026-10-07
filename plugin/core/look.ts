@@ -85,6 +85,16 @@ export type LookPorts = Pick<Host, 'now' | 'ask' | 'trace' | 'toast' | 'fail'> &
  * One look: the pending changes go to the play-by-play model, and its reply
  * becomes notes. `isAsked` is true when the person pressed "look now".
  */
+/** What `l` is told when nothing has changed since the last look. */
+export const NOTHING_NEW = 'Nothing has changed since the last look.'
+/**
+ * What `l` is told before any look: the tree as it stood at switch-on is
+ * the baseline (the owner pressed `l` with a file changed before switch-on
+ * and was told nothing had changed "since the last look", with no look ever
+ * run: the eighth ui-truth pass, 2026-10-06).
+ */
+export const NO_SAVE_YET = 'No save to look at yet. What was already changed at switch-on is the baseline.'
+
 export async function runLook(ports: LookPorts, state: LookState, isAsked: boolean): Promise<void> {
   const { settings } = ports
   const active = ports.watcher()
@@ -98,7 +108,7 @@ export async function runLook(ports: LookPorts, state: LookState, isAsked: boole
     if (changes.length === 0) {
       active.settle([])
       ports.trace('look', 'nothing to look at', () => ({ isAsked }))
-      if (isAsked) ports.toast('Nothing has changed since the last look.')
+      if (isAsked) ports.toast(state.lastLookAt === null ? NO_SAVE_YET : NOTHING_NEW)
 
       return
     }

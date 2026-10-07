@@ -399,6 +399,11 @@ export async function placeFirst(ports: ProgressPorts, state: ProgressState, run
     .slice(0, PLACEMENT_SCAN)
   if (mine.length === 0) return
 
+  // Why the newest of their commits did not count, when none did: the owner's first commit in a project was an
+  // import of 385 files, and the Growth tab said "3 more observations from 2 more commits" with no word on it (the
+  // eighth ui-truth pass, 2026-10-06).
+  let newestReason = ''
+  let isAnyPicked = false
   for (const language of ports.profiles().languages.slice(0, 2)) {
     const record = await loadRecord(ports, language)
     if (record.level !== null || run !== ports.engagement()) continue
@@ -409,11 +414,16 @@ export async function placeFirst(ports: ProgressPorts, state: ProgressState, run
       const info = parseCommitInfo((await ports.git(commitInfoArgs(commit.hash))).stdout)
       if (info === null) continue
       const verdict = judge(info, state.identity, addedLines((await ports.git(commitPatchArgs(commit.hash))).stdout))
+      if (commit === mine[0] && !verdict.isYours && newestReason === '') newestReason = `Commit ${shortHash(info.hash)} does not count toward your progress: ${verdict.reason}.`
       const group = verdict.isYours ? byLanguage(verdict.files).get(language) : undefined
       if (group === undefined || sizeOf(group) < MIN_LINES) continue
       picked.push({ hash: info.hash, short: shortHash(info.hash), weight: 0.5, lines: sizeOf(group), title: info.message.split('\n')[0] ?? '', files: group })
     }
     // Read newest first from git log; assessed oldest first, so that the record runs in time order.
-    if (picked.length > 0 && run === ports.engagement()) await assess(ports, state, language, picked.reverse(), '')
+    if (picked.length > 0 && run === ports.engagement()) {
+      isAnyPicked = true
+      await assess(ports, state, language, picked.reverse(), '')
+    }
   }
+  if (!isAnyPicked && newestReason !== '' && state.skipped === '' && run === ports.engagement()) await noteSkipped(ports, state, newestReason)
 }

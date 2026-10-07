@@ -1,6 +1,8 @@
 import { expect } from 'claude-code/testing'
 
 import { PANE, ROOT, SESSION, sessionTest, stubSession, typed } from './kit'
+import { NO_LOOK_YET, NO_NOTES } from '../hooks/pane'
+import { NO_SAVE_YET, NOTHING_NEW } from '../core/look'
 
 const MEAN = 'def mean(xs):\n    return sum(xs) / len(xs)\n'
 const EMPTY_LIST = {
@@ -251,7 +253,7 @@ sessionTest('switching the tutor off stops the watcher and clears the notes', as
   await $.command.run(typed('backseat'))
   await session.clock.settle()
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: 'No notes. Keep going.' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: NO_LOOK_YET })).toBeDefined()
   await ui.unmount()
 })
 
@@ -303,7 +305,8 @@ sessionTest('"look now" with nothing new says so', async ($, on) => {
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'look' })
-  expect(session.toasts).toEqual(['Nothing has changed since the last look.'])
+  // Before any look, the answer says what the baseline is (the eighth ui-truth pass, 2026-10-06).
+  expect(session.toasts).toEqual([NO_SAVE_YET])
   expect(session.requests.length).toBe(0)
   await ui.unmount()
 })
@@ -366,4 +369,27 @@ sessionTest('the repository is found from the session\'s directory, which may be
   expect(await ui.find({ type: 'Text', text: 'On. Watching for your next save.' })).toBeDefined()
   await ui.unmount()
   expect(session.scans).toBeGreaterThan(0)
+})
+
+sessionTest('a look asked for before any save says that the tree at switch-on is the baseline', async ($, on) => {
+  // The owner pressed `l` with a file changed before switch-on and was told nothing had changed "since the last look",
+  // with no look ever run (the eighth ui-truth pass, 2026-10-06).
+  const session = stubSession(on, { head: { 'stats.py': 'x = 1\n' } })
+  await $.session.start(SESSION)
+  await $.command.run(typed('backseat'))
+  await session.clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'look' })
+  await session.clock.settle()
+  expect(session.toasts.at(-1)).toBe(NO_SAVE_YET)
+  // After a look, the usual answer.
+  session.reply({ resolved: [], notes: [] })
+  session.write('stats.py', 'x = 2\n')
+  await session.clock.advance(12_000)
+  await session.clock.settle()
+  expect(await ui.find({ type: 'Text', text: NO_NOTES })).toBeDefined()
+  await ui.press({ key: 'look' })
+  await session.clock.settle()
+  expect(session.toasts.at(-1)).toBe(NOTHING_NEW)
+  await ui.unmount()
 })

@@ -452,6 +452,45 @@ class Disagreements(unittest.TestCase):
         told["shown"]["pane"]["scroll"]["offset"] = 0
         self.assertEqual(bad(jack.check_session(world([s], now=self.now), s, DOCKED)), [])
 
+    def test_before_any_look_the_tutor_never_says_nothing_changed_or_no_notes(self):
+        told = state(self.now, look={"lastLookAt": None})
+        told["pane"]["tab"] = "play"
+        told["pane"]["watch"] = {"state": "idle", "lastLookAt": None, "line": "On. Watching for your next save."}
+        told["said"] = [{"at": self.now - 30_000, "how": "toast", "text": "Nothing has changed since the last look."}]
+        told["shown"]["pane"]["texts"] = [*TEXTS, "No notes. Keep going."]
+        s = session(state=told)
+        found = bad(jack.check_session(world([s], now=self.now), s, DOCKED))
+        self.assertEqual(len(found), 2, found)
+        self.assertIn("no look has ever run: what was changed at switch-on is the baseline", found[0])
+        self.assertIn("reads as an all-clear on code nothing has looked at", found[1])
+        # After a look, both are what they say.
+        told["look"]["lastLookAt"] = self.now - 20_000
+        self.assertEqual(bad(jack.check_session(world([s], now=self.now), s, DOCKED)), [])
+        # A session that does not drive shows the driver's notes: "No notes" is right there with no look of its own.
+        told["look"]["lastLookAt"] = None
+        told["said"] = []
+        told["pane"]["watch"]["state"] = "following"
+        self.assertEqual(bad(jack.check_session(world([s], now=self.now), s, DOCKED)), [])
+
+    def test_a_character_line_cut_mid_sentence(self):
+        told = state(self.now)
+        told["pane"]["speech"] = {"text": "I've had a look around. HTML is built up in strings and printed at the end. The database login details are typed…", "tick": 30, "isBlinking": False}
+        found = bad(jack.check_speech("aaaaaaaa", told))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("a line cut mid-sentence", found[0])
+        told["pane"]["speech"]["text"] = "I've had a look around. The Deep review tab has the map."
+        self.assertEqual(bad(jack.check_speech("aaaaaaaa", told)), [])
+
+    def test_a_squeezed_middle_is_reported_under_a_cut_top(self):
+        # At 23 columns the tab row was cut and the "Working on" value went missing under it (the eighth ui-truth pass, 2026-10-06).
+        told = state(self.now)
+        told["shown"]["pane"]["texts"] = [*TEXTS[:7], "Working on:", "includes/head.php, lines 24 to 35", "w: change", "e: explain", "No notes. Keep going."]
+        rows = ["1: Play (1) 2: Review 3:", "4: Growth 5: Lessons 6:", "On. Watching for your next save.", "●", "No editor is connected.", "Working on:   w: change", "e: explain", "No notes. Keep going."]
+        s = session(state=told)
+        found = bad(jack.check_session(world([s], now=self.now), s, rows))
+        self.assertTrue(any("not on its screen" in text for text in found), found)
+        self.assertTrue(any("is squeezed as well: 1 piece(s) missing from its middle" in text and "includes/head.php, lines 24 to 35" in text for text in found), found)
+
     def test_the_growth_tab_under_no_level_never_says_the_next_level(self):
         told = state(self.now)
         told["pane"]["tab"] = "profile"
@@ -949,6 +988,22 @@ class Cache(unittest.TestCase):
         self.assertEqual(jack.mentioned_at(["x = cm + 1"], "$cm"), 1)
         self.assertEqual(jack.mentioned_at(["x = acme + 1"], "$cm"), -1)
         self.assertEqual(jack.mentioned_at(["run() here"], "run()"), 1)
+
+    def test_a_spot_the_pane_set_is_named_as_the_panes(self):
+        (self.home / "editors").mkdir(exist_ok=True)
+        (self.home / "editors" / "emacs-1.json").write_text(json.dumps({"v": 1, "editor": "emacs", "pid": 1, "at": self.now - 1000, "changed": self.now - 60_000, "root": self.root, "file": f"{self.root}/stats.py", "line": 18, "buffers": [f"{self.root}/stats.py"], "visible": [], "active": True}))
+        told = self.told(True, explain={"status": "fresh", "spot": {"path": "stats.py", "line": 98}, "target": None, "detail": None})
+        told["explain"] = {"isOn": True, "focus": {"path": "stats.py", "line": 98, "source": "pane"}, "editorFocusAt": self.now - 60_000, "focusText": ""}
+        told["scan"] = {"lastScanAt": self.now - 2000}
+        self.write(self.folder / "lease.json", {"v": 1, "session": "aaaaaaaa-1111-4000-8000-000000000001", "at": self.now}, 0)
+        s = session(home=self.home, state=told)
+        found = jack.check_session(world([s], [self.home], self.now), s, DOCKED)
+        self.assertTrue(any("Explain spot is the pane's, stats.py:98; emacs's caret" in text and "was followed at" in text for _, text in found), found)
+        self.assertFalse(any("follows emacs's caret: stats.py:98" in text for _, text in found), found)
+        told["explain"]["focus"]["source"] = "editor"
+        told["explain"]["focus"]["line"] = 18
+        found = jack.check_session(world([s], [self.home], self.now), s, DOCKED)
+        self.assertTrue(any("follows emacs's caret: stats.py:18" in text for _, text in found), found)
 
     def test_a_bundle_reads_as_one_page(self):
         import contextlib

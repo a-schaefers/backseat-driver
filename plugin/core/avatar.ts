@@ -180,11 +180,23 @@ export function speakable(text: string): string {
   return `${cut.slice(0, cut.lastIndexOf(' ') > 0 ? cut.lastIndexOf(' ') : cut.length)}…`
 }
 
-/** The last line of a deep review, which its instructions make the single thing most worth doing next. */
+/** What the character says once the first look around a project is in: the survey asks for no closing line, and its last paragraph is no bubble's. */
+export const SURVEY_LINE = "I've had a look around. The Deep review tab has the map."
+
+/**
+ * The last line of a deep review, which its instructions make the single
+ * thing most worth doing next. A review that ends in a paragraph instead
+ * gives its last sentence: a bubble holds one short line, and the owner's
+ * character spoke a survey's four-sentence conventions paragraph, cut twice
+ * mid-sentence (the eighth ui-truth pass, 2026-10-06).
+ */
 export function closingLine(review: string): string {
   const lines = review.split('\n').filter(line => line.trim() !== '')
+  const last = lines[lines.length - 1] ?? ''
+  const sentences = last.split(/(?<=[.!?])\s+/).filter(sentence => sentence.trim() !== '')
+  const line = last.length > MAX_SPEECH_CHARS && sentences.length > 1 ? (sentences[sentences.length - 1] ?? last) : last
 
-  return speakable(lines[lines.length - 1] ?? '')
+  return speakable(line)
 }
 
 /** A new line to say, from its first word. */

@@ -11,18 +11,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, PluginOptions, Register, Timer, UiFocusResult } from 'claude-code'
 
 import type { ExplainView, Hush, LessonsView, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, ReviewText, SettingRow, Speech, Spot, Tab, Watch, Working } from '../types'
-import {
-  avatarFor,
-  BLINK_MS,
-  BLINK_SHUT_MS,
-  closingLine,
-  finished,
-  isTalking,
-  nextTick,
-  SILENT,
-  speech,
-  TALK_MS,
-} from '../core/avatar'
+import { avatarFor, BLINK_MS, BLINK_SHUT_MS, closingLine, finished, isTalking, nextTick, SILENT, speech, SURVEY_LINE, TALK_MS } from '../core/avatar'
 import { backdropOf } from '../core/sprite'
 import type { Backdrop } from '../core/sprite'
 import { carryOn as carryOnOf, checkBound as checkBoundOf, checkSelf as checkSelfOf, freshCarryState, sayLeft as sayLeftOf, sayOff as sayOffOf, sayOn as sayOnOf } from '../core/carrying'
@@ -487,6 +476,8 @@ const shown: {
 }
 /** The drawings as the debug log last recorded them, and the timer that records the next. */
 const shownLogged: { pane: Shown | null; band: Shown | null } = { pane: null, band: null }
+/** Where the pane's window last stood, as its last `ui.scroll` asked: a scroll that moves nothing is not logged. */
+let lastScrollOffset = -1
 let shownTimer: Timer | null = null
 /** A drawing is written down once it has stood this long, so that a line being said word by word is one record and not ten. */
 const SHOWN_SETTLE_MS = 500
@@ -4268,7 +4259,8 @@ async function drawTutor(
     onExplainPick: (line: number) => {
       touched($, settings, 'explain pick', () => line)
       void read($, explainAtom).then(shown => {
-        if (shown.spot !== null) void setFocus($, { path: shown.spot.path, line, source: 'command' }, true)
+        // A pick in the outline is the pane's, as `n` and `p` are (the eighth ui-truth pass, 2026-10-06: `view.json` said `command`).
+        if (shown.spot !== null) void setFocus($, { path: shown.spot.path, line, source: 'pane' }, true)
       })
     },
     onReviewStep: (step: 1 | -1) => {
@@ -4655,7 +4647,7 @@ export const register: Register = (on, options) => {
         if (isUnseen) toastPerson($, `Deep review ready: ${scopeSubject(scope)}`)
         // The review ends on the one thing most worth doing next, which is worth saying out loud.
         // Its last line as shown: the notes after it are not for the person.
-        if (settings.isAnimated) await say($, `${scope.kind === 'survey' ? "I've had a look around." : "Review's in."} ${closingLine(shown)}`)
+        if (settings.isAnimated) await say($, scope.kind === 'survey' ? SURVEY_LINE : `Review's in. ${closingLine(shown)}`)
         // What it said may be about the spot the Explain tab is on.
         void refreshView($)
         reviewState.reviewRetryAt = null
@@ -4972,7 +4964,9 @@ export const register: Register = (on, options) => {
   // Where the pane's window moves, and who moved it: for the debug log, so that a pane standing scrolled past its
   // top can be told from one the person scrolled. The move itself is let through as it is.
   on('ui.scroll', { requestId: 'backseat-driver' }, async ($, e, next) => {
-    if (mode !== 'off') trace($, 'ui', 'scroll', () => ({ offset: e.offset, by: e.by, origin: e.origin.kind }))
+    // A wheel at the edge asks for the offset it already has, eighty times in two seconds (2026-10-06): only a move is logged.
+    if (mode !== 'off' && (e.origin.kind !== 'person' || e.offset !== lastScrollOffset)) trace($, 'ui', 'scroll', () => ({ offset: e.offset, by: e.by, origin: e.origin.kind }))
+    lastScrollOffset = e.offset
 
     return next(e)
   })

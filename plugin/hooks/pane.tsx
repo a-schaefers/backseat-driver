@@ -222,12 +222,16 @@ export function tabRows(
 ): TabRowView[] {
   const one = tabRow(view)
   if (rowFits(one.labels, one.gap, view.columns)) return [{ from: 0, ...one }]
-  const half = Math.ceil(TABS.length / 2)
+  // Rows of three, then of two: the first count whose every row fits. Claude Code gave the pane 23 columns on the
+  // owner's 157-column terminal (2026-10-06, 23:30), where two rows of three cut "3:" and "6:" off their rows.
+  for (const perRow of [3, 2]) {
+    const rows: TabRowView[] = []
+    for (let from = 0; from < TABS.length; from += perRow) rows.push({ from, ...labelsFor(view, TABS.slice(from, from + perRow)) })
+    if (rows.every(row => rowFits(row.labels, row.gap, view.columns))) return rows
+  }
 
-  return [
-    { from: 0, ...labelsFor(view, TABS.slice(0, half)) },
-    { from: half, ...labelsFor(view, TABS.slice(half)) },
-  ]
+  // One tab a row, whatever the width.
+  return TABS.map((_, from) => ({ from, ...labelsFor(view, TABS.slice(from, from + 1)) }))
 }
 
 /** Shown while the pane does not have the keyboard: its keys do nothing until it does. */
@@ -400,8 +404,23 @@ export function workingLines(working: Working): { head: string; tail: string } {
   return { head: NOT_CLEAR, tail: '' }
 }
 
+/** The fewest columns the "Working on" value gets beside its label and its control before it goes on a row of its own. */
+const WORKING_MIN_COLUMNS = 8
+
+/**
+ * Whether the "Working on" value fits beside its label and its control: at 23
+ * columns the label, the gaps and `w: change` took every column, and the
+ * value vanished without an ellipsis (the eighth ui-truth pass, 2026-10-06).
+ */
+export function workingRowFits(columns: number, control: string): boolean {
+  // The label, a gap, the value, a gap, the control's margin, and the control as `w: label`.
+  return columns - ('Working on:'.length + 3 + control.length + 3) >= WORKING_MIN_COLUMNS
+}
+
 function workingOn({ Box, Text, Button }: Kit, view: PaneView, actions: PaneActions) {
   const { head, tail } = workingLines(view.working)
+  const control = head === NOT_CLEAR ? 'say what' : 'change'
+  const isOneLine = workingRowFits(view.columns, control)
 
   return (
     <Box flexDirection="column">
@@ -409,13 +428,16 @@ function workingOn({ Box, Text, Button }: Kit, view: PaneView, actions: PaneActi
         <Box flexShrink={0}>
           <Text dimColor>Working on:</Text>
         </Box>
-        <Box flexShrink={1}>
-          <Text wrap="truncate-end">{head}</Text>
-        </Box>
+        {isOneLine && (
+          <Box flexShrink={1}>
+            <Text wrap="truncate-end">{head}</Text>
+          </Box>
+        )}
         <Box flexShrink={0} marginLeft={1}>
-          <Button key="working" label={head === NOT_CLEAR ? 'say what' : 'change'} hotkey="w" plain onPress={() => actions.onWorking()} />
+          <Button key="working" label={control} hotkey="w" plain onPress={() => actions.onWorking()} />
         </Box>
       </Box>
+      {!isOneLine && <Text wrap="truncate-end">{head}</Text>}
       {tail !== '' && !view.isCompact && (
         <Text dimColor wrap="truncate-end">
           {tail}
@@ -483,9 +505,12 @@ function characterRow(kit: Kit, view: PaneView, { avatar, speech, backdrop }: { 
   if (view.isCompact || width === 0) {
     return (
       <Box flexDirection="row" columnGap={1}>
-        <Text color={avatar.color} dimColor={isResting}>
-          {avatar.mini[pose]}
-        </Text>
+        {/* The art keeps its width: at 23 columns it wrapped onto a second row while the line beside it was cut (the eighth ui-truth pass, 2026-10-06). */}
+        <Box flexShrink={0}>
+          <Text color={avatar.color} dimColor={isResting}>
+            {avatar.mini[pose]}
+          </Text>
+        </Box>
         <Text dimColor={isAsleep} wrap="truncate-end">
           {isAsleep ? ASLEEP : saidSoFar(speech)}
         </Text>
@@ -885,11 +910,23 @@ function playControls({ Text, Button }: Pick<Kit, 'Text' | 'Button'>, view: Pane
   ]
 }
 
+/** The Play-by-play tab with no note. */
+export const NO_NOTES = 'No notes. Keep going.'
+/** The same before any look: "No notes" read as an all-clear on code nothing had looked at (the owner, 2026-10-06: "does that mean our codebase is relatively healthy here"). */
+export const NO_LOOK_YET = 'No look yet. Save a file, and the play-by-play looks at the change.'
+
+/** What the Play-by-play tab says with no note: that nothing has been looked at yet, where a look can come, else that there is nothing to say. */
+export function emptyPlayLine(view: Pick<PaneView, 'watch' | 'mode'>): string {
+  const isBeforeLooks = view.watch.lastLookAt === null && view.mode === 'on' && !['following', 'no-git', 'starting'].includes(view.watch.state)
+
+  return isBeforeLooks ? NO_LOOK_YET : NO_NOTES
+}
+
 function playByPlay(kit: Kit, view: PaneView, actions: PaneActions) {
   const { Box, Text } = kit
   const notes = drawnOrder(view.notes)
   const current = currentNote(view)
-  if (current === undefined) return <Text dimColor>No notes. Keep going.</Text>
+  if (current === undefined) return <Text dimColor>{emptyPlayLine(view)}</Text>
 
   const decisions = notes.filter(note => note.kind === 'decision')
   const insights = notes.filter(note => note.kind === 'insight')
@@ -1326,15 +1363,16 @@ function characterOf(view: PaneView): PaneView['character'] {
 function renderStacked(kit: Kit, view: PaneView, actions: PaneActions) {
   const { Box, Text } = kit
   const character = characterOf(view)
-  const [first, second] = tabRows(view)
   const controls = tabControls(kit, view, actions)
 
   return (
     <Box flexDirection="column">
-      {first !== undefined && tabButtons(kit, view, actions, first)}
-      {first !== undefined && tabUnderline(kit, view, first)}
-      {second !== undefined && tabButtons(kit, view, actions, second)}
-      {second !== undefined && tabUnderline(kit, view, second)}
+      {tabRows(view).map(row => (
+        <Box flexDirection="column">
+          {tabButtons(kit, view, actions, row)}
+          {tabUnderline(kit, view, row)}
+        </Box>
+      ))}
       {statusRows(kit, view, true)}
       {/* Outside a repository there is no journal, so nothing to go on and nowhere to keep an answer. */}
       {view.watch.state !== 'no-git' && workingOn(kit, view, actions)}
