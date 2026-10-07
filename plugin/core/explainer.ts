@@ -1,7 +1,6 @@
 import { detailRequest, isMappable, outlineRequest, parseDetailReply, parseOutline } from './explain-prompts'
 import type { ProjectContext } from './explain-prompts'
-import {
-  freshSymbols,
+import { freshSymbols,
   isDetailFresh,
   parseKnowledge,
   placeSymbols,
@@ -14,7 +13,7 @@ import {
   withDetail,
   withOutline,
   withRegion,
-mergeKnowledge } from './knowledge'
+mergeKnowledge, mentionedAt } from './knowledge'
 import type { ExplainStatus, ExplainView, OutlineRow, Spot } from '../types'
 import type { Detail, FileKnowledge, Sym, Use } from './knowledge'
 import type { Store } from './store'
@@ -70,7 +69,7 @@ export type ExplainPorts = {
    * What a deep review said about a symbol, or about its file when `name` is
    * '', that still applies to code with these fingerprints.
    */
-  insights: (path: string, name: string, symbolPrint: string, filePrint: string) => string[]
+  insights: (path: string, name: string, symbolPrint: string, filePrint: string, isMentioned: (name: string) => boolean) => string[]
   /** `automatic`: fetch what the person looks at and saves. `on request`: only what they ask for. */
   mode: () => 'automatic' | 'on request' | 'off'
   pressure: () => Pressure
@@ -346,7 +345,7 @@ export function createExplainer(ports: ExplainPorts) {
     let detail: Detail | null = null
     let wanted = ''
     // What the deep review said about the file. A symbol in focus narrows it to that symbol.
-    let insights = ports.insights(spot.path, '', '', read.print)
+    let insights = ports.insights(spot.path, '', '', read.print, name => mentionedAt(read.lines, name) !== -1)
 
     if (end > line) {
       // A selection is explained as what it is, whatever symbols it cuts across.
@@ -362,7 +361,7 @@ export function createExplainer(ports: ExplainPorts) {
       const symbol = symbolAt(fresh, line)
       if (symbol !== undefined) {
         target = row(symbol)
-        insights = ports.insights(spot.path, symbol.name, symbol.print, read.print)
+        insights = ports.insights(spot.path, symbol.name, symbol.print, read.print, name => mentionedAt(read.lines.slice(symbol.startLine - 1, symbol.endLine), name) !== -1)
         detail = await trusted(symbol.detail)
         if (detail === null) {
           const job = detailJob(spot.path, symbol.print, symbol.endLine - symbol.startLine + 1, symbol.startLine, false, priority)
@@ -431,12 +430,16 @@ export function createExplainer(ports: ExplainPorts) {
       const born = generation
       void run(job, control.signal)
         .catch(error => {
-          ports.log(`lookup failed (${job.key}): ${String(error)}`)
+          if (!isStopped) ports.log(`lookup failed (${job.key}): ${String(error)}`)
 
           return 'failed' as const
         })
         .then(async outcome => {
           running.delete(job.key)
+          // Stopped while it ran (switched off, the project forgotten): nothing of it is taken up, and the host may
+          // be gone with the module (the kit unloads it at a file's end, and a clock read then was a rejection
+          // nothing handled: `filewatch.test.ts`, 2026-10-06).
+          if (isStopped) return
           const finished = await ports.now()
           if (born !== generation) {
             // Started before the project's cache was forgotten: nothing of it is taken up again.
@@ -551,7 +554,7 @@ export function createExplainer(ports: ExplainPorts) {
         start: found.start,
         end: found.end,
         name: found.name,
-        insights: found.name === '' ? [] : ports.insights(job.path, found.name, job.print, before.print),
+        insights: found.name === '' ? [] : ports.insights(job.path, found.name, job.print, before.print, name => mentionedAt(before.lines.slice(found.start - 1, found.end), name) !== -1),
       }),
       1500,
       signal,
@@ -624,13 +627,22 @@ export function createExplainer(ports: ExplainPorts) {
      * be tied to that code. Falls back to the whole file's when the symbol is
      * not known by that name. Null when the file cannot be read.
      */
-    async printFor(path: string, name: string): Promise<{ print: string; of: 'symbol' | 'file' } | null> {
+    async printFor(path: string, name: string): Promise<{ print: string; of: 'symbol' | 'file'; symbol: string } | null> {
       const read = await source(path)
       if (read === null) return null
       const held = await knowledge(path)
-      const symbol = name === '' || held === null ? undefined : freshSymbols(held, read.lines).find(candidate => candidate.name === name)
+      const fresh = held === null ? [] : freshSymbols(held, read.lines)
+      const symbol = name === '' ? undefined : fresh.find(candidate => candidate.name === name)
+      if (symbol !== undefined) return { print: symbol.print, of: 'symbol', symbol: symbol.name }
+      // A name the outline does not know (a variable, the reviewer's own word for a stretch of code) is tied to the
+      // symbol whose lines first mention it, so that it shows beside that code; mentioned outside every symbol, to
+      // the file. Not in the file at all, it keeps its name, and nothing shows it (the seventh ui-truth pass,
+      // 2026-10-06: four insights for `$accountType` and the like, which the Explain tab could never reach).
+      const line = mentionedAt(read.lines, name)
+      if (line === -1) return { print: read.print, of: 'file', symbol: name }
+      const around = fresh.find(candidate => candidate.startLine <= line && line <= candidate.endLine)
 
-      return symbol === undefined ? { print: read.print, of: 'file' } : { print: symbol.print, of: 'symbol' }
+      return around === undefined ? { print: read.print, of: 'file', symbol: '' } : { print: around.print, of: 'symbol', symbol: around.name }
     },
     /**
      * Lets waiting lookups start if they may. Called when the time `wakeAt`

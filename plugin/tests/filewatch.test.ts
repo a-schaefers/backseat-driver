@@ -177,3 +177,27 @@ sessionTest('a watcher that gives up hands the work back to the scan', async ($,
   await session.clock.advance(10_000)
   expect(session.scans - before).toBeGreaterThan(1)
 })
+
+sessionTest('with inotifywait, an editor\'s report is read without a scan of the working tree', async ($, on) => {
+  // A scan for every write of an editor's file was a `git status` a second for an editor in another repository (the seventh ui-truth pass, 2026-10-06).
+  const session = stubSession(on, { hasInotify: true })
+  await $.session.start(SESSION)
+  await $.command.run(typed('backseat'))
+  await session.clock.settle()
+  await session.clock.advance(1000)
+  await session.clock.settle()
+  const [, focusFile] = session.watchers
+  const before = session.scans
+  session.editor(`${ROOT}/stats.py`, 2, undefined, { editor: 'neovim', root: ROOT, at: session.clock.now() })
+  focusFile?.report(`${DATA_HOME}/editors/neovim-1.json`)
+  await session.clock.settle()
+  await session.clock.advance(1)
+  await session.clock.settle()
+  expect(session.scans).toBe(before)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: 'Neovim is connected.' })).toBeDefined()
+  await ui.unmount()
+  // Off, so that the fast lane a caret move starts ends with the test.
+  await $.command.run(typed('backseat', 'off'))
+  await session.clock.settle()
+})

@@ -84,6 +84,10 @@ SELF_CHECK_MS = 10_000
 ALIVE_MS = 660_000
 # A state file older than this, with the log on, is a session whose timers do not run.
 STATE_STALE_MS = 3 * SELF_CHECK_MS
+# A session with the tutor on has had this long since its load to arm its look at itself (`self`).
+SELF_GRACE_MS = 15_000
+# A tab opened this long ago has had its pane scrolled back to the top by the tutor.
+TAB_SETTLE_MS = 2_000
 # A deadline this far past its time has not been met.
 OVERDUE_MS = 15_000
 # After a reload the watchers are killed and started again: this long, a mismatch with the processes is that.
@@ -957,8 +961,14 @@ def check_progress_files(home: pathlib.Path) -> list[tuple[str, str]]:
         # A report under no level is the placement's when it was written after the level the history last reached and
         # before the withdrawal (or with no withdrawal on record, by a copy from before withdrawals were marked).
         is_stale = level is None and report is not None and history and (report.get("at") or 0) >= reached_at and (withdrawn_at == 0 or (report.get("at") or 0) < withdrawn_at)
+        # Under no level, why a level and what the next needs are the model's words for a level the code did not give,
+        # whether withdrawn since or never given (the seventh ui-truth pass, 2026-10-06: "To reach junior, …" under
+        # "Not placed yet" at a first assessment). The tutor drops them as the record is written and as it is read.
+        has_words = report is not None and bool(report.get("why") or report.get("next"))
         if is_stale:
             out.append((BAD, f"progress/{file.name} has no level and still the report of the placement withdrawn: the Growth tab would say “Not placed yet” over its words"))
+        elif level is None and has_words:
+            out.append((BAD, f"progress/{file.name} has no level and the model's words for the level it proposed (why, and what the next level needs): the Growth tab would say “Not placed yet” over them"))
         elif level and history and history[-1].get("to") != level:
             out.append((BAD, f"progress/{file.name} is at {level} and its history last reached {history[-1].get('to')}: a level the history does not account for"))
         else:
@@ -1110,6 +1120,21 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
         if isinstance(due, (int, float)) and now - due > OVERDUE_MS and mode == "on":
             out.append((BAD, f"{who} had `{name}` to do at {clock(due)}, {ago(now - due)} ago, and has not done it"))
 
+    # The look at itself, armed at all times while on: it says the goodbye at a handoff and follows the debug switch.
+    # A quiet session's state never listed it, written after the fired deadline was dropped and before it was set
+    # again (the seventh ui-truth pass, 2026-10-06); the tutor arms it first since.
+    loaded_for_self = dig(state, "loaded.at")
+    if mode == "on" and "self" not in deadlines and isinstance(loaded_for_self, (int, float)) and (state.get("at") or now) - loaded_for_self > SELF_GRACE_MS:
+        out.append((BAD, f"{who} has the tutor on and no `self` deadline: its look at itself (the goodbye at a handoff, the debug switch) is not armed"))
+
+    # The Growth tab under no level never says what the next level needs: those are the model's words for a level it
+    # was not given (the seventh ui-truth pass, 2026-10-06: "Not placed yet" over "Next level: To reach junior, …").
+    records = dig(state, "pane.progress.records")
+    drawn_now = [t for t in (dig(state, "shown.pane.texts") or []) if isinstance(t, str)]
+    if dig(state, "pane.tab") == "profile" and isinstance(records, list) and records and all(isinstance(r, dict) and r.get("level") is None for r in records):
+        if any(t.startswith("Next level:") for t in drawn_now):
+            out.append((BAD, f"{who}'s Growth tab says “Not placed yet” and under it what the next level needs: the model's words for a level it was not given"))
+
     # The watchers it says it runs.
     said = sorted(p.get("role", "?") for p in state.get("pushers", []) if isinstance(p, dict) and p.get("isLive"))
     running = [pid for pid in children(s["pid"], w["procs"]) if any("inotifywait" in word for word in w["procs"][pid]["argv"][:1])] if s["pid"] else []
@@ -1147,6 +1172,7 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
     out += check_cache(w, s, project)
     out += check_notes_lines(who, state, root)
     out += check_explain_fresh(who, state, root, project)
+    out += check_explain_insights(who, state, root, project)
 
     # What it says it shows, against the screen.
     shown = state.get("shown") if isinstance(state.get("shown"), dict) else {}
@@ -1205,6 +1231,18 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
                 # cuts is the tab's contents; a drawing from before has the keys row last, and the note says when it is cut.
                 keys_below = not any(word in texts and is_on_screen(word, flows(rows)) for word in KEYS_HINTS)
                 out.append((NOTE, f"{who}'s {where} is cut at the bottom: {len(rest)} piece(s) are below the frame{', the keys row among them' if keys_below else ''} (a pane taller than its frame, as in a narrow window)"))
+        # A pane standing scrolled past its top since a tab was opened, with nobody having scrolled it: its controls and
+        # keys row are above the frame (the owner's Play-by-play tab, fourteen minutes, the seventh ui-truth pass,
+        # 2026-10-06). The tutor scrolls to the top at a change of tab since; this holds it to that.
+        scroll = drawing.get("scroll") if isinstance(drawing.get("scroll"), dict) else None
+        if scroll is not None and (scroll.get("offset") or 0) > 0 and s["debug"] is not None and not minimized:
+            recent = [r for r in log_records(s["debug"])[-300:] if r.get("k") == "ui"]
+            opened_tab = max((r for r in recent if r.get("n") == "tab"), key=lambda r: r.get("t") or 0, default=None)
+            written = state.get("at") or now
+            if opened_tab is not None and written - (opened_tab.get("t") or 0) > TAB_SETTLE_MS and (drawing.get("at") or 0) >= (opened_tab.get("t") or 0):
+                moved = any(r.get("n") == "scroll" and isinstance(r.get("d"), dict) and r["d"].get("origin") == "person" and (r.get("t") or 0) > (opened_tab.get("t") or 0) for r in recent)
+                if not moved:
+                    out.append((BAD, f"{who}'s {where} stands scrolled {scroll.get('offset')} row(s) past its top since the {opened_tab.get('d')} tab was opened at {clock(opened_tab.get('t'))}, and nobody scrolled it: its controls and keys row are above the frame"))
         if not minimized:
             out += check_keys_row(who, texts, rows)
     elif mode != "off" and rows is not None:
@@ -1355,6 +1393,66 @@ def check_explain_fresh(who: str, state: dict, root: str, project: dict | None) 
     if print_ != now_print:
         return [(BAD, f"{who}'s Explain tab says {path} is fresh, and the cache's fingerprint {print_} is not the file's {now_print}: what it shows is of another text")]
     return [(FINE, f"{who}'s Explain tab is fresh for {path}, as the file reads")]
+
+
+def mentioned_at(lines: list[str], name: str) -> int:
+    """plugin/core/knowledge.ts `mentionedAt`: the first line (1-based) that mentions a name, as written or as a bare
+    word without its sigil or parentheses, else -1."""
+    if not name:
+        return -1
+    as_word = lambda text: re.compile(r"(^|[^A-Za-z0-9_])" + re.escape(text) + r"($|[^A-Za-z0-9_])")
+    for i, line in enumerate(lines):
+        if as_word(name).search(line):
+            return i + 1
+    bare = re.sub(r"^[$@:]+", "", name)
+    bare = re.sub(r"\(\)$", "", bare)
+    if not bare or bare == name:
+        return -1
+    for i, line in enumerate(lines):
+        if as_word(bare).search(line):
+            return i + 1
+    return -1
+
+
+def check_explain_insights(who: str, state: dict, root: str, project: dict | None) -> list[tuple[str, str]]:
+    """What the deep reviews said of the file in focus, against what the Explain tab can reach, and the explanation it
+    shows against the project notes it was written under (the seventh ui-truth pass, 2026-10-06: four insights kept
+    under variable names no outline has, and explanations sending the reader to check they had the right file,
+    written under a survey's notes from before the project was replaced)."""
+    explain = dig(state, "pane.explain") if isinstance(dig(state, "pane.explain"), dict) else {}
+    path = str((explain.get("spot") or {}).get("path") or "")
+    if not path or not root or project is None:
+        return []
+    file = pathlib.Path(root) / path
+    try:
+        text = file.read_text(errors="replace")
+    except OSError:
+        return []
+    lines = text.split("\n")
+    known = read_json(project["dir"] / "project.json") or {}
+    entry = read_json(project["dir"] / "files" / f"{fnv(path)}-{file.name}.json") or {}
+    symbols = [s for s in (entry.get("symbols") or []) if isinstance(s, dict)] if isinstance(entry, dict) else []
+    names = {s.get("name") for s in symbols}
+    out: list[tuple[str, str]] = []
+    file_print = source_print(text)
+    unreachable = [i for i in (known.get("insights") or []) if isinstance(i, dict) and i.get("file") == path and i.get("of") == "file"
+                   and i.get("symbol") and i["symbol"] not in names and i.get("print") == file_print and mentioned_at(lines, str(i["symbol"])) == -1]
+    if unreachable:
+        quoted = ", ".join(f"“{i['symbol']}”" for i in unreachable[:4])
+        out.append((NOTE, f"{who}'s Explain tab can never show {len(unreachable)} insight(s) of the deep reviews on {path}: nothing in the file is named {quoted}"))
+    target = explain.get("target") if isinstance(explain.get("target"), dict) else None
+    detail = explain.get("detail") if isinstance(explain.get("detail"), dict) else None
+    overview_at = known.get("overviewAt") or 0
+    if target is not None and detail is not None and isinstance(overview_at, (int, float)) and overview_at:
+        symbol = next((s for s in symbols if s.get("name") == target.get("name")), None)
+        at = ((symbol or {}).get("detail") or {}).get("at") or 0
+        if isinstance(at, (int, float)) and at and at < overview_at:
+            words = f"{detail.get('watch', '')} {detail.get('why', '')} {detail.get('what', '')}".lower()
+            if "project notes" in words or "does not match" in words or f"right {file.name.lower()}" in words:
+                out.append((BAD, f"{who}'s Explain tab sends the reader to check {path} against the project notes, which were rewritten at {clock(overview_at)} after the explanation ({clock(at)}): the file is the right one, and the notes were old"))
+            else:
+                out.append((NOTE, f"{who}'s explanation of {target.get('name')} in {path} was written at {clock(at)} under project notes rewritten at {clock(overview_at)}: it stands, as the file reads the same"))
+    return out
 
 
 def unchanged_since(root: str, path: str, at: float | None, now: int) -> bool:

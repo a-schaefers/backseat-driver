@@ -1456,7 +1456,9 @@ async function changeSetting($: EngineInterface, row: SettingRow, picked: string
     reloadWatch = $.clock.after(RELOAD_WAIT_MS, () => {
       reloadWatch = null
       trace($, 'state', 'setting not reloaded', () => ({ key: row.key, value: picked }))
-      tellPerson($, notReloadedText(row.label, picked))
+      Promise.resolve()
+        .then(() => tellPerson($, notReloadedText(row.label, picked)))
+        .catch(() => undefined)
     })
   } catch (error) {
     await update($, settingsAtom, rows => withSetting(rows, row.key, row.value))
@@ -1492,8 +1494,9 @@ async function say($: EngineInterface, text: string): Promise<void> {
   stopTalking()
   // Switched off while the line was being written: nothing may keep running.
   if (line.text === '' || mode === 'off') return
+  // A tick that finds its host gone with the module (the kit unloads it at a file's end, timers armed) is nothing's.
   talkTimer = $.clock.every(TALK_MS, () => {
-    void talkOn($)
+    talkOn($).catch(() => undefined)
   })
 }
 
@@ -1508,7 +1511,7 @@ async function blink($: EngineInterface): Promise<void> {
   if (mode !== 'on' || talkTimer !== null) return
   await update($, speechAtom, said => ({ ...said, isBlinking: true }))
   $.clock.after(BLINK_SHUT_MS, () => {
-    void update($, speechAtom, said => ({ ...said, isBlinking: false }))
+    update($, speechAtom, said => ({ ...said, isBlinking: false })).catch(() => undefined)
   })
 }
 
@@ -1524,7 +1527,7 @@ async function startAnimating($: EngineInterface, settings: Settings, isFresh: b
     return
   }
   blinkTimer = $.clock.every(BLINK_MS, () => {
-    void blink($)
+    blink($).catch(() => undefined)
   })
   const hello = avatarFor(settings.persona.voice).hello
   if (isFresh) await say($, hello)
@@ -1555,7 +1558,7 @@ async function keepSpinning($: EngineInterface): Promise<void> {
     spinSince = await $.clock.now()
     isSpinSlow = false
     spinTimer = $.clock.every(SPIN_MS, () => {
-      void spinOnce($)
+      spinOnce($).catch(() => undefined)
     })
   } else if (!isBusy) {
     stopSpinning()
@@ -1570,7 +1573,7 @@ async function spinOnce($: EngineInterface): Promise<void> {
     isSpinSlow = true
     spinTimer.cancel()
     spinTimer = $.clock.every(SPIN_SLOW_MS, () => {
-      void spinOnce($)
+      spinOnce($).catch(() => undefined)
     })
   }
   await update($, spinAtom, (spin: number): number => spin + 1)
@@ -2528,6 +2531,25 @@ async function showTab($: EngineInterface, tab: Tab): Promise<void> {
   await update($, tabAtom, () => tab)
   if (tab === 'review') await setReview($, { isUnseen: false })
   if (tab === 'explain') watchClosely($)
+  void scrollToTop($)
+}
+
+/**
+ * The pane's window back to its top. Claude Code keeps a pane's offset across
+ * a change of what it draws, so a tab opened after a long review had been
+ * read stood scrolled past its own controls and keys row (the seventh
+ * ui-truth pass, 2026-10-06: fourteen minutes with the tabs, the status and
+ * `❯ 2` above the frame, and nobody had scrolled it). A refusal, as with no
+ * pane open, is nothing.
+ */
+async function scrollToTop($: EngineInterface): Promise<void> {
+  try {
+    const result = await $.ui.scroll({ in: PANE_ID, to: 'start' })
+    trace($, 'ui', 'scroll to top', () => result)
+  } catch (error) {
+    // A host that cannot scroll a pane (the kit has no stub for it) says so in the log, and nothing is told.
+    trace($, 'ui', 'scroll to top', () => ({ refused: String(error) }))
+  }
 }
 
 /** Said once in a process that carries the tutor on from the one its conversation left. */
@@ -2595,8 +2617,8 @@ async function checkBound($: EngineInterface, settings: Settings): Promise<void>
  * is on, and whether the debug log was switched from outside. Nothing tells
  * it any of the three.
  */
-async function checkSelf($: EngineInterface, settings: Settings): Promise<void> {
-  await checkSelfOf(carryPortsOf($, settings), carryState, () => followDebug($, settings))
+async function checkSelf($: EngineInterface, settings: Settings, firedAt: number | null = null): Promise<void> {
+  await checkSelfOf(carryPortsOf($, settings), carryState, () => followDebug($, settings), firedAt)
 }
 
 /** What a session that does not drive says when it is asked for a look or a review. */
@@ -3053,7 +3075,7 @@ function reviewPortsOf($: EngineInterface, settings: Settings): ReviewPorts {
 }
 
 /** The fingerprint of the code an insight is about, as that code is now. Null when its file cannot be read. */
-async function printForInsight($: EngineInterface, insight: Insight): Promise<{ print: string; of: 'symbol' | 'file' } | null> {
+async function printForInsight($: EngineInterface, insight: Insight): Promise<{ print: string; of: 'symbol' | 'file'; symbol?: string } | null> {
   if (followState.explainer !== null) return followState.explainer.printFor(insight.file, insight.symbol)
   try {
     return { print: sourcePrint(await $.fs.read(`${repoRoot}/${insight.file}`)), of: 'file' }
@@ -3375,8 +3397,16 @@ function runPusher(
       const wasLive = pusher.isLive
       pusher.isLive = false
       pushers = pushers.filter(other => other !== pusher)
-      // Back to the scan's own pace.
-      if (wasLive && run === pushRun) planScan($, settings, await $.clock.now())
+      // Back to the scan's own pace. A child whose stream ended with the module (the kit unloads it at a file's end,
+      // the children still running) finds the host gone here: nothing to plan (a rejection nothing handled at the
+      // end of `filewatch.test.ts`, 2026-10-06).
+      if (wasLive && run === pushRun) {
+        try {
+          planScan($, settings, await $.clock.now())
+        } catch {
+          // The host is gone.
+        }
+      }
     }
   })()
 }
@@ -3392,7 +3422,11 @@ async function nudged($: EngineInterface, settings: Settings, nudge: Nudge): Pro
   const isSpotChanged = nudge.kind === 'focus' || (nudge.kind === 'tree' && spot !== null && nudge.paths.includes(spot.path))
   // While someone watches the spot in focus, its check runs now. The scan leaves the focus file to it.
   if (followState.isWatchingClosely && isSpotChanged) schedulerOf($).set('focus', await $.clock.now(), () => fastPoll($))
-  if (nudge.kind !== 'focus' || !followState.isWatchingClosely) await kick($, settings, `pushed: ${nudge.kind}`)
+  // An editor's report is read where the scan would read it, and nothing else of the scan is needed for it: a scan
+  // for every write of an editor's file was a `git status` a second for an editor in another repository (the
+  // seventh ui-truth pass, 2026-10-06: twenty in eight seconds).
+  if (nudge.kind !== 'focus') await kick($, settings, `pushed: ${nudge.kind}`)
+  else if (!followState.isWatchingClosely) await pollFocus($)
 }
 
 /**
@@ -3676,8 +3710,8 @@ async function startExplaining($: EngineInterface, settings: Settings, run: numb
           },
           now: () => $.clock.now(),
           project: () => ({ name: projectId(root).replace(/-[0-9a-f]{8}$/, ''), overview: project === null ? '' : overviewLine(project) }),
-          insights: (path, name, symbolPrint, filePrint) =>
-            project === null ? [] : insightsFor(project, path, name, symbolPrint, filePrint).map(insightLine),
+          insights: (path, name, symbolPrint, filePrint, isMentioned) =>
+            project === null ? [] : insightsFor(project, path, name, symbolPrint, filePrint, isMentioned).map(insightLine),
           // Paused, or with another session driving this project, nothing is fetched unless it is asked for.
           mode: () => (mode === 'off' ? 'off' : mode === 'paused' || !leaseState.isDriver ? 'on request' : settings.explain.mode),
           // While Claude is not answering, or refuses this job's model, only what the person asks for is tried.
@@ -3848,7 +3882,7 @@ async function engage(
     if (run !== engagement) return
     // Said where a process that carries this conversation on will look, and looked at again now and then.
     await sayOn($, settings, true)
-    schedulerOf($).set('self', (await $.clock.now()) + SELF_CHECK_MS, () => checkSelf($, settings))
+    schedulerOf($).set('self', (await $.clock.now()) + SELF_CHECK_MS, now => checkSelf($, settings, now))
     if (run !== engagement) return
     if (leaseState.isDriver) await startJournal($, run, isFresh)
     if (run !== engagement) return
@@ -4087,7 +4121,7 @@ async function drawTutor(
   $: EngineInterface,
   settings: Settings,
   kit: Kit,
-  where: Pick<PaneView, 'isFocused' | 'columns' | 'isCompact' | 'rows'> & { placement?: string },
+  where: Pick<PaneView, 'isFocused' | 'columns' | 'isCompact' | 'rows'> & { placement?: string; scroll?: { offset: number; bodyRows: number } },
 ) {
   quiet.renders += 1
   // One round for everything the pane shows, not a dozen in a row for every frame.
@@ -4318,6 +4352,7 @@ async function drawTutor(
     isFocused: where.isFocused,
     isCompact: where.isCompact,
     texts: textsOf(tree),
+    ...(where.scroll === undefined ? {} : { scroll: where.scroll }),
   })
 
   return tree
@@ -4896,6 +4931,8 @@ export const register: Register = (on, options) => {
       rows: e.viewport?.rows ?? 48,
       columns: e.props.bodyColumns,
       placement: e.props.placement,
+      // The window over the drawing, for what the tutor says it shows: the first row on the screen, 0 at the top.
+      scroll: e.props.scroll === undefined ? undefined : { offset: e.props.scroll.offset, bodyRows: e.props.scroll.bodyRows },
       // A fullscreen terminal seats the pane beside the conversation, and above the prompt once it is too narrow
       // for that: it is drawn whole there too, so that narrowing the window moves the pane and never swaps it for
       // another look. Where panes are never seated at the side, rows above the prompt are scarce, and other
@@ -4912,6 +4949,14 @@ export const register: Register = (on, options) => {
     if (note !== null) await update($, selectedAtom, () => Number(note[1]))
 
     return result
+  })
+
+  // Where the pane's window moves, and who moved it: for the debug log, so that a pane standing scrolled past its
+  // top can be told from one the person scrolled. The move itself is let through as it is.
+  on('ui.scroll', { requestId: 'backseat-driver' }, async ($, e, next) => {
+    if (mode !== 'off') trace($, 'ui', 'scroll', () => ({ offset: e.offset, by: e.by, origin: e.origin.kind }))
+
+    return next(e)
   })
 
 }

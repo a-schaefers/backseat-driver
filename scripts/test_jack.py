@@ -62,7 +62,7 @@ def session(**over) -> dict:
 
 def state(now: int, **over) -> dict:
     base = {
-        "at": now - 2000, "mode": "on", "repoRoot": "", "deadlines": {}, "pushers": [], "lease": {"isDriver": True, "holder": "x"},
+        "at": now - 2000, "mode": "on", "repoRoot": "", "deadlines": {"self": now + 8000}, "pushers": [], "lease": {"isDriver": True, "holder": "x"},
         "session": {"id": "aaaaaaaa", "surfaces": ["terminal"], "layout": "vertical", "panes": [{"id": "backseat-driver", "isPlaced": True, "isShown": True}]},
         "pane": {"mode": "on", "notes": [], "watch": {}},
         "shown": {"pane": {"at": now - 3000, "placement": "dock", "columns": 48, "texts": TEXTS}, "band": None, "hint": "", "opened": {"at": now - 9000, "isPlaced": True, "reason": ""}},
@@ -414,21 +414,81 @@ class Disagreements(unittest.TestCase):
         self.assertIn("3 piece(s) are below the frame (a pane taller", notes[0])
         self.assertTrue(any("keys row is whole" in text for _, text in found), found)
 
+    def test_a_session_on_without_its_look_at_itself(self):
+        told = state(self.now, deadlines={"lease": self.now + 5000, "scan": self.now + 1000}, loaded={"at": self.now - 60_000, "options": {}})
+        s = session(state=told)
+        found = bad(jack.check_session(world([s], now=self.now), s, DOCKED))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("no `self` deadline", found[0])
+        # Armed: nothing. Just loaded: not yet asked.
+        told["deadlines"]["self"] = self.now + 8000
+        self.assertEqual(bad(jack.check_session(world([s], now=self.now), s, DOCKED)), [])
+        del told["deadlines"]["self"]
+        told["loaded"]["at"] = self.now - 4000
+        self.assertEqual(bad(jack.check_session(world([s], now=self.now), s, DOCKED)), [])
+
+    def test_a_pane_standing_scrolled_past_its_top_since_a_tab_was_opened(self):
+        debug = pathlib.Path(self.tmp.name) / "debug" / "20261006-000000-aaaaaaaa"
+        debug.mkdir(parents=True)
+        pressed = self.now - 12_000
+        tab = {"t": pressed, "seq": 1, "s": "a", "p": "", "k": "ui", "n": "tab", "d": "play"}
+        debug.joinpath("000000.jsonl").write_text(json.dumps(tab) + "\n")
+        told = state(self.now)
+        told["shown"]["pane"]["scroll"] = {"offset": 20, "bodyRows": 30}
+        told["shown"]["pane"]["at"] = pressed + 500
+        s = session(state=told, debug=debug)
+        found = bad(jack.check_session(world([s], now=self.now), s, DOCKED))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("stands scrolled 20 row(s) past its top since the play tab was opened", found[0])
+        # The person scrolled it after opening the tab: their view.
+        scrolled = {"t": pressed + 3000, "seq": 2, "s": "a", "p": "", "k": "ui", "n": "scroll", "d": {"offset": 20, "by": 20, "origin": "person"}}
+        debug.joinpath("000000.jsonl").write_text(json.dumps(tab) + "\n" + json.dumps(scrolled) + "\n")
+        self.assertEqual(bad(jack.check_session(world([s], now=self.now), s, DOCKED)), [])
+        # The tutor's own scroll to the top is not the person's.
+        own = {**scrolled, "d": {"offset": 0, "by": -20, "origin": "plugin"}}
+        debug.joinpath("000000.jsonl").write_text(json.dumps(tab) + "\n" + json.dumps(own) + "\n")
+        self.assertEqual(len(bad(jack.check_session(world([s], now=self.now), s, DOCKED))), 1)
+        # At the top: nothing to say.
+        told["shown"]["pane"]["scroll"]["offset"] = 0
+        self.assertEqual(bad(jack.check_session(world([s], now=self.now), s, DOCKED)), [])
+
+    def test_the_growth_tab_under_no_level_never_says_the_next_level(self):
+        told = state(self.now)
+        told["pane"]["tab"] = "profile"
+        told["pane"]["progress"] = {"records": [{"language": "php", "level": None}], "skipped": "", "busy": ""}
+        told["shown"]["pane"]["texts"] = [*TEXTS, "Not placed yet", "Next level: To reach junior, show small pieces of PHP that are correct."]
+        s = session(state=told)
+        found = bad(jack.check_session(world([s], now=self.now), s, DOCKED))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("the model's words for a level it was not given", found[0])
+        told["pane"]["progress"]["records"][0]["level"] = "junior"
+        self.assertEqual(bad(jack.check_session(world([s], now=self.now), s, DOCKED)), [])
+
     def test_the_progress_files_against_themselves(self):
         home = pathlib.Path(self.tmp.name) / "home2"
         (home / "progress").mkdir(parents=True)
         placed = [{"from": None, "to": "beginner", "at": 1000}]
         write = lambda **record: (home / "progress" / "shell.json").write_text(json.dumps({"v": 1, "language": "shell", "history": placed, **record}))
+        # Never placed, with the model's words for the level it proposed: the Growth tab would say "Not placed yet" over them.
+        (home / "progress" / "php.json").write_text(json.dumps({"v": 1, "language": "php", "level": None, "history": [], "report": {"why": "", "next": "To reach junior, show more.", "at": 3000}, "withdrawnAt": 0}))
+        words = [text for level, text in jack.check_progress_files(home) if level == jack.BAD and "php.json" in text]
+        self.assertEqual(len(words), 1, words)
+        self.assertIn("the model's words for the level it proposed", words[0])
+        (home / "progress" / "php.json").write_text(json.dumps({"v": 1, "language": "php", "level": None, "history": [], "report": {"why": "", "next": "", "working": ["forms"], "at": 3000}, "withdrawnAt": 0}))
+        self.assertEqual([text for level, text in jack.check_progress_files(home) if level == jack.BAD and "php.json" in text], [])
         # Withdrawn by a copy from before withdrawals were marked: the report written under the level is the placement's.
         write(level=None, report={"why": "Gaps keep it at beginner.", "at": 2000}, withdrawnAt=0)
         found = bad(jack.check_progress_files(home))
         self.assertEqual(len(found), 1, found)
         self.assertIn("has no level and still the report of the placement withdrawn", found[0])
-        # Marked withdrawn, with the report from before: the same. With a report written since: an unplaced record's own.
+        # Marked withdrawn, with the report from before: the same. With a report written since, without the model's
+        # words for a level (the tutor drops them under no level): an unplaced record's own.
         write(level=None, report={"why": "Gaps keep it at beginner.", "at": 2000}, withdrawnAt=3000)
         self.assertEqual(len(bad(jack.check_progress_files(home))), 1)
-        write(level=None, report={"why": "No level yet: four of eight observations.", "at": 4000}, withdrawnAt=3000)
+        write(level=None, report={"why": "", "next": "", "working": ["edge cases"], "at": 4000}, withdrawnAt=3000)
         self.assertEqual(bad(jack.check_progress_files(home)), [])
+        write(level=None, report={"why": "No level yet: four of eight observations.", "at": 4000}, withdrawnAt=3000)
+        self.assertIn("the model's words for the level it proposed", bad(jack.check_progress_files(home))[0])
         write(level="junior", report=None)
         self.assertIn("is at junior and its history last reached beginner", bad(jack.check_progress_files(home))[0])
         write(level=None, report=None)
@@ -497,7 +557,7 @@ class Disagreements(unittest.TestCase):
         self.assertTrue(any("open and not drawn: 100 columns" in text for text in found))
 
     def test_a_deadline_that_came_and_went(self):
-        s = session(state=state(self.now, deadlines={"scan": self.now - 60_000, "lease": self.now + 5000}))
+        s = session(state=state(self.now, deadlines={"scan": self.now - 60_000, "lease": self.now + 5000, "self": self.now + 8000}))
         found = bad(jack.check_session(world([s], now=self.now), s, DOCKED))
         self.assertEqual(len(found), 1)
         self.assertIn("`scan`", found[0])
@@ -857,6 +917,35 @@ class Cache(unittest.TestCase):
         self.assertIn("says stats.py is fresh, and the cache's fingerprint 0000000000000000 is not the file's", found[0])
         told["pane"]["explain"]["status"] = "updating"
         self.assertEqual(jack.check_explain_fresh("aaaaaaaa", told, self.root, jack.projects(self.home)[0]), [])
+
+    def test_the_deep_reviews_insights_against_what_explain_can_reach(self):
+        stats = pathlib.Path(self.root) / "stats.py"
+        text = "def mean(xs):\n    total = sum(xs)\n    return total / len(xs)\n"
+        stats.write_text(text)
+        (self.folder / "files").mkdir(exist_ok=True)
+        entry = {"v": 1, "path": "stats.py", "print": jack.source_print(text), "symbols": [{"name": "mean", "kind": "function", "startLine": 1, "endLine": 3, "detail": {"what": "Averages.", "why": "Used by variance.", "watch": "Also, the project notes describe a different stats.py than this one.", "at": self.now - 600_000}}]}
+        (self.folder / "files" / f"{jack.fnv('stats.py')}-stats.py.json").write_text(json.dumps(entry))
+        known = {"v": 1, "root": self.root, "overview": "A statistics library.", "overviewAt": self.now - 120_000, "insights": [
+            {"file": "stats.py", "symbol": "$nowhere", "text": "A code nothing names.", "commit": "abc1234", "at": 1, "print": jack.source_print(text), "of": "file"},
+            {"file": "stats.py", "symbol": "total", "text": "The running sum.", "commit": "abc1234", "at": 1, "print": jack.source_print(text), "of": "file"},
+        ]}
+        self.write(self.folder / "project.json", known, 60_000)
+        told = self.told(True, explain={"status": "fresh", "spot": {"path": "stats.py", "line": 2}, "target": {"name": "mean", "kind": "function", "startLine": 1, "endLine": 3}, "detail": {"what": "Averages.", "how": "", "why": "Used by variance.", "watch": "Also, the project notes describe a different stats.py than this one.", "uses": []}})
+        found = jack.check_explain_insights("aaaaaaaa", told, self.root, jack.projects(self.home)[0])
+        self.assertEqual(len(bad(found)), 1, found)
+        self.assertIn("sends the reader to check stats.py against the project notes", bad(found)[0])
+        notes = [text for level, text in found if level == jack.NOTE]
+        self.assertEqual(len(notes), 1, found)
+        self.assertIn("can never show 1 insight(s)", notes[0])
+        self.assertIn("“$nowhere”", notes[0])
+        # Written under old notes without sending the reader anywhere: a note, and the explanation stands.
+        told["pane"]["explain"]["detail"]["watch"] = "Divides by the length."
+        found = jack.check_explain_insights("aaaaaaaa", told, self.root, jack.projects(self.home)[0])
+        self.assertEqual(bad(found), [])
+        self.assertTrue(any("under project notes rewritten at" in text for _, text in found), found)
+        self.assertEqual(jack.mentioned_at(["x = cm + 1"], "$cm"), 1)
+        self.assertEqual(jack.mentioned_at(["x = acme + 1"], "$cm"), -1)
+        self.assertEqual(jack.mentioned_at(["run() here"], "run()"), 1)
 
     def test_a_bundle_reads_as_one_page(self):
         import contextlib

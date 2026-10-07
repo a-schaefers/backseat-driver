@@ -2,21 +2,11 @@ import { expect, test } from 'claude-code/testing'
 
 import { createExplainer, MAX_RETRY_MS, RETRY_MS, SETTLE_MS } from '../core/explainer'
 import { detailRequest, isMappable, outlineRequest, parseDetailReply, parseOutline } from '../core/explain-prompts'
-import {
-  firstChange,
-  freshSymbols,
-  isDetailFresh,
-  parseKnowledge,
-  placeSymbols,
-  printOf,
-  splitSource,
-  symbolAt,
-  withDetail,
-  withOutline,
-} from '../core/knowledge'
+import { firstChange, freshSymbols, isDetailFresh, mentionedAt, parseKnowledge, placeSymbols, printOf, splitSource, symbolAt, withDetail, withOutline } from '../core/knowledge'
 import type { Detail } from '../core/knowledge'
 import { memoryDisk } from '../core/storage'
 import { plainStore } from '../core/store'
+import { emptyProject, insightsFor } from '../core/project'
 
 const STATS = [
   'def mean(xs):',
@@ -150,6 +140,8 @@ function world(initial: Record<string, string>) {
     mode: 'automatic' as 'automatic' | 'on request' | 'off',
     pressure: 'none' as 'none' | 'slowed' | 'held',
     changes: 0,
+    /** True once the host is gone with its module: every port then refuses, as the kit's `$` does after a file's end. */
+    gone: false,
     insights: [] as string[],
     /** When the engine last said it wants to be woken, or null for no time at all. */
     wakeAt: null as number | null,
@@ -166,7 +158,11 @@ function world(initial: Record<string, string>) {
         new Promise(resolve => {
           asked.push({ prompt, signal, answer: reply => resolve(reply === null ? null : typeof reply === 'string' ? reply : JSON.stringify(reply)) })
         }),
-      now: async () => state.now,
+      now: async () => {
+        if (state.gone) throw new Error('$.clock.now refused: no hooks module of that name is loaded')
+
+        return state.now
+      },
       project: () => ({ name: 'stats', overview: '' }),
       insights: () => state.insights,
       mode: () => state.mode,
@@ -778,4 +774,49 @@ test('a caret moving through a file too large to map keeps one lookup queued, no
   // Three in flight (the slots), and of the rest only the latest waits.
   expect(w.asked.length).toBe(3)
   expect(w.explainer.pending()).toBe(4)
+})
+
+test('a deep review insight under a name the outline does not know is tied to the symbol that mentions it', async () => {
+  // Four insights for `$accountType` and the like, which the Explain tab could never reach (the seventh ui-truth pass, 2026-10-06).
+  const w = await visited()
+  const variance = await w.explainer.printFor('stats.py', 'variance')
+  expect(variance?.of).toBe('symbol')
+  expect(variance?.symbol).toBe('variance')
+  // `m` is no symbol of the outline: it is set inside variance, so the insight shows beside variance.
+  expect(await w.explainer.printFor('stats.py', 'm')).toEqual({ print: variance?.print, of: 'symbol', symbol: 'variance' })
+  // Written with a sigil the file does not use, the bare word is found.
+  expect(await w.explainer.printFor('stats.py', '$m')).toEqual({ print: variance?.print, of: 'symbol', symbol: 'variance' })
+  // Not in the file at all: it keeps its name, and nothing shows it.
+  expect((await w.explainer.printFor('stats.py', 'nothing_here'))?.symbol).toBe('nothing_here')
+  expect(mentionedAt(STATS.split('\n'), 'mean(xs)')).toBe(1)
+  expect(mentionedAt(STATS.split('\n'), '')).toBe(-1)
+  expect(mentionedAt(['x = cm + 1'], '$cm')).toBe(1)
+  expect(mentionedAt(['x = acme + 1'], '$cm')).toBe(-1)
+  expect(mentionedAt(['run() is called'], 'run()')).toBe(1)
+})
+
+test('an insight kept for the whole file under a variable name shows where the name is mentioned', () => {
+  const project = { ...emptyProject('/work'), insights: [{ file: 'a.py', symbol: '$x', text: 'A code.', commit: 'abc', at: 1, print: 'fp', of: 'file' as const }] }
+  expect(insightsFor(project, 'a.py', 'f', 'sp', 'fp').length).toBe(0)
+  expect(insightsFor(project, 'a.py', 'f', 'sp', 'fp', name => name === '$x').length).toBe(1)
+  // The file changed since the commit: a file-level insight no longer applies, mentioned or not.
+  expect(insightsFor(project, 'a.py', 'f', 'sp', 'other', name => name === '$x').length).toBe(0)
+})
+
+test('a lookup stopped while it ran touches nothing of a host that is gone', async () => {
+  // Switched off with a lookup in flight, its continuation read the clock after the module was unloaded (the kit at a
+  // file's end): a rejection nothing handled, 2026-10-06.
+  const w = world({ 'stats.py': STATS })
+  await w.explainer.view({ path: 'stats.py', line: 6 }, 'browsing')
+  await w.settle()
+  const request = w.open('Map this file.')[0]
+  expect(request).toBeDefined()
+  w.explainer.stop()
+  expect(request?.signal.aborted).toBe(true)
+  w.state.gone = true
+  const changes = w.state.changes
+  w.answer(request, OUTLINE)
+  await w.settle()
+  expect(w.state.changes).toBe(changes)
+  expect(w.explainer.pending()).toBe(0)
 })

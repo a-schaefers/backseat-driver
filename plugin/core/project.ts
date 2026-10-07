@@ -218,7 +218,7 @@ export function withReviewNotes(
   notes: ReviewNotes,
   commit: string,
   at: number,
-  printOf: (insight: Insight) => { print: string; of: 'symbol' | 'file' } | null,
+  printOf: (insight: Insight) => { print: string; of: 'symbol' | 'file'; symbol?: string } | null,
 ): ProjectKnowledge {
   const roles = { ...project.roles }
   for (const { file, role } of notes.files) roles[file] = role
@@ -252,10 +252,13 @@ export function insightsFor(
   symbol: string,
   symbolPrint: string,
   filePrint: string,
+  isMentioned: (name: string) => boolean = () => false,
 ): KeptInsight[] {
   return project.insights.filter(insight => {
     if (insight.file !== file) return false
-    if (insight.of === 'file') return insight.print === filePrint && (insight.symbol === '' || insight.symbol === symbol)
+    // One kept for the whole file under a name the outline does not know (from before 2026-10-06, or a file unmapped
+    // at its review) shows where that name is mentioned: beside the symbol in focus, or at the file level.
+    if (insight.of === 'file') return insight.print === filePrint && (insight.symbol === '' || insight.symbol === symbol || isMentioned(insight.symbol))
 
     return insight.symbol === symbol && insight.print === symbolPrint
   })

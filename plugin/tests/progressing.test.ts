@@ -172,3 +172,14 @@ test('the watched files of the commit the reason on record names are released at
   const quiet = world({ git: async args => { throw new Error(`asked ${args.join(' ')}`) } })
   await releaseSkipped(quiet.ports, freshProgressState())
 })
+
+test('a record never placed that keeps the model\'s words for a level is mended as it is read', async () => {
+  const store = plainStore(memoryDisk())
+  const stale = { ...emptyRecord('python'), report: { why: 'This is your first commit.', next: 'To reach junior, show more.', working: ['forms'], encouragement: 'Keep going.', at: 5 } }
+  await store.update(progressPath('/data', 'python'), () => stale)
+  const w = world({ store: () => store })
+  const state = freshProgressState()
+  await setUpProgress(w.ports, state)
+  expect(state.records.get('python')?.report).toEqual({ why: '', next: '', working: ['forms'], encouragement: 'Keep going.', at: 5 })
+  expect((await store.read(progressPath('/data', 'python')) as { report: { why: string; next: string } }).report).toMatchObject({ why: '', next: '' })
+})

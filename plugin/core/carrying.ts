@@ -49,7 +49,7 @@ export type CarryPorts = Pick<Host, 'now' | 'trace' | 'fail' | 'dataRoot' | 'mod
   cwd: () => Promise<string>
   /** How many surfaces the session draws on now. */
   surfaces: () => Promise<number>
-  deadline: Pick<Deadlines, 'set'>
+  deadline: Pick<Deadlines, 'set' | 'cancel'>
   /** Switches the tutor on as it was in `from`, the session this one carries on. */
   comeUp: (mode: 'on' | 'paused', from: string) => Promise<void>
   /** This session has nowhere left to draw: everything it runs is laid down. */
@@ -172,9 +172,19 @@ export async function checkBound(ports: CarryPorts, state: CarryState): Promise<
  * `SELF_CHECK_MS`: whether it still draws anywhere, and whether it is time to
  * say again that it is on. `also` is the host's own share of the look.
  */
-export async function checkSelf(ports: CarryPorts, state: CarryState, also: () => Promise<void>): Promise<void> {
+export async function checkSelf(ports: CarryPorts, state: CarryState, also: () => Promise<void>, firedAt: number | null = null): Promise<void> {
   if (ports.mode() === 'off') return
-  if (!(await checkBound(ports, state))) return
+  // Armed again first, and at once when the deadline itself calls (it hands the time it fired at): the state written
+  // inside `also` then lists `self`. Armed after the work, a quiet session's state never listed it, written after the
+  // scheduler had dropped the fired deadline and before it was set again (the seventh ui-truth pass, 2026-10-06).
+  const at = firedAt ?? (await ports.now())
+  ports.deadline.set('self', at + SELF_CHECK_MS, now => checkSelf(ports, state, also, now))
+  if (!(await checkBound(ports, state))) {
+    // Laid down: no further look.
+    ports.deadline.cancel('self')
+
+    return
+  }
   await sayOn(ports, state, false)
   try {
     await also()
@@ -182,6 +192,5 @@ export async function checkSelf(ports: CarryPorts, state: CarryState, also: () =
     // Whatever went wrong there, the next look still has to come.
     ports.fail('could not finish the look at itself', error)
   }
-  if (ports.mode() === 'off') return
-  ports.deadline.set('self', (await ports.now()) + SELF_CHECK_MS, () => checkSelf(ports, state, also))
+  if (ports.mode() === 'off') ports.deadline.cancel('self')
 }

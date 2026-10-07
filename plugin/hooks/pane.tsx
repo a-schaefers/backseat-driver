@@ -1009,11 +1009,11 @@ function growthSection(kit: Kit, record: ProgressRecord, growth: Growth | undefi
       {growth !== undefined && growthBar(kit, growth, record.isProvisional, columns)}
       {growth !== undefined && <Text dimColor>{growthCounts(growth)}</Text>}
       <Text dimColor>{`From your commits alone: ${levelPhrase(record).replace(/^no level yet: /, 'not placed yet, ')}`}</Text>
-      {report !== null && report.why !== '' && <Text>{report.why}</Text>}
+      {record.level !== null && report !== null && report.why !== '' && <Text>{report.why}</Text>}
       {growth !== undefined && listOf(kit, 'Work on', growth.workOn.map(workOnLine))}
       {growth !== undefined && listOf(kit, 'Needed help with', growth.neededHelp.map(helpLine))}
       {growth !== undefined && listOf(kit, 'To raise your score', growth.toRaise.map(raiseLine))}
-      {report !== null && report.next !== '' && <Text>{`Next level: ${report.next}`}</Text>}
+      {record.level !== null && report !== null && report.next !== '' && <Text>{`Next level: ${report.next}`}</Text>}
       {growth !== undefined && listOf(kit, 'Improved', growth.improved.map(improvedLine))}
       {recent.length > 0 && <Text dimColor>Lately</Text>}
       {recent.map(line => (

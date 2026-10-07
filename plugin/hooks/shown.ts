@@ -24,6 +24,8 @@ export type Shown = {
   isCompact: boolean
   /** The pieces of text in it, in the order drawn. */
   texts: string[]
+  /** The window over it where the surface says: the first row on the screen (0 at the top) and the rows it may show. */
+  scroll?: { offset: number; bodyRows: number }
 }
 
 function inline(value: unknown): string {

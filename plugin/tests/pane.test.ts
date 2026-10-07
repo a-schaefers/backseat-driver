@@ -9,6 +9,7 @@ import { readableReview, reviewHistory, shownReview, spotsIn, SURVEY_SUBJECT, wi
 import { dayTime } from '../core/clock'
 import { clockTime, watchOf } from '../core/status'
 import { PANE, SESSION, sessionTest, stubSession, typed } from './kit'
+import { FLUSH_MS } from '../core/debuglog'
 
 const VIEW: PaneView = {
   progress: { isOn: true, identity: [], records: [], busy: '', skipped: '' },
@@ -391,4 +392,20 @@ test('the spinner behind a tab at work, the line where another session drives, a
   expect(dayTime(new Date(2026, 8, 30, 8, 5).getTime(), noon)).toBe('Sep 30, 08:05')
   expect(reviewRow({ subject: 'commit a83b842: fail loudly', at: lastNight }, noon)).toBe('yesterday 19:57  Commit a83b842: fail loudly')
   expect(reviewsHeading(0, 4, lastNight, false, noon)).toBe('▸ Review 1 of 4 · yesterday 19:57')
+})
+
+sessionTest('a change of tab scrolls the pane back to its top, and the log says so', async ($, on) => {
+  // The owner's Play-by-play tab stood scrolled past its own controls for fourteen minutes after a long review was read
+  // (the seventh ui-truth pass, 2026-10-06): Claude Code keeps a pane's offset across a change of what it draws.
+  const session = stubSession(on, { data: { 'debug.json': { on: true } } })
+  await $.session.start(SESSION)
+  await $.command.run(typed('backseat'))
+  await session.clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const before = session.debugLog().filter(record => record.k === 'ui' && record.n === 'scroll to top').length
+  await ui.press({ key: 'tab-review' })
+  await session.clock.settle()
+  await session.clock.advance(FLUSH_MS)
+  expect(session.debugLog().filter(record => record.k === 'ui' && record.n === 'scroll to top').length).toBe(before + 1)
+  await ui.unmount()
 })

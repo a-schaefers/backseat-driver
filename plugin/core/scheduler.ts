@@ -22,7 +22,7 @@ export type SchedulerPorts = {
   fail: (name: string, error: unknown) => void
 }
 
-type Deadline = { at: number; run: () => unknown }
+type Deadline = { at: number; run: (now: number) => unknown }
 
 export function createScheduler(ports: SchedulerPorts) {
   const deadlines = new Map<string, Deadline>()
@@ -47,16 +47,20 @@ export function createScheduler(ports: SchedulerPorts) {
     armedFor = arm.next === 'arm' ? arm.at : null
     if (arm.next === 'disarm') return
     const first = arm.at
-    void ports.now().then(now => {
-      // Asked again while the clock was being read: the later request arms it.
-      if (mine !== request) return
-      timer = ports.after(delayMs(first, now), () => {
+    ports
+      .now()
+      .then(now => {
+        // Asked again while the clock was being read: the later request arms it.
         if (mine !== request) return
-        timer = null
-        armedFor = null
-        void fire()
+        timer = ports.after(delayMs(first, now), () => {
+          if (mine !== request) return
+          timer = null
+          armedFor = null
+          fire().catch(() => undefined)
+        })
       })
-    })
+      // A clock that refuses is a host that is gone (the module unloaded under a timer): nothing is due in it.
+      .catch(() => undefined)
   }
 
   /** Does everything that is due, earliest first. Work that takes long is started, not waited for. */
@@ -68,15 +72,15 @@ export function createScheduler(ports: SchedulerPorts) {
       if (deadline === undefined || deadlines.get(name) !== deadline) continue
       deadlines.delete(name)
       void Promise.resolve()
-        .then(() => deadline.run())
+        .then(() => deadline.run(now))
         .catch(error => ports.fail(name, error))
     }
     arm()
   }
 
   return {
-    /** Does `run` at `at`. A deadline of the same name is replaced, so each name is one thing to do. */
-    set(name: string, at: number, run: () => unknown): void {
+    /** Does `run` at `at`, handing it the time it fires at. A deadline of the same name is replaced, so each name is one thing to do. */
+    set(name: string, at: number, run: (now: number) => unknown): void {
       deadlines.set(name, { at, run })
       arm()
     },

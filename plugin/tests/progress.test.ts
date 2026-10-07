@@ -3,19 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import { addedLines, byLanguage, hasOtherAuthor, identityOf, judge, MAX_ADDED_LINES, parseCommitInfo, parseRecent } from '../core/authorship'
 import { projectId } from '../core/datahome'
 import { FORGET } from '../core/forget'
-import {
-  assessmentRequest,
-  decideLevel,
-  emptyRecord,
-  levelPhrase,
-  parseAssessment,
-  parseRecord,
-  progressText,
-  recordText,
-  skillStates,
-  withAssessment,
-  withdrawn,
-} from '../core/progress'
+import { assessmentRequest, decideLevel, emptyRecord, levelPhrase, parseAssessment, parseRecord, progressText, recordText, skillStates, unplaced, withAssessment, withdrawn } from '../core/progress'
 import type { Assessment } from '../core/progress'
 import type { Level, Observation, ProgressRecord } from '../types'
 import { COMPOSE, DATA_HOME, PANE, ROOT, SESSION, sessionTest, stubSession, typed } from './kit'
@@ -161,7 +149,9 @@ test('a level comes back down when what it assumes is missed, and the skill is m
 test('withAssessment records what was seen once per commit, and keeps the history of every change', async () => {
   const first = withAssessment(emptyRecord('python'), SAW, [{ hash: 'a'.repeat(40), short: 'aaaaaaa', weight: 1, lines: 40 }], 'stats', 10)
   expect(first.record.observations.map(item => `${item.commit.slice(0, 7)} ${item.verdict} ${item.skill} x${item.weight}`)).toEqual(['aaaaaaa missed edge-cases x1', 'aaaaaaa shown naming x1'])
-  expect(first.record.report?.why).toBe('Small, working functions with clear names.')
+  // Under no level, the model's words for the level it proposed go; what they are working on stays.
+  expect(first.record.report?.why).toBe('')
+  expect(first.record.report?.working).toEqual(['edge cases'])
   expect(first.change).toBe(null)
   expect(levelPhrase(first.record)).toBe('no level yet: 2 of 8 observations, from 1 of 3 commits, 40 of 80 lines read')
 
@@ -520,4 +510,21 @@ test('a provisional level the bar no longer supports is withdrawn as the record 
   expect(withdrawn(unplaced, 5000)).toBe(unplaced)
   const marked = { ...older, withdrawnAt: 4000 }
   expect(withdrawn(marked, 5000)).toBe(marked)
+})
+
+test('under no level the report loses the model\'s words for the level it proposed, and keeps what is theirs', () => {
+  // "This is your first commit…" and "To reach junior, …" under "Not placed yet" (the seventh ui-truth pass, 2026-10-06).
+  const first = withAssessment(emptyRecord('python'), SAW, [{ hash: 'b'.repeat(40), short: 'bbbbbbb', weight: 1, lines: 40 }], 'stats', 10)
+  expect(first.record.level).toBe(null)
+  expect(first.record.report?.why).toBe('')
+  expect(first.record.report?.next).toBe('')
+  expect(first.record.report?.working).toEqual(SAW.working)
+  expect(first.record.report?.encouragement).toBe(SAW.encouragement)
+  expect(recordText(first.record)).not.toMatch('Why:')
+  expect(recordText(first.record)).not.toMatch('For the next level:')
+  const placed = { ...emptyRecord('python'), level: 'junior' as const, report: { why: 'w', next: 'n', working: [], encouragement: '', at: 1 } }
+  expect(unplaced(placed)).toBe(placed)
+  expect(unplaced({ ...placed, level: null }).report).toEqual({ why: '', next: '', working: [], encouragement: '', at: 1 })
+  const clean = { ...placed, level: null, report: { ...placed.report, why: '', next: '' } }
+  expect(unplaced(clean)).toBe(clean)
 })

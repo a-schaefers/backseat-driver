@@ -317,16 +317,30 @@ export function withAssessment(
   }
 
   return {
-    record: {
+    record: unplaced({
       ...grown,
       level: decided.level,
       isProvisional: decided.isProvisional,
       history: change === null ? grown.history : [...grown.history, change].slice(-MAX_HISTORY),
       // An assessment that had nothing to say leaves the last report standing.
       report: assessment.why === '' ? record.report : report,
-    },
+    }),
     change,
   }
+}
+
+/**
+ * Under no level, the report keeps what is theirs (what they are working on,
+ * the encouragement) and loses the model's words for the level it proposed
+ * and the code did not give: "This is your first commit…" and "To reach
+ * junior, …" stood under "Not placed yet" on the Growth tab and went to the
+ * reviewers (the seventh ui-truth pass, 2026-10-06). The same object comes
+ * back when there is nothing to drop.
+ */
+export function unplaced(record: ProgressRecord): ProgressRecord {
+  if (record.level !== null || record.report === null || (record.report.why === '' && record.report.next === '')) return record
+
+  return { ...record, report: { ...record.report, why: '', next: '' } }
 }
 
 /**
@@ -380,8 +394,9 @@ export function recordText(record: ProgressRecord): string {
   const lines = [`${languageName(record.language)}: ${levelPhrase(record)}`]
   const { report } = record
   if (report !== null) {
-    if (report.why !== '') lines.push(`Why: ${report.why}`)
-    if (report.next !== '') lines.push(`For the next level: ${report.next}`)
+    // Why a level, and what the next one needs, are said only under a level.
+    if (record.level !== null && report.why !== '') lines.push(`Why: ${report.why}`)
+    if (record.level !== null && report.next !== '') lines.push(`For the next level: ${report.next}`)
     if (report.working.length > 0) lines.push(`Working on: ${report.working.join('; ')}`)
   }
   const states = skillStates(record)

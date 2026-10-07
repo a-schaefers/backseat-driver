@@ -337,3 +337,22 @@ export function withRegion(knowledge: FileKnowledge, region: Region): FileKnowle
 export function isDetailFresh(detail: Detail, currentPrint: (use: Use) => string | null): boolean {
   return detail.uses.every(use => currentPrint(use) === use.print)
 }
+
+/**
+ * The first line (1-based) that mentions a name, or -1: as written, else as
+ * a bare word without a leading sigil or trailing parentheses (`$cm`, `cm`,
+ * `run()`). What a deep review's insight is tied to when its name is no
+ * symbol of the outline (a variable, a reviewer's own word for a stretch).
+ */
+export function mentionedAt(lines: readonly string[], name: string): number {
+  if (name === '') return -1
+  // As a whole word, never inside a longer one: `m` is not mentioned by `mean`.
+  const asWord = (text: string) => new RegExp(`(^|[^A-Za-z0-9_])${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9_])`)
+  const exact = lines.findIndex(line => asWord(name).test(line))
+  if (exact !== -1) return exact + 1
+  const bare = name.replace(/^[$@:]+/, '').replace(/\(\)$/, '')
+  if (bare === '' || bare === name) return -1
+  const loose = lines.findIndex(line => asWord(bare).test(line))
+
+  return loose === -1 ? -1 : loose + 1
+}

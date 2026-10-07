@@ -15,7 +15,7 @@ function world(overrides: Partial<CarryPorts> = {}) {
   const disk = memoryDisk()
   const store = plainStore(disk)
   const state = { now: 10_000, mode: 'off' as Mode, surfaces: 1, id: 'me', born: 500 }
-  const due = new Map<string, { at: number; run: () => Promise<unknown> | unknown }>()
+  const due = new Map<string, { at: number; run: (now: number) => Promise<unknown> | unknown }>()
   const ports: CarryPorts = {
     now: async () => state.now,
     trace: () => undefined,
@@ -27,7 +27,7 @@ function world(overrides: Partial<CarryPorts> = {}) {
     cwd: async () => '/work',
     surfaces: async () => state.surfaces,
     store: () => store,
-    deadline: { set: (name, at, run) => void due.set(name, { at, run }) },
+    deadline: { set: (name, at, run) => void due.set(name, { at, run }), cancel: name => void due.delete(name) },
     comeUp: async (mode, from) => {
       state.mode = mode
       log.push(`come up ${mode} from ${from}`)
@@ -237,4 +237,29 @@ test('the look a session takes at itself plans the next one, until the tutor is 
   expect(w.log).toEqual(['stand down'])
   expect(w.due.size).toBe(0)
   expect(also).toBe(2)
+})
+
+test('the look at itself is armed again before its work, at once when the deadline hands the time it fired at', async () => {
+  // Armed after the work, the state written inside it never listed `self` in a quiet session (the seventh ui-truth pass, 2026-10-06).
+  const w = world()
+  w.state.mode = 'on'
+  const state = freshCarryState()
+  let wasArmed = false
+  await checkSelf(w.ports, state, async () => void (wasArmed = w.due.has('self')), 10_000)
+  expect(wasArmed).toBe(true)
+  expect(w.due.get('self')?.at).toBe(10_000 + SELF_CHECK_MS)
+  // Fired, it hands the time on, and the next is set from that.
+  const armed = w.due.get('self')
+  w.due.delete('self')
+  await armed?.run(20_000)
+  expect(w.due.get('self')?.at).toBe(20_000 + SELF_CHECK_MS)
+  // Called by hand, with no time handed, the clock is read.
+  w.due.delete('self')
+  await checkSelf(w.ports, state, async () => undefined)
+  expect(w.due.get('self')?.at).toBe(w.state.now + SELF_CHECK_MS)
+  // Off, nothing is armed.
+  w.state.mode = 'off'
+  w.due.delete('self')
+  await checkSelf(w.ports, state, async () => undefined, 30_000)
+  expect(w.due.has('self')).toBe(false)
 })

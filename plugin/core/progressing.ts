@@ -15,7 +15,7 @@ import { languageName } from './languages'
 import { progressPath, watchedPath } from './datahome'
 import { ANSWER_LABELS, GENERAL } from './profiles'
 import type { Profiles } from '../types'
-import { assessmentRequest, emptyRecord, parseAssessment, parseRecord, withAssessment, withdrawn } from './progress'
+import { assessmentRequest, emptyRecord, parseAssessment, parseRecord, unplaced, withAssessment, withdrawn } from './progress'
 import type { AssessedCommit, CommitForAssessment } from './progress'
 import { shortHash } from './review'
 import type { Settings } from './settings'
@@ -237,7 +237,7 @@ async function mendedRecord(ports: ProgressPorts, language: string): Promise<Pro
   // Its commits are elsewhere: nothing can be said of its lines here, so nothing is withdrawn here.
   if (counted === null) return read
   const at = await ports.now()
-  const mended = withdrawn(counted, at)
+  const mended = unplaced(withdrawn(counted, at))
   if (mended === read) return read
   if (ports.dataRoot() === '') return mended
   try {
@@ -245,7 +245,7 @@ async function mendedRecord(ports: ProgressPorts, language: string): Promise<Pro
       ports.store(),
       progressPath(ports.dataRoot(), language),
       stored => parseRecord(stored, language),
-      latest => withdrawn({ ...latest, linesRead: Math.max(latest.linesRead, counted.linesRead) }, at),
+      latest => unplaced(withdrawn({ ...latest, linesRead: Math.max(latest.linesRead, counted.linesRead) }, at)),
       { keepBackup: true },
     )
   } catch (error) {

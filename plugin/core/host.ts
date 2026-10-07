@@ -35,7 +35,7 @@ export type Trace = (kind: string, name: string, detail?: () => unknown) => void
 
 /** Sets a named deadline, moves it, or takes it away. */
 export type Deadlines = {
-  set: (name: string, at: number, run: () => Promise<unknown> | unknown) => void
+  set: (name: string, at: number, run: (now: number) => Promise<unknown> | unknown) => void
   cancel: (name: string) => void
 }
 
