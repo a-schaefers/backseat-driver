@@ -364,7 +364,7 @@ export type Finding = {
 /** What the last audit read. `files` is how many source files git listed; `read` and `skipped` are its own account. */
 export type Coverage = { at: number; commit: string; files: number; read: string[]; skipped: { path: string; why: string }[] }
 
-export type Ledger = { nextId: number; findings: Finding[]; coverage: Coverage }
+export type Ledger = { v?: 1; nextId: number; findings: Finding[]; coverage: Coverage }
 
 /** The project's ledger of issues as the pane holds it: the ledger, where each open issue's line stands now, and whether an audit was started. */
 export type IssuesState = {

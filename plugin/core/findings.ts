@@ -15,6 +15,7 @@
  * that every surface draws.
  */
 
+import { isCommentLine } from './noise'
 import type { Actor, Category, Coverage, Finding, IssueOrigin, IssueStatus, Ledger, PersonAction, Severity } from '../types'
 import type { IssueSpot } from './notes'
 import { askedIssues, coveredLedger, foundIssues, LEDGER_MAX_CLOSED, LEDGER_NEAR_LINES, ledgerViews, normalLedger, personIssue, ruledIssues } from './core'
@@ -235,15 +236,12 @@ export function parseFindingsFence(answer: string): { issues: FenceIssue[]; ruli
   return { issues, rulings, coverage }
 }
 
-/** A line that opens with a comment: a quote of code found inside one is the code commented out, not the code. */
-const COMMENTED = /^(\/\/|#|\/\*|\*|--|<!--|;|%)/
-
 /** Whether a line of a file is the quoted one: the same text, trimmed, or a long enough quote it contains. */
 function isQuoted(line: string, quote: string): boolean {
   const said = line.trim()
   const wanted = quote.trim()
   // The line commented out since is not the line: the issue there was dealt with, or the line is gone.
-  if (COMMENTED.test(said) && !COMMENTED.test(wanted)) return false
+  if (isCommentLine(said) && !isCommentLine(wanted)) return false
 
   // The line itself, a long enough part of it, or its start up to a value left out: a secret's line is quoted so, and
   // the first live audit's "DB password committed" was dropped for a start of eleven characters (2026-10-07).
@@ -383,6 +381,21 @@ export function countsWords(counts: Record<Severity, number>, withLow = true): s
   return SEVERITIES.filter(severity => counts[severity] > 0 && (withLow || severity !== 'low'))
     .map(severity => `${counts[severity]} ${severity}`)
     .join(', ')
+}
+
+/** Why an audit skipped a file of someone else's: vendored, generated, third-party, minified or bundled code. */
+export const VENDORED_WHY = /\b(vendored|generated|third[- ]party|minified|bundled)\b/i
+
+/**
+ * Their own source files among those an audit was given: less what the audit
+ * itself skipped as someone else's, a file or a folder of them. "Read 11 of 16
+ * source files" counted PDF.js files its own line called vendored (the
+ * fourteenth ui-truth pass, 2026-10-07).
+ */
+export function ownFiles(sources: readonly string[], skipped: readonly { path: string; why: string }[]): string[] {
+  const theirs = skipped.filter(skip => VENDORED_WHY.test(skip.why)).map(skip => skip.path)
+
+  return sources.filter(path => !theirs.some(other => path === other || (other.endsWith('/') && path.startsWith(other))))
 }
 
 /** What the last audit covered, in a line, or '' before any audit. `clock` says a time of day. */

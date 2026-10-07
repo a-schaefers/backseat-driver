@@ -1,3 +1,4 @@
+import { isAllComment } from './noise'
 import { detailRequest, isMappable, outlineRequest, parseDetailReply, parseOutline } from './explain-prompts'
 import type { ProjectContext } from './explain-prompts'
 import { freshSymbols,
@@ -301,8 +302,12 @@ export function createExplainer(ports: ExplainPorts) {
    * the other way round, which showed in "Relies on" and made a sound
    * explanation look stale when a later section changed (the twelfth ui-truth pass).
    */
-  function forward(detail: Detail | undefined, symbol: Sym, fresh: readonly Sym[], path: string): Detail | undefined {
-    if (detail === undefined || symbol.kind !== 'section') return detail
+  function forward(detail: Detail | undefined, symbol: Sym, fresh: readonly Sym[], path: string, lines: readonly string[]): Detail | undefined {
+    if (detail === undefined) return detail
+    // Code commented out calls and reads nothing: "Relies on" under an "old game" of comments named two sections it
+    // only mentions (the fourteenth ui-truth pass, 2026-10-07).
+    if (isAllComment(lines, symbol.startLine, symbol.endLine)) return detail.uses.length === 0 ? detail : { ...detail, uses: [] }
+    if (symbol.kind !== 'section') return detail
     const later = new Set(fresh.filter(other => other.startLine > symbol.endLine).map(other => other.name))
     const kept = detail.uses.filter(use => use.file !== path || !later.has(use.name))
 
@@ -376,7 +381,7 @@ export function createExplainer(ports: ExplainPorts) {
       if (symbol !== undefined) {
         target = row(symbol)
         insights = ports.insights(spot.path, symbol.name, symbol.print, read.print, name => mentionedAt(read.lines.slice(symbol.startLine - 1, symbol.endLine), name) !== -1)
-        detail = await trusted(forward(symbol.detail, symbol, fresh, spot.path))
+        detail = await trusted(forward(symbol.detail, symbol, fresh, spot.path, read.lines))
         if (detail === null) {
           const job = detailJob(spot.path, symbol.print, symbol.endLine - symbol.startLine + 1, symbol.startLine, false, priority)
           wanted = job.key
@@ -555,7 +560,7 @@ export function createExplainer(ports: ExplainPorts) {
     const fresh = held === null ? [] : freshSymbols(held, before.lines)
     // The same: an explanation that is already there and still holds is not asked for again.
     const own = fresh.find(symbol => symbol.print === job.print)
-    const existing = job.isRegion ? held?.regions.find(region => region.print === job.print)?.detail : own === undefined ? undefined : forward(own.detail, own, fresh, job.path)
+    const existing = job.isRegion ? held?.regions.find(region => region.print === job.print)?.detail : own === undefined ? undefined : forward(own.detail, own, fresh, job.path, before.lines)
     if ((await trusted(existing)) !== null) return 'done'
 
     const reply = await ports.complete(
@@ -587,7 +592,8 @@ export function createExplainer(ports: ExplainPorts) {
     // other way round pointed the never-stale check the wrong way (the twelfth ui-truth pass, 2026-10-07).
     const isSection = here.find(candidate => candidate.startLine === found.start && candidate.endLine === found.end)?.kind === 'section'
     const uses: Use[] = []
-    for (const name of parsed.uses) {
+    // Code commented out relies on nothing it names.
+    for (const name of isAllComment(after.lines, found.start, found.end) ? [] : parsed.uses) {
       const symbol = here.find(candidate => candidate.name === name || candidate.name.endsWith(`.${name}`))
       if (symbol !== undefined) {
         if (isSection && symbol.startLine > found.end) continue

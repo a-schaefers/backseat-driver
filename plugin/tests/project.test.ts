@@ -93,6 +93,12 @@ test('insightsFor shows an insight only beside the exact code it was written abo
   // The first look around keeps its insights under HEAD as it stood: credited to it, not to a review (the ninth ui-truth pass, 2026-10-07).
   expect(insightLine(onSymbol, 1)).toBe('Population variance. (from the first look around, at aaa1111)')
   expect(insightLine(onSymbol, 2)).toBe('Population variance. (deep review of aaa1111)')
+  // An audit's insight is the audit's: no review of that commit holds it (the fourteenth ui-truth pass, 2026-10-07).
+  expect(insightLine({ ...onSymbol, source: 'audit' })).toBe('Population variance. (from the audit, at aaa1111)')
+  // Kept so, and read back so.
+  const audited = withReviewNotes(emptyProject('/work'), { overview: '', files: [], insights: [{ file: 'stats.py', symbol: '', text: 'No tests.' }], decisions: [] }, 'aaa1111', 5, () => ({ print: 'file', of: 'file' }), 'audit')
+  expect(parseProject(JSON.parse(JSON.stringify(audited)), '/work').insights[0]?.source).toBe('audit')
+  expect(withReviewNotes(emptyProject('/work'), { overview: '', files: [], insights: [{ file: 'stats.py', symbol: '', text: 'No tests.' }], decisions: [] }, 'aaa1111', 5, () => ({ print: 'file', of: 'file' })).insights[0]?.source).toBe(undefined)
 })
 
 test('what the other two jobs are told: a brief for the play-by-play, a digest for the next review', async () => {

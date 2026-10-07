@@ -325,6 +325,7 @@ import {
   lookIssues,
   MAX_FROM_AUDIT,
   MAX_FROM_REVIEW,
+  ownFiles,
   parseFindingsFence,
   parseLedger,
   personIssue,
@@ -3197,7 +3198,8 @@ async function loadIssues($: EngineInterface): Promise<void> {
 async function changeIssues($: EngineInterface, step: (current: Ledger) => Ledger): Promise<void> {
   const path = findingsPath()
   try {
-    ledger = path === '' ? step(ledger) : await updateJson(storeOf($), path, parseLedger, step)
+    // Kept with its version, as every file of a project is.
+    ledger = path === '' ? step(ledger) : await updateJson(storeOf($), path, parseLedger, current => ({ v: 1 as const, ...step(current) }))
     findingsStamp = await fileStamp($, path)
   } catch (error) {
     fail($, 'could not keep the issues', error)
@@ -3241,7 +3243,9 @@ async function keepIssues($: EngineInterface, scope: ReviewScope, answer: string
   const sources = scope.kind !== 'audit' ? [] : scope.files.length > 0 ? scope.files : (await sourceFiles($)).own
   const skipped = fence.coverage?.skipped ?? []
   const passed = new Set(skipped.map(skip => skip.path))
-  const read = (fence.coverage?.read ?? []).filter(path => sources.includes(path) && !passed.has(path))
+  // Their own: less what the audit itself skipped as someone else's code (the fourteenth ui-truth pass).
+  const own = ownFiles(sources, skipped)
+  const read = (fence.coverage?.read ?? []).filter(path => own.includes(path) && !passed.has(path))
   // Changes not yet committed were read with the commit: `+` says so (the first live audit's high issue was in one).
   const isDirty = scope.kind === 'audit' && (watcher?.dirty().length ?? 0) > 0
   let raised: number[] = []
@@ -3250,7 +3254,7 @@ async function keepIssues($: EngineInterface, scope: ReviewScope, answer: string
     raised = [...found.added, ...found.matched]
     const ruled = ruledIssues(found.ledger, 'review', at, fence.rulings).ledger
 
-    return scope.kind === 'audit' ? coveredLedger(ruled, { at, commit: isDirty ? `${commit}+` : commit, files: sources.length, read, skipped }) : ruled
+    return scope.kind === 'audit' ? coveredLedger(ruled, { at, commit: isDirty ? `${commit}+` : commit, files: own.length, read, skipped }) : ruled
   })
   trace($, 'state', 'issues kept', () => ({
     subject: scopeSubject(scope),
@@ -3333,13 +3337,37 @@ async function sourceFiles($: EngineInterface): Promise<{ own: string[]; vendore
  */
 async function mendCoverage($: EngineInterface): Promise<void> {
   const coverage = ledger.coverage
-  if (coverage.at <= 0 || coverage.read.length === 0 || !leaseState.isDriver) return
+  if (coverage.at <= 0 || !leaseState.isDriver) return
+  await mendAuditInsights($, coverage.at)
+  if (coverage.read.length === 0) return
   const passed = new Set(coverage.skipped.map(skip => skip.path))
-  const sources = new Set((await sourceFiles($)).own)
-  const read = coverage.read.filter(path => !passed.has(path) && sources.has(path))
-  if (read.length === coverage.read.length) return
-  trace($, 'state', 'audit reading counted again', () => ({ was: coverage.read.length, now: read.length }))
-  await changeIssues($, current => coveredLedger(current, { ...current.coverage, read: current.coverage.read.filter(path => read.includes(path)) }))
+  // Their own files as the rules count them now: less what the audit skipped as someone else's, and no file too large
+  // to be hand-written (the fourteenth ui-truth pass: "16 source files" counted PDF.js files the line called vendored).
+  const own = ownFiles((await sourceFiles($)).own, coverage.skipped)
+  const read = coverage.read.filter(path => !passed.has(path) && own.includes(path))
+  if (read.length === coverage.read.length && own.length === coverage.files) return
+  trace($, 'state', 'audit reading counted again', () => ({ was: coverage.read.length, now: read.length, files: coverage.files, own: own.length }))
+  await changeIssues($, current => coveredLedger(current, { ...current.coverage, files: own.length, read: current.coverage.read.filter(path => read.includes(path)) }))
+}
+
+/**
+ * An audit's insights kept before 2026-10-07 were credited to "the deep
+ * review of" the commit it audited at, which holds no such insight: marked as
+ * the audit's once, by the audit's time, which they share with its coverage.
+ */
+async function mendAuditInsights($: EngineInterface, auditAt: number): Promise<void> {
+  if (project === null || repoRoot === '' || dataRoot === '') return
+  if (!project.insights.some(insight => insight.at === auditAt && insight.commit !== '' && insight.source === undefined)) return
+  const root = repoRoot
+  try {
+    project = await updateJson(storeOf($), `${projectDir(dataRoot, repoRoot)}/project.json`, stored => parseProject(stored, root), current => ({
+      ...current,
+      insights: current.insights.map(insight => (insight.at === auditAt && insight.commit !== '' && insight.source === undefined ? { ...insight, source: 'audit' as const } : insight)),
+    }))
+    trace($, 'state', "audit's insights credited to the audit", () => ({ at: auditAt }))
+  } catch (error) {
+    fail($, "could not credit the audit's insights", error)
+  }
 }
 
 /** Marks the project audited, when its audit starts: one that fails is not started again at every switch-on. */
@@ -3568,7 +3596,7 @@ async function keepReview($: EngineInterface, scope: ReviewScope, answer: string
             ? withSurvey(current, { commit: '', subject: scopeSubject(scope), at, text, decisions: notes?.decisions ?? [], insights: insightLines(notes) })
             : current
 
-        return notes === null ? surveyed : withReviewNotes(surveyed, notes, commit, at, insight => prints.get(insight) ?? null)
+        return notes === null ? surveyed : withReviewNotes(surveyed, notes, commit, at, insight => prints.get(insight) ?? null, scope.kind === 'audit' ? 'audit' : undefined)
       },
     )
     if (scope.kind !== 'survey') {

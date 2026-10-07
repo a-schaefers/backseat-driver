@@ -11,6 +11,7 @@ import {
   LEDGER_MAX_CLOSED,
   ledgerLine,
   ledgerViews,
+  ownFiles,
   parseFindingsFence,
   parseLedger,
   personIssue,
@@ -245,6 +246,19 @@ test('an issue is placed at the line it quotes, now or as the commit left it, an
   expect(secret).toMatchObject({ line: 3, lineText: '$db_password =' })
   expect(JSON.stringify(secret)).not.toContain('not-for-the-ledger')
   expect(placeLine(['a', 'b'], '', 1)).toBe(null)
+})
+
+test('their own files are those an audit was given less what it skipped as someone else\'s', () => {
+  // "Read 11 of 16 source files" counted PDF.js files the same line called vendored (the fourteenth ui-truth pass).
+  const sources = ['index.php', 'web/viewer.html', 'web/viewer.css', 'css/style.css', 'lib/x.js', 'lib/y.js']
+  const skipped = [
+    { path: 'web/viewer.html', why: 'PDF.js viewer page, vendored' },
+    { path: 'web/viewer.css', why: 'PDF.js styles, Vendored' },
+    { path: 'css/style.css', why: 'styles only' },
+    { path: 'lib/', why: 'a third-party library' },
+  ]
+  expect(ownFiles(sources, skipped)).toEqual(['index.php', 'css/style.css'])
+  expect(ownFiles(sources, [])).toEqual(sources)
 })
 
 test('placement follows an issue\'s line and says when it is gone, without changing its status', () => {

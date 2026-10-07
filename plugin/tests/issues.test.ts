@@ -122,11 +122,36 @@ sessionTest('an audit that says nothing of its reading still finished, and one t
 sessionTest('an audit whose reading was kept before it was counted as a reader counts is counted again at switch-on', async ($, on) => {
   const coverage = { at: 1000, commit: '0000000', files: 2, read: ['stats.py', '.user.ini', 'web/viewer.js'], skipped: [{ path: 'web/viewer.js', why: 'vendored' }] }
   const head = { 'stats.py': MEAN, 'web/viewer.js': 'x()\n', '.user.ini': 'display_errors = Off\n' }
-  const session = stubSession(on, { head, data: { [`${FOLDER}/findings.json`]: { ...ON_RECORD, coverage } } })
+  // Kept before the ledger carried its version, as every file of a project does.
+  const { v: _version, ...unversioned } = ON_RECORD
+  const session = stubSession(on, { head, data: { [`${FOLDER}/findings.json`]: { ...unversioned, coverage } } })
   await $.session.start(SESSION)
   await $.command.run(typed('backseat'))
   await session.clock.settle()
-  expect(parseLedger(session.data(`${FOLDER}/findings.json`)).coverage.read).toEqual(['stats.py'])
+  expect((session.data(`${FOLDER}/findings.json`) as { v?: number }).v).toBe(1)
+  const mended = parseLedger(session.data(`${FOLDER}/findings.json`)).coverage
+  expect(mended.read).toEqual(['stats.py'])
+  // Their own files are counted again too: less the one the audit skipped as vendored.
+  expect(mended.files).toBe(1)
+})
+
+sessionTest("an audit's insights are the audit's, kept so and mended so", async ($, on) => {
+  const coverage = { at: 1000, commit: '0000000', files: 1, read: ['stats.py'], skipped: [] }
+  const insight = { file: 'stats.py', symbol: '', text: 'One function, no tests.', commit: '0000000', at: 1000, print: 'x', of: 'file' }
+  const review = { file: 'stats.py', symbol: '', text: 'A review said this.', commit: '0000000', at: 900, print: 'y', of: 'file' }
+  const data = {
+    [`${FOLDER}/findings.json`]: { ...ON_RECORD, coverage },
+    [`${FOLDER}/project.json`]: { v: 1, root: ROOT, isSurveyed: true, isAudited: true, insights: [insight, review] },
+  }
+  const session = stubSession(on, { head: { 'stats.py': MEAN }, data })
+  await $.session.start(SESSION)
+  await $.command.run(typed('backseat'))
+  await session.clock.settle()
+  const kept = parseProject(session.data(`${FOLDER}/project.json`), ROOT).insights
+  expect(kept.map(item => [item.text, item.source])).toEqual([
+    ['One function, no tests.', 'audit'],
+    ['A review said this.', undefined],
+  ])
 })
 
 sessionTest('a commit review rules on the issues on record in its files, and adds its own', async ($, on) => {

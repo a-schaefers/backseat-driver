@@ -39,6 +39,8 @@ export type KeptInsight = Insight & {
   print: string
   /** Which of the two `print` is. */
   of: 'symbol' | 'file'
+  /** `audit` for what an audit of the project said, which no review of `commit` holds. */
+  source?: 'audit'
 }
 
 export type ProjectKnowledge = {
@@ -199,6 +201,7 @@ export function parseProject(value: unknown, root: string): ProjectKnowledge {
       at: whole(insight.at),
       print: text(insight.print, 40),
       of: insight.of === 'symbol' ? 'symbol' : 'file',
+      ...(insight.source === 'audit' ? { source: 'audit' as const } : {}),
     })
   }
 
@@ -233,6 +236,8 @@ export function withReviewNotes(
   commit: string,
   at: number,
   printOf: (insight: Insight) => { print: string; of: 'symbol' | 'file'; symbol?: string } | null,
+  /** `audit` when an audit said them, which they are credited to. */
+  source?: 'audit',
 ): ProjectKnowledge {
   const roles = { ...project.roles }
   for (const { file, role } of notes.files) roles[file] = role
@@ -242,7 +247,7 @@ export function withReviewNotes(
   for (const insight of notes.insights) {
     const print = printOf(insight)
     // No fingerprint means no way to tell later whether it still applies, so it is not kept.
-    if (print !== null) fresh.push({ ...insight, commit, at, ...print })
+    if (print !== null) fresh.push({ ...insight, commit, at, ...print, ...(source === undefined ? {} : { source }) })
   }
   const isReplaced = (old: KeptInsight): boolean => fresh.some(insight => insight.file === old.file && insight.symbol === old.symbol)
 
@@ -287,6 +292,8 @@ export function insightsFor(
  */
 export function insightLine(insight: KeptInsight, surveyAt?: number): string {
   if (insight.commit === '') return insight.text
+  // An audit's, kept under HEAD: no review of that commit holds it (the fourteenth ui-truth pass, 2026-10-07).
+  if (insight.source === 'audit') return `${insight.text} (from the audit, at ${insight.commit})`
   if (surveyAt !== undefined && insight.at === surveyAt) return `${insight.text} (from the first look around, at ${insight.commit})`
 
   return `${insight.text} (deep review of ${insight.commit})`

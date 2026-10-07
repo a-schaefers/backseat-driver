@@ -100,6 +100,15 @@ class Numbers(unittest.TestCase):
         self.assertEqual(jack.PLACE_LINES, self.number("plugin/core/progress.ts", "PLACE_LINES"))
         self.assertEqual(jack.SHARED_CHECK_MS, self.number("plugin/hooks/register.tsx", "SHARED_CHECK_MS"))
         self.assertEqual(jack.PUSHED_SCAN_MS, self.number("kernel/src/Kernel/Sensor.purs", "pushedScanMs"))
+        self.assertEqual(jack.EDITOR_LIVE_MS, self.number("plugin/core/following.ts", "EDITOR_LIVE_MS"))
+        self.assertIn(f"const COMMENT = /{jack.COMMENT_LINE.pattern}/", (REPO / "plugin" / "core" / "noise.ts").read_text().replace("\\/", "/"))
+        rules = jack.mod_tables()
+        self.assertTrue({"py", "php", "ts", "sh", "html"} <= rules["extensions"], rules["extensions"])
+        self.assertIn("node_modules", rules["folders"])
+        self.assertIn("package-lock.json", rules["locks"])
+        self.assertTrue(rules["not_source"].search("app.min.js") and not rules["not_source"].search("app.js"))
+        self.assertEqual(rules["vendored_bytes"], 200_000)
+        self.assertTrue(rules["vendored_why"].search("PDF.js, Vendored") and not rules["vendored_why"].search("styles only"))
         pane = (REPO / "plugin" / "hooks" / "pane.tsx").read_text()
         for mark in jack.SPINNER:
             self.assertIn(f"'{mark}'", pane.split("export const SPINNER")[1].split("\n")[0], mark)
@@ -858,6 +867,39 @@ class Issues(unittest.TestCase):
         self.assertIn("does not list the 1 bug(s) and risk(s) the play-by-play raised", found([status]))
         self.assertIn("without 1 of them: stats.py:2", found([status, jack.RAISED_HEADING]))
 
+    def test_their_own_files_are_counted_as_the_mod_counts_them(self):
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@x"}
+        subprocess.run(["git", "init", "-q", self.root], check=True, env=env)
+        ride = pathlib.Path(self.root)
+        (ride / "web").mkdir()
+        (ride / "node_modules" / "left").mkdir(parents=True)
+        files = {"index.php": "<?php echo 1;\n", "web/viewer.js": "x" * 210_000, "web/viewer.html": "<html></html>\n",
+                 "node_modules/left/pad.js": "pad()\n", "app.min.js": "x\n", ".user.ini": "display_errors = Off\n"}
+        for name, text in files.items():
+            (ride / name).write_text(text)
+        subprocess.run(["git", "-C", self.root, "add", "-A"], check=True, env=env)
+        subprocess.run(["git", "-C", self.root, "commit", "-q", "-m", "Site"], check=True, env=env)
+        head = subprocess.run(["git", "-C", self.root, "rev-parse", "--short=7", "HEAD"], check=True, env=env, capture_output=True, text=True).stdout.strip()
+        skipped = [{"path": "web/viewer.html", "why": "PDF.js viewer page, vendored"}]
+        # A file too large to be hand-written, a vendored folder, a minified file, no language: none is theirs.
+        self.assertEqual(jack.mod_own_files(self.root, skipped), ["index.php"])
+        ledger = self.keep([], {"at": self.now - 600_000, "commit": head, "files": 3, "read": ["index.php"], "skipped": skipped})
+        self.assertIn(f"counts 3 of their own source files, and the mod's rules count 1 at {head}", " ".join(bad(self.found(ledger, "explain", []))))
+        ledger = self.keep([], {"at": self.now - 600_000, "commit": f"{head}+", "files": 1, "read": ["index.php"], "skipped": skipped})
+        self.assertEqual(bad(self.found(ledger, "explain", [])), [])
+        # Audited at another commit: what it was given then cannot be counted now, and nothing is said.
+        ledger = self.keep([], {"at": self.now - 600_000, "commit": "0000000", "files": 3, "read": ["index.php"], "skipped": skipped})
+        self.assertEqual(bad(self.found(ledger, "explain", [])), [])
+        # Kept before the ledger carried its version: a note, until its next change.
+        path = self.folder / "findings.json"
+        stored = json.loads(path.read_text())
+        stored.pop("v")
+        path.write_text(json.dumps(stored))
+        old = (self.now - 120_000) / 1000
+        os.utime(path, (old, old))
+        found = self.found(stored, "explain", [])
+        self.assertTrue(any(level == jack.NOTE and "has no version" in text for level, text in found), found)
+
     def test_the_explain_tab_shows_open_issues_of_its_file(self):
         ledger = self.keep([self.issue(1, "high", "mean of an empty list"), self.issue(2, "low", "a name", "dismissed")],
                            {"at": self.now - 600_000, "commit": "abc1234", "files": 1, "read": ["stats.py"], "skipped": []})
@@ -1295,6 +1337,31 @@ class Cache(unittest.TestCase):
         self.assertEqual(len(found), 1, found)
         self.assertIn("the journal holds 7 s of caret time there", found[0])
 
+    def test_an_audits_insight_credited_to_a_review_that_does_not_hold_it(self):
+        (pathlib.Path(self.root) / "stats.py").write_text("def mean(xs):\n    return sum(xs) / len(xs)\n")
+        reviews = [{"commit": "abc1234", "subject": "commit abc1234: Add mean", "at": self.now - 7_200_000, "text": "Fine.", "insights": ["stats.py: The mean divides by the count."]},
+                   {"commit": "", "subject": jack.AUDIT_SUBJECT, "at": self.now - 600_000, "text": "Read it all.", "insights": ["stats.py: One function, no tests."]}]
+        self.write(self.folder / "reviews.json", reviews, 60_000)
+        explain = {"status": "fresh", "spot": {"path": "stats.py", "line": 1}, "target": {"name": "mean", "kind": "function", "startLine": 1, "endLine": 2},
+                   "detail": None, "insights": ["One function, no tests. (deep review of abc1234)"]}
+        told = self.told(True, explain=explain)
+        found = bad(jack.check_explain_insights("aaaaaaaa", told, self.root, jack.projects(self.home)[0]))
+        self.assertIn("credits the audit's insight “One function, no tests.” to the deep review of abc1234, which does not hold it", " ".join(found))
+        # Credited to the audit, or a review's own insight credited to it: as it should be.
+        explain["insights"] = ["One function, no tests. (from the audit, at abc1234)", "The mean divides by the count. (deep review of abc1234)"]
+        self.assertEqual(bad(jack.check_explain_insights("aaaaaaaa", self.told(True, explain=explain), self.root, jack.projects(self.home)[0])), [])
+
+    def test_code_commented_out_shown_relying_on_something(self):
+        (pathlib.Path(self.root) / "game.sh").write_text("roll=$((RANDOM % 6))\n\n# old game\n# echo $roll\n")
+        outline = [{"name": "roll the dice", "kind": "section", "startLine": 1, "endLine": 1, "summary": ""},
+                   {"name": "old game", "kind": "section", "startLine": 3, "endLine": 4, "summary": ""}]
+        explain = {"status": "fresh", "spot": {"path": "game.sh", "line": 3}, "outline": outline, "target": outline[1],
+                   "detail": {"what": "Nothing here runs.", "how": "", "why": "", "watch": "", "uses": ["roll the dice"]}}
+        found = bad(jack.check_explain_uses("aaaaaaaa", self.told(True, explain=explain), None, self.root))
+        self.assertIn("“old game”, lines that are all comments, relying on “roll the dice”", " ".join(found))
+        explain["detail"]["uses"] = []
+        self.assertEqual(bad(jack.check_explain_uses("aaaaaaaa", self.told(True, explain=explain), None, self.root)), [])
+
     def test_a_section_shown_relying_on_a_later_one(self):
         outline = [{"name": "Page setup and includes", "kind": "section", "startLine": 2, "endLine": 42, "summary": ""},
                    {"name": "Goal keyword input", "kind": "section", "startLine": 44, "endLine": 60, "summary": ""}]
@@ -1576,6 +1643,35 @@ class ToldAndBelieved(unittest.TestCase):
         s["state"]["explain"]["editorFocusAt"] = self.now - 60_000
         s["state"]["at"] = self.now - 9000
         self.assertEqual(bad(jack.check_world(world([s], [home], self.now), s)), [])
+
+
+class FastLane(unittest.TestCase):
+    """The spot in focus is checked ten times a second for ten minutes after a caret moved, timed by the move itself: a
+    reload took Emacs's unchanged report for a move (the fourteenth ui-truth pass, 2026-10-07)."""
+
+    def test_the_spot_checked_closely_for_a_caret_still_for_hours(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = jack.now_ms()
+            home = pathlib.Path(tmp) / "home"
+            (home / "editors").mkdir(parents=True)
+            root = "/tmp/ride-editor"
+            caret = {"v": 1, "editor": "emacs", "pid": 1, "at": now - 1000, "changed": now - 3 * 3_600_000, "root": root, "file": f"{root}/stats.py", "line": 9}
+            (home / "editors" / "emacs-1.json").write_text(json.dumps(caret))
+            believed = {"repoRoot": root, "scan": {"lastScanAt": now - 1000}, "loaded": {"at": now, "options": {}},
+                        "explain": {"isOn": True, "editorFocusAt": now - 3 * 3_600_000, "isWatchingClosely": True, "focus": {"path": "stats.py", "line": 9, "source": "editor"}}}
+            s = session(home=home, state=state(now, **believed))
+            s["state"]["pane"]["tab"] = "play"
+            closely = lambda: [x for x in bad(jack.check_world(world([s], [home], now), s)) if "ten times a second" in x]
+            self.assertTrue(any("with its Explain tab closed, and emacs's caret has been still since" in x for x in closely()), closely())
+            # The tab is open: what it is for.
+            s["state"]["pane"]["tab"] = "explain"
+            self.assertEqual(closely(), [])
+            # The caret moved a minute ago: what the fast lane is for.
+            s["state"]["pane"]["tab"] = "play"
+            caret["changed"] = now - 60_000
+            (home / "editors" / "emacs-1.json").write_text(json.dumps(caret))
+            s["state"]["explain"]["editorFocusAt"] = now - 60_000
+            self.assertEqual(closely(), [])
 
 
 class StateWords(unittest.TestCase):

@@ -1,7 +1,13 @@
 import { expect, test } from 'claude-code/testing'
 
-import { freshFollowState, isWatched, lookUp, readFocus } from '../core/following'
-import type { FollowPorts } from '../core/following'
+import { followEditor, freshFollowState, isWatched, lookUp, readFocus } from '../core/following'
+import type { FollowPorts, FollowState } from '../core/following'
+
+/** An engine that knows nothing, enough for the focus to be followed. */
+const QUIET_ENGINE = {
+  view: async () => ({ spot: null, status: 'off', fileSummary: '', outline: [], isOutlineCurrent: true, isMappable: true, target: null, detail: null, insights: [] }),
+  wake: () => undefined,
+} as unknown as FollowState['explainer']
 
 const REPORT = JSON.stringify({ v: 1, editor: 'neovim', pid: 1, at: 5000, changed: 5000, root: '/work', file: '/work/a.py', line: 3, column: 1 })
 
@@ -65,6 +71,29 @@ test('nobody watches an unseen tab, and a lookup without the engine answers noth
 
   expect(await isWatched(w.ports, state)).toBe(false)
   expect(await lookUp(w.ports, state, { path: 'a.py', line: 1 })).toBe('')
+})
+
+test('a caret is followed closely for ten minutes after the editor says it moved, never after it was first read', async () => {
+  // A reload read Emacs's unchanged report as a move, and checked a caret still since the morning ten times a second
+  // for ten minutes (the fourteenth ui-truth pass, 2026-10-07).
+  const still = JSON.stringify({ v: 1, editor: 'emacs', pid: 1, at: 699_000, changed: 5000, root: '/work', file: '/work/a.py', line: 3, column: 1 })
+  const reread = world({ now: async () => 700_000, list: async () => [{ name: 'emacs-1.json', kind: 'file', size: still.length, mtimeMs: 699_000 }], readFile: async () => still })
+  const state = freshFollowState()
+  state.explainer = QUIET_ENGINE
+  expect(await readFocus(reread.ports, state)).toBe(true)
+  await followEditor(reread.ports, state, 700_000)
+  expect(state.editorFocusAt).toBe(5000)
+  expect(state.isWatchingClosely).toBe(false)
+  expect(await isWatched(reread.ports, state)).toBe(false)
+  // A caret that moved a second ago is followed closely.
+  const moved = freshFollowState()
+  moved.explainer = QUIET_ENGINE
+  const w = world()
+  expect(await readFocus(w.ports, moved)).toBe(true)
+  await followEditor(w.ports, moved, 6000)
+  expect(moved.editorFocusAt).toBe(5000)
+  expect(moved.isWatchingClosely).toBe(true)
+  expect(w.log).toContain('set focus')
 })
 
 test('an editor that moved its caret lately is watched by the driver, and by a session that does not drive only through its open tab', async () => {

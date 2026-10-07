@@ -57,6 +57,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import functools
 import json
 import os
 import pathlib
@@ -121,6 +122,10 @@ LEDGER_GRACE_MS = PUSHED_SCAN_MS + SHARED_CHECK_MS + 5_000
 # play-by-play raised (plugin/hooks/pane.tsx `PLAY_PICKS`, `RAISED_HEADING`).
 PLAY_PICKS = 3
 RAISED_HEADING = "Raised while you worked"
+# How long the spot in focus is checked ten times a second after an editor's caret moved (plugin/core/following.ts).
+EDITOR_LIVE_MS = 600_000
+# A line that opens with a comment (plugin/core/noise.ts `COMMENT`): code commented out.
+COMMENT_LINE = re.compile(r"^(//|#|/\*|\*|--|<!--|;|%)")
 # The lines the empty play-by-play draws about the ledger (plugin/core/findings.ts `ledgerLine`): one of them, always.
 LEDGER_LINE_STARTS = ("Open in the deep review: ", "The audit found nothing open", "The audit has not finished", "Not audited for issues yet.")
 # The bar for a first placement (plugin/core/progress.ts): a level on a record under it is one the rules no longer support.
@@ -1293,7 +1298,7 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
     out += check_notes_lines(who, state, root)
     out += check_explain_fresh(who, state, root, project)
     out += check_explain_insights(who, state, root, project)
-    out += check_explain_uses(who, state, project)
+    out += check_explain_uses(who, state, project, root)
     out += check_working_share(who, state, project, now)
 
     # What it says it shows, against the screen.
@@ -1573,7 +1578,7 @@ def check_working_share(who: str, state: dict, project: dict | None, now: int) -
     return [(FINE, f"{who}'s “Working on” time agrees with the journal: {share}")]
 
 
-def check_explain_uses(who: str, state: dict, project: dict | None) -> list[tuple[str, str]]:
+def check_explain_uses(who: str, state: dict, project: dict | None, root: str = "") -> list[tuple[str, str]]:
     """What the Explain tab shows a section relying on, against the order of the file's sections: a section of a
     script relies on earlier sections, never on a later one that reads what it builds (the twelfth ui-truth pass,
     2026-10-07: "Page setup and includes" shown relying on four sections after it). The tutor drops such a use
@@ -1581,7 +1586,20 @@ def check_explain_uses(who: str, state: dict, project: dict | None) -> list[tupl
     explain = dig(state, "pane.explain") if isinstance(dig(state, "pane.explain"), dict) else {}
     target = explain.get("target") if isinstance(explain.get("target"), dict) else None
     detail = explain.get("detail") if isinstance(explain.get("detail"), dict) else None
-    if target is None or detail is None or target.get("kind") != "section":
+    if target is None or detail is None:
+        return []
+    # Code commented out relies on nothing it names (the fourteenth ui-truth pass, 2026-10-07: an "old game" of comments
+    # shown relying on two sections).
+    path = dig(explain, "spot.path")
+    if root and isinstance(path, str) and detail.get("uses"):
+        try:
+            lines = (pathlib.Path(root) / path).read_text(errors="replace").split("\n")
+        except OSError:
+            lines = []
+        said = [line.strip() for line in lines[max(0, (target.get("startLine") or 1) - 1):(target.get("endLine") or 0)] if line.strip()]
+        if said and all(COMMENT_LINE.match(line) for line in said):
+            return [(BAD, f"{who}'s Explain tab shows “{target.get('name')}”, lines that are all comments, relying on {', '.join(f'“{u}”' for u in detail.get('uses') or [])}: code commented out relies on nothing")]
+    if target.get("kind") != "section":
         return []
     later = {r.get("name") for r in (explain.get("outline") or []) if isinstance(r, dict) and (r.get("startLine") or 0) > (target.get("endLine") or 0)}
     backward = [u for u in (detail.get("uses") or []) if u in later]
@@ -1638,11 +1656,22 @@ def check_explain_insights(who: str, state: dict, root: str, project: dict | Non
         out.append((NOTE, f"{who}'s Explain tab can never show {len(unreachable)} insight(s) of the deep reviews on {path}: nothing in the file is named {quoted}"))
     # An insight credited to a deep review the Deep review tab does not have is the first look around's, kept under
     # HEAD as it stood (the ninth ui-truth pass, 2026-10-07: "(deep review of 570e787)" with no review of 570e787).
-    reviewed = {str(r.get("commit")) for r in (project.get("reviews") or []) if isinstance(r, dict) and r.get("commit")}
+    reviews = [r for r in (project.get("reviews") or []) if isinstance(r, dict)]
+    reviewed = {str(r.get("commit")) for r in reviews if r.get("commit")}
+    holds = lambda review, said: any(said in str(item) for item in (review.get("insights") or []))
     for shown_insight in (explain.get("insights") or []):
-        m = re.search(r"\(deep review of ([0-9a-f]{7,40})\)$", str(shown_insight))
-        if m and not any(c.startswith(m.group(1)) or m.group(1).startswith(c) for c in reviewed):
-            out.append((NOTE, f"{who}'s Explain tab credits an insight to a deep review of {m.group(1)}, which the Deep review tab does not have: the first look around's, taken at that commit"))
+        m = re.search(r"^(.*) \(deep review of ([0-9a-f]{7,40})\)$", str(shown_insight))
+        if not m:
+            continue
+        said, commit = m.group(1).strip(), m.group(2)
+        if not any(c.startswith(commit) or commit.startswith(c) for c in reviewed):
+            out.append((NOTE, f"{who}'s Explain tab credits an insight to a deep review of {commit}, which the Deep review tab does not have: the first look around's, taken at that commit"))
+            break
+        # Credited to a review that does not hold it, while the audit's does: the audit's, kept under the commit it
+        # audited at (the fourteenth ui-truth pass, 2026-10-07).
+        of_commit = [r for r in reviews if r.get("commit") and (str(r["commit"]).startswith(commit) or commit.startswith(str(r["commit"])))]
+        if not any(holds(r, said) for r in of_commit) and any(holds(r, said) for r in reviews if r.get("subject") == AUDIT_SUBJECT):
+            out.append((BAD, f"{who}'s Explain tab credits the audit's insight “{brief(said, 60)}” to the deep review of {commit}, which does not hold it"))
             break
     target = explain.get("target") if isinstance(explain.get("target"), dict) else None
     detail = explain.get("detail") if isinstance(explain.get("detail"), dict) else None
@@ -1692,6 +1721,60 @@ def ledger_line(counts: dict[str, int], is_audited: bool, coverage: dict) -> str
     if is_audited:
         return "The audit has not finished."
     return "Not audited for issues yet."
+
+
+@functools.lru_cache(maxsize=1)
+def mod_tables() -> dict:
+    """The mod's own rules for a file of the person's own source, read out of its source so that a count here is the
+    mod's: the extensions it knows (core/languages.ts), the files and folders it calls noise (core/noise.ts), the size
+    past which a file is taken for someone else's, and the words an audit uses for a file it skipped as someone else's
+    (core/findings.ts)."""
+    core = REPO / "plugin" / "core"
+    languages = (core / "languages.ts").read_text()
+    table = languages[languages.index("const BY_EXTENSION"):]
+    table = table[:table.index("\n}")]
+    noise = (core / "noise.ts").read_text()
+
+    def strings_of(name: str) -> set[str]:
+        part = noise[noise.index(f"const {name}"):]
+        return set(re.findall(r"'([^']+)'", part[:part.index("])")]))
+
+    return {
+        "extensions": set(re.findall(r"^\s*['\"]?([^'\":\s]+)['\"]?\s*:", table, re.M)) - {"const BY_EXTENSION"},
+        "locks": strings_of("LOCK_FILES"),
+        "folders": strings_of("GENERATED_FOLDERS"),
+        "not_source": re.compile(re.search(r"const NOT_SOURCE = /(.+)/i", noise).group(1), re.I),
+        "vendored_bytes": int(re.search(r"VENDORED_BYTES = ([0-9_]+)", noise).group(1).replace("_", "")),
+        "vendored_why": re.compile(re.search(r"export const VENDORED_WHY = /(.+)/i", (core / "findings.ts").read_text()).group(1), re.I),
+    }
+
+
+def mod_own_files(root: str, skipped: list) -> list[str] | None:
+    """Their own source files as the mod counts them for an audit (`sourceFiles` and `ownFiles`): git's files of a
+    language it knows, not noise, no larger than hand-written code, less what the audit skipped as someone else's."""
+    listed = git_out(root, "ls-files", "-z")
+    if listed is None:
+        return None
+    rules = mod_tables()
+    sizes: dict[str, int] = {}
+    for entry in (git_out(root, "ls-tree", "-r", "-l", "-z", "HEAD") or "").split("\0"):
+        if "\t" in entry:
+            meta, path = entry.split("\t", 1)
+            parts = meta.split()
+            sizes[path] = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
+    own = []
+    for path in listed.split("\0"):
+        name = path.rsplit("/", 1)[-1]
+        dot = name.rfind(".")
+        if not path or dot <= 0 or name[dot + 1:].lower() not in rules["extensions"]:
+            continue
+        if name in rules["locks"] or rules["not_source"].search(name) or any(folder in rules["folders"] for folder in path.split("/")[:-1]):
+            continue
+        if sizes.get(path, 0) > rules["vendored_bytes"]:
+            continue
+        own.append(path)
+    theirs = [str(s.get("path")) for s in skipped if isinstance(s, dict) and rules["vendored_why"].search(str(s.get("why", "")))]
+    return [path for path in own if not any(path == other or (other.endswith("/") and path.startswith(other)) for other in theirs)]
 
 
 def issue_label(finding: dict) -> re.Pattern:
@@ -1825,7 +1908,7 @@ def check_issues(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]
     # another line of the same text, would have kept a fixed issue standing).
     placed = dig(state, "pane.issues.placed") or {}
     root_now = state.get("repoRoot") or ""
-    comment = re.compile(r"^(//|#|/\*|\*|--|<!--|;|%)")
+    comment = COMMENT_LINE
     for f in on_disk:
         at = placed.get(str(f.get("id"))) if isinstance(placed, dict) else None
         if not is_open(f) or not root_now or not isinstance(at, int) or at <= 0 or str(f.get("file", "")) in ("", ".") or not str(f.get("lineText", "")).strip():
@@ -1849,6 +1932,16 @@ def check_issues(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]
     both = sorted(passed & {str(p) for p in (coverage.get("read") or [])})
     if both:
         out.append((BAD, f"the audit of {project['id']} counts {len(both)} file(s) as read that it also skipped: {', '.join(both[:3])}"))
+    # Their own files, as the mod's own rules count them, while HEAD is what was audited: "16 source files" counted
+    # PDF.js files the line itself called vendored (the fourteenth ui-truth pass, 2026-10-07).
+    audited_at = str(coverage.get("commit", "")).rstrip("+")[:7]
+    head = (git_out(root, "rev-parse", "--short=7", "HEAD") or "").strip() if root and audited_at else ""
+    if head and head == audited_at:
+        own = mod_own_files(root, coverage.get("skipped") or [])
+        if own is not None and len(own) != (coverage.get("files") or 0):
+            out.append((BAD, f"the audit of {project['id']} counts {coverage.get('files')} of their own source files, and the mod's rules count {len(own)} at {head}"))
+    if isinstance(project.get("findings"), dict) and "v" not in project["findings"]:
+        out.append((NOTE, f"findings.json of {project['id']} has no version: it gets one at its next change"))
     if (coverage.get("at") or 0) > 0 and root:
         listed = git_out(root, "ls-files", "-z")
         if listed is not None:
@@ -2418,6 +2511,10 @@ def check_world(w: dict, s: dict) -> list[tuple[str, str]]:
                 # Connected through an open buffer, with its caret in another repository: the spot is not its (the third ui-truth pass, 2026-10-06).
                 focus = dig(state, "explain.focus") or {}
                 out.append((FINE, f"{who}'s Explain spot is {focus.get('source', 'its own')}'s, {focus.get('path')}:{focus.get('line')}: {d.get('editor')}'s caret is in another repository"))
+            # Checked ten times a second for ten minutes after the caret moved, timed by the move itself, and only while
+            # nobody reads the Explain tab otherwise: a reload took an unchanged report for a move (the fourteenth pass).
+            if moved and dig(state, "explain.isWatchingClosely") is True and dig(state, "pane.tab") != "explain" and believed_at - moved > EDITOR_LIVE_MS + 30_000:
+                out.append((BAD, f"{who} checks the spot in focus ten times a second with its Explain tab closed, and {d.get('editor')}'s caret has been still since {day_clock(moved, now)}"))
     return out
 
 

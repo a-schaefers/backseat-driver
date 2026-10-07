@@ -821,6 +821,37 @@ test('a lookup stopped while it ran touches nothing of a host that is gone', asy
   expect(w.explainer.pending()).toBe(0)
 })
 
+test('code commented out relies on nothing it names', async () => {
+  // "Relies on roll the dice, map roll to move" under an "old game" of comments (the fourteenth ui-truth pass, 2026-10-07).
+  const SCRIPT = ['x = 1', '', '# old = x + 1', '# print(old)', ''].join('\n')
+  const SECTIONS = {
+    summary: 'A small script.',
+    symbols: [
+      { name: 'setup', kind: 'section', start: 1, end: 1, head: 'x = 1', summary: 'Sets x.' },
+      { name: 'old', kind: 'section', start: 3, end: 4, head: '# old = x + 1', summary: 'An old version, commented out.' },
+    ],
+  }
+  const w = world({ 'run.py': SCRIPT })
+  await w.explainer.view({ path: 'run.py', line: 3 }, 'browsing')
+  await w.settle()
+  w.answer(w.open('Map this file.')[0], SECTIONS)
+  await w.settle()
+  await w.explainer.view({ path: 'run.py', line: 3 }, 'browsing')
+  await w.settle()
+  w.answer(w.open('Explain').find(request => request.prompt.includes('Explain old')), { what: 'An older version. Nothing here runs.', how: '', why: '', watch: '', uses: ['setup'] })
+  await w.settle()
+  expect((await w.explainer.view({ path: 'run.py', line: 3 }, 'browsing')).detail?.uses).toEqual([])
+  // A cache written before the rule names one anyway: read without it, and still trusted.
+  const path = '/d/files/run.py.json'
+  const stored = JSON.parse(w.disk.files.get(path) ?? '{}') as { symbols: { name: string; detail?: { uses: { file: string; name: string; print: string }[] } }[] }
+  const old = stored.symbols.find(symbol => symbol.name === 'old')
+  if (old?.detail !== undefined) old.detail.uses = [{ file: 'run.py', name: 'setup', print: 'changed since' }]
+  w.disk.files.set(path, JSON.stringify(stored))
+  const read = await w.start().view({ path: 'run.py', line: 3 }, 'browsing')
+  expect(read.detail?.what).toBe('An older version. Nothing here runs.')
+  expect(read.detail?.uses).toEqual([])
+})
+
 test('a section of a script relies on what came before it, never on a later section', async () => {
   // An earlier section "relying on" a later one pointed the never-stale check the wrong way (the twelfth ui-truth pass, 2026-10-07).
   const SCRIPT = ['x = 1', 'y = 2', '', 'print(x)', 'print(y)', ''].join('\n')

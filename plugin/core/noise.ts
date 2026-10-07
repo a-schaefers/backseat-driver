@@ -64,6 +64,21 @@ export function noiseRoot(path: string): string {
 /** A committed source file larger than this is taken for vendored or generated code: hand-written code rarely reaches it. */
 export const VENDORED_BYTES = 200_000
 
+/** A line that opens with a comment, in the languages the tutor reads: `//`, `#`, `/*`, `*`, `--`, `<!--`, `;`, `%`. */
+const COMMENT = /^(\/\/|#|\/\*|\*|--|<!--|;|%)/
+
+/** Whether a line, trimmed, opens with a comment. */
+export function isCommentLine(line: string): boolean {
+  return COMMENT.test(line.trim())
+}
+
+/** Whether every line from `start` to `end` (1-based, inclusive) that is not blank is a comment, and one is: code commented out. */
+export function isAllComment(lines: readonly string[], start: number, end: number): boolean {
+  const said = lines.slice(Math.max(0, start - 1), end).filter(line => line.trim() !== '')
+
+  return said.length > 0 && said.every(isCommentLine)
+}
+
 /** Text files do not contain NUL. */
 export function looksBinary(text: string): boolean {
   return text.includes('\0')

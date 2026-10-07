@@ -40,6 +40,8 @@ export type FollowState = {
   editorFiles: Map<string, { stamp: string; seen: EditorSeen | null }>
   /** What the editor that speaks for this project says, without what changes on every write; null when no editor does. */
   focusText: string | null
+  /** When that editor says what it says last changed, in clock milliseconds; 0 when no editor speaks. */
+  focusChangedAt: number
   /** Whether any editor is open, in this project or another. */
   isAnyEditor: boolean
   /** Counts refreshes of the Explain view, so that a slower, older one does not overwrite a newer one. */
@@ -58,6 +60,7 @@ export function freshFollowState(): FollowState {
     isWatchingClosely: false,
     editorFiles: new Map(),
     focusText: null,
+    focusChangedAt: 0,
     isAnyEditor: false,
     viewRun: 0,
     viewedStamp: '',
@@ -189,9 +192,11 @@ export async function readFocus(ports: FollowPorts, state: FollowState): Promise
   const editors = [...state.editorFiles.values()].flatMap(file => (file.seen === null ? [] : [file.seen]))
   state.isAnyEditor = editors.some(seen => isConnected(seen, now))
   await ports.showEditors(editorsLine(connectedHere(editors, ports.repoRoot(), now)))
-  const text = speaker(editors, ports.repoRoot(), now)?.text ?? null
+  const speaking = speaker(editors, ports.repoRoot(), now)
+  const text = speaking?.text ?? null
   if (text === state.focusText) return false
   state.focusText = text
+  state.focusChangedAt = speaking?.changed ?? 0
 
   return true
 }
@@ -202,10 +207,13 @@ export async function followEditor(ports: FollowPorts, state: FollowState, now: 
   // A file caught half-written does not parse. The editor's next write is read whole.
   const spot = parseFocusFile(state.focusText, ports.repoRoot())
   if (spot === null) return
-  state.editorFocusAt = now
+  // The caret moved when the editor says it did, not when this session first read it: a reload took an unchanged report
+  // for a move and checked a caret still since the morning ten times a second for ten minutes (the fourteenth
+  // ui-truth pass, 2026-10-07).
+  state.editorFocusAt = state.focusChangedAt > 0 ? Math.min(now, state.focusChangedAt) : now
   // An editor is reporting its cursor: from now on its file is checked ten times a second. In a session that does not
   // drive, only its open Explain tab is worth that, and opening the tab starts the fast lane by itself.
-  if (ports.isDriver()) watchClosely(ports, state)
+  if (ports.isDriver() && now - state.editorFocusAt < EDITOR_LIVE_MS) watchClosely(ports, state)
   await setFocus(ports, state, { ...spot, source: 'editor' }, false)
 }
 
