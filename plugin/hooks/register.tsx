@@ -148,6 +148,7 @@ import {
   queueProgress as queueProgressWork,
   setUpProgress as setUpProgressOf,
   showProgress as showProgressOf,
+  explainUnassessed as explainUnassessedOf,
 } from '../core/progressing'
 import type { ProgressPorts, ProgressState } from '../core/progressing'
 import { helpText, isModeRequest, parseRequest, SETTINGS_OFF, transition } from '../core/mode'
@@ -3779,6 +3780,8 @@ function progressPortsOf($: EngineInterface, settings: Settings): ProgressPorts 
     mayAsk: () => mayAsk(health),
     setProgress: change => setProgress($, change),
     registerReviewer: () => registerReviewer($, settings),
+    latestReviewed: () => [...reviews].reverse().find(review => review.commit !== '')?.commit ?? '',
+    isWaiting: short => reviewState.waiting.commits.some(commit => commit.hash.startsWith(short)),
   }
 }
 
@@ -3863,6 +3866,8 @@ async function engage(
     if (leaseState.isDriver) {
       await loadQueue($)
       await adoptReview($, settings)
+      // Why the latest reviewed commit did not count, when nothing on record says.
+      await explainUnassessedOf(progressPortsOf($, settings), progressState)
     }
     await startExplaining($, settings, run)
     // Commits that were left reviewState.waiting, by an outage or a closed session, are taken up now.

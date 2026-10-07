@@ -735,6 +735,22 @@ class Cache(unittest.TestCase):
         shown = {"state": "done", "subject": jack.SURVEY_SUBJECT, "text": "A look around.", "older": [{}]}
         self.assertEqual(bad(self.found(self.told(True, review=shown))), [])
 
+    def test_the_latest_reviewed_commit_counts_somewhere_or_the_tab_says_why(self):
+        full = "a83b842d7f0e6c1b2a3f4e5d6c7b8a9f0e1d2c3b"
+        self.write(self.folder / "reviews.json", [{"commit": "a83b842", "subject": "commit a83b842: fail loudly", "at": self.now - 7_200_000, "text": "Two lines."}], 60_000)
+        shown = {"state": "done", "subject": "commit a83b842: fail loudly", "text": "Two lines.", "older": [{}]}
+        # Not assessed, not waiting, and nothing says why.
+        found = bad(self.found(self.told(True, review=shown, progress={"records": [], "skipped": "", "busy": ""})))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("says nothing of commit a83b842, which the Deep review tab reviewed", found[0])
+        # The tab says why: fine. Assessed in a record, or waiting: fine too.
+        self.assertEqual(bad(self.found(self.told(True, review=shown, progress={"records": [], "skipped": "Commit a83b842 is too small to say anything about your progress.", "busy": ""}))), [])
+        self.write(self.home / "progress" / "shell.json", {"v": 1, "language": "shell", "level": None, "assessed": [full], "observations": []}, 60_000)
+        self.assertEqual(bad(self.found(self.told(True, review=shown, progress={"records": [], "skipped": "", "busy": ""}))), [])
+        (self.home / "progress" / "shell.json").unlink()
+        self.write(self.folder / "queue.json", {"v": 1, "commits": [{"hash": full, "title": "fail loudly", "at": self.now, "isReviewed": True, "attempts": 0}]}, 60_000)
+        self.assertEqual(bad(self.found(self.told(True, review=shown, progress={"records": [], "skipped": "", "busy": ""}))), [])
+
     def test_a_bundle_reads_as_one_page(self):
         import contextlib
         import io
@@ -748,6 +764,15 @@ class Cache(unittest.TestCase):
             jack.print_bundle(world([s], [self.home], self.now), s)
         page = out.getvalue()
         self.assertIn("settings tab: Voice persona: default", page)
+        # "provisional" is a level's word, as the pane draws it: a record with none is "not placed", plain.
+        self.write(self.home / "progress" / "shell.json", {"v": 1, "language": "shell", "level": None, "isProvisional": True, "observations": []}, 60_000)
+        told["pane"]["progress"] = {"records": [{"language": "shell", "level": None, "isProvisional": True, "observations": []}]}
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            jack.print_bundle(world([s], [self.home], self.now), s)
+        self.assertIn("growth: shell not placed · 0 observations", out.getvalue())
+        self.assertIn("progress/shell.json (written 60s ago): level none · 0 observations", out.getvalue())
+        self.assertNotIn("not placed (provisional)", out.getvalue())
         for heading in ("=== SESSION aaaaaaaa", "--- SCREEN", "cannot be seen", "--- WHAT IT SAYS IT DRAWS", "--- THE PANE'S STATE", "--- THE CACHE ON DISK", "--- SAID LATELY", "--- CHECKS"):
             self.assertIn(heading, page)
         self.assertIn("review: state done · subject “commit abc1234: Add mean”", page)

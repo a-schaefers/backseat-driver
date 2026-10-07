@@ -1315,6 +1315,19 @@ def check_cache(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]]
         if count != counted:
             out.append((BAD, f"{who}'s Deep review tab counts {counted} commit(s) waiting for their review, and queue.json has {count}"))
 
+    # The latest reviewed commit, accounted for: assessed in some record, waiting, or with its reason on record. A reader
+    # with four reviews in the tab and "3 of 3 commits" in Growth had no way to learn why (the fourth ui-truth pass, 2026-10-06).
+    latest = next((r for r in reversed(reviews) if r.get("commit")), None)
+    if latest is not None and isinstance(dig(state, "pane.progress"), dict) and (dig(state, "loaded.options.progress_report") is not False) and s["home"] is not None:
+        short = str(latest.get("commit"))
+        assessed = any(str(h).startswith(short) for file in (s["home"] / "progress").glob("*.json") for h in ((read_json(file) or {}).get("assessed") or []))
+        waiting = any(str(c.get("hash", "")).startswith(short) for c in (dig(project["queue"], "commits") or []) if isinstance(c, dict)) if isinstance(project["queue"], dict) else False
+        said = " ".join(str(x) for x in (dig(state, "pane.progress.skipped"), dig(state, "pane.progress.busy"), (read_json(project["dir"] / "watched.json") or {}).get("skipped")) if x)
+        if not assessed and not waiting and short not in said and settled(project["reviews_at"], SHARED_GRACE_MS):
+            out.append((BAD, f"{who}'s Growth tab says nothing of commit {short}, which the Deep review tab reviewed at {clock(latest.get('at'))}: not assessed, not waiting, and no reason on record"))
+        elif not assessed and not waiting:
+            out.append((FINE, f"{who}'s Growth tab says why commit {short} did not count"))
+
     # The level, which any session may change, and which the bar for a first placement has to support: a provisional
     # level placed under an older bar stood for a day with "Not placed yet" above it (the second ui-truth pass, 2026-10-06).
     for record in (dig(state, "pane.progress.records") or []):
@@ -1373,7 +1386,8 @@ def print_bundle(w: dict, s: dict) -> None:
         print(f"  text: “{brief(review.get('text'), 200)}”")
     for r in (pane.get("progress") or {}).get("records", []) if isinstance(pane.get("progress"), dict) else []:
         if isinstance(r, dict):
-            print(f"growth: {r.get('language')} {r.get('level') or 'not placed'}{' (provisional)' if r.get('isProvisional') else ''} · {len(r.get('observations') or [])} observations")
+            # "provisional" belongs to a level, as the pane draws it: a record with none is "not placed".
+            print(f"growth: {r.get('language')} {r.get('level') or 'not placed'}{' (provisional)' if r.get('level') and r.get('isProvisional') else ''} · {len(r.get('observations') or [])} observations")
     lessons = pane.get("lessons") if isinstance(pane.get("lessons"), dict) else {}
     print(f"lessons: {len(lessons.get('paths') or [])} path(s) · selected {lessons.get('selected')} · update notice: {brief(pane.get('update'), 80) or '-'} · license line: {brief(pane.get('license'), 80) or '-'}")
     speech = pane.get("speech") if isinstance(pane.get("speech"), dict) else {}
@@ -1403,7 +1417,7 @@ def print_bundle(w: dict, s: dict) -> None:
         for file in sorted((s["home"] / "progress").glob("*.json")):
             stored = read_json(file) or {}
             if isinstance(stored, dict):
-                print(f"{file.parent.name}/{file.name} (written {ago(now - (mtime_ms(file) or now))} ago): level {stored.get('level') or 'none'}{' (provisional)' if stored.get('isProvisional') else ''} · {len(stored.get('observations') or [])} observations")
+                print(f"{file.parent.name}/{file.name} (written {ago(now - (mtime_ms(file) or now))} ago): level {stored.get('level') or 'none'}{' (provisional)' if stored.get('level') and stored.get('isProvisional') else ''} · {len(stored.get('observations') or [])} observations")
         print("profiles: " + ", ".join(f.stem for f in sorted((s["home"] / "profiles").glob("*.json"))))
         for e in editors(s["home"]):
             d = e["data"]

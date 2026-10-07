@@ -57,6 +57,10 @@ export type ProgressPorts = Pick<
   /** Changes what the Progress tab says, and records the change. */
   setProgress: (change: Partial<ProgressView>) => Promise<void>
   registerReviewer: () => Promise<void>
+  /** The commit of the latest deep review on record, short, or '' when none reviewed a commit. */
+  latestReviewed: () => string
+  /** Whether a commit (by its short hash) waits for its review or its look at the progress. */
+  isWaiting: (short: string) => boolean
 }
 
 /** Runs one piece of progress work after the ones before it, so that two never write one record at once. */
@@ -160,6 +164,30 @@ export async function setUpProgress(ports: ProgressPorts, state: ProgressState):
   state.records.clear()
   for (const language of ports.profiles().languages) state.records.set(language, await mendedRecord(ports, language))
   await showProgress(ports, state)
+}
+
+/**
+ * Why the latest reviewed commit did not count, when nothing says: assessed
+ * in no record, not waiting, and no reason on record. Judged again as
+ * `assessCommit` judges, without a model: a reader with four reviews in the
+ * Deep review tab and "3 of 3 commits" in Growth had no way to learn why
+ * (the fourth ui-truth pass, 2026-10-06: the skip of 2026-10-05 was said
+ * in a session since closed, before the reason was kept).
+ */
+export async function explainUnassessed(ports: ProgressPorts, state: ProgressState): Promise<void> {
+  const short = ports.latestReviewed()
+  if (short === '' || state.skipped !== '' || !ports.settings.isProgressOn || ports.repoRoot() === '' || ports.dataRoot() === '') return
+  if ([...state.records.values()].some(record => record.assessed.some(hash => hash.startsWith(short))) || ports.isWaiting(short)) return
+  const asked = await ports.git(commitInfoArgs(short))
+  if (asked.exitCode !== 0) return
+  const info = parseCommitInfo(asked.stdout)
+  if (info === null) return
+  const verdict = judge(info, state.identity, addedLines((await ports.git(commitPatchArgs(info.hash))).stdout))
+  const named = shortHash(info.hash)
+  if (!verdict.isYours) await noteSkipped(ports, state, `Commit ${named} does not count toward your progress: ${verdict.reason}.`)
+  else if ([...byLanguage(verdict.files)].every(([, group]) => sizeOf(group) < MIN_LINES)) {
+    await noteSkipped(ports, state, `Commit ${named} is too small to say anything about your progress.`)
+  } else await noteSkipped(ports, state, `Commit ${named} was reviewed and never looked at for your progress.`)
 }
 
 /**

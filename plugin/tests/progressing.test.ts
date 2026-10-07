@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import { NO_PRESSURE } from '../core/health'
 import { progressPath, watchedPath } from '../core/datahome'
 import { emptyRecord } from '../core/progress'
-import { forgetWatched, freshProgressState, loadWatched, noteWatched, placeFirst, queueProgress, setUpProgress } from '../core/progressing'
+import { explainUnassessed, forgetWatched, freshProgressState, loadWatched, noteWatched, placeFirst, queueProgress, setUpProgress } from '../core/progressing'
 import { memoryDisk } from '../core/storage'
 import { plainStore } from '../core/store'
 import type { ProgressPorts } from '../core/progressing'
@@ -33,6 +33,8 @@ function world(overrides: Partial<ProgressPorts> = {}) {
     mayAsk: () => true,
     setProgress: async change => void log.push(`progress ${Object.keys(change).join(',')}`),
     registerReviewer: async () => undefined,
+    latestReviewed: () => '',
+    isWaiting: () => false,
     toast: () => undefined,
     fail: (what, error) => void log.push(`fail: ${what}: ${String(error)}`),
     ...overrides,
@@ -132,4 +134,26 @@ test('a record placed under the old bar is mended as it is read: its lines count
   await setUpProgress(elsewhere.ports, away)
   expect(away.records.get('python')?.level).toBe('beginner')
   expect(away.records.get('python')?.linesRead).toBe(0)
+})
+
+test('the latest reviewed commit that counted nowhere is judged again, and the tab says why, once', async () => {
+  const info = ['a83b842d7f0e6c1b2a3f4e5d6c7b8a9f0e1d2c3b', 'f481c4a0000000000000000000000000000000000', 'me@example.com', 'Adam', 'fail loudly'].join('\0')
+  const patch = ['diff --git a/run.sh b/run.sh', '--- a/run.sh', '+++ b/run.sh', '@@ -1,0 +2,2 @@', '+set -e', '+exit 1'].join('\n')
+  const git = async (args: readonly string[]) => ({ exitCode: 0, stdout: args.includes('-s') ? info : args[0] === 'show' ? patch : 'me@example.com' })
+  const store = plainStore(memoryDisk())
+  const w = world({ store: () => store, git, latestReviewed: () => 'a83b842' })
+  const state = freshProgressState()
+  state.identity = ['me@example.com']
+  await explainUnassessed(w.ports, state)
+  expect(state.skipped).toBe('Commit a83b842 is too small to say anything about your progress.')
+  expect((await store.read(watchedPath('/data', '/work')) as { skipped: string }).skipped).toBe('Commit a83b842 is too small to say anything about your progress.')
+  expect(w.log.at(-1)).toBe('progress skipped')
+  // Said once: with a reason on record, assessed, or waiting, nothing is judged.
+  const before = w.log.length
+  await explainUnassessed(w.ports, state)
+  await explainUnassessed({ ...w.ports, isWaiting: () => true }, { ...freshProgressState(), identity: ['me@example.com'] })
+  const assessed = freshProgressState()
+  assessed.records.set('shell', { ...emptyRecord('shell'), assessed: ['a83b842d7f0e6c1b2a3f4e5d6c7b8a9f0e1d2c3b'] })
+  await explainUnassessed(w.ports, assessed)
+  expect(w.log.length).toBe(before)
 })
