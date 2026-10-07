@@ -384,9 +384,10 @@ class Disagreements(unittest.TestCase):
         self.assertEqual(bad(jack.check_session(world([s], now=self.now), s, DOCKED)), [])
         told["pane"]["speech"]["text"] = "Review's in. Nice and small."
         self.assertEqual(bad(jack.check_session(world([s], now=self.now), s, DOCKED)), [])
-        # A spinner caught a tick apart is the same badge.
-        self.assertTrue(jack.is_on_screen("2: Review (✻)", ["1: Play  2: Review (✶)  3: Explain"]))
-        self.assertTrue(jack.is_on_screen("3: Explain (…)", ["3: Explain (·)"]))
+        # A spinner caught a tick apart is the same badge, bare after the name.
+        self.assertTrue(jack.is_on_screen("2: Review ✻", ["1: Play  2: Review ✶  3: Explain"]))
+        self.assertTrue(jack.is_on_screen("3: Explain ✽", ["3: Explain ·"]))
+        self.assertFalse(jack.is_on_screen("2: Review (new)", ["1: Play  2: Review ✶  3: Explain"]))
 
     def test_a_pane_squeezed_in_the_middle_and_one_cut_at_the_bottom(self):
         # The owner's pane, 2026-10-06 18:05: laid out into sixteen rows, the editors' light gone from its middle while rows below it showed.
@@ -403,6 +404,15 @@ class Disagreements(unittest.TestCase):
         found = jack.check_session(world([s], now=self.now), s, DOCKED)
         self.assertEqual(bad(found), [])
         self.assertTrue(any(level == jack.NOTE and "cut at the bottom" in text and "the keys row among them" in text for level, text in found), found)
+        # The controls and the keys row at the top of every tab (2026-10-06): a short frame cuts the contents, and the note says only that.
+        told["shown"]["pane"]["texts"] = [*TEXTS[:9], "e: explain", "l: look now", "x: minimize", "Keys off", "Click here or press Ctrl+X Tab to use the keys.", "stats.py", "✘ bug · line 6", "For even-length lists, median should average the two middle values, not take the upper one."]
+        top = session(state=told)
+        found = jack.check_session(world([top], now=self.now), top, told["shown"]["pane"]["texts"][:14])
+        self.assertEqual(bad(found), [])
+        notes = [text for level, text in found if level == jack.NOTE and "cut at the bottom" in text]
+        self.assertEqual(len(notes), 1, found)
+        self.assertIn("3 piece(s) are below the frame (a pane taller", notes[0])
+        self.assertTrue(any("keys row is whole" in text for _, text in found), found)
 
     def test_the_progress_files_against_themselves(self):
         home = pathlib.Path(self.tmp.name) / "home2"

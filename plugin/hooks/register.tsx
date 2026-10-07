@@ -536,14 +536,16 @@ let blinkTimer: Timer | null = null
 let spinTimer: Timer | null = null
 const SPIN_MS = 150
 /**
- * How long the spinner spins for one stretch of work before the ellipsis stands in for it: a deep review can run a
+ * After this long in one stretch of work the spinner pulses every `SPIN_SLOW_MS` instead: a deep review can run a
  * quarter of an hour, and a pane redrawn seven times a second for that long serves nobody (it also timed the kit's
- * watchdog test out, which advances forty-five minutes while a review runs).
+ * watchdog test out, which advances forty-five minutes while a review runs). It never stops while the work runs:
+ * an ellipsis standing in for it read as nothing to the owner (2026-10-06, "(...) is not helpful to me").
  */
 const SPIN_FOR_MS = 60_000
+const SPIN_SLOW_MS = 2000
 let spinSince = 0
-/** True once the stretch's minute is up, until the work ends: the spinner does not start again for the same work. */
-let isSpinSpent = false
+/** True once the stretch's minute is up and the slow pulse is on, until the work ends. */
+let isSpinSlow = false
 
 /** How close the plan's usage limit is: pushed by Claude Code when it measures the session, and read before anything is spent. */
 let pressure: Pressure = NO_PRESSURE
@@ -1549,34 +1551,35 @@ async function setReview($: EngineInterface, change: Partial<Review>): Promise<v
 async function keepSpinning($: EngineInterface): Promise<void> {
   const [review, explain, progress] = await Promise.all([read($, reviewAtom), read($, explainAtom), read($, progressAtom)])
   const isBusy = mode !== 'off' && (review.state === 'running' || explain.status === 'updating' || progress.busy !== '')
-  if (isBusy && spinTimer === null && !isSpinSpent) {
+  if (isBusy && spinTimer === null) {
     spinSince = await $.clock.now()
+    isSpinSlow = false
     spinTimer = $.clock.every(SPIN_MS, () => {
       void spinOnce($)
     })
   } else if (!isBusy) {
     stopSpinning()
-    isSpinSpent = false
     if ((await read($, spinAtom)) !== 0) await update($, spinAtom, () => 0)
   }
 }
 
-/** One tick of the spinner, or, its minute up, the ellipsis for the rest of the work. */
+/** One tick of the spinner. Its minute up, the ticks come every `SPIN_SLOW_MS` instead, for as long as the work runs. */
 async function spinOnce($: EngineInterface): Promise<void> {
   if (spinTimer === null) return
-  if ((await $.clock.now()) - spinSince >= SPIN_FOR_MS) {
-    stopSpinning()
-    isSpinSpent = true
-    await update($, spinAtom, () => -1)
-
-    return
+  if (!isSpinSlow && (await $.clock.now()) - spinSince >= SPIN_FOR_MS) {
+    isSpinSlow = true
+    spinTimer.cancel()
+    spinTimer = $.clock.every(SPIN_SLOW_MS, () => {
+      void spinOnce($)
+    })
   }
-  await update($, spinAtom, (spin: number): number => Math.max(0, spin) + 1)
+  await update($, spinAtom, (spin: number): number => spin + 1)
 }
 
 function stopSpinning(): void {
   spinTimer?.cancel()
   spinTimer = null
+  isSpinSlow = false
 }
 
 /** A file's size and modification time as one string, or '' when it is not there. */

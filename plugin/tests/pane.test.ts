@@ -162,26 +162,26 @@ test('a tab says what is going on behind it', async () => {
   expect(tabBadge('review', VIEW)).toBe('')
   expect(tabBadge('review', { review: { ...DONE, isUnseen: true } })).toBe(' (new)')
   expect(tabBadge('review', { review: DONE })).toBe('')
-  expect(tabBadge('review', { review: { ...DONE, state: 'running' } })).toBe(' (…)')
+  expect(tabBadge('review', { review: { ...DONE, state: 'running' } })).toBe(' ·')
   expect(tabBadge('review', { review: { ...DONE, state: 'failed' } })).toBe(' (!)')
-  expect(tabBadge('explain', { explain: { ...NO_VIEW, status: 'updating' } })).toBe(' (…)')
+  expect(tabBadge('explain', { explain: { ...NO_VIEW, status: 'updating' } })).toBe(' ·')
   expect(tabBadge('explain', { explain: { ...NO_VIEW, status: 'fresh' } })).toBe('')
-  expect(tabBadge('profile', { progress: { ...VIEW.progress, busy: 'Looking at commit aaaaaaa' } })).toBe(' (…)')
+  expect(tabBadge('profile', { progress: { ...VIEW.progress, busy: 'Looking at commit aaaaaaa' } })).toBe(' ·')
   expect(tabBadge('profile', VIEW)).toBe('')
 })
 
 test('the tab row keeps what the tabs say for as long as there is room, and never wraps', async () => {
   const busy = { ...VIEW, notes: [note(1), note(2)], review: { ...DONE, isUnseen: true }, explain: { ...NO_VIEW, status: 'updating' as const } }
-  expect(tabRow({ ...busy, columns: 98 })).toEqual({ labels: ['Play-by-play (2)', 'Deep review (new)', 'Explain (…)', 'Growth', 'Lessons', 'Settings'], gap: 3 })
+  expect(tabRow({ ...busy, columns: 98 })).toEqual({ labels: ['Play-by-play (2)', 'Deep review (new)', 'Explain ·', 'Growth', 'Lessons', 'Settings'], gap: 3 })
   // Too narrow for the full names: the short ones, still saying it.
-  expect(tabRow({ ...busy, columns: 80 })).toEqual({ labels: ['Play (2)', 'Review (new)', 'Explain (…)', 'Growth', 'Lessons', 'Settings'], gap: 2 })
-  expect(tabRow({ ...busy, columns: 75 })).toEqual({ labels: ['Play (2)', 'Review (new)', 'Explain (…)', 'Growth', 'Lessons', 'Settings'], gap: 1 })
+  expect(tabRow({ ...busy, columns: 80 })).toEqual({ labels: ['Play (2)', 'Review (new)', 'Explain ·', 'Growth', 'Lessons', 'Settings'], gap: 2 })
+  expect(tabRow({ ...busy, columns: 75 })).toEqual({ labels: ['Play (2)', 'Review (new)', 'Explain ·', 'Growth', 'Lessons', 'Settings'], gap: 1 })
   // Narrower still: the review's word is the one that asks for a look, so it is the one kept.
   expect(tabRow({ ...busy, columns: 72 })).toEqual({ labels: ['Play', 'Review (new)', 'Explain', 'Growth', 'Lessons', 'Settings'], gap: 2 })
   // Not even the shortest names fit a 46-column dock (Claude Code's, on the owner's 157-column terminal, 2026-10-06, where
   // "6: Set" was cut off): two rows of three, each choosing its names and keeping its badges.
   expect(tabRows({ ...busy, columns: 46 })).toEqual([
-    { from: 0, labels: ['Play (2)', 'Review (new)', 'Explain (…)'], gap: 2 },
+    { from: 0, labels: ['Play (2)', 'Review (new)', 'Explain ·'], gap: 2 },
     { from: 3, labels: ['Growth', 'Lessons', 'Settings'], gap: 3 },
   ])
   expect(tabRows({ ...busy, columns: 72 })).toEqual([{ from: 0, labels: ['Play', 'Review (new)', 'Explain', 'Growth', 'Lessons', 'Settings'], gap: 2 }])
@@ -371,12 +371,12 @@ test('several places fold under a heading that counts them, and opens downward',
 })
 
 test('the spinner behind a tab at work, the line where another session drives, and the rows of the review list', () => {
-  // Claude Code's own marks, one a tick, and an ellipsis where nothing ticks (the tests' views, and a pane with no timer).
-  expect(spinFrame(undefined)).toBe('…')
-  expect(spinFrame(-1)).toBe('…')
+  // Claude Code's own marks, one a tick, bare after the name, and the first of them where nothing ticks: never an ellipsis (owner, 2026-10-06).
+  expect(spinFrame(undefined)).toBe('·')
+  expect(spinFrame(-1)).toBe('·')
   expect([0, 1, 2, 3, 4, 5, 6].map(spinFrame)).toEqual(['·', '✢', '✳', '✶', '✻', '✽', '·'])
-  expect(tabBadge('explain', { explain: { ...VIEW.explain, status: 'updating' }, spin: 4 })).toBe(' (✻)')
-  expect(tabBadge('explain', { explain: { ...VIEW.explain, status: 'updating' } })).toBe(' (…)')
+  expect(tabBadge('explain', { explain: { ...VIEW.explain, status: 'updating' }, spin: 4 })).toBe(' ✻')
+  expect(tabBadge('explain', { explain: { ...VIEW.explain, status: 'updating' } })).toBe(' ·')
   expect(followingLine('')).toBe('Looks and reviews run in the session that drives this project.')
   expect(followingLine('00:58')).toBe('Looks and reviews run in your session started 00:58.')
   expect(reviewsHeading(1, 5, undefined, false, 0)).toBe('▸ Review 2 of 5')

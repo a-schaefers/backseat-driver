@@ -75,9 +75,9 @@ export function textsOf(tree: unknown): string[] {
 }
 
 /** Whether two drawings say the same. */
-/** The spinner behind a tab at work, at any tick, read as the ellipsis it stands for: a drawing a tick later is the same drawing. */
+/** The spinner behind a tab at work, at any tick, read as its first frame: a drawing a tick later is the same drawing. */
 function despun(text: string): string {
-  return text.replace(/\(([·✢✳✶✻✽…])\)/g, '(…)')
+  return text.replace(/(?<=\s)[✢✳✶✻✽](?=\s|$)/g, '·')
 }
 
 export function isSameShown(one: Shown | null, other: Shown | null): boolean {

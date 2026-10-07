@@ -137,9 +137,9 @@ const TROUBLE = ' (!)'
 /** The frames of the spinner behind a tab at work: Claude Code's own marks, one a tick (owner, 2026-10-06). */
 export const SPINNER = ['·', '✢', '✳', '✶', '✻', '✽'] as const
 
-/** The badge's mark for something at work: the spinner's frame at this tick, or an ellipsis where nothing ticks (no tick known, or the stretch's minute up). */
+/** The badge's mark for something at work: the spinner's frame at this tick, and its first frame where no tick is known. Never an ellipsis (owner, 2026-10-06: "(...) is not helpful to me"). */
 export function spinFrame(spin: number | undefined): string {
-  return spin === undefined || spin < 0 ? '…' : (SPINNER[spin % SPINNER.length] ?? '…')
+  return SPINNER[Math.max(0, spin ?? 0) % SPINNER.length] ?? '·'
 }
 
 /**
@@ -148,7 +148,8 @@ export function spinFrame(spin: number | undefined): string {
  * is at work. '' when there is nothing to say.
  */
 export function tabBadge(tab: Tab, view: Partial<Pick<PaneView, 'notes' | 'review' | 'explain' | 'progress' | 'spin'>>): string {
-  const busy = ` (${spinFrame(view.spin)})`
+  // The spinner stands bare after the name (owner, 2026-10-06: "it should not be parenth'd"); the other badges keep their parentheses.
+  const busy = ` ${spinFrame(view.spin)}`
   if (tab === 'play') return view.notes === undefined || view.notes.length === 0 ? '' : ` (${view.notes.length})`
   if (tab === 'review') {
     const review = view.review
@@ -239,8 +240,11 @@ export const FOCUSED_HINT = 'Tab moves · Enter presses · 1–6 open a tab · E
  * One grammar for everything that can be pressed, so that a glance says what
  * is a control (owner, 2026-10-05: "what can i click on, what the keys are"):
  * a control with a key reads `k: label`, one without reads `[ label ]`, a row
- * of a list reads `▸ …` (`❯ …` the one the keys act on). Every tab ends with
- * its controls under a rule, and the last row says whether the keys work.
+ * of a list reads `▸ …` (`❯ …` the one the keys act on). Every tab's keyed
+ * controls stand at its top, under "Working on", with the keys row under them
+ * and a rule under that (owner, 2026-10-06: "all of our keyboard shortcut
+ * type of buttons are at the top of the tab"): the same place on every tab,
+ * and never below the fold of a pane taller than its frame.
  */
 
 /** A thin rule across the pane, setting one part apart from the next. */
@@ -248,14 +252,11 @@ function rule({ Text }: Pick<Kit, 'Text'>, columns: number) {
   return <Text dimColor>{'─'.repeat(Math.max(1, columns))}</Text>
 }
 
-/** A tab's controls, in one row at its end under a rule, the same place on every tab. A rule costs the row a blank would, so it is drawn compact too. */
-function controlsRow({ Box, Text }: Pick<Kit, 'Box' | 'Text'>, view: Pick<PaneView, 'columns'>, controls: readonly RenderChildren[]) {
+/** A tab's controls in one wrapping row, under "Working on" on every tab. */
+function controlsRow({ Box }: Pick<Kit, 'Box'>, controls: readonly RenderChildren[]) {
   return (
-    <Box flexDirection="column">
-      {rule({ Text }, view.columns)}
-      <Box flexDirection="row" columnGap={3} flexWrap="wrap">
-        {controls}
-      </Box>
+    <Box flexDirection="row" columnGap={3} flexWrap="wrap">
+      {controls}
     </Box>
   )
 }
@@ -269,8 +270,8 @@ export function keysRowFits(view: Pick<PaneView, 'isFocused' | 'columns'>, hasMi
 }
 
 /**
- * The last row: whether the keys work now, and how the pane is driven. On
- * every tab, since nothing else says it. Where one line cannot hold it (a
+ * The keys row, under the controls on every tab: whether the keys work now,
+ * and how the pane is driven, since nothing else says it. Where one line cannot hold it (a
  * 46-column dock cut the hint to "Click here or press Ctr…", and a 73-column
  * one cuts the focused hint; the first ui-truth pass, 2026-10-06) the hint
  * goes on a line of its own under the word, and wraps rather than being cut.
@@ -598,6 +599,30 @@ function outlineRow({ Box, Text, Button }: Pick<Kit, 'Box' | 'Text' | 'Button'>,
   )
 }
 
+/** What the Explain tab has to go on: nothing at all (then it says what to do), and whether a lookup is to be offered. */
+function explainFlags(explain: PaneView['explain']): { isBlank: boolean; canFetch: boolean } {
+  const isBlank = explain.target === null && explain.outline.length === 0 && explain.fileSummary === '' && explain.status === 'fresh'
+
+  return { isBlank, canFetch: isBlank || explain.status === 'waiting' || explain.status === 'held' || explain.status === 'failed' }
+}
+
+/** The Explain tab's controls: along the outline, a question about the symbol, a lookup, the editor. */
+function explainControls({ Button }: Pick<Kit, 'Button'>, view: PaneView, actions: PaneActions): RenderChildren[] {
+  const { explain } = view
+  const spot = explain.spot
+  if (spot === null) return []
+  const { target } = explain
+  const { canFetch } = explainFlags(explain)
+
+  return [
+    explain.outline.length > 1 && <Button key="explain-next" label="next" hotkey="n" plain onPress={() => actions.onExplainMove(1)} />,
+    explain.outline.length > 1 && <Button key="explain-previous" label="previous" hotkey="p" plain onPress={() => actions.onExplainMove(-1)} />,
+    target !== null && <Button key="explain-ask" label="ask about this" hotkey="e" plain onPress={() => actions.onExplainAsk()} />,
+    canFetch && <Button key="explain-fetch" label="look this up" hotkey="f" plain onPress={() => actions.onExplainFetch()} />,
+    actions.onOpen !== undefined && <Button key="explain-open" label="open in editor" hotkey="o" plain onPress={() => actions.onOpen?.(spot.path, spot.line)} />,
+  ]
+}
+
 function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, actions: PaneActions) {
   const { explain } = view
   if (explain.spot === null) {
@@ -610,11 +635,9 @@ function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
   }
 
   const { target, detail } = explain
-  const spot = explain.spot
+  const { isBlank } = explainFlags(explain)
   // Nothing known about the file, and nothing on its way: say what to do rather than show an empty tab.
-  const isBlank = target === null && explain.outline.length === 0 && explain.fileSummary === '' && explain.status === 'fresh'
   const notice = isBlank ? NOTHING_EXPLAINED : explainNotice(explain)
-  const canFetch = isBlank || explain.status === 'waiting' || explain.status === 'held' || explain.status === 'failed'
 
   return (
     <Box flexDirection="column">
@@ -624,15 +647,7 @@ function explainTab({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
           {`${target.kind}, lines ${target.startLine} to ${target.endLine}`}
         </Text>
       )}
-      <Box flexDirection="row" columnGap={3}>
-        {explain.outline.length > 1 && <Button key="explain-next" label="next" hotkey="n" plain onPress={() => actions.onExplainMove(1)} />}
-        {explain.outline.length > 1 && <Button key="explain-previous" label="previous" hotkey="p" plain onPress={() => actions.onExplainMove(-1)} />}
-        {target !== null && <Button key="explain-ask" label="ask about this" hotkey="e" plain onPress={() => actions.onExplainAsk()} />}
-        {canFetch && <Button key="explain-fetch" label="look this up" hotkey="f" plain onPress={() => actions.onExplainFetch()} />}
-        {actions.onOpen !== undefined && <Button key="explain-open" label="open in editor" hotkey="o" plain onPress={() => actions.onOpen?.(spot.path, spot.line)} />}
-      </Box>
-      {/* The keys and the list stay at the top, so that a press moves the mark without moving the page (owner, 2026-10-05). */}
-      {rule({ Text }, view.columns)}
+      {/* The list stays near the top, so that a press on a key moves the mark without moving the page (owner, 2026-10-05). */}
       {explain.outline.length > 0 && <Text bold>In this file</Text>}
       {explain.outline.map(row =>
         outlineRow({ Box, Text, Button }, row, target !== null && row.startLine === target.startLine && row.endLine === target.endLine, nameColumns(explain.outline), actions),
@@ -703,11 +718,7 @@ function reviewList({ Box, Text, Button }: Pick<Kit, 'Box' | 'Text' | 'Button'>,
 
   return (
     <Box flexDirection="column">
-      <Box flexDirection="row" columnGap={3}>
-        <Button key="review-list" label={reviewsHeading(index, history.length, history[index]?.at, isOpen, now)} plain onPress={() => actions.onReviewsFold?.()} />
-        {index + 1 < history.length && <Button key="review-older" label="older" hotkey="p" plain onPress={() => actions.onReviewStep?.(1)} />}
-        {index > 0 && <Button key="review-newer" label="newer" hotkey="n" plain onPress={() => actions.onReviewStep?.(-1)} />}
-      </Box>
+      <Button key="review-list" label={reviewsHeading(index, history.length, history[index]?.at, isOpen, now)} plain onPress={() => actions.onReviewsFold?.()} />
       {isOpen && (
         <Box flexDirection="column" paddingLeft={2}>
           {history.map((entry, at) =>
@@ -807,11 +818,21 @@ function deepReview({ Box, Text, Button, Markdown }: Kit, view: PaneView, action
           ))}
         </Box>
       )}
-      {view.watch.state === 'following'
-        ? controlsRow({ Box, Text }, view, [<Text dimColor>{followingLine(view.watch.driver)}</Text>])
-        : controlsRow({ Box, Text }, view, [<Button key="review-now" label="review now" hotkey="r" plain onPress={() => actions.onReview()} />])}
     </Box>
   )
+}
+
+/** The Deep review tab's controls: a review now, and the way through the history. Another session driving, that is said in their place. */
+function reviewControls({ Text, Button }: Pick<Kit, 'Text' | 'Button'>, view: PaneView, actions: PaneActions): RenderChildren[] {
+  if (view.watch.state === 'following') return [<Text dimColor>{followingLine(view.watch.driver)}</Text>]
+  const history = reviewHistory(view.review)
+  const { index } = shownReview(view.review)
+
+  return [
+    <Button key="review-now" label="review now" hotkey="r" plain onPress={() => actions.onReview()} />,
+    index + 1 < history.length && <Button key="review-older" label="older" hotkey="p" plain onPress={() => actions.onReviewStep?.(1)} />,
+    index > 0 && <Button key="review-newer" label="newer" hotkey="n" plain onPress={() => actions.onReviewStep?.(-1)} />,
+  ]
 }
 
 /** The marks that set the two learning sections apart from the rest of the notes. */
@@ -840,24 +861,35 @@ function noteRow({ Box, Text, Button }: Kit, note: Note, current: Note, label: s
  * The play-by-play: decision points first, set apart as theirs to make, then
  * what will or may break and what reads better, by file, then insights last.
  */
-function playByPlay(kit: Kit, view: PaneView, actions: PaneActions) {
-  const { Box, Text, Button } = kit
+/**
+ * The play-by-play's controls: what to do with the note the keys act on, the
+ * way through the notes, a look now. Paused, nothing looks, so it is not
+ * offered. Another session driving, it says so there (the second ui-truth
+ * pass, 2026-10-06: a "look now" the owner pressed four times, which only refused).
+ */
+function playControls({ Text, Button }: Pick<Kit, 'Text' | 'Button'>, view: PaneView, actions: PaneActions): RenderChildren[] {
   const notes = drawnOrder(view.notes)
   const current = currentNote(view)
-  // Paused, nothing looks, so it is not offered. Another session driving, it says so there (the second ui-truth pass,
-  // 2026-10-06: a "look now" the owner pressed four times, which only refused).
   const isFollowing = view.watch.state === 'following'
   const canLook = view.mode !== 'paused' && !isFollowing
-  const followingNote = isFollowing ? <Text dimColor>{followingLine(view.watch.driver)}</Text> : null
-  if (current === undefined) {
-    return (
-      <Box flexDirection="column">
-        <Text dimColor>No notes. Keep going.</Text>
-        {followingNote !== null && controlsRow(kit, view, [followingNote])}
-        {canLook && controlsRow(kit, view, [<Button key="look" label="look now" hotkey="l" plain onPress={() => actions.onLook()} />])}
-      </Box>
-    )
-  }
+
+  return [
+    current !== undefined && <Button key="explain" label="explain" hotkey="e" plain onPress={() => actions.onExplain(current)} />,
+    current !== undefined && <Button key="dismiss" label="dismiss" hotkey="d" plain onPress={() => actions.onDismiss(current)} />,
+    current !== undefined && <Button key="mute" label="mute" hotkey="m" plain onPress={() => actions.onMute(current)} />,
+    notes.length > 1 && <Button key="next-note" label="next note" hotkey="j" plain onPress={() => actions.onStep(1)} />,
+    notes.length > 1 && <Button key="previous-note" label="previous" hotkey="k" plain onPress={() => actions.onStep(-1)} />,
+    canLook && <Button key="look" label="look now" hotkey="l" plain onPress={() => actions.onLook()} />,
+    current !== undefined && actions.onOpen !== undefined && <Button key="open" label="open in editor" hotkey="o" plain onPress={() => actions.onOpen?.(current.file, current.line)} />,
+    isFollowing && <Text dimColor>{followingLine(view.watch.driver)}</Text>,
+  ]
+}
+
+function playByPlay(kit: Kit, view: PaneView, actions: PaneActions) {
+  const { Box, Text } = kit
+  const notes = drawnOrder(view.notes)
+  const current = currentNote(view)
+  if (current === undefined) return <Text dimColor>No notes. Keep going.</Text>
 
   const decisions = notes.filter(note => note.kind === 'decision')
   const insights = notes.filter(note => note.kind === 'insight')
@@ -881,16 +913,6 @@ function playByPlay(kit: Kit, view: PaneView, actions: PaneActions) {
       {insights.length > 0 && (decisions.length > 0 || others.length > 0) && <Text> </Text>}
       {insights.length > 0 && <Text color="cyan">{INSIGHT_HEADING}</Text>}
       {insights.map(note => noteRow(kit, note, current, `${note.id}  ${note.file} · line ${note.line}`, actions))}
-      {controlsRow(kit, view, [
-        <Button key="explain" label="explain" hotkey="e" plain onPress={() => actions.onExplain(current)} />,
-        <Button key="dismiss" label="dismiss" hotkey="d" plain onPress={() => actions.onDismiss(current)} />,
-        <Button key="mute" label="mute" hotkey="m" plain onPress={() => actions.onMute(current)} />,
-        notes.length > 1 && <Button key="next-note" label="next note" hotkey="j" plain onPress={() => actions.onStep(1)} />,
-        notes.length > 1 && <Button key="previous-note" label="previous" hotkey="k" plain onPress={() => actions.onStep(-1)} />,
-        canLook && <Button key="look" label="look now" hotkey="l" plain onPress={() => actions.onLook()} />,
-        actions.onOpen !== undefined && <Button key="open" label="open in editor" hotkey="o" plain onPress={() => actions.onOpen?.(current.file, current.line)} />,
-        followingNote,
-      ])}
     </Box>
   )
 }
@@ -1046,17 +1068,15 @@ function profileTab(kit: Kit, view: PaneView, actions: PaneActions) {
           </Box>
         )
       })}
-      {controlsRow(kit, view, [
-        <Button
-          key="questions"
-          label={subjects.some(({ profile }) => Object.keys(profile.answers).length > 0) ? 'answer the questions again' : 'answer a few questions'}
-          hotkey="q"
-          plain
-          onPress={() => actions.onQuestions()}
-        />,
-      ])}
     </Box>
   )
+}
+
+/** The Growth tab's control: the first-run questions, again or for the first time. */
+function profileControls({ Button }: Pick<Kit, 'Button'>, view: PaneView, actions: PaneActions): RenderChildren[] {
+  const hasAnswers = [...view.profiles.languages, GENERAL].some(subject => Object.keys(view.profiles.subjects[subject]?.answers ?? {}).length > 0)
+
+  return [<Button key="questions" label={hasAnswers ? 'answer the questions again' : 'answer a few questions'} hotkey="q" plain onPress={() => actions.onQuestions()} />]
 }
 
 /** What the Lessons tab says above the list. */
@@ -1075,7 +1095,7 @@ function stepMark(state: string, isNext: boolean): string {
 }
 
 /** One path opened: its steps, and what can be done with it. */
-function lessonDetail({ Box, Text, Button }: Kit, view: PaneView, lesson: LessonView, actions: PaneActions) {
+function lessonDetail({ Box, Text }: Kit, lesson: LessonView) {
   const next = lesson.steps[lesson.next]
 
   return (
@@ -1090,29 +1110,44 @@ function lessonDetail({ Box, Text, Button }: Kit, view: PaneView, lesson: Lesson
         </Text>
       ))}
       {next === undefined && <Text dimColor>Every step is done.</Text>}
-      {controlsRow({ Box, Text }, view, [
-        next !== undefined && (
-          <Button
-            key="lesson-start"
-            label={next.state === 'started' ? `continue step ${lesson.next + 1}` : `start step ${lesson.next + 1}`}
-            hotkey="s"
-            plain
-            onPress={() => actions.onLessonStart?.(lesson.id)}
-          />
-        ),
-        next !== undefined && <Button key="lesson-done" label={`I did step ${lesson.next + 1}`} hotkey="c" plain onPress={() => actions.onLessonDone?.(lesson.id)} />,
-        <Button key="lesson-back" label="all lessons" hotkey="b" plain onPress={() => actions.onLessonOpen?.(null)} />,
-      ])}
     </Box>
   )
+}
+
+/** The path opened, if one is. */
+function openedLesson(view: PaneView): LessonView | undefined {
+  const lessons = view.lessons ?? { paths: [], selected: null, problems: [] }
+
+  return lessons.paths.find(lesson => lesson.id === lessons.selected)
+}
+
+/** The Lessons tab's controls, in a path: its next step, started or done by their word, and the way back. The list has none: its rows are the paths. */
+function lessonControls({ Button }: Pick<Kit, 'Button'>, view: PaneView, actions: PaneActions): RenderChildren[] {
+  const lesson = openedLesson(view)
+  if (lesson === undefined) return []
+  const next = lesson.steps[lesson.next]
+
+  return [
+    next !== undefined && (
+      <Button
+        key="lesson-start"
+        label={next.state === 'started' ? `continue step ${lesson.next + 1}` : `start step ${lesson.next + 1}`}
+        hotkey="s"
+        plain
+        onPress={() => actions.onLessonStart?.(lesson.id)}
+      />
+    ),
+    next !== undefined && <Button key="lesson-done" label={`I did step ${lesson.next + 1}`} hotkey="c" plain onPress={() => actions.onLessonDone?.(lesson.id)} />,
+    <Button key="lesson-back" label="all lessons" hotkey="b" plain onPress={() => actions.onLessonOpen?.(null)} />,
+  ]
 }
 
 /** The Lessons tab: the paths, by language, or the one opened. */
 function lessonsTab(kit: Kit, view: PaneView, actions: PaneActions) {
   const { Box, Text, Button } = kit
   const lessons = view.lessons ?? { paths: [], selected: null, problems: [] }
-  const opened = lessons.paths.find(lesson => lesson.id === lessons.selected)
-  if (opened !== undefined) return lessonDetail(kit, view, opened, actions)
+  const opened = openedLesson(view)
+  if (opened !== undefined) return lessonDetail(kit, opened)
   const languages = [...new Set(lessons.paths.map(lesson => lesson.language))]
 
   return (
@@ -1151,6 +1186,21 @@ function tabBody(kit: Kit, view: PaneView, actions: PaneActions) {
   if (view.tab === 'lessons') return lessonsTab(kit, view, actions)
 
   return profileTab(kit, view, actions)
+}
+
+/**
+ * The tab's keyed controls: what the keys do on this tab. Drawn under
+ * "Working on" on every tab, with the keys row under them and a rule under
+ * that (owner, 2026-10-06). Settings has none: its rows are the settings.
+ */
+function tabControls(kit: Kit, view: PaneView, actions: PaneActions): RenderChildren[] {
+  if (view.tab === 'play') return playControls(kit, view, actions)
+  if (view.tab === 'review') return reviewControls(kit, view, actions)
+  if (view.tab === 'explain') return explainControls(kit, view, actions)
+  if (view.tab === 'lessons') return lessonControls(kit, view, actions)
+  if (view.tab === 'settings') return []
+
+  return profileControls(kit, view, actions)
 }
 
 /** The tabs of one row as buttons, each with its digit. */
@@ -1266,11 +1316,18 @@ function characterOf(view: PaneView): PaneView['character'] {
   return view.tab === 'play' ? view.character : null
 }
 
-/** The pane: every part stacked, tabs first, controls and the keys row last. */
+/**
+ * The pane: every part stacked. The tabs, the status, what they are working
+ * on, then the tab's controls and the keys row over a rule, and the tab's own
+ * contents under it (owner, 2026-10-06: the controls "at the top of the tab
+ * right after the working on", with a divider after them; until then they and
+ * the keys row came last, below the fold of a pane taller than its frame).
+ */
 function renderStacked(kit: Kit, view: PaneView, actions: PaneActions) {
   const { Box, Text } = kit
   const character = characterOf(view)
   const [first, second] = tabRows(view)
+  const controls = tabControls(kit, view, actions)
 
   return (
     <Box flexDirection="column">
@@ -1281,11 +1338,12 @@ function renderStacked(kit: Kit, view: PaneView, actions: PaneActions) {
       {statusRows(kit, view, true)}
       {/* Outside a repository there is no journal, so nothing to go on and nowhere to keep an answer. */}
       {view.watch.state !== 'no-git' && workingOn(kit, view, actions)}
-      <Text> </Text>
+      {controls.some(Boolean) && controlsRow(kit, controls)}
+      {keysRow(kit, view, actions)}
+      {rule({ Text }, view.columns)}
       {character !== null && characterRow(kit, view, character)}
       {character !== null && <Text> </Text>}
       {tabBody(kit, view, actions)}
-      {keysRow(kit, view, actions)}
     </Box>
   )
 }

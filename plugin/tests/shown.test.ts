@@ -51,9 +51,9 @@ test('two drawings are the same when they say the same in the same place', async
   expect(isSameShown(one, { ...one, at: 2, rows: 50 })).toBe(true)
   expect(isSameShown(one, { ...one, texts: ['a', 'c'] })).toBe(false)
   // The spinner's frames apart, a drawing is the same drawing.
-  expect(isSameShown({ ...one, texts: ['2: Review (✻)', 'b'] }, { ...one, texts: ['2: Review (·)', 'b'] })).toBe(true)
-  expect(isSameShown({ ...one, texts: ['2: Review (…)', 'b'] }, { ...one, texts: ['2: Review (✶)', 'b'] })).toBe(true)
-  expect(isSameShown({ ...one, texts: ['2: Review (new)', 'b'] }, { ...one, texts: ['2: Review (✶)', 'b'] })).toBe(false)
+  expect(isSameShown({ ...one, texts: ['2: Review ✻', 'b'] }, { ...one, texts: ['2: Review ·', 'b'] })).toBe(true)
+  expect(isSameShown({ ...one, texts: ['2: Review ✽', 'b'] }, { ...one, texts: ['2: Review ✶', 'b'] })).toBe(true)
+  expect(isSameShown({ ...one, texts: ['2: Review (new)', 'b'] }, { ...one, texts: ['2: Review ✶', 'b'] })).toBe(false)
   expect(isSameShown(one, { ...one, placement: 'inline' })).toBe(false)
   expect(isSameShown(one, { ...one, isFocused: true })).toBe(false)
   expect(isSameShown(null, null)).toBe(true)

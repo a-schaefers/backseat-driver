@@ -99,7 +99,8 @@ SURVEY_SUBJECT = "a first look around this project"
 PLACE_OBSERVATIONS = 8
 PLACE_COMMITS = 3
 PLACE_LINES = 80
-# The spinner's marks behind a tab at work (plugin/hooks/pane.tsx `SPINNER`): a drawing and a screen caught a tick apart differ only there.
+# The spinner's marks behind a tab at work (plugin/hooks/pane.tsx `SPINNER`), bare after the tab's name: a drawing and a screen
+# caught a tick apart differ only there.
 SPINNER = "·✢✳✶✻✽"
 # The first pieces of a drawing are the tabs and the status line: the top of the pane, which is never below the fold.
 HEAD_PIECES = 6
@@ -1199,8 +1200,11 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
                 out.append((BAD, f"{who}'s {where} is squeezed: {len(squeezed)} piece(s) missing from its middle while pieces below them are on the screen ({quoted}{' and more' if len(squeezed) > 3 else ''})"))
             else:
                 out.append((FINE, f"{who}'s {where} is on its screen as it says ({len(texts) - len(rest)} of {len(texts)} pieces{', the rest below the fold or cut' if rest else ''})"))
-            if rest and not squeezed and not any(word in texts and is_on_screen(word, flows(rows)) for word in KEYS_HINTS):
-                out.append((NOTE, f"{who}'s {where} is cut at the bottom: {len(rest)} piece(s) are below the frame, the keys row among them (a pane taller than its frame, as in a narrow window)"))
+            if rest and not squeezed:
+                # The keys row stands at the top of every tab since 2026-10-06 (the controls with it), so what a short frame
+                # cuts is the tab's contents; a drawing from before has the keys row last, and the note says when it is cut.
+                keys_below = not any(word in texts and is_on_screen(word, flows(rows)) for word in KEYS_HINTS)
+                out.append((NOTE, f"{who}'s {where} is cut at the bottom: {len(rest)} piece(s) are below the frame{', the keys row among them' if keys_below else ''} (a pane taller than its frame, as in a narrow window)"))
         if not minimized:
             out += check_keys_row(who, texts, rows)
     elif mode != "off" and rows is not None:
@@ -1289,8 +1293,8 @@ def check_speech(who: str, state: dict) -> list[tuple[str, str]]:
 
 
 def despin(text: str) -> str:
-    """A tab's spinner at any tick reads as the ellipsis it stands for, so that a drawing and a screen caught a tick apart agree."""
-    return re.sub(rf"\(([{SPINNER}…])\)", "(…)", text)
+    """A tab's spinner at any tick reads as its first frame, so that a drawing and a screen caught a tick apart agree."""
+    return re.sub(rf"(?<=\s)[{SPINNER[1:]}](?=\s|$)", "·", text)
 
 
 def check_notes_lines(who: str, state: dict, root: str) -> list[tuple[str, str]]:
