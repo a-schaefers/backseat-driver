@@ -373,8 +373,22 @@ def editors_here(found: list[dict], root: str, now: int) -> list[dict]:
 
 # ------------------------------------------------------------------ the debug log ----
 def debug_dir(home: pathlib.Path, session_id: str) -> pathlib.Path | None:
-    found = sorted((home / "debug").glob(f"*-{short(session_id)}"))
-    return found[-1] if found else None
+    """A session's log folder. It is named after the id the session had when its log began, and a
+    session keeps it across `/clear`, which gives the session another id: so a folder whose state
+    names the id is the session's too, and of all of them the one written last is the one in use."""
+    found = set((home / "debug").glob(f"*-{short(session_id)}"))
+    for state in (home / "debug").glob("*/state.json"):
+        try:
+            if json.loads(state.read_text()).get("session", {}).get("id") == session_id:
+                found.add(state.parent)
+        except (OSError, ValueError, AttributeError):
+            continue
+    def written(folder: pathlib.Path) -> float:
+        try:
+            return max(f.stat().st_mtime for f in folder.iterdir())
+        except (OSError, ValueError):
+            return 0.0
+    return max(found, key=lambda f: (written(f), f.name)) if found else None
 
 
 def log_records(folder: pathlib.Path | None, since_seq: tuple[str, int] | None = None) -> list[dict]:

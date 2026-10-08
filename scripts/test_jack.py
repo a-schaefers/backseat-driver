@@ -267,6 +267,28 @@ class Log(unittest.TestCase):
             self.assertEqual([r["seq"] for r in jack.log_records(folder, records[-1]["_at"])], [4])
             self.assertEqual(jack.log_records(None), [])
 
+    def test_a_session_keeps_its_log_folder_across_clear_and_is_found_under_its_new_id(self):
+        # The owner's php-hello session, 2026-10-07: begun as f0586955, /clear made it a9427c35,
+        # and its log went on in the folder of the first id.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = pathlib.Path(tmp)
+            old = home / "debug" / "20261008-035143-f0586955"
+            old.mkdir(parents=True)
+            (old / "state.json").write_text(json.dumps({"session": {"id": "a9427c35-f0f0-4a0f-af8f-7d8b942cc027"}}))
+            other = home / "debug" / "20261008-034306-c67336a0"
+            other.mkdir()
+            (other / "state.json").write_text(json.dumps({"session": {"id": "c67336a0-fd54"}}))
+            self.assertEqual(jack.debug_dir(home, "a9427c35-f0f0-4a0f-af8f-7d8b942cc027"), old)
+            self.assertEqual(jack.debug_dir(home, "c67336a0-fd54"), other)
+            self.assertEqual(jack.debug_dir(home, "f0586955-0000"), old)
+            self.assertIsNone(jack.debug_dir(home, "bbbbbbbb-0000"))
+            # A folder under the new id that is older than the one in use is not the one in use.
+            stale = home / "debug" / "20261001-000000-a9427c35"
+            stale.mkdir()
+            (stale / "state.json").write_text("{}")
+            os.utime(stale / "state.json", (1, 1))
+            self.assertEqual(jack.debug_dir(home, "a9427c35-f0f0-4a0f-af8f-7d8b942cc027"), old)
+
     def test_claude_codes_own_log_is_read_for_what_it_refused_and_not_for_everyday_lines(self):
         everyday = [
             "2026-10-05T21:12:46.969Z [DEBUG] $.fs.list (backseat-driver): /tmp/home/editors failed: ENOENT: no such file or directory, scandir '/tmp/home/editors'",
