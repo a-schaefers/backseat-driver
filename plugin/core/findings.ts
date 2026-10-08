@@ -405,15 +405,21 @@ export function coverageLine(coverage: Coverage, clock: (ms: number) => string):
   const isDirty = coverage.commit.endsWith('+')
   const hash = (isDirty ? coverage.commit.slice(0, -1) : coverage.commit).slice(0, 7)
   const commit = hash === '' ? '' : isDirty ? ` at ${hash} with uncommitted changes` : ` at ${hash}`
+  const own = `${coverage.files} own source file${coverage.files === 1 ? '' : 's'}`
   const read =
     coverage.read.length === 0
       ? coverage.files > 0
-        ? `it did not say which of the ${coverage.files} source files it read`
+        ? `it did not say which of the ${own} it read`
         : 'it did not say what it read'
       : coverage.files > 0
-        ? `read ${Math.min(coverage.read.length, coverage.files)} of ${coverage.files} source files`
+        ? `read ${Math.min(coverage.read.length, coverage.files)} of ${own}`
         : `read ${coverage.read.length} files`
-  const skipped = coverage.skipped.length === 0 ? '' : `; skipped ${coverage.skipped.map(skip => (skip.why === '' ? skip.path : `${skip.path} (${skip.why})`)).join(', ')}`
+  // Their own files it skipped apart from someone else's code it left out, so that the figures add up: "read 11 of 13,
+  // skipped" six, four of them vendored and none of the 13 (the seventeenth ui-truth pass, 2026-10-07).
+  const listed = (skips: readonly { path: string; why: string }[]): string => skips.map(skip => (skip.why === '' ? skip.path : `${skip.path} (${skip.why})`)).join(', ')
+  const theirs = coverage.skipped.filter(skip => VENDORED_WHY.test(skip.why))
+  const mine = coverage.skipped.filter(skip => !VENDORED_WHY.test(skip.why))
+  const skipped = `${mine.length === 0 ? '' : `; skipped ${listed(mine)}`}${theirs.length === 0 ? '' : `; left out as someone else's code: ${listed(theirs)}`}`
 
   return `Audited ${clock(coverage.at)}${commit}: ${read}${skipped}.`
 }

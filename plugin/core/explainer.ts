@@ -70,7 +70,7 @@ export type ExplainPorts = {
    * What a deep review said about a symbol, or about its file when `name` is
    * '', that still applies to code with these fingerprints.
    */
-  insights: (path: string, name: string, symbolPrint: string, filePrint: string, isMentioned: (name: string) => boolean) => string[]
+  insights: (path: string, name: string, symbolPrint: string, filePrint: string, isMentioned: (name: string) => boolean, names: readonly string[]) => string[]
   /** `automatic`: fetch what the person looks at and saves. `on request`: only what they ask for. */
   mode: () => 'automatic' | 'on request' | 'off'
   pressure: () => Pressure
@@ -364,7 +364,7 @@ export function createExplainer(ports: ExplainPorts) {
     let detail: Detail | null = null
     let wanted = ''
     // What the deep review said about the file. A symbol in focus narrows it to that symbol.
-    let insights = ports.insights(spot.path, '', '', read.print, name => mentionedAt(read.lines, name) !== -1)
+    let insights = ports.insights(spot.path, '', '', read.print, name => mentionedAt(read.lines, name) !== -1, fresh.map(symbol => symbol.name))
 
     if (end > line) {
       // A selection is explained as what it is, whatever symbols it cuts across.
@@ -380,7 +380,7 @@ export function createExplainer(ports: ExplainPorts) {
       const symbol = symbolAt(fresh, line)
       if (symbol !== undefined) {
         target = row(symbol)
-        insights = ports.insights(spot.path, symbol.name, symbol.print, read.print, name => mentionedAt(read.lines.slice(symbol.startLine - 1, symbol.endLine), name) !== -1)
+        insights = ports.insights(spot.path, symbol.name, symbol.print, read.print, name => mentionedAt(read.lines.slice(symbol.startLine - 1, symbol.endLine), name) !== -1, fresh.map(other => other.name))
         detail = await trusted(forward(symbol.detail, symbol, fresh, spot.path, read.lines))
         if (detail === null) {
           const job = detailJob(spot.path, symbol.print, symbol.endLine - symbol.startLine + 1, symbol.startLine, false, priority)
@@ -572,7 +572,7 @@ export function createExplainer(ports: ExplainPorts) {
         start: found.start,
         end: found.end,
         name: found.name,
-        insights: found.name === '' ? [] : ports.insights(job.path, found.name, job.print, before.print, name => mentionedAt(before.lines.slice(found.start - 1, found.end), name) !== -1),
+        insights: found.name === '' ? [] : ports.insights(job.path, found.name, job.print, before.print, name => mentionedAt(before.lines.slice(found.start - 1, found.end), name) !== -1, fresh.map(other => other.name)),
       }),
       1500,
       signal,

@@ -30,7 +30,7 @@ const MAX_ASSESSED = 600
 const MAX_HISTORY = 50
 
 export function emptyRecord(language: string): ProgressRecord {
-  return { v: 1, language, level: null, isProvisional: true, observations: [], history: [], report: null, assessed: [], linesRead: 0, withdrawnAt: 0 }
+  return { v: 1, language, level: null, isProvisional: true, observations: [], history: [], report: null, assessed: [], linesRead: 0, withdrawnAt: 0, isLinesNonBlank: true }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -114,6 +114,15 @@ export function parseRecord(value: unknown, language: string): ProgressRecord {
     assessed: (Array.isArray(stored.assessed) ? stored.assessed : []).filter((hash): hash is string => typeof hash === 'string').slice(-MAX_ASSESSED),
     linesRead: whole(stored.linesRead),
     withdrawnAt: whole(stored.withdrawnAt),
+    ...(stored.isLinesNonBlank === true ? { isLinesNonBlank: true } : {}),
+  }
+}
+
+/** The record's observations by verdict, counted: what the Growth tab's counts are, beside their weights. */
+export function verdictCounts(record: Pick<ProgressRecord, 'observations'>): { shown: number; missed: number } {
+  return {
+    shown: record.observations.filter(seen => seen.verdict === 'shown').length,
+    missed: record.observations.filter(seen => seen.verdict === 'missed').length,
   }
 }
 
@@ -380,7 +389,9 @@ export function levelPhrase(record: ProgressRecord): string {
   if (record.level !== null) return record.isProvisional ? `${record.level} (provisional)` : record.level
   const commits = commitsIn(record.observations)
 
-  const counts = `${Math.min(record.observations.length, PLACE_OBSERVATIONS)} of ${PLACE_OBSERVATIONS} observations, from ${Math.min(commits, PLACE_COMMITS)} of ${PLACE_COMMITS} commits, ${Math.min(record.linesRead, PLACE_LINES)} of ${PLACE_LINES} lines read`
+  // Each figure as it is, with what the bar needs: "8 of 8 observations" stood for fifteen (the seventeenth ui-truth pass).
+  const figure = (has: number, needs: number, what: string): string => (has < needs ? `${has} of ${needs} ${what}` : `${has} ${what} (${needs} needed)`)
+  const counts = `${figure(record.observations.length, PLACE_OBSERVATIONS, 'observations')}, from ${figure(commits, PLACE_COMMITS, 'commits')}, ${figure(record.linesRead, PLACE_LINES, 'lines read')}`
 
   return isPlaceable(record) ? `no level yet: nothing shows one either way (${counts})` : `no level yet: ${counts}`
 }

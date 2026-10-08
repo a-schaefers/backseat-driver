@@ -154,6 +154,9 @@ test('withAssessment records what was seen once per commit, and keeps the histor
   expect(first.record.report?.working).toEqual(['edge cases'])
   expect(first.change).toBe(null)
   expect(levelPhrase(first.record)).toBe('no level yet: 2 of 8 observations, from 1 of 3 commits, 40 of 80 lines read')
+  // Past the bar, a figure is said as it is, with what the bar needs: "8 of 8 observations" stood for fifteen (the seventeenth ui-truth pass).
+  const many = { ...first.record, observations: Array.from({ length: 15 }, (_, index) => ({ ...first.record.observations[0], commit: ['a', 'b', 'c'][index % 3]?.repeat(40) ?? 'a', skill: `s${index}` })) } as typeof first.record
+  expect(levelPhrase({ ...many, linesRead: 31 })).toBe('no level yet: 15 observations (8 needed), from 3 commits (3 needed), 31 of 80 lines read')
 
   // The same commit again, from another project or another session, adds nothing.
   expect(withAssessment(first.record, SAW, [{ hash: 'a'.repeat(40), short: 'aaaaaaa', weight: 1, lines: 40 }], 'fork', 20).record).toBe(first.record)

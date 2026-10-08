@@ -324,6 +324,11 @@ export function withNamesBack(project: ProjectKnowledge, said: readonly string[]
   return isChanged ? { ...project, insights } : project
 }
 
+/** Whether a text quotes a name, as a reviewer quotes a part of the file: 'old game', "old game", `old game`, “old game”. */
+export function quotesName(text: string, name: string): boolean {
+  return name !== '' && [`'${name}'`, `"${name}"`, `\`${name}\``, `“${name}”`, `‘${name}’`].some(quoted => text.includes(quoted))
+}
+
 /** The overview with the commit it was written at, or '' when there is none. */
 export function overviewLine(project: ProjectKnowledge): string {
   if (project.overview === '') return ''

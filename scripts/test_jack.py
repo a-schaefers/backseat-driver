@@ -532,6 +532,56 @@ class Disagreements(unittest.TestCase):
         told["pane"]["progress"]["records"][0]["level"] = "junior"
         self.assertEqual(bad(jack.check_session(world([s], now=self.now), s, DOCKED)), [])
 
+    def test_the_growth_tabs_counts_against_its_records(self):
+        # "6.5 shown, 3.5 missed" were weights, and "8 of 8 observations" stood for fifteen (the seventeenth ui-truth pass, 2026-10-07).
+        seen = lambda commit, verdict, n: [{"commit": commit, "verdict": verdict, "skill": f"s{i}", "level": "junior", "weight": 0.5} for i in range(n)]
+        record = {"language": "shell", "level": None, "linesRead": 31, "observations": seen("a", "shown", 10) + seen("b", "missed", 5)}
+        weights = ["Counted: own commits: 6.5 shown, 3.5 missed.", "From your commits alone: not placed yet, 8 of 8 observations, from 2 of 3 commits, 31 of 80 lines read"]
+        found = bad(jack.check_growth_counts("aaaaaaaa", weights, [record]))
+        self.assertEqual(len(found), 2, found)
+        self.assertIn("weights read as counts", found[0])
+        self.assertIn("“8 of 8 observations”: a figure capped at the bar", found[1])
+        counts = ["Counted: own commits: 10 shown, 5 missed (weighing 6.5 and 3.5).", "From your commits alone: not placed yet, 15 observations (8 needed), from 2 of 3 commits, 31 of 80 lines read"]
+        self.assertEqual(bad(jack.check_growth_counts("aaaaaaaa", counts, [record])), [])
+        self.assertIn("“39 of 80 lines read”, and no record it draws has 39", " ".join(bad(jack.check_growth_counts("aaaaaaaa", [counts[1].replace("31 of", "39 of")], [record]))))
+        self.assertIn("“16 observations”, and no record it draws has 16", " ".join(bad(jack.check_growth_counts("aaaaaaaa", [counts[1].replace("15 obs", "16 obs")], [record]))))
+        # Through the session, on the Growth tab.
+        told = state(self.now)
+        told["pane"]["tab"] = "profile"
+        told["pane"]["progress"] = {"records": [record], "skipped": "", "busy": ""}
+        told["shown"]["pane"]["texts"] = [*TEXTS, *weights]
+        s = session(state=told)
+        self.assertTrue(any("weights read as counts" in text for text in bad(jack.check_session(world([s], now=self.now), s, DOCKED))))
+
+    def test_the_lines_read_against_git(self):
+        # bashscripts' 31 non-blank lines read as 39 (the seventeenth ui-truth pass, 2026-10-07).
+        root = pathlib.Path(self.tmp.name) / "repo"
+        root.mkdir()
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@x"}
+        subprocess.run(["git", "init", "-q", str(root)], check=True, env=env)
+        (root / "play.sh").write_text("#!/bin/sh\n\necho hi\n\n\necho bye\n")
+        (root / "notes.md").write_text("words\n")
+        subprocess.run(["git", "-C", str(root), "add", "."], check=True, env=env)
+        subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "Add play"], check=True, env=env)
+        head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+        self.project(str(root), {})
+        record = {"v": 1, "language": "shell", "level": None, "history": [], "report": None, "assessed": [head], "linesRead": 6}
+        (self.home / "progress").mkdir(parents=True, exist_ok=True)
+        write = lambda **over: (self.home / "progress" / "shell.json").write_text(json.dumps({**record, **over}))
+        write()
+        self.assertEqual(jack.lines_recount(self.home, record), (3, str(root)))
+        notes = [text for level, text in jack.check_progress_files(self.home) if level == jack.NOTE and "older recount" in text]
+        self.assertEqual(len(notes), 1, notes)
+        self.assertIn("has read 6 line(s)", notes[0])
+        self.assertIn("add 3 non-blank", notes[0])
+        write(isLinesNonBlank=True)
+        self.assertIn("add 3 non-blank line(s) of shell", " ".join(bad(jack.check_progress_files(self.home))))
+        write(isLinesNonBlank=True, linesRead=3)
+        self.assertEqual([text for level, text in jack.check_progress_files(self.home) if level != jack.FINE], [])
+        # A commit no repository here has: nothing can be said of its lines.
+        write(isLinesNonBlank=True, assessed=["f" * 40])
+        self.assertEqual(bad(jack.check_progress_files(self.home)), [])
+
     def test_the_progress_files_against_themselves(self):
         home = pathlib.Path(self.tmp.name) / "home2"
         (home / "progress").mkdir(parents=True)
@@ -958,6 +1008,28 @@ class Issues(unittest.TestCase):
         # Saved a moment ago: the next look places it.
         os.utime(code, None)
         self.assertEqual(found(2), "")
+
+    def test_the_audit_line_adds_up_for_a_reader(self):
+        # "read 11 of 13, skipped" six, four of them vendored and none of the 13 (the seventeenth ui-truth pass, 2026-10-07).
+        mixed = "Audited 13:24 at 570e787: read 11 of 13 source files; skipped build/ (PDF.js 2.16.105, vendored), web/viewer.js (PDF.js viewer, vendored: read only the version and file-origin check), css/style.css (styles only)."
+        parts = jack.audit_line_parts(mixed)
+        self.assertEqual((parts["read"], parts["files"]), (11, 13))
+        self.assertEqual([path for path, _ in parts["skipped"]], ["build/", "web/viewer.js", "css/style.css"])
+        found = bad(jack.check_audit_line("aaaaaaaa", mixed, None))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("lists among what of theirs it skipped 2 it calls someone else's code (build/", found[0])
+        apart = ("Audited 13:24 at 570e787: read 11 of 13 own source files; skipped css/style.css (styles only); left out as someone else's code: "
+                 "build/ (PDF.js 2.16.105, vendored), web/viewer.js (PDF.js viewer, vendored: read only the version and file-origin check).")
+        own = [f"f{i}.php" for i in range(12)] + ["css/style.css"]
+        self.assertEqual([path for path, _ in jack.audit_line_parts(apart)["theirs"]], ["build/", "web/viewer.js"])
+        self.assertEqual(bad(jack.check_audit_line("aaaaaaaa", apart, own)), [])
+        # More of their own read and skipped than there are.
+        over = "Audited 13:24 at 570e787: read 13 of 13 own source files; skipped css/style.css (styles only)."
+        self.assertIn("skipped 1 more of them: more than there are", " ".join(bad(jack.check_audit_line("aaaaaaaa", over, own))))
+        self.assertEqual(jack.check_audit_line("aaaaaaaa", "Not audited for issues yet.", own), [])
+        # On the Deep review tab.
+        ledger = self.keep([], {"at": self.now - 600_000, "commit": "abc1234", "files": 13, "read": [], "skipped": []})
+        self.assertTrue(any("calls someone else's code" in text for text in bad(self.found(ledger, "review", [mixed]))))
 
     def test_an_audit_of_another_day_is_dated_with_its_day(self):
         at = self.now - 3 * 24 * 3_600_000
@@ -1388,6 +1460,23 @@ class Cache(unittest.TestCase):
         self.write(self.folder / "project.json", known, 60_000)
         explain["insights"] = ["No tests cover this file. (from the first look around, at abc1234, about the whole file)"]
         self.assertEqual(bad(jack.check_explain_insights("aaaaaaaa", self.told(True, explain=explain), self.root, jack.projects(self.home)[0])), [])
+
+    def test_an_insight_that_quotes_one_part_of_the_file_belongs_with_it(self):
+        # "The commented-out 'old game' …" under every section of playground.sh (the seventeenth ui-truth pass, 2026-10-07).
+        play = pathlib.Path(self.root) / "playground.sh"
+        text = "# roll\nroll() { echo 1; }\n# old game\n# echo old\n"
+        play.write_text(text)
+        known = {"v": 1, "root": self.root, "insights": [{"file": "playground.sh", "symbol": "", "text": "The commented-out 'old game' is the bash version.",
+                                                          "commit": "a83b842", "at": 5, "print": jack.source_print(text), "of": "file"}]}
+        self.write(self.folder / "project.json", known, 60_000)
+        outline = [{"name": "roll", "kind": "section", "startLine": 1, "endLine": 2, "summary": ""}, {"name": "old game", "kind": "section", "startLine": 3, "endLine": 4, "summary": ""}]
+        shown = lambda target, label: {"status": "fresh", "spot": {"path": "playground.sh", "line": 1}, "target": {"name": target, "kind": "section", "startLine": 1, "endLine": 2},
+                                       "detail": None, "outline": outline, "insights": [f"The commented-out 'old game' is the bash version. (from the audit, at a83b842{label})"]}
+        found = lambda explain: " ".join(bad(jack.check_explain_insights("aaaaaaaa", self.told(True, explain=explain), self.root, jack.projects(self.home)[0])))
+        self.assertIn("under “roll”, and it quotes “old game”, another part of playground.sh: it belongs with that part", found(shown("roll", ", about the whole file")))
+        self.assertIn("is about the whole file, and it quotes “old game”, the part in focus", found(shown("old game", ", about the whole file")))
+        self.assertEqual(found(shown("old game", "")), "")
+        self.assertEqual(jack.quoted_names("See `mean` and “median”, not mean.", ["mean", "median", "mode"]), ["mean", "median"])
 
     def test_a_cached_explanation_that_doubts_a_name_set_elsewhere(self):
         index = pathlib.Path(self.root) / "index.php"

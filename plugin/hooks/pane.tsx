@@ -11,7 +11,7 @@ import { ANSWER_LABELS, explained, GENERAL, recurring } from '../core/profiles'
 import { encouragementLine, growthCounts, growthHeadline, growthLadder, growthMeterLabel, helpLine, improvedLine, raiseLine, rungWord, workOnLine } from '../core/growth'
 import type { Growth, GrowthBand } from '../core/growth'
 import { lessonLanguage, lessonProgress } from '../core/lessons'
-import { lately, levelPhrase } from '../core/progress'
+import { lately, levelPhrase, verdictCounts } from '../core/progress'
 import { AUDIT_SUBJECT, readableReview, reviewHistory, shownReview, spotsIn, SURVEY_SUBJECT } from '../core/review'
 import { DEFAULT_PERSONA } from '../core/settings'
 import { dayTime } from '../core/clock'
@@ -1346,7 +1346,7 @@ function growthSection(kit: Kit, record: ProgressRecord, growth: Growth | undefi
   return (
     <Box flexDirection="column">
       {growth !== undefined && growthBar(kit, growth, record.isProvisional, columns)}
-      {growth !== undefined && <Text dimColor>{growthCounts(growth)}</Text>}
+      {growth !== undefined && <Text dimColor>{growthCounts(growth, verdictCounts(record))}</Text>}
       <Text dimColor>{`From your commits alone: ${levelPhrase(record).replace(/^no level yet: /, 'not placed yet, ')}`}</Text>
       {record.level !== null && report !== null && report.why !== '' && <Text>{report.why}</Text>}
       {growth !== undefined && listOf(kit, 'Work on', growth.workOn.map(workOnLine))}

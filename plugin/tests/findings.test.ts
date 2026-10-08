@@ -295,11 +295,14 @@ test('the conversation is told what was found and what was read, never that sile
   ]).ledger
   const audited = { ...ledger, coverage: { at: 5, commit: '570e787abc', files: 22, read: ['index.php'], skipped: [{ path: 'web/', why: 'PDF.js' }] } }
   const brief = issuesBrief(audited, ledgerViews(audited, { savedFiles: [], cap: 3 }), clock)
-  expect(brief).toMatch('Issues on record: 1 high open. Audited 11:42 at 570e787: read 1 of 22 source files; skipped web/ (PDF.js).')
+  expect(brief).toMatch('Issues on record: 1 high open. Audited 11:42 at 570e787: read 1 of 22 own source files; skipped web/ (PDF.js).')
+  // Their own files it skipped apart from someone else's code it left out, so that the figures add up (the seventeenth ui-truth pass).
+  const apart = { at: 5, commit: '570e787', files: 13, read: Array.from({ length: 11 }, (_, index) => `f${index}.php`), skipped: [{ path: 'css/style.css', why: 'styles only' }, { path: 'build/', why: 'PDF.js 2.16.105, vendored' }] }
+  expect(coverageLine(apart, clock)).toBe("Audited 11:42 at 570e787: read 11 of 13 own source files; skipped css/style.css (styles only); left out as someone else's code: build/ (PDF.js 2.16.105, vendored).")
   expect(brief).toMatch('- [high] index.php:95: SQL built from the search words')
   expect(coverageLine(EMPTY_LEDGER.coverage, clock)).toBe('')
   // An audit that read uncommitted changes says so; one that said nothing of its reading says that.
-  expect(coverageLine({ at: 5, commit: '570e787+', files: 16, read: [], skipped: [] }, clock)).toBe('Audited 11:42 at 570e787 with uncommitted changes: it did not say which of the 16 source files it read.')
+  expect(coverageLine({ at: 5, commit: '570e787+', files: 16, read: [], skipped: [] }, clock)).toBe('Audited 11:42 at 570e787 with uncommitted changes: it did not say which of the 16 own source files it read.')
   expect(ledgerLine(ledgerViews(EMPTY_LEDGER, { savedFiles: [], cap: 3 }), true, { at: 5, commit: '', files: 1, read: [], skipped: [] })).toBe('The audit found nothing open.')
   expect(ledgerLine(ledgerViews(audited, { savedFiles: [], cap: 3 }), true, audited.coverage)).toBe('Open in the deep review: 1 high.')
   expect(countsWords({ critical: 1, high: 0, medium: 2, low: 3 }, false)).toBe('1 critical, 2 medium')

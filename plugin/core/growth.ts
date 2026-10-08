@@ -161,8 +161,15 @@ function bandOf(way: number): GrowthBand {
 }
 
 /** What went into the score, in a line. */
-export function growthCounts(growth: Growth): string {
-  const parts = [`own commits: ${round(growth.shown)} shown, ${round(growth.missed)} missed`]
+export function growthCounts(growth: Growth, seen?: { shown: number; missed: number }): string {
+  // The observations by verdict, with what they weigh when that differs: "6.5 shown, 3.5 missed" were weights read as
+  // counts (the seventeenth ui-truth pass, 2026-10-07).
+  const isWeighed = seen !== undefined && (seen.shown !== growth.shown || seen.missed !== growth.missed)
+  const own =
+    seen === undefined
+      ? `own commits weigh ${round(growth.shown)} shown and ${round(growth.missed)} missed`
+      : `own commits: ${seen.shown} shown, ${seen.missed} missed${isWeighed ? ` (weighing ${round(growth.shown)} and ${round(growth.missed)})` : ''}`
+  const parts = [own]
   if (growth.lessonSteps > 0) parts.push(`lesson steps done: ${growth.lessonSteps}`)
   if (growth.habitsImproved > 0) parts.push(`habits fixed: ${growth.habitsImproved}`)
   if (growth.stillComing > 0) parts.push(`still coming back: ${growth.stillComing}`)
@@ -257,8 +264,8 @@ export function encouragementLine(growth: Growth): string {
 }
 
 /** Growth in one language as plain text, for the progress tool and every prompt. */
-export function growthText(language: string, growth: Growth): string {
-  const lines = [`${languageName(language)} growth: ${growthHeadline(growth)}. ${growthCounts(growth)}`]
+export function growthText(language: string, growth: Growth, seen?: { shown: number; missed: number }): string {
+  const lines = [`${languageName(language)} growth: ${growthHeadline(growth)}. ${growthCounts(growth, seen)}`]
   if (growth.workOn.length > 0) lines.push(`Work on: ${growth.workOn.map(workOnLine).join('; ')}.`)
   if (growth.neededHelp.length > 0) lines.push(`Needed help with: ${growth.neededHelp.map(helpLine).join('; ')}.`)
   if (growth.improved.length > 0) lines.push(`Improved: ${growth.improved.map(improvedLine).join('; ')}.`)

@@ -56,6 +56,7 @@ somebody's session: never without being asked. Nothing here calls a model.
 from __future__ import annotations
 
 import argparse
+import codecs
 import fcntl
 import functools
 import json
@@ -1044,6 +1045,16 @@ def check_progress_files(home: pathlib.Path) -> list[tuple[str, str]]:
             out.append((BAD, f"progress/{file.name} is at {level} and its history last reached {history[-1].get('to')}: a level the history does not account for"))
         else:
             out.append((FINE, f"progress/{file.name} is at {level or 'no level'}, as its history and report say"))
+        # The lines read, against git: an older recount counted blank lines too, where every assessment counts the
+        # non-blank ones (the seventeenth ui-truth pass, 2026-10-07: bashscripts' 31 read as 39).
+        recount = lines_recount(home, record)
+        said = record.get("linesRead") or 0
+        if recount is not None and recount[0] != said:
+            language = record.get("language") or file.stem
+            if record.get("isLinesNonBlank") is True:
+                out.append((BAD, f"progress/{file.name} has read {said} line(s), and its {len(record.get('assessed') or [])} assessed commit(s) add {recount[0]} non-blank line(s) of {language} in {tilde(recount[1])}: the bar is held against a count the rules do not make"))
+            else:
+                out.append((NOTE, f"progress/{file.name} has read {said} line(s), counted by an older recount with the blank ones; its assessed commits add {recount[0]} non-blank in {tilde(recount[1])}, and a session with {language} in play counts them again at switch-on"))
     return out
 
 
@@ -1258,6 +1269,8 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
     if dig(state, "pane.tab") == "profile" and isinstance(records, list) and records and all(isinstance(r, dict) and r.get("level") is None for r in records):
         if any(t.startswith("Next level:") for t in drawn_now):
             out.append((BAD, f"{who}'s Growth tab says “Not placed yet” and under it what the next level needs: the model's words for a level it was not given"))
+    if dig(state, "pane.tab") == "profile" and isinstance(records, list):
+        out += check_growth_counts(who, drawn_now, records)
 
     # The watchers it says it runs.
     said = sorted(p.get("role", "?") for p in state.get("pushers", []) if isinstance(p, dict) and p.get("isLive"))
@@ -1697,13 +1710,26 @@ def check_explain_insights(who: str, state: dict, root: str, project: dict | Non
         if named is not None:
             out.append((BAD, f"project.json keeps the insight “{brief(i.get('text'), 60)}” for all of {path} under no name, and its review named it {named[len(path) + 2:len(named) - len(str(i.get('text'))) - 2]}: it shows under every part of the file"))
             break
-    # Shown under a symbol, an insight about the whole file says so: it read as about the code in focus.
+    # Shown under a symbol, an insight about the whole file says so: it read as about the code in focus. One kept under
+    # no name that quotes the name of one part of the file is about that part, shown with it as its own and not under
+    # the others (the seventeenth ui-truth pass, 2026-10-07: "The commented-out 'old game' …" under every section).
     target_name = dig(explain, "target.name")
-    whole = {str(i.get("text")) for i in (known.get("insights") or []) if isinstance(i, dict) and i.get("file") == path and i.get("of") == "file" and not i.get("symbol")}
+    outline = [str(o.get("name")) for o in (explain.get("outline") or []) if isinstance(o, dict) and o.get("name")] or [str(n) for n in names if n]
+    nameless = [str(i.get("text")) for i in (known.get("insights") or []) if isinstance(i, dict) and i.get("file") == path and i.get("of") == "file" and not i.get("symbol")]
+    whole = {text_ for text_ in nameless if len(quoted_names(text_, outline)) != 1}
     if target_name:
         unsaid = [x for x in (explain.get("insights") or []) if any(str(x).startswith(w) for w in whole) and "about the whole file" not in str(x)]
         if unsaid:
             out.append((BAD, f"{who}'s Explain tab shows “{brief(unsaid[0], 60)}” under “{target_name}” without saying it is about the whole file"))
+        for text_ in nameless:
+            about = quoted_names(text_, outline)
+            drawn = [str(x) for x in (explain.get("insights") or []) if str(x).startswith(text_)]
+            if len(about) != 1 or not drawn:
+                continue
+            if about[0] != target_name:
+                out.append((BAD, f"{who}'s Explain tab shows “{brief(text_, 60)}” under “{target_name}”, and it quotes “{about[0]}”, another part of {path}: it belongs with that part"))
+            elif "about the whole file" in drawn[0]:
+                out.append((BAD, f"{who}'s Explain tab says “{brief(text_, 60)}” is about the whole file, and it quotes “{target_name}”, the part in focus"))
     # A cached explanation that doubts a name the file sets outside its lines: written before the prompt forbade it,
     # it stands while the code reads the same (the fifteenth and sixteenth ui-truth passes, 2026-10-07).
     doubt = re.compile(r"(without a (visible )?start(ing)? value|never set|not set|unset|set earlier)", re.I)
@@ -1809,6 +1835,7 @@ def mod_tables() -> dict:
 
     return {
         "extensions": set(re.findall(r"^\s*['\"]?([^'\":\s]+)['\"]?\s*:", table, re.M)) - {"const BY_EXTENSION"},
+        "languages": dict(re.findall(r"^\s*['\"]?([^'\":\s]+)['\"]?\s*:\s*'([^']+)'", table, re.M)),
         "locks": strings_of("LOCK_FILES"),
         "folders": strings_of("GENERATED_FOLDERS"),
         "not_source": re.compile(re.search(r"const NOT_SOURCE = /(.+)/i", noise).group(1), re.I),
@@ -1843,6 +1870,184 @@ def mod_own_files(root: str, skipped: list) -> list[str] | None:
         own.append(path)
     theirs = [str(s.get("path")) for s in skipped if isinstance(s, dict) and rules["vendored_why"].search(str(s.get("why", "")))]
     return [path for path in own if not any(path == other or (other.endswith("/") and path.startswith(other)) for other in theirs)]
+
+
+def unquote_git(path: str) -> str:
+    """A path as git prints it in a patch header (`unquoted` in core/authorship.ts): one with a character outside plain
+    ASCII, a quote or a backslash comes in double quotes, with C escapes and its UTF-8 bytes in octal."""
+    if len(path) < 2 or not (path.startswith('"') and path.endswith('"')):
+        return path
+    try:
+        return codecs.escape_decode(path[1:-1].encode("latin-1", "backslashreplace"))[0].decode("utf-8", "replace")
+    except ValueError:
+        return path[1:-1]
+
+
+def mod_language(path: str, rules: dict) -> str | None:
+    """A file's language as the mod tells it (`languageOf` in core/languages.ts), or None for one it does not know."""
+    name = path.rsplit("/", 1)[-1]
+    dot = name.rfind(".")
+    return rules["languages"].get(name[dot + 1:].lower()) if dot > 0 else None
+
+
+def mod_noise(path: str, rules: dict) -> bool:
+    """Whether the mod never reads a file (`isNoiseFile` in core/noise.ts): a lock file, a name that is no source, or a
+    file in a generated or vendored folder."""
+    parts = path.split("/")
+    return parts[-1] in rules["locks"] or bool(rules["not_source"].search(parts[-1])) or any(folder in rules["folders"] for folder in parts[:-1])
+
+
+_ADDED: dict[tuple[str, str, str], int | None] = {}
+_PRESENT: dict[tuple[str, tuple[str, ...]], bool] = {}
+
+
+def added_nonblank(root: str, hash_: str, language: str) -> int | None:
+    """The non-blank lines a commit adds in one language, as the tutor counts a commit's lines for a progress record
+    (`addedLines` and `sizeOf` in core/authorship.ts), or None when git does not know the commit here or its patch is
+    past what the host keeps."""
+    key = (root, hash_, language)
+    if key not in _ADDED:
+        try:
+            p = subprocess.run(["git", "--no-optional-locks", "-C", root, "show", "--format=", "--no-color", "--no-ext-diff", "--unified=0", hash_], capture_output=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if p.returncode != 0 or len(p.stdout) > OUTPUT_CAP:
+            _ADDED[key] = None
+            return None
+        rules = mod_tables()
+        count, current, in_hunk = 0, False, False
+        for line in p.stdout.decode("utf-8", "replace").split("\n"):
+            if line.startswith("diff --git "):
+                current, in_hunk = False, False
+                continue
+            if line.startswith("@@"):
+                in_hunk = True
+            if not in_hunk and line.startswith("+++ "):
+                path = unquote_git(line[4:].strip())
+                path = path[2:] if path.startswith("b/") else path
+                current = path != "/dev/null" and not mod_noise(path, rules) and mod_language(path, rules) == language
+                continue
+            if current and line.startswith("+") and line[1:].strip():
+                count += 1
+        _ADDED[key] = count
+    return _ADDED[key]
+
+
+def lines_recount(home: pathlib.Path, record: dict) -> tuple[int, str] | None:
+    """The non-blank lines a progress record's assessed commits add in its language, counted in the first repository of
+    the data folder's projects that has all of them, with that repository; None when none has them all (a record is one
+    language's across projects) or a patch is past what the host keeps."""
+    assessed = tuple(str(h) for h in (record.get("assessed") or []) if isinstance(h, str))
+    language = str(record.get("language") or "")
+    if not assessed or not language:
+        return None
+    for project in projects(home):
+        root = str(project.get("root") or "")
+        if not root or not pathlib.Path(root).is_dir():
+            continue
+        key = (root, assessed)
+        if key not in _PRESENT:
+            _PRESENT[key] = git_out(root, "show", "-s", "--format=%H", *assessed) is not None
+        if not _PRESENT[key]:
+            continue
+        counts = [added_nonblank(root, h, language) for h in assessed]
+        return None if any(c is None for c in counts) else (sum(c for c in counts if c is not None), root)
+    return None
+
+
+def split_entries(text: str) -> list[tuple[str, str]]:
+    """An audit line's list, `path (why), path`, as (path, why) pairs: split at the commas outside parentheses, since a
+    reason can hold one ("PDF.js viewer, vendored: …")."""
+    parts, depth, start = [], 0, 0
+    for i, ch in enumerate(text):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        elif ch == "," and depth == 0 and text[i + 1:i + 2] == " ":
+            parts.append(text[start:i])
+            start = i + 2
+    parts.append(text[start:])
+    out = []
+    for part in (x.strip() for x in parts):
+        m = re.match(r"^(.*?) \((.*)\)$", part)
+        if part:
+            out.append((m.group(1), m.group(2)) if m else (part, ""))
+    return out
+
+
+THEIRS_WORDS = "; left out as someone else's code: "
+
+
+def audit_line_parts(text: str) -> dict | None:
+    """The figures and lists of the Deep review tab's audit line (`coverageLine` in core/findings.ts): what it read of
+    how many of their own files, what of theirs it skipped, and someone else's code it left out. None for another line."""
+    m = re.match(r"^Audited .*?: read (\d+) of (\d+) (?:own )?source files?(.*)\.$", text)
+    if not m:
+        return None
+    rest = m.group(3)
+    at = rest.find(THEIRS_WORDS)
+    mine = rest[:at] if at != -1 else rest
+    return {"read": int(m.group(1)), "files": int(m.group(2)),
+            "skipped": split_entries(mine[len("; skipped "):]) if mine.startswith("; skipped ") else [],
+            "theirs": split_entries(rest[at + len(THEIRS_WORDS):]) if at != -1 else []}
+
+
+def check_audit_line(who: str, text: str, own: list[str] | None) -> list[tuple[str, str]]:
+    """The audit line's figures add up for a reader: what it read and what of theirs it skipped is no more than their own
+    files, and someone else's code is not among what of theirs it skipped ("read 11 of 13, skipped" six, four of them
+    vendored and none of the 13: the seventeenth ui-truth pass, 2026-10-07). `own` is their own files at the commit
+    audited, by the mod's rules, when HEAD is that commit."""
+    parts = audit_line_parts(text)
+    if parts is None:
+        return []
+    out: list[tuple[str, str]] = []
+    why_theirs = mod_tables()["vendored_why"]
+    worded = [(path, why) for path, why in parts["skipped"] if why_theirs.search(why)]
+    if worded:
+        out.append((BAD, f"{who}'s Deep review tab counts {parts['read']} of {parts['files']} of their own files read, and lists among what of theirs it skipped {len(worded)} it calls someone else's code ({worded[0][0]}: {brief(worded[0][1], 40)}): the figures do not add up for a reader"))
+    if own is not None:
+        is_own = lambda path: any(f == path or (path.endswith("/") and f.startswith(path)) for f in own)
+        theirs_skipped = [path for path, _ in parts["skipped"] if is_own(path)]
+        if parts["read"] + len(theirs_skipped) > parts["files"]:
+            out.append((BAD, f"{who}'s Deep review tab says the audit read {parts['read']} of {parts['files']} of their own files and skipped {len(theirs_skipped)} more of them: more than there are"))
+    return out
+
+
+def check_growth_counts(who: str, texts: list[str], records: list) -> list[tuple[str, str]]:
+    """The Growth tab's counts against the records it draws: "6.5 shown, 3.5 missed" were weights read as counts, and
+    "8 of 8 observations" stood for fifteen (the seventeenth ui-truth pass, 2026-10-07)."""
+    out: list[tuple[str, str]] = []
+    tallies = []
+    for r in records:
+        if not isinstance(r, dict):
+            continue
+        seen = [o for o in (r.get("observations") or []) if isinstance(o, dict)]
+        tallies.append({"shown": sum(1 for o in seen if o.get("verdict") == "shown"), "missed": sum(1 for o in seen if o.get("verdict") == "missed"),
+                        "observations": len(seen), "commits": len({o.get("commit") for o in seen}), "lines read": r.get("linesRead") or 0})
+    if not tallies:
+        return out
+    for text in texts:
+        m = re.search(r"own commits: ([\d.]+) shown, ([\d.]+) missed", text)
+        if m and not any(str(t["shown"]) == m.group(1) and str(t["missed"]) == m.group(2) for t in tallies):
+            out.append((BAD, f"{who}'s Growth tab counts “{m.group(0)}”, and the records it draws hold " + "; ".join(f"{t['shown']} shown, {t['missed']} missed" for t in tallies) + ": weights read as counts"))
+        for has, needs, what in re.findall(r"(\d+) of (\d+) (observations|commits|lines read)", text):
+            if int(has) >= int(needs):
+                out.append((BAD, f"{who}'s Growth tab says “{has} of {needs} {what}”: a figure capped at the bar, which the record may pass"))
+            elif not any(t[what] == int(has) for t in tallies):
+                out.append((BAD, f"{who}'s Growth tab says “{has} of {needs} {what}”, and no record it draws has {has}"))
+        for has, what in re.findall(r"(\d+) (observations|commits|lines read) \(\d+ needed\)", text):
+            if not any(t[what] == int(has) for t in tallies):
+                out.append((BAD, f"{who}'s Growth tab says “{has} {what}”, and no record it draws has {has}"))
+    return out
+
+
+QUOTE_MARKS = (("'", "'"), ('"', '"'), ("`", "`"), ("“", "”"), ("‘", "’"))
+
+
+def quoted_names(text: str, names: list[str]) -> list[str]:
+    """The names a text quotes, as a reviewer quotes a part of the file (`quotesName` in core/project.ts)."""
+    return [n for n in names if n and any(f"{a}{n}{b}" in text for a, b in QUOTE_MARKS)]
 
 
 def issue_label(finding: dict) -> re.Pattern:
@@ -1941,6 +2146,12 @@ def check_issues(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]
         if not is_auditing:
             if (coverage.get("at") or 0) > 0 and not any(t.startswith("Audited ") for t in texts):
                 out.append((BAD, f"{who}'s Deep review tab does not say what the audit of {day_clock(coverage['at'], now)} read"))
+            audit_root = state.get("repoRoot") or ""
+            audited = str(coverage.get("commit", "")).rstrip("+")[:7]
+            at_head = audit_root and audited and (git_out(audit_root, "rev-parse", "--short=7", "HEAD") or "").strip() == audited
+            for t in texts:
+                if t.startswith("Audited "):
+                    out += check_audit_line(who, t, mod_own_files(audit_root, coverage.get("skipped") or []) if at_head else None)
             # An audit of another day, dated by a bare time of day: a reader takes it for today's.
             at = coverage.get("at") or 0
             if at > 0 and datetime.fromtimestamp(at / 1000).date() != datetime.fromtimestamp(now / 1000).date() and any(t.startswith(f"Audited {clock(at)[:5]}") for t in texts):
@@ -2284,7 +2495,7 @@ def print_bundle(w: dict, s: dict) -> None:
         ledger = project.get("findings") or {}
         found = [f for f in (ledger.get("findings") or []) if isinstance(f, dict)]
         cov = ledger.get("coverage") if isinstance(ledger.get("coverage"), dict) else {}
-        audit = (f"audited {day_clock(cov.get('at'), now)} at {cov.get('commit') or '-'}: read {len(cov.get('read') or [])} file(s), {cov.get('files')} source file(s) in git, skipped {len(cov.get('skipped') or [])}"
+        audit = (f"audited {day_clock(cov.get('at'), now)} at {cov.get('commit') or '-'}: read {len(cov.get('read') or [])} file(s) of their {cov.get('files')} own source file(s) by the mod's count, skipped {len(cov.get('skipped') or [])}"
                  if (cov.get("at") or 0) > 0 else "an audit started and never finished" if project.get("is_audited") else "never audited")
         print(f"findings.json ({since(project['findings_at'])}): {len(found)} issue(s), open {counts_words(ledger_counts(found)) or 'none'} · {audit}")
         for f in found:

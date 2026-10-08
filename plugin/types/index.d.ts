@@ -284,6 +284,8 @@ export type ProgressRecord = {
   linesRead: number
   /** When a provisional level was last withdrawn as the record was read, in clock milliseconds, or 0: a report older than that was the placement's. */
   withdrawnAt: number
+  /** True once `linesRead` counts non-blank lines only, as every assessment does: an older recount counted blank ones too (the seventeenth ui-truth pass, 2026-10-07). */
+  isLinesNonBlank?: boolean
 }
 
 /** One step of a lesson as the Lessons tab shows it. `checked` is done with the tutor watching, `done` marked done by them. */

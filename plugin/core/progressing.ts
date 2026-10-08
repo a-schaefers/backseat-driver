@@ -246,17 +246,19 @@ async function headOf(ports: Pick<ProgressPorts, 'git'>): Promise<string> {
  * (the caching audit, 2026-10-06).
  */
 async function withLinesCounted(ports: Pick<ProgressPorts, 'git'>, record: ProgressRecord): Promise<ProgressRecord | null> {
+  // All of them here, asked in one call, before any is read: a record across projects is asked again at every switch-on.
+  if (record.assessed.length > 0 && (await ports.git(['show', '-s', '--format=%H', ...record.assessed])).exitCode !== 0) return null
   let lines = 0
-  for (const hash of record.assessed.slice(-20)) {
+  for (const hash of record.assessed) {
     const shown = await ports.git(commitPatchArgs(hash))
     // Not here, or more than the host reads at once: nothing can be said of its lines.
     if (shown.exitCode !== 0 || shown.isCut === true) return null
-    lines += addedLines(shown.stdout)
-      .filter(file => file.language === record.language)
-      .reduce((sum, file) => sum + file.lines.length, 0)
+    // Counted as an assessment counts them: the non-blank lines (`sizeOf`). Counting every line made bashscripts' 31
+    // read as 39 (the seventeenth ui-truth pass, 2026-10-07).
+    lines += sizeOf(addedLines(shown.stdout).filter(file => file.language === record.language))
   }
 
-  return { ...record, linesRead: lines }
+  return { ...record, linesRead: lines, isLinesNonBlank: true }
 }
 
 /**
@@ -267,7 +269,9 @@ async function withLinesCounted(ports: Pick<ProgressPorts, 'git'>, record: Progr
  */
 async function mendedRecord(ports: ProgressPorts, language: string): Promise<ProgressRecord> {
   const read = await loadRecord(ports, language)
-  const needsLines = read.level !== null && read.isProvisional && read.linesRead === 0
+  // Counted again once: a record from before the lines were kept, and one whose lines an older recount counted blank
+  // ones and all (`isLinesNonBlank`).
+  const needsLines = (read.level !== null && read.isProvisional && read.linesRead === 0) || (read.isLinesNonBlank !== true && read.assessed.length > 0)
   const counted = needsLines ? await withLinesCounted(ports, read) : read
   // Its commits are elsewhere: nothing can be said of its lines here, so nothing is withdrawn here.
   if (counted === null) return read
@@ -280,7 +284,15 @@ async function mendedRecord(ports: ProgressPorts, language: string): Promise<Pro
       ports.store(),
       progressPath(ports.dataRoot(), language),
       stored => parseRecord(stored, language),
-      latest => unplaced(withdrawn({ ...latest, linesRead: Math.max(latest.linesRead, counted.linesRead) }, at)),
+      latest =>
+        unplaced(
+          withdrawn(
+            latest.isLinesNonBlank === true || counted.isLinesNonBlank !== true
+              ? { ...latest, linesRead: Math.max(latest.linesRead, counted.linesRead) }
+              : { ...latest, linesRead: counted.linesRead, isLinesNonBlank: true },
+            at,
+          ),
+        ),
       { keepBackup: true },
     )
   } catch (error) {

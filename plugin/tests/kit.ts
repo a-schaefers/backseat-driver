@@ -737,6 +737,12 @@ export function stubSession(on: On, options: StubOptions = {}) {
 
       return email === '' ? failed : ok(`${email}\n`)
     }
+    // Whether every commit named is here: one call, failing when any is not, as git's does.
+    if (args[0] === 'show' && args[1] === '-s' && args[2] === '--format=%H') {
+      const hashes = args.slice(3)
+
+      return hashes.every(hash => commits.some(known => known.hash === hash)) ? ok(hashes.map(hash => `${hash}\n`).join('')) : failed
+    }
     if (args[0] === 'show' && args[1] === '-s') {
       const commit = commits.find(known => known.hash === args[args.length - 1])
       if (commit === undefined) return failed

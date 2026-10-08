@@ -123,7 +123,12 @@ import {
   versionText,
 } from '../core/update'
 import type { Install } from '../core/update'
-import { emptyRecord, progressText, recordText } from '../core/progress'
+import {
+  emptyRecord,
+  progressText,
+  recordText,
+  verdictCounts,
+} from '../core/progress'
 import { growthOf, growthText } from '../core/growth'
 import type { Growth } from '../core/growth'
 import { freshLearningState, lessonTool as lessonToolOf, lessonViews, loadLessons as loadLessonsOf, markDone as markDoneOf, selectLesson as selectLessonOf, showLessons as showLessonsOf, startStep as startStepOf } from '../core/learning'
@@ -185,6 +190,7 @@ import {
   parseProject,
   parseReviews,
   projectBrief,
+  quotesName,
   reviewDigest,
   splitReview,
   withAudited,
@@ -4178,12 +4184,18 @@ async function startExplaining($: EngineInterface, settings: Settings, run: numb
           },
           now: () => $.clock.now(),
           project: () => ({ name: projectId(root).replace(/-[0-9a-f]{8}$/, ''), overview: project === null ? '' : overviewLine(project) }),
-          insights: (path, name, symbolPrint, filePrint, isMentioned) =>
+          insights: (path, name, symbolPrint, filePrint, isMentioned, names) =>
             project === null
               ? []
-              : insightsFor(project, path, name, symbolPrint, filePrint, isMentioned).map(insight =>
-                  insightLine(insight, project?.survey?.at, name !== '' && insight.of === 'file' && insight.symbol === ''),
-                ),
+              : insightsFor(project, path, name, symbolPrint, filePrint, isMentioned).flatMap(insight => {
+                  const isNameless = insight.of === 'file' && insight.symbol === ''
+                  // A nameless one that quotes the name of one part of the file is about that part: shown there, as its
+                  // own, and not under the others (the seventeenth ui-truth pass, 2026-10-07: "old game").
+                  const about = isNameless ? names.filter(other => quotesName(insight.text, other)) : []
+                  if (name !== '' && about.length === 1 && about[0] !== name) return []
+
+                  return [insightLine(insight, project?.survey?.at, name !== '' && isNameless && about.length !== 1)]
+                }),
           // Paused, or with another session driving this project, nothing is fetched unless it is asked for.
           mode: () => (mode === 'off' ? 'off' : mode === 'paused' || !leaseState.isDriver ? 'on request' : settings.explain.mode),
           // While Claude is not answering, or refuses this job's model, only what the person asks for is tried.
@@ -4217,7 +4229,11 @@ function aboutPerson(): string {
   const seen = profiles.languages.map(language => progressState.records.get(language)).filter(record => record !== undefined)
   const grown = growths()
     .filter(({ growth }) => growth.level !== null)
-    .map(({ language, growth }) => growthText(language, growth))
+    .map(({ language, growth }) => {
+      const record = progressState.records.get(language)
+
+      return growthText(language, growth, record === undefined ? undefined : verdictCounts(record))
+    })
   const growthPart = grown.length === 0 ? '' : ['## Their growth, all of it counted: own commits, lessons, help needed, habits', ...grown].join('\n')
 
   return [personText(profiles), progressText(seen), growthPart].filter(part => part !== '').join('\n\n')
@@ -5362,7 +5378,7 @@ export const register: Register = (on, options) => {
     const whose = progressState.identity.length === 0 ? 'Git has no user.email here, so no commit can be confirmed as theirs.' : `Only commits by ${progressState.identity.join(' or ')} count.`
 
     const growth = growthOf(record, profiles.subjects[language], lessonViews(learningState, profiles.languages))
-    const grown = growthText(language, growth)
+    const grown = growthText(language, growth, verdictCounts(record))
 
     return answered($, e, record.observations.length === 0 ? `Nothing is on record for ${language} yet. ${whose}\n\n${grown}` : `${recordText(record)}\n\n${grown}\n\n${whose}`)
   })

@@ -115,7 +115,7 @@ sessionTest('an audit that says nothing of its reading still finished, and one t
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: 'The audit found nothing open.' })).toBeDefined()
   await ui.press({ key: 'tab-review' })
-  expect(await ui.find({ type: 'Text', text: `Audited ${clockTime(ledger.coverage.at)} at 0000000 with uncommitted changes: it did not say which of the 1 source files it read.` })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: `Audited ${clockTime(ledger.coverage.at)} at 0000000 with uncommitted changes: it did not say which of the 1 own source file it read.` })).toBeDefined()
   await ui.unmount()
 })
 

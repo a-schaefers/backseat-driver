@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { encouragementLine, growthFacts, growthHeadline, growthLadder, growthMeterLabel, growthOf, growthText, improvedLine, raiseLine, rungWord, workOnLine } from '../core/growth'
+import { encouragementLine, growthCounts, growthFacts, growthHeadline, growthLadder, growthMeterLabel, growthOf, growthText, improvedLine, raiseLine, rungWord, workOnLine } from '../core/growth'
 import { emptyLessonRecord, lessonView, parsePath, withDone, withHelp, withStarted } from '../core/lessons'
 import type { LessonPath } from '../core/lessons'
 import { emptyProfile, withFlagged, withLooked } from '../core/profiles'
@@ -200,7 +200,11 @@ test('a path about no one language is suggested and moves no level', () => {
 test('growthText says it all in a few lines for the tutor', () => {
   const text = growthText('python', growthOf(record(JUNIOR), undefined, []))
   expect(text).toMatch(/^Python growth: junior · growth 1\d\d/)
-  expect(text).toMatch('Counted: own commits: 7 shown, 0.5 missed.')
+  // Without the record's counts, the figures are said to be weights.
+  expect(text).toMatch('Counted: own commits weigh 7 shown and 0.5 missed.')
+  // With them, the counts, and the weights beside them when they differ (the seventeenth ui-truth pass, 2026-10-07).
+  expect(growthCounts(growthOf(record(JUNIOR), undefined, []), { shown: 8, missed: 1 })).toMatch('Counted: own commits: 8 shown, 1 missed (weighing 7 and 0.5).')
+  expect(growthCounts({ ...growthOf(record(JUNIOR), undefined, []), shown: 8, missed: 1 }, { shown: 8, missed: 1 })).toMatch('Counted: own commits: 8 shown, 1 missed.')
 })
 
 function seededRandom(seed: number): () => number {

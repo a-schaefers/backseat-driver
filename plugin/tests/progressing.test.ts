@@ -136,6 +136,26 @@ test('a record placed under the old bar is mended as it is read: its lines count
   expect(away.records.get('python')?.linesRead).toBe(0)
 })
 
+test('lines counted with the blank ones by an older recount are counted again once, as an assessment counts them', async () => {
+  // bashscripts' 31 non-blank lines read as 39 (the seventeenth ui-truth pass, 2026-10-07).
+  const old = { ...emptyRecord('python'), assessed: ['a'.repeat(40)], linesRead: 6 }
+  delete (old as { isLinesNonBlank?: boolean }).isLinesNonBlank
+  const patch = ['diff --git a/stats.py b/stats.py', '--- a/stats.py', '+++ b/stats.py', '@@ -0,0 +1,6 @@', '+def mean(xs):', '+', '+    return sum(xs) / len(xs)', '+', '+', '+x = 1'].join('\n')
+  const store = plainStore(memoryDisk())
+  await store.update(progressPath('/data', 'python'), () => old)
+  let shows = 0
+  const w = world({ store: () => store, git: async args => (args[0] === 'show' ? (shows += 1, { exitCode: 0, stdout: patch }) : { exitCode: 0, stdout: 'me@example.com' }) })
+  const state = freshProgressState()
+  await setUpProgress(w.ports, state)
+  expect(state.records.get('python')?.linesRead).toBe(3)
+  expect(state.records.get('python')?.isLinesNonBlank).toBe(true)
+  expect((await store.read(progressPath('/data', 'python')) as { linesRead: number; isLinesNonBlank: boolean }).isLinesNonBlank).toBe(true)
+  // Counted once: the next switch-on reads no patch.
+  const before = shows
+  await setUpProgress(w.ports, freshProgressState())
+  expect(shows).toBe(before)
+})
+
 test('the latest reviewed commit that counted nowhere is judged again, and the tab says why, once', async () => {
   const info = ['a83b842d7f0e6c1b2a3f4e5d6c7b8a9f0e1d2c3b', 'f481c4a0000000000000000000000000000000000', 'me@example.com', 'Adam', 'fail loudly'].join('\0')
   const patch = ['diff --git a/run.sh b/run.sh', '--- a/run.sh', '+++ b/run.sh', '@@ -1,0 +2,2 @@', '+set -e', '+exit 1'].join('\n')

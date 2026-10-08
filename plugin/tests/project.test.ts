@@ -11,6 +11,7 @@ import {
   parseProject,
   parseReviews,
   projectBrief,
+  quotesName,
   reviewDigest,
   splitReview,
   withReview,
@@ -103,6 +104,14 @@ test('insightsFor shows an insight only beside the exact code it was written abo
   const audited = withReviewNotes(emptyProject('/work'), { overview: '', files: [], insights: [{ file: 'stats.py', symbol: '', text: 'No tests.' }], decisions: [] }, 'aaa1111', 5, () => ({ print: 'file', of: 'file' }), 'audit')
   expect(parseProject(JSON.parse(JSON.stringify(audited)), '/work').insights[0]?.source).toBe('audit')
   expect(withReviewNotes(emptyProject('/work'), { overview: '', files: [], insights: [{ file: 'stats.py', symbol: '', text: 'No tests.' }], decisions: [] }, 'aaa1111', 5, () => ({ print: 'file', of: 'file' })).insights[0]?.source).toBe(undefined)
+})
+
+test('a name is quoted as a reviewer quotes a part of the file', async () => {
+  expect(quotesName("The commented-out 'old game' is the bash version.", 'old game')).toBe(true)
+  expect(quotesName('See `mean` and “median”.', 'mean')).toBe(true)
+  expect(quotesName('See `mean` and “median”.', 'median')).toBe(true)
+  expect(quotesName('The mean of the old game.', 'old game')).toBe(false)
+  expect(quotesName("It is 'x'.", '')).toBe(false)
 })
 
 test('an insight kept with no name takes back the name its review gave it', async () => {
@@ -242,6 +251,34 @@ sessionTest('the play-by-play, the next review and Explain all read what the dee
   const later = session.requests[session.requests.length - 1]?.prompt ?? ''
   expect(later).toMatch('About this project: A small statistics library')
   expect(later.includes('population variance')).toBe(false)
+  await ui.unmount()
+})
+
+sessionTest('a nameless insight that quotes one part of the file shows with that part only, and one about the whole file says so', async ($, on) => {
+  // "The commented-out 'old game' …" showed under every section of playground.sh as about the whole file (the seventeenth ui-truth pass, 2026-10-07).
+  const print = sourcePrint(STATS)
+  const kept = (text: string) => ({ file: 'stats.py', symbol: '', text, commit: '0000000', at: 5, print, of: 'file' })
+  const data = { [`projects/${projectId(ROOT)}/project.json`]: { v: 1, root: ROOT, isSurveyed: true, isAudited: true, insights: [kept("The 'mean' helper divides by the count."), kept('No tests cover this file.')] } }
+  const session = stubSession(on, { head: { 'stats.py': STATS }, data })
+  session.explain(
+    { summary: 'Helpers.', symbols: [{ name: 'mean', kind: 'function', start: 1, end: 2, head: 'def mean(xs):', summary: 'Average.' }, { name: 'variance', kind: 'function', start: 5, end: 7, head: 'def variance(xs):', summary: 'Spread.' }] },
+    'Map this file.',
+  )
+  session.explain({ what: 'Spread of the values.', how: '', why: '', watch: '', uses: [] }, 'Explain variance')
+  session.explain({ what: 'The average.', how: '', why: '', watch: '', uses: [] }, 'Explain mean')
+  await $.session.start(SESSION)
+  await $.command.run(typed('backseat'))
+  await session.clock.settle()
+  await $.command.run(typed('backseat', 'explain stats.py:6'))
+  await session.clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // Under variance: the one about the whole file, said so; the one about mean, not at all.
+  expect(await ui.find({ type: 'Text', text: 'Deep review: No tests cover this file. (deep review of 0000000, about the whole file)' })).toBeDefined()
+  expect((await ui.findAll({ type: 'Text' })).some(found => String((found as { text?: string }).text ?? '').includes("The 'mean' helper"))).toBe(false)
+  // Under mean: the one about mean, as its own.
+  await $.command.run(typed('backseat', 'explain stats.py:1'))
+  await session.clock.settle()
+  expect(await ui.find({ type: 'Text', text: "Deep review: The 'mean' helper divides by the count. (deep review of 0000000)" })).toBeDefined()
   await ui.unmount()
 })
 
