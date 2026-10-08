@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import { MARKER } from '../core/datahome'
 import { FLUSH_MS } from '../core/debuglog'
 import { rowKeysOf } from '../hooks/shown'
-import { ALREADY_ASKED, FOCUSED_HINT } from '../hooks/pane'
+import { ALREADY_ASKED, FOCUSED_HINT, FOCUSED_HINT_NO_ROWS } from '../hooks/pane'
 import { PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
 type Session = ReturnType<typeof stubSession>
@@ -152,4 +152,24 @@ sessionTest('the same question is not sent twice before the conversation has ans
   await session.clock.settle()
   expect(session.submitted.length - before).toBe(2)
   await ui.unmount()
+})
+
+sessionTest('the keys row promises j and k only on a tab that offers them, and /backseat settings names them', QUIET, async ($, on) => {
+  // "j k move" on Growth, and "then Tab to it" in the answer to /backseat settings (the nineteenth ui-truth pass, 2026-10-07).
+  const session = stubSession(on, { head: { 'stats.py': MEAN } })
+  await $.session.start(SESSION)
+  await $.command.run(typed('backseat'))
+  await session.clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-profile' })
+  expect(await ui.find({ key: 'row-next' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: FOCUSED_HINT_NO_ROWS })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: FOCUSED_HINT })).toBeUndefined()
+  await ui.press({ key: 'tab-settings' })
+  expect(await ui.find({ key: 'row-next' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: FOCUSED_HINT })).toBeDefined()
+  await ui.unmount()
+  const answer = await $.command.run(typed('backseat', 'settings'))
+  expect(String((answer as { text?: string }).text ?? '')).toMatch('then j and k to it and Enter')
+  expect(String((answer as { text?: string }).text ?? '')).not.toMatch('Tab to it')
 })

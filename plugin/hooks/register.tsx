@@ -224,7 +224,7 @@ import { parseSessions, SELF_CHECK_MS } from '../core/sessions'
 import { isHello } from '../core/avatar'
 import { parseLease } from '../core/lease'
 import { clockTime, dayTime } from '../core/clock'
-import { isSameShown, rowKeysOf, textsOf } from './shown'
+import { isSameShown, rowKeysOf, rowLabelsOf, textsOf } from './shown'
 import type { Shown } from './shown'
 import { healthLine, playLine, watchOf } from '../core/status'
 import type { Recorder } from '../core/recorder'
@@ -4993,6 +4993,7 @@ async function drawTutor(
     texts: textsOf(tree),
     ...(where.scroll === undefined ? {} : { scroll: where.scroll }),
     rowKeys: rowKeysOf(tree),
+    rowLabels: rowLabelsOf(tree),
     ...(ring.key !== '' && ring.tab === tab ? { ring: { key: ring.key, at: ring.at } } : {}),
   })
 
@@ -5044,7 +5045,8 @@ async function backseatCommand($: EngineInterface, settings: Settings, args: str
     // Asking again brings back a pane that was put away, and reads the rows again.
     await bringBack($)
 
-    return { text: 'The settings are in the pane. Click a row to see its options, or Ctrl+X Tab, then Tab to it and Enter.' }
+    // j and k, not Tab, since 2026-10-07: Tab does nothing in the pane (the nineteenth ui-truth pass).
+    return { text: 'The settings are in the pane. Click a row to see its options, or Ctrl+X Tab, then j and k to it and Enter.' }
   }
   if (request === 'explain') {
     if (mode === 'off') return { text: 'Backseat Driver is off. Run /backseat to start it.' }

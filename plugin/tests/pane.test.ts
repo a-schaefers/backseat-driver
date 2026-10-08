@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Note, OutlineRow, Watch } from '../types'
 import { NO_VIEW } from '../core/explainer'
-import { currentNote, detailMarkdown, emptyPlayLine, estimatedRows, explainNotice, FOCUSED_HINT, followingLine, jumpHeading, KEYBOARD_HINT, keysRowFits, nameColumns, NO_LOOK_YET, NO_NOTES, outlineName, personaLine, reviewBanner, reviewPlace, reviewRow, reviewsHeading, reviewSpots, spinFrame, stateMark, statusLine, tabBadge, tabRow, tabRows, underlineSpans, waitingLine, workingLayout } from '../hooks/pane'
+import { currentNote, detailMarkdown, emptyPlayLine, estimatedRows, explainNotice, FOCUSED_HINT, FOCUSED_HINT_NO_ROWS, followingLine, jumpHeading, KEYBOARD_HINT, keysRowFits, nameColumns, NO_LOOK_YET, NO_NOTES, outlineName, personaLine, reviewBanner, reviewPlace, reviewRow, reviewsHeading, reviewSpots, spinFrame, stateMark, statusLine, tabBadge, tabRow, tabRows, underlineSpans, waitingLine, workingLayout } from '../hooks/pane'
 import type { PaneView } from '../hooks/pane'
 import { paneContext } from '../core/prompts'
 import { readableReview, reviewHistory, shownReview, spotsIn, SURVEY_SUBJECT, withReviewChange } from '../core/review'
@@ -123,6 +123,9 @@ sessionTest('the pane says how to give it the keyboard, until it has it', async 
   const focused = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await focused.findAll({ type: 'Text', text: KEYBOARD_HINT })).length).toBe(0)
   expect(await focused.find({ type: 'Text', text: 'Keys on' })).toBeDefined()
+  // A Play-by-play tab with no note has no row for j and k: the hint leaves them out (the nineteenth ui-truth pass).
+  expect(await focused.find({ type: 'Text', text: FOCUSED_HINT_NO_ROWS })).toBeDefined()
+  await focused.press({ key: 'tab-settings' })
   expect(await focused.find({ type: 'Text', text: FOCUSED_HINT })).toBeDefined()
   await focused.unmount()
 })
@@ -195,6 +198,9 @@ test('the tab row keeps what the tabs say for as long as there is room, and neve
   // The focused hint names the keys that move and scroll (2026-10-07): one line from 104 columns.
   expect(keysRowFits({ isFocused: true, columns: 103 }, true)).toBe(false)
   expect(keysRowFits({ isFocused: true, columns: 104 }, true)).toBe(true)
+  // On a tab with no row to walk the hint leaves j and k out, and is shorter (the nineteenth ui-truth pass).
+  expect(keysRowFits({ isFocused: true, columns: 77 }, true, false)).toBe(true)
+  expect(keysRowFits({ isFocused: true, columns: 76 }, true, false)).toBe(false)
   expect(keysRowFits({ isFocused: false, columns: 56 }, false)).toBe(true)
   expect(tabRow({ ...busy, columns: 67 })).toEqual({ labels: ['Play', 'Review (new)', 'Explain', 'Growth', 'Lessons', 'Settings'], gap: 1 })
   // A docked pane: the longest names give way.

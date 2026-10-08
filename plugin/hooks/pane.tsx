@@ -272,6 +272,16 @@ export const KEYBOARD_HINT = 'Click here or press Ctrl+X Tab to use the keys.'
 /** Shown while the pane has the keyboard: how it is driven. */
 export const FOCUSED_HINT = '1–6 tabs · j k move · Enter presses · ↑↓ PgUp PgDn scroll · Esc back to the prompt.'
 
+/** The same on a tab with no row to walk, where j and k are not offered (the nineteenth ui-truth pass, 2026-10-07: the hint promised them on Growth). */
+export const FOCUSED_HINT_NO_ROWS = '1–6 tabs · ↑↓ PgUp PgDn scroll · Esc back to the prompt.'
+
+/** The hint for where the keyboard is: how the pane is driven while it has it, with j and k only where the tab offers them. */
+function keysHint(view: Pick<PaneView, 'isFocused'>, canWalk: boolean): string {
+  if (!view.isFocused) return KEYBOARD_HINT
+
+  return canWalk ? FOCUSED_HINT : FOCUSED_HINT_NO_ROWS
+}
+
 /**
  * One grammar for everything that can be pressed, so that a glance says what
  * is a control (owner, 2026-10-05: "what can i click on, what the keys are"):
@@ -303,8 +313,8 @@ function controlsRow({ Box }: Pick<Kit, 'Box'>, controls: readonly RenderChildre
 }
 
 /** Whether the keys row fits one line of the pane: "x: minimize", the word for where the keyboard is, and the hint after it. */
-export function keysRowFits(view: Pick<PaneView, 'isFocused' | 'columns'>, hasMinimize: boolean): boolean {
-  const hint = view.isFocused ? FOCUSED_HINT : KEYBOARD_HINT
+export function keysRowFits(view: Pick<PaneView, 'isFocused' | 'columns'>, hasMinimize: boolean, canWalk = true): boolean {
+  const hint = keysHint(view, canWalk)
   const word = view.isFocused ? 'Keys on' : 'Keys off'
 
   return (hasMinimize ? 'x: minimize'.length + 2 : 0) + word.length + 1 + hint.length <= view.columns
@@ -317,9 +327,9 @@ export function keysRowFits(view: Pick<PaneView, 'isFocused' | 'columns'>, hasMi
  * one cuts the focused hint; the first ui-truth pass, 2026-10-06) the hint
  * goes on a line of its own under the word, and wraps rather than being cut.
  */
-function keysRow({ Box, Text, Button }: Pick<Kit, 'Box' | 'Text' | 'Button'>, view: Pick<PaneView, 'isFocused' | 'columns'>, actions: Pick<PaneActions, 'onMinimize'>) {
-  const isOneLine = keysRowFits(view, actions.onMinimize !== undefined)
-  const hint = view.isFocused ? FOCUSED_HINT : KEYBOARD_HINT
+function keysRow({ Box, Text, Button }: Pick<Kit, 'Box' | 'Text' | 'Button'>, view: Pick<PaneView, 'isFocused' | 'columns'>, actions: Pick<PaneActions, 'onMinimize'>, canWalk: boolean) {
+  const isOneLine = keysRowFits(view, actions.onMinimize !== undefined, canWalk)
+  const hint = keysHint(view, canWalk)
 
   return (
     <Box flexDirection="column">
@@ -692,8 +702,10 @@ function explainControls({ Button }: Pick<Kit, 'Button'>, view: PaneView, action
   const { canFetch } = explainFlags(explain)
 
   return [
-    explain.outline.length > 1 && <Button key="explain-next" label="next" hotkey="n" plain onPress={() => actions.onExplainMove(1)} />,
-    explain.outline.length > 1 && <Button key="explain-previous" label="previous" hotkey="p" plain onPress={() => actions.onExplainMove(-1)} />,
+    // Named apart from j and k, which move the ring through the same outline (the nineteenth ui-truth pass, 2026-10-07:
+    // "j: next  k: previous  n: next  p: previous"): these move the symbol in focus, and it is explained at once.
+    explain.outline.length > 1 && <Button key="explain-next" label="next symbol" hotkey="n" plain onPress={() => actions.onExplainMove(1)} />,
+    explain.outline.length > 1 && <Button key="explain-previous" label="previous symbol" hotkey="p" plain onPress={() => actions.onExplainMove(-1)} />,
     target !== null && <Button key="explain-ask" label="ask about this" hotkey="e" plain onPress={() => actions.onExplainAsk()} />,
     canFetch && <Button key="explain-fetch" label="look this up" hotkey="f" plain onPress={() => actions.onExplainFetch()} />,
     actions.onOpen !== undefined && <Button key="explain-open" label="open in editor" hotkey="o" plain onPress={() => actions.onOpen?.(spot.path, spot.line)} />,
@@ -1443,7 +1455,8 @@ export const NO_LESSONS = 'No lessons are installed. A path is a markdown file i
 function stepMark(state: string, isNext: boolean): string {
   if (state === 'checked') return '✓'
   if (state === 'done') return '✓'
-  if (isNext) return '▸'
+  // Not `▸`, which marks a row to press: the step is started with `s` (the nineteenth ui-truth pass, 2026-10-07).
+  if (isNext) return '→'
 
   return ' '
 }
@@ -1580,10 +1593,13 @@ export function currentRowKey(view: PaneView): string {
  * more than one row, or one the keys are not on yet. The rows are the body's
  * buttons without a key, in the order drawn, so whatever a tab lists is walked.
  */
+export function canWalkRows(view: PaneView, rows: readonly string[]): boolean {
+  return rows.length > 1 || (rows.length === 1 && rows[0] !== currentRowKey(view))
+}
+
 function rowControls({ Button }: Pick<Kit, 'Button'>, view: PaneView, rows: readonly string[], actions: PaneActions): RenderChildren[] {
   const current = currentRowKey(view)
-  const canWalk = actions.onRowStep !== undefined && (rows.length > 1 || (rows.length === 1 && rows[0] !== current))
-  if (!canWalk) return []
+  if (actions.onRowStep === undefined || !canWalkRows(view, rows)) return []
 
   return [
     <Button key="row-next" label="next" hotkey="j" plain onPress={() => actions.onRowStep?.(1, rows, current)} />,
@@ -1716,7 +1732,9 @@ function renderStacked(kit: Kit, view: PaneView, actions: PaneActions) {
   const character = characterOf(view)
   // The body first, so that the controls above it know the rows j and k walk.
   const body = tabBody(kit, view, actions)
-  const controls = [...rowControls(kit, view, rowKeysOf(body), actions), ...tabControls(kit, view, actions)]
+  const rows = rowKeysOf(body)
+  const controls = [...rowControls(kit, view, rows, actions), ...tabControls(kit, view, actions)]
+  const canWalk = actions.onRowStep !== undefined && canWalkRows(view, rows)
 
   return (
     <Box flexDirection="column">
@@ -1730,7 +1748,7 @@ function renderStacked(kit: Kit, view: PaneView, actions: PaneActions) {
       {/* Outside a repository there is no journal, so nothing to go on and nowhere to keep an answer. */}
       {view.watch.state !== 'no-git' && workingOn(kit, view, actions)}
       {controls.some(Boolean) && controlsRow(kit, controls)}
-      {keysRow(kit, view, actions)}
+      {keysRow(kit, view, actions, canWalk)}
       {rule({ Text }, view.columns)}
       {character !== null && characterRow(kit, view, character)}
       {character !== null && <Text> </Text>}

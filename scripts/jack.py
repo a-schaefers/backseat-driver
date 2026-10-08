@@ -2048,6 +2048,9 @@ def check_audit_line(who: str, text: str, own: list[str] | None) -> list[tuple[s
 
 
 REVIEW_HEADING = re.compile(r"Review (\d+) of (\d+)")
+# Words that send the person to Tab inside the pane, which does nothing there since 2026-10-07. "Ctrl+X Tab" gives the
+# pane or the strip the keyboard, and stays.
+TAB_WORDS = re.compile(r"\bthen Tab\b|\bTab to it\b|\bTab moves\b|\bTab walks\b|Shift\+Tab")
 
 
 def prompt_text(rows: list[str]) -> str:
@@ -2087,6 +2090,29 @@ def check_keys_walk(who: str, state: dict, rows: list[str] | None) -> list[tuple
         if shown > 1 and "n: newer" not in texts:
             out.append((BAD, f"{who}'s Deep review tab shows “Review {shown} of {total}” and no “n: newer”: the history cannot be walked from the keys"))
         break
+    # Two keys under one label: "j: next  k: previous  n: next  p: previous" on Explain (the nineteenth ui-truth pass).
+    labels: dict[str, set[str]] = {}
+    for text in texts:
+        m = re.match(r"^([a-z0-9]): (.+)$", text)
+        if m:
+            labels.setdefault(m.group(2), set()).add(m.group(1))
+    for label, keys_of in sorted(labels.items()):
+        if len(keys_of) > 1:
+            out.append((BAD, f"{who}'s pane offers {' and '.join(sorted(keys_of))} under one label, “{label}”: a reader cannot tell what each does"))
+    # The hint promises j and k only where the tab offers them (the same pass: "j k move" on Growth).
+    if any("j k move" in text for text in texts) and "j: next" not in texts:
+        out.append((BAD, f"{who}'s keys row says “j k move” on a tab that offers no j or k"))
+    # A piece marked as a row (▸, ▾) is a row to press (the same pass: a lesson's next step).
+    row_labels = pane.get("rowLabels")
+    if isinstance(row_labels, list):
+        loose = [text for text in texts if text.startswith(("▸ ", "▾ ")) and text not in row_labels]
+        if loose:
+            out.append((BAD, f"{who}'s pane marks “{brief(loose[0], 50)}” as a row, and it cannot be pressed"))
+    # Tab does nothing in the pane since 2026-10-07: nothing the tutor says sends the person to it.
+    told = texts + [str(item.get("text")) for item in state.get("said") or [] if isinstance(item, dict) and item.get("how") in ("command", "toast", "transcript")]
+    tabbed = next((text for text in told if TAB_WORDS.search(text)), None)
+    if tabbed is not None:
+        out.append((BAD, f"{who} tells the person to use Tab (“{brief(tabbed, 70)}”), and Tab does nothing in the pane: j and k walk the rows"))
     if rows is not None and pane.get("isFocused") is False:
         hotkeys = {text.split(":")[0] for text in texts if re.match(r"^[a-z0-9]: ", text)}
         typed = prompt_text(rows)

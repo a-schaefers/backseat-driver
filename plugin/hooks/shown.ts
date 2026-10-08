@@ -28,6 +28,8 @@ export type Shown = {
   scroll?: { offset: number; bodyRows: number }
   /** The rows j and k walk, by key, in the order drawn (`rowKeysOf`). */
   rowKeys?: string[]
+  /** Their labels, as the pieces read them (`rowLabelsOf`): a piece marked as a row and not among them cannot be pressed. */
+  rowLabels?: string[]
   /** The row j and k last put the focus ring on, on the tab drawn, and when; absent when none. */
   ring?: { key: string; at: number }
 }
@@ -86,14 +88,23 @@ export function textsOf(tree: unknown): string[] {
  * a row j and k put the ring on, for Enter to press (2026-10-07).
  */
 export function rowKeysOf(tree: unknown): string[] {
-  const keys: string[] = []
+  return rowsOf(tree).map(row => row.key)
+}
+
+/** The labels of those rows, as the pieces of the drawing read them: what a reader takes for a row to press. */
+export function rowLabelsOf(tree: unknown): string[] {
+  return rowsOf(tree).map(row => tidy(row.label))
+}
+
+function rowsOf(tree: unknown): { key: string; label: string }[] {
+  const rows: { key: string; label: string }[] = []
   const walk = (node: unknown): void => {
     if (node === null || node === undefined || typeof node !== 'object') return
     if (Array.isArray(node)) return node.forEach(walk)
     const { type, props, children } = node as { type?: unknown; props?: unknown; children?: unknown }
     const given = (typeof props === 'object' && props !== null ? props : {}) as Record<string, unknown>
     if (type === 'Button') {
-      if (typeof given.hotkey !== 'string' && typeof given.key === 'string' && given.key !== '') keys.push(given.key)
+      if (typeof given.hotkey !== 'string' && typeof given.key === 'string' && given.key !== '') rows.push({ key: given.key, label: typeof given.label === 'string' ? given.label : '' })
 
       return
     }
@@ -101,7 +112,7 @@ export function rowKeysOf(tree: unknown): string[] {
   }
   walk(tree)
 
-  return keys
+  return rows
 }
 
 /** Whether two drawings say the same. */

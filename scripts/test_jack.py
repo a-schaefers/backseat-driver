@@ -568,6 +568,30 @@ class Disagreements(unittest.TestCase):
         screen[2] = "❯ fix the parser"
         self.assertEqual([text for level, text in jack.check_keys_walk("aaaaaaaa", away, screen) if level == jack.NOTE], [])
 
+    def test_the_pane_keys_say_what_they_do(self):
+        # The nineteenth ui-truth pass, 2026-10-07: two pairs under one label on Explain, "j k move" on Growth, a lesson's
+        # next step marked as a row, and /backseat settings sending the person to Tab.
+        explain = {"shown": {"pane": {"texts": ["j: next", "k: previous", "n: next", "p: previous", "▸ helper"], "rowKeys": ["explain-row-1", "explain-row-9"], "rowLabels": ["▸ helper", "main"], "isFocused": True}}}
+        found = " ".join(bad(jack.check_keys_walk("aaaaaaaa", explain, None)))
+        self.assertIn("offers j and n under one label, “next”", found)
+        explain["shown"]["pane"]["texts"][2:4] = ["n: next symbol", "p: previous symbol"]
+        self.assertEqual(bad(jack.check_keys_walk("aaaaaaaa", explain, None)), [])
+        growth = {"shown": {"pane": {"texts": ["4: Growth", "1–6 tabs · j k move · Enter presses · ↑↓ PgUp PgDn scroll · Esc back to the prompt."], "rowKeys": [], "rowLabels": [], "isFocused": True}}}
+        self.assertIn("says “j k move” on a tab that offers no j or k", " ".join(bad(jack.check_keys_walk("aaaaaaaa", growth, None))))
+        growth["shown"]["pane"]["texts"][1] = "1–6 tabs · ↑↓ PgUp PgDn scroll · Esc back to the prompt."
+        self.assertEqual(bad(jack.check_keys_walk("aaaaaaaa", growth, None)), [])
+        lesson = {"shown": {"pane": {"texts": ["s: start step 1", "▸ 1. One change per commit"], "rowKeys": [], "rowLabels": [], "isFocused": True}}}
+        self.assertIn("marks “▸ 1. One change per commit” as a row, and it cannot be pressed", " ".join(bad(jack.check_keys_walk("aaaaaaaa", lesson, None))))
+        lesson["shown"]["pane"]["texts"][1] = "→ 1. One change per commit"
+        self.assertEqual(bad(jack.check_keys_walk("aaaaaaaa", lesson, None)), [])
+        said = {"said": [{"at": 1, "how": "command", "text": "The settings are in the pane. Click a row to see its options, or Ctrl+X Tab, then Tab to it and Enter."}], "shown": {"pane": {"texts": [], "rowKeys": [], "isFocused": False}}}
+        self.assertIn("tells the person to use Tab", " ".join(bad(jack.check_keys_walk("aaaaaaaa", said, None))))
+        said["said"][0]["text"] = "The settings are in the pane. Click a row to see its options, or Ctrl+X Tab, then j and k to it and Enter."
+        self.assertEqual(bad(jack.check_keys_walk("aaaaaaaa", said, None)), [])
+        # The strip's way back is Ctrl+X Tab then Enter: the focus chord, not Tab in the pane.
+        said["said"][0]["text"] = "minimized · click a name, or Ctrl+X Tab then Enter, to bring it back"
+        self.assertEqual(bad(jack.check_keys_walk("aaaaaaaa", said, None)), [])
+
     def test_the_growth_tabs_counts_against_its_records(self):
         # "6.5 shown, 3.5 missed" were weights, and "8 of 8 observations" stood for fifteen (the seventeenth ui-truth pass, 2026-10-07).
         seen = lambda commit, verdict, n: [{"commit": commit, "verdict": verdict, "skill": f"s{i}", "level": "junior", "weight": 0.5} for i in range(n)]
