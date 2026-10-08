@@ -173,3 +173,24 @@ sessionTest('the keys row promises j and k only on a tab that offers them, and /
   expect(String((answer as { text?: string }).text ?? '')).toMatch('then j and k to it and Enter')
   expect(String((answer as { text?: string }).text ?? '')).not.toMatch('Tab to it')
 })
+
+sessionTest('a click in a pane without the keyboard gives it the keyboard, and one in a pane that has it asks nothing', QUIET, async ($, on) => {
+  // The twenty-first ui-truth pass, 2026-10-07: an issue's row clicked, then `e` pressed, and the e's went into the prompt.
+  const session = stubSession(on, { head: { 'stats.py': MEAN } })
+  await $.session.start(SESSION)
+  await $.command.run(typed('backseat'))
+  await session.clock.settle()
+  const away = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, isFocused: false } })
+  const before = session.focusAsked.length
+  await away.press({ key: 'tab-review' })
+  await session.clock.settle()
+  expect(session.focusAsked.slice(before)).toEqual(['backseat-driver'])
+  await away.unmount()
+
+  const focused = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const after = session.focusAsked.length
+  await focused.press({ key: 'tab-play' })
+  await session.clock.settle()
+  expect(session.focusAsked.length).toBe(after)
+  await focused.unmount()
+})

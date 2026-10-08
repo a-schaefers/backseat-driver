@@ -120,6 +120,11 @@ test('the requests name the project, the file and the lines, and replies are rea
   expect(detail).toMatch('What the last deep review said about this code:\n- Divides by n, not n - 1.')
   expect(detail.includes('- variance (function)')).toBe(false)
   expect(detailRequest(project, { path: 'stats.py', fileSummary: '', outline: [], lines, start: 6, end: 7, name: '', insights: [] })).toMatch('Explain the selected lines, 6 to 7.')
+  // Issues on record in those lines go with it, so that it never says the code handles what one says it does not.
+  const told = detailRequest(project, { path: 'stats.py', fileSummary: '', outline: [], lines, start: 6, end: 7, name: '', insights: [], issues: ['high, line 6: empty input. Divides by zero.'] })
+  expect(told).toMatch('Issues on record in these lines')
+  expect(told).toMatch('- high, line 6: empty input. Divides by zero.')
+  expect(detailRequest(project, { path: 'stats.py', fileSummary: '', outline: [], lines, start: 6, end: 7, name: '', insights: [] })).not.toMatch('Issues on record')
 
   expect(parseOutline('Here you go:\n```json\n' + JSON.stringify(OUTLINE) + '\n```')?.entries.length).toBe(2)
   expect(parseOutline('no json here')).toBe(null)

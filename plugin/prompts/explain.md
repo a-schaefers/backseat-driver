@@ -30,5 +30,6 @@ Pitch it at the person. What is on record about them follows these instructions 
 - Plain text in every field: no Markdown, no code blocks, no line breaks.
 - `what` is for someone who has not read the code. `how` is for someone about to.
 - `watch` is a real hazard or nothing: an edge case, a hidden side effect, an assumption about its input, something a caller could get wrong. Point at it the way a tutor would, without writing the fix.
+- Issues on record are true of this code as it reads: never say the code handles, rejects or falls back on what an issue says it does not. You may name the issue in `watch`, and never write its fix.
 - `uses` lists only names that appear under "Also in this file" or that the code plainly calls from elsewhere in the project. Leave out the standard library.
 - A name in `uses` is one this code calls or reads. A part that reads what this code builds relies on it, not the other way round: for a section of a script, that means an earlier section, never a later one.

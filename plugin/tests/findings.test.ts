@@ -7,6 +7,7 @@ import {
   EMPTY_LEDGER,
   foundIssues,
   issuesBrief,
+  issuesWithin,
   issueWhere,
   LEDGER_MAX_CLOSED,
   ledgerLine,
@@ -306,4 +307,23 @@ test('the conversation is told what was found and what was read, never that sile
   expect(ledgerLine(ledgerViews(EMPTY_LEDGER, { savedFiles: [], cap: 3 }), true, { at: 5, commit: '', files: 1, read: [], skipped: [] })).toBe('The audit found nothing open.')
   expect(ledgerLine(ledgerViews(audited, { savedFiles: [], cap: 3 }), true, audited.coverage)).toBe('Open in the deep review: 1 high.')
   expect(countsWords({ critical: 1, high: 0, medium: 2, low: 3 }, false)).toBe('1 critical, 2 medium')
+})
+
+test('an Explain request is told the open issues standing inside the lines it explains, worst first', () => {
+  // The twenty-first ui-truth pass (2026-10-07): "Anything else falls back to 0" above a high issue on those lines.
+  const base = { category: 'bug', topic: 't', text: 'Why.', condition: '', origin: 'audit', commit: 'abc1234', at: 1, statusAt: 1, statusBy: 'review', statusNote: '', isPinned: false } as const
+  const lines = ['<?php', '$id = $_GET["media"];', 'echo $id;', 'exit;']
+  const ledger: Ledger = {
+    v: 1,
+    nextId: 5,
+    findings: [
+      { ...base, id: 1, file: 'a.php', line: 3, lineText: 'echo $id;', severity: 'low', title: 'unescaped', status: 'open' },
+      { ...base, id: 2, file: 'a.php', line: 2, lineText: '$id = $_GET["media"];', severity: 'high', title: 'an array crashes it', status: 'open' },
+      { ...base, id: 3, file: 'a.php', line: 2, lineText: '$id = $_GET["media"];', severity: 'high', title: 'dismissed', status: 'dismissed' },
+      { ...base, id: 4, file: 'a.php', line: 4, lineText: 'exit;', severity: 'medium', title: 'outside', status: 'open' },
+    ],
+    coverage: { at: 0, commit: '', files: 0, read: [], skipped: [] },
+  }
+  expect(issuesWithin(ledger, 'a.php', lines, 2, 3)).toEqual(['high, line 2: an array crashes it. Why.', 'low, line 3: unescaped. Why.'])
+  expect(issuesWithin(ledger, 'b.php', lines, 1, 4)).toEqual([])
 })

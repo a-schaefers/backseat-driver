@@ -71,6 +71,8 @@ export type ExplainPorts = {
    * '', that still applies to code with these fingerprints.
    */
   insights: (path: string, name: string, symbolPrint: string, filePrint: string, isMentioned: (name: string) => boolean, names: readonly string[]) => string[]
+  /** The open issues on record inside lines `start` to `end` of the file as it reads, worst first. */
+  issues?: (path: string, lines: readonly string[], start: number, end: number) => string[]
   /** `automatic`: fetch what the person looks at and saves. `on request`: only what they ask for. */
   mode: () => 'automatic' | 'on request' | 'off'
   pressure: () => Pressure
@@ -573,6 +575,7 @@ export function createExplainer(ports: ExplainPorts) {
         end: found.end,
         name: found.name,
         insights: found.name === '' ? [] : ports.insights(job.path, found.name, job.print, before.print, name => mentionedAt(before.lines.slice(found.start - 1, found.end), name) !== -1, fresh.map(other => other.name)),
+        issues: ports.issues?.(job.path, before.lines, found.start, found.end) ?? [],
       }),
       1500,
       signal,

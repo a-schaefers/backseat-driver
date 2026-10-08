@@ -8,7 +8,7 @@
  * logic needs an effect, it is handed a closure written here.
  */
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, PluginOptions, Register, Timer, UiFocusResult } from 'claude-code'
+import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, PluginOptions, Register, Timer, UiFocusResult, UiOpenResult } from 'claude-code'
 
 import type { ExplainView, Hush, IssuesState, LessonsView, Mode, Note, Profile, Profiles, ProgressRecord, ProgressView, Review, ReviewText, SettingRow, Speech, Spot, Tab, Watch, Working } from '../types'
 import { avatarFor, BLINK_MS, BLINK_SHUT_MS, closingLine, finished, isTalking, lineAtReload, nextTick, SILENT, speech, SURVEY_LINE, TALK_MS } from '../core/avatar'
@@ -327,6 +327,7 @@ import {
   issueQuestion,
   issuesBrief,
   issuesForRequest,
+  issuesWithin,
   isQuoteMissing,
   ledgerViews,
   lookIssues,
@@ -1128,10 +1129,21 @@ async function readSource($: EngineInterface, root: string, path: string): Promi
   return text
 }
 
-/** A key in the pane: recorded, and a reason to look at the working tree now. */
+/**
+ * Presses that leave the keyboard where it is: the strip's (the pane is not open), putting the pane away, and those
+ * that ask a question in a dialog, which hands the keyboard back itself (`refocusPane`).
+ */
+const KEEPS_KEYBOARD = new Set(['restore', 'minimize', 'working', 'questions'])
+
+/**
+ * A key in the pane: recorded, and a reason to look at the working tree now. A press in a pane that does not have
+ * the keyboard is a click, and the pane takes the keyboard: the owner clicked an issue's row and pressed `e`, and the
+ * e's went into the prompt (the twenty-first ui-truth pass, 2026-10-07: "eeee").
+ */
 function touched($: EngineInterface, settings: Settings, name: string, detail?: () => unknown): void {
   trace($, 'ui', name, detail)
   void kick($, settings, 'a key in the pane')
+  if (!KEEPS_KEYBOARD.has(name) && shown.pane !== null && !shown.pane.isFocused && mode !== 'off') void refocusPane($)
 }
 
 /** What one of the tutor's own tools answers, kept for the debug log with what it was asked. */
@@ -1409,8 +1421,8 @@ async function markHome($: EngineInterface): Promise<void> {
 const PANE_WAITS = 'Backseat Driver is on. Its pane waits for a wider terminal: /backseat opens it now.'
 
 /** Opens the pane, and keeps what Claude Code said of it: open is not yet drawn. */
-async function openPane($: EngineInterface): Promise<void> {
-  const opened = await $.ui.open({ id: PANE_ID, title: 'Backseat', columns: PANE_COLUMNS })
+async function openPane($: EngineInterface, opening?: Promise<UiOpenResult>): Promise<void> {
+  const opened = await (opening ?? $.ui.open({ id: PANE_ID, title: 'Backseat', columns: PANE_COLUMNS }))
   const reason = opened.isPlaced ? '' : opened.reason
   const wasWaiting = shown.opened?.isPlaced === false
   shown.opened = { at: Date.now(), isPlaced: opened.isPlaced, reason }
@@ -1458,13 +1470,17 @@ async function minimizePane($: EngineInterface, origin: 'person' | 'plugin'): Pr
 
 /** Brings the pane back from the strip, on the tab asked for when one was. */
 async function restoreFromStrip($: EngineInterface, tab: Tab | null): Promise<void> {
+  // Opened first, while the press is still the person's: opened after the awaits below, it counted as the tutor's own,
+  // and after a close by hand an open the tutor makes is not drawn under 144 columns (the twenty-first ui-truth pass,
+  // 2026-10-07: four presses on the strip at 125 columns, each answered "Its pane waits for a wider terminal").
+  const opening = $.ui.open({ id: PANE_ID, title: 'Backseat', columns: PANE_COLUMNS })
   isMinimized = false
   shown.minimized = false
   shown.band = null
   await update($, minimizedAtom, () => false)
   if (tab !== null) await showTab($, tab, true)
   trace($, 'ui', 'pane restored', () => ({ tab }))
-  await openPane($)
+  await openPane($, opening)
   $.ui.invalidate('ui.render')
 }
 
@@ -4307,6 +4323,7 @@ async function startExplaining($: EngineInterface, settings: Settings, run: numb
 
                   return [insightLine(insight, project?.survey?.at, name !== '' && isNameless && about.length !== 1)]
                 }),
+          issues: (path, lines, start, end) => issuesWithin(ledger, path, lines, start, end),
           // Paused, or with another session driving this project, nothing is fetched unless it is asked for.
           mode: () => (mode === 'off' ? 'off' : mode === 'paused' || !leaseState.isDriver ? 'on request' : settings.explain.mode),
           // While Claude is not answering, or refuses this job's model, only what the person asks for is tried.

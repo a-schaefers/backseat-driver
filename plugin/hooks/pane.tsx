@@ -1774,7 +1774,8 @@ export function noteMark(note: Pick<Note, 'kind'>): { mark: string; color: strin
 }
 
 /** What the strip says after the tabs: that the pane is put away, and how it comes back. */
-export const STRIP_HINT = 'minimized · click a name, or Ctrl+X Tab then Enter, to bring it back'
+// Short enough to stand whole beside the tabs from 125 columns: the longer wording lost "to bring it back" under 143 (the twenty-first ui-truth pass, 2026-10-07).
+export const STRIP_HINT = 'minimized · restore: click, or Ctrl+X Tab then Enter'
 
 /**
  * The pane put away (owner, 2026-10-06: the pane's close should minimize, and

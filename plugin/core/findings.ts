@@ -345,6 +345,25 @@ export function placeIssues(ledger: Ledger, file: string, lines: readonly string
   return placed
 }
 
+/**
+ * The open issues whose line stands inside lines `start` to `end` of a file, worst first, as an Explain request
+ * lists them: so that an explanation never says the code handles what an issue on record says it does not (the
+ * twenty-first ui-truth pass, 2026-10-07: "Anything else falls back to 0" above a high issue on the same lines,
+ * "?media[]=1 … throws a TypeError").
+ */
+export function issuesWithin(ledger: Ledger, file: string, lines: readonly string[], start: number, end: number): string[] {
+  const placed = placeIssues(ledger, file, lines)
+
+  return ledger.findings
+    .filter(finding => {
+      const at = placed.get(finding.id)
+
+      return at !== undefined && at !== null && at >= start && at <= end
+    })
+    .sort((a, b) => SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity))
+    .map(finding => `${finding.severity}, line ${placed.get(finding.id)}: ${finding.title}. ${finding.text}`)
+}
+
 /** Where an issue is, as a person reads it: "index.php:95", "index.php", "the project". */
 export function issueWhere(finding: Pick<Finding, 'file' | 'line'>, placed?: number | null): string {
   if (finding.file === '.') return 'the project'

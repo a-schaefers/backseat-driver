@@ -1275,6 +1275,7 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
     out += check_speech(who, state)
     if s["debug"] is not None:
         out += check_speech_kept(who, state, log_records(s["debug"])[-2000:])
+        out += check_press_keyboard(who, log_records(s["debug"])[-2000:], dig(state, "loaded.at"))
     out += check_settings_tab(who, state, s)
 
     # Deadlines that came and went.
@@ -1530,6 +1531,34 @@ def check_speech(who: str, state: dict) -> list[tuple[str, str]]:
     return [(FINE, f"{who}'s character says its own voice's hello")]
 
 
+# What the pane notes that is not a press: the tutor's own moves and what it was answered.
+NOT_PRESSES = {"ring", "ring kept", "row step", "scroll", "scroll to top", "pane opened", "pane closed", "pane minimized", "pane restored",
+               "pane refocused", "answered", "not answered", "restore", "minimize", "working", "questions"}
+
+
+def check_press_keyboard(who: str, records: list[dict], loaded: float | None) -> list[tuple[str, str]]:
+    """A press the person made with the mouse, in a pane that did not have the keyboard, gives it the keyboard; and a
+    press on the minimized strip draws the pane. Both in this load of the module, from the debug log (the twenty-first
+    ui-truth pass, 2026-10-07: an issue's row clicked and `e` typed into the prompt, "eeee"; four presses on the strip
+    at 125 columns answered "Its pane waits for a wider terminal")."""
+    out: list[tuple[str, str]] = []
+    recent = [r for r in records if isinstance(loaded, (int, float)) and (r.get("t") or 0) >= loaded]
+    focused: bool | None = None
+    for i, r in enumerate(recent):
+        if r.get("k") == "shown" and isinstance(r.get("d"), dict) and "isFocused" in r["d"]:
+            focused = r["d"]["isFocused"] is True
+        if r.get("k") != "ui":
+            continue
+        after = [x for x in recent[i + 1:] if (x.get("t") or 0) - (r.get("t") or 0) <= 2000]
+        if r.get("n") == "pane restored":
+            opened = next((x for x in after if x.get("k") == "ui" and x.get("n") == "pane opened"), None)
+            if opened is not None and isinstance(opened.get("d"), dict) and opened["d"].get("isPlaced") is False:
+                out.append((BAD, f"{who}'s strip was pressed at {clock(r.get('t'))} and the pane did not come back: “{opened['d'].get('reason')}”"))
+        elif focused is False and r.get("n") not in NOT_PRESSES and not any(x.get("k") == "ui" and x.get("n") == "pane refocused" for x in after):
+            out.append((BAD, f"{who}'s pane was pressed ({r.get('n')}) at {clock(r.get('t'))} without the keyboard, and did not take it: the next keys go into the prompt"))
+    return out[-3:]
+
+
 def check_speech_kept(who: str, state: dict, records: list[dict]) -> list[tuple[str, str]]:
     """The character's line against the last line the tutor says it gave it, in this load of the module: a line gone
     with nothing saying so went with the state (the twentieth ui-truth pass, 2026-10-07: after a /clear the character
@@ -1587,6 +1616,10 @@ def check_strip_badges(who: str, state: dict) -> list[tuple[str, str]]:
     while the pane said "Review (4)" (the twentieth ui-truth pass, 2026-10-07; an unbadged tab reads as nothing to see)."""
     out: list[tuple[str, str]] = []
     texts = [t for t in (dig(state, "shown.band.texts") or []) if isinstance(t, str)]
+    # One row, gap 2: what does not fit is cut at its end, the hint first (the twenty-first ui-truth pass: "to bring it back" lost).
+    columns = dig(state, "shown.band.columns")
+    if isinstance(columns, int) and texts and sum(len(t) for t in texts) + 2 * (len(texts) - 1) > columns:
+        out.append((NOTE, f"{who}'s strip needs {sum(len(t) for t in texts) + 2 * (len(texts) - 1)} columns and has {columns}: its hint is cut, “{texts[-1]}”"))
     for tab, name in (("play", "Play"), ("review", "Review")):
         drawn = next((t for t in texts if t == name or t.startswith(name + " ")), None)
         badge = strip_badge(tab, state)
@@ -1868,14 +1901,22 @@ def check_explain_insights(who: str, state: dict, root: str, project: dict | Non
         detail = s.get("detail") if isinstance(s.get("detail"), dict) else {}
         for field in ("what", "how", "why", "watch"):
             for sentence in re.split(r"(?<=[.!?])\s+", str(detail.get(field) or "")):
-                if not doubt.search(sentence):
+                found = doubt.search(sentence)
+                if not found:
                     continue
-                for name in re.findall(r"\$\w+", sentence):
-                    setting = next((n for n, line in enumerate(lines, 1) if re.match(rf"\s*{re.escape(name)}\s*=[^=]", line)
-                                    and not ((s.get("startLine") or 0) <= n <= (s.get("endLine") or 0))), None)
-                    if setting is not None:
-                        out.append((NOTE, f"the cached explanation of “{s.get('name')}” in {path} doubts {name}, which line {setting} sets: “{brief(sentence, 90)}”"))
-                        break
+                # The name doubted is the one the doubt is said of, the nearest before it: "$mediaId is never set here,
+                # so … check $noFiles first" doubts $mediaId, and $noFiles was named for it (the twenty-first ui-truth pass).
+                before = re.findall(r"\$\w+", sentence[: found.start()])
+                if not before:
+                    continue
+                name = before[-1]
+                start_, end_ = s.get("startLine") or 0, s.get("endLine") or 0
+                sets = [n for n, line in enumerate(lines, 1) if re.match(rf"\s*{re.escape(name)}\s*=[^=]", line)]
+                if any(start_ <= n <= end_ for n in sets):
+                    continue
+                setting = next(iter(sets), None)
+                if setting is not None:
+                    out.append((NOTE, f"the cached explanation of “{s.get('name')}” in {path} doubts {name}, which line {setting} sets: “{brief(sentence, 90)}”"))
     if unreachable:
         quoted = ", ".join(f"“{i['symbol']}”" for i in unreachable[:4])
         out.append((NOTE, f"{who}'s Explain tab can never show {len(unreachable)} insight(s) of the deep reviews on {path}: nothing in the file is named {quoted}"))
@@ -2389,6 +2430,18 @@ def check_issues(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]
             m = re.match(r"^Issue: (critical|high|medium|low) · line (\d+) (.+)$", text)
             if m and not any(is_open(f) and f.get("file") == spot_path and f.get("severity") == m.group(1) and " ".join(str(f.get("title", "")).split()) == m.group(3) for f in on_disk):
                 out.append((BAD, f"{who}'s Explain tab shows the issue “{m.group(3)}” at {spot_path}:{m.group(2)}, which findings.json does not have open there"))
+        # An explanation written before an issue it shows was found was not told of it, and may say the code handles
+        # what the issue says it does not (the twenty-first ui-truth pass, 2026-10-07: "Anything else falls back to 0"
+        # above "?media[]=1 … throws a TypeError"). Explanations are told since; one written before stands.
+        target = dig(state, "pane.explain.target.name")
+        shown_titles = {m.group(1) for m in (re.match(r"^Issue: (?:critical|high|medium|low) · line \d+ (.+)$", t) for t in texts) if m}
+        if isinstance(target, str) and target and shown_titles:
+            entry = read_json(project["dir"] / "files" / f"{fnv(spot_path)}-{pathlib.Path(spot_path).name}.json") or {}
+            symbol = next((x for x in entry.get("symbols") or [] if isinstance(x, dict) and x.get("name") == target), None)
+            written = dig(symbol, "detail.at") if isinstance(symbol, dict) else None
+            later = [f for f in on_disk if is_open(f) and f.get("file") == spot_path and " ".join(str(f.get("title", "")).split()) in shown_titles and isinstance(written, (int, float)) and (f.get("at") or 0) > written]
+            if later:
+                out.append((NOTE, f"{who}'s Explain tab shows “{target}” as explained at {day_clock(written, now)}, before issue {later[0].get('id')} “{later[0].get('title')}” shown under it was found: the explanation was not told of it"))
     # A bug or risk note beside an open issue on its line: a review adopts it, until then the same thing shows twice.
     for note in (dig(state, "pane.notes") or []):
         if not isinstance(note, dict) or note.get("kind") not in ("bug", "risk"):

@@ -112,6 +112,8 @@ export type DetailTarget = {
   name: string
   /** What a deep review said about this code, when it said anything. */
   insights: readonly string[]
+  /** The open issues on record inside these lines, worst first. */
+  issues?: readonly string[]
 }
 
 /** The request for the fuller explanation of one symbol or one selected region. */
@@ -126,6 +128,7 @@ export function detailRequest(project: ProjectContext, target: DetailTarget): st
     `File: ${fileLabel(target.path)}${target.fileSummary === '' ? '' : `. ${target.fileSummary}`}`,
     ...(others.length === 0 ? [] : ['', 'Also in this file:', ...others]),
     ...(target.insights.length === 0 ? [] : ['', 'What the last deep review said about this code:', ...target.insights.map(insight => `- ${insight}`)]),
+    ...((target.issues ?? []).length === 0 ? [] : ['', 'Issues on record in these lines (the deep review found them, and the reader sees them beside your explanation):', ...(target.issues ?? []).map(issue => `- ${issue}`)]),
     '',
     target.name === ''
       ? `Explain the selected lines, ${target.start} to ${target.end}.`

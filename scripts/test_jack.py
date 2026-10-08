@@ -518,6 +518,28 @@ class Disagreements(unittest.TestCase):
         told["pane"]["speech"]["text"] = "I've had a look around. The Deep review tab has the map."
         self.assertEqual(bad(jack.check_speech("aaaaaaaa", told)), [])
 
+    def test_a_press_without_the_keyboard_takes_it_and_the_strip_brings_the_pane_back(self):
+        # The twenty-first ui-truth pass (2026-10-07): "eeee" in the prompt after a click on an issue's row, and four
+        # presses on the strip at 125 columns answered "Its pane waits for a wider terminal".
+        loaded = self.now - 60_000
+        shown = lambda t, focused: {"t": t, "k": "shown", "n": "pane", "d": {"isFocused": focused}}
+        ui = lambda t, name, d=None: {"t": t, "k": "ui", "n": name, **({"d": d} if d is not None else {})}
+        clicked = [shown(self.now - 50_000, False), ui(self.now - 40_000, "issue select", 4)]
+        found = bad(jack.check_press_keyboard("aaaaaaaa", clicked, loaded))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("pressed (issue select)", found[0])
+        self.assertEqual(bad(jack.check_press_keyboard("aaaaaaaa", [*clicked, ui(self.now - 39_900, "pane refocused", {"isPlaced": True})], loaded)), [])
+        self.assertEqual(bad(jack.check_press_keyboard("aaaaaaaa", [shown(self.now - 50_000, True), ui(self.now - 40_000, "issue select", 4)], loaded)), [])
+        # Before this load of the module: the copy that did it is gone.
+        self.assertEqual(bad(jack.check_press_keyboard("aaaaaaaa", clicked, self.now - 30_000)), [])
+        waits = "unasked below 144 columns (125 now): placed when the person opens it"
+        restored = [ui(self.now - 20_000, "restore"), ui(self.now - 19_990, "pane restored", {"tab": None}), ui(self.now - 19_980, "pane opened", {"isPlaced": False, "reason": waits})]
+        found = bad(jack.check_press_keyboard("aaaaaaaa", restored, loaded))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("the pane did not come back", found[0])
+        restored[2]["d"] = {"isPlaced": True, "reason": ""}
+        self.assertEqual(bad(jack.check_press_keyboard("aaaaaaaa", restored, loaded)), [])
+
     def test_a_line_gone_from_the_character_with_nothing_saying_so(self):
         # The twentieth ui-truth pass (2026-10-07): a /clear left the character silent, and nothing had taken the line back.
         told = state(self.now)
@@ -544,6 +566,8 @@ class Disagreements(unittest.TestCase):
         self.assertEqual(found, ["aaaaaaaa's strip says “Review”, and the state calls for “Review (1)”"])
         told["shown"]["band"]["texts"][2] = "Review (1)"
         self.assertEqual(bad(jack.check_strip_badges("aaaaaaaa", told)), [])
+        told["shown"]["band"]["columns"] = 30
+        self.assertTrue(any(level == jack.NOTE and "its hint is cut" in text for level, text in jack.check_strip_badges("aaaaaaaa", told)))
         told["pane"]["review"] = {"state": "done", "isUnseen": True}
         self.assertIn("calls for “Review (new)”", " ".join(bad(jack.check_strip_badges("aaaaaaaa", told))))
 
@@ -1107,6 +1131,17 @@ class Issues(unittest.TestCase):
         note = {"id": 7, "file": "stats.py", "line": 1, "kind": "bug", "topic": "division", "text": "What of an empty list?"}
         said = self.found(ledger, "explain", ["stats.py"], explain=explain, notes=[note])
         self.assertTrue(any(level == jack.NOTE and "stands beside issue 1" in text for level, text in said), said)
+        # An explanation written before the issue it shows was found was not told of it (the twenty-first ui-truth pass).
+        (self.folder / "files").mkdir(exist_ok=True)
+        entry = {"v": 1, "path": "stats.py", "symbols": [{"name": "mean", "startLine": 1, "endLine": 2, "detail": {"what": "Averages.", "at": 0}}]}
+        (self.folder / "files" / f"{jack.fnv('stats.py')}-stats.py.json").write_text(json.dumps(entry))
+        focused = {"spot": {"path": "stats.py", "line": 1}, "target": {"name": "mean"}}
+        said = self.found(ledger, "explain", ["stats.py", "Issue: high · line 1 mean of an empty list"], explain=focused)
+        self.assertTrue(any(level == jack.NOTE and "before issue 1 “mean of an empty list” shown under it was found" in text for level, text in said), said)
+        entry["symbols"][0]["detail"]["at"] = 5
+        (self.folder / "files" / f"{jack.fnv('stats.py')}-stats.py.json").write_text(json.dumps(entry))
+        said = self.found(ledger, "explain", ["stats.py", "Issue: high · line 1 mean of an empty list"], explain=focused)
+        self.assertFalse(any("shown under it was found" in text for _, text in said), said)
 
     def test_what_the_audit_read_is_in_the_repository(self):
         env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@x"}
@@ -1676,6 +1711,15 @@ class Cache(unittest.TestCase):
         explain = {"status": "fresh", "spot": {"path": "index.php", "line": 4}, "target": {"name": "Checkboxes", "kind": "section", "startLine": 4, "endLine": 6}, "detail": None}
         found = jack.check_explain_insights("aaaaaaaa", self.told(True, explain=explain), self.root, jack.projects(self.home)[0])
         self.assertTrue(any(level == jack.NOTE and "doubts $pairs, which line 2 sets" in text_ for level, text_ in found), found)
+        # The name doubted is the one the doubt is said of: $mediaId, set only inside the section, not $noFiles, set
+        # outside it and named for what to check (the twenty-first ui-truth pass, 2026-10-07).
+        text = "<?php\n$noFiles = false;\n\nif ($files) {\n  $mediaId = 0;\n}\n"
+        index.write_text(text)
+        entry["print"] = jack.source_print(text)
+        entry["symbols"][0]["detail"]["watch"] = "In the empty case, $mediaId is never set here, so later code that reads it needs to check $noFiles first."
+        (self.folder / "files" / f"{jack.fnv('index.php')}-index.php.json").write_text(json.dumps(entry))
+        found = jack.check_explain_insights("aaaaaaaa", self.told(True, explain=explain), self.root, jack.projects(self.home)[0])
+        self.assertFalse(any("doubts" in text_ for _, text_ in found), found)
 
     def test_an_explanation_in_the_first_person(self):
         explain = {"status": "fresh", "spot": {"path": "index.php", "line": 2}, "target": {"name": "Page setup and includes", "kind": "section", "startLine": 2, "endLine": 42},
