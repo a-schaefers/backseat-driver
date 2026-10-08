@@ -153,6 +153,7 @@ import type { Play, PlayFacts } from '../core/play'
 import { isProblem, keepNotes, parseKeptNotes, stillOpen, withDismissed } from '../core/notes'
 import type { KeptNotes } from '../core/notes'
 import {
+  ALREADY_ASKED,
   detailMarkdown,
   estimatedRows,
   PLAY_PICKS,
@@ -1161,10 +1162,35 @@ function tellPerson($: EngineInterface, text: string): void {
 
 /** A prompt sent in the person's name, written down: it shows in the conversation as theirs. */
 function submitForPerson($: EngineInterface, text: string): Promise<unknown> {
-  noteSaid($, 'prompt', text)
+  // The same question again before the conversation has answered it is not sent twice (the eighteenth ui-truth pass,
+  // 2026-10-07: `e` pressed five times while the first answer was being written, and Claude asked whether it was sent by
+  // accident). Its answer is on its way; after `ASK_AGAIN_MS` a press sends it again, in case it never started.
+  if (unanswered !== null && unanswered.text === text && Date.now() - unanswered.at < ASK_AGAIN_MS) {
+    toastPerson($, ALREADY_ASKED)
 
-  return $.prompt.submit({ text, asUser: true })
+    return Promise.resolve(undefined)
+  }
+  noteSaid($, 'prompt', text)
+  const sent = { text, at: Date.now(), isStarted: false }
+  unanswered = sent
+
+  return $.prompt.submit({ text, asUser: true }).then(
+    result => {
+      sent.isStarted = true
+
+      return result
+    },
+    (error: unknown) => {
+      if (unanswered === sent) unanswered = null
+      throw error
+    },
+  )
 }
+
+/** A prompt sent for the person whose answer has not ended yet: the same one is not sent again meanwhile. */
+let unanswered: { text: string; at: number; isStarted: boolean } | null = null
+/** After this long a prompt that never got its answer may be sent again. */
+const ASK_AGAIN_MS = 5 * 60_000
 
 /** A question in a dialog, written down with the answer it got, or that it got none. */
 async function askPerson($: EngineInterface, question: string, choices: { options: string[]; header: string }): Promise<string> {
@@ -2826,7 +2852,8 @@ async function showDriver($: EngineInterface): Promise<void> {
   try {
     const lease = parseLease(await storeOf($).read(leasePath(dataRoot, repoRoot)))
     const entry = parseSessions(await storeOf($).read(sessionsPath(dataRoot))).sessions.find(entry => entry.session === lease.session)
-    if (entry !== undefined) driver = clockTime(entry.born)
+    // With its day when it is not today's: "started 23:04" read as later today (the eighteenth ui-truth pass, 2026-10-07).
+    if (entry !== undefined) driver = dayTime(entry.born, await $.clock.now())
   } catch {
     // Nothing to say, then.
   }
@@ -2945,13 +2972,23 @@ async function followProject($: EngineInterface, settings: Settings): Promise<vo
   followedStamps = stamps
   const isFirst = before === null
   const isChanged = (name: string): boolean => before === null || stamps[name] !== before[name]
+  // A look has run in this project once the driver has kept its notes, which it does after every look: until then the
+  // empty tab says so here as there (the eighteenth ui-truth pass, 2026-10-07: "No notes. Keep going." here beside
+  // "No look yet" in the driver).
+  const noted = stamps['notes.json']
+  if (noted !== undefined && lookState.lastLookAt === null) {
+    const notedAt = Number(noted.split(':')[1])
+    lookState.lastLookAt = Number.isFinite(notedAt) && notedAt > 0 ? notedAt : await $.clock.now()
+    await showPlay($, settings)
+  }
   try {
     if (isChanged('notes.json')) await followNotes($, isFirst)
     if (isChanged('reviews.json') || isChanged('queue.json') || isChanged('project.json')) await followReviews($, settings, isFirst)
-    if (isChanged('journal.json')) {
-      await showStoredWorkingOf(journalPortsOf($), journalState, repoRoot)
-      await noteSavedFiles($)
-    }
+    // What they are working on is read again at every beat, not only when the journal changes: its time in the editor
+    // is over the last ten minutes, which move on (the eighteenth ui-truth pass, 2026-10-07: "5 s in the editor in the
+    // last 10 minutes" stood for half an hour here, while the driver had cleared it).
+    await showStoredWorkingOf(journalPortsOf($), journalState, repoRoot)
+    if (isChanged('journal.json')) await noteSavedFiles($)
     if (isChanged(FINDINGS_FILE)) await loadIssues($)
   } catch (error) {
     fail($, 'could not take up what the driver wrote', error)
@@ -5204,6 +5241,8 @@ export const register: Register = (on, options) => {
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined && mode !== 'off') {
       trace($, 'hook', 'turn.complete', () => ({ reason: e.reason }))
+      // The turn a prompt sent for the person started has ended: the same question may be asked again.
+      if (unanswered?.isStarted === true) unanswered = null
       // The conversation's own turn ended. An answer means Claude is answering, which ends any wait.
       if (e.reason === 'answer') await noteOutcome($, settings, 'conversation', { ok: true })
       // Whatever Claude's tools did to the working tree during the turn is looked at now.

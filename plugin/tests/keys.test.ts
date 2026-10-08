@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import { MARKER } from '../core/datahome'
 import { FLUSH_MS } from '../core/debuglog'
 import { rowKeysOf } from '../hooks/shown'
-import { FOCUSED_HINT } from '../hooks/pane'
+import { ALREADY_ASKED, FOCUSED_HINT } from '../hooks/pane'
 import { PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 
 type Session = ReturnType<typeof stubSession>
@@ -126,4 +126,30 @@ sessionTest('a dialog asked from the pane hands the keyboard back to it once ans
   await session.clock.settle()
   expect(session.focusAsked.length).toBe(after)
   await away.unmount()
+})
+
+sessionTest('the same question is not sent twice before the conversation has answered it', QUIET, async ($, on) => {
+  // `e` pressed five times while the first answer was being written (the eighteenth ui-truth pass, 2026-10-07).
+  const session = stubSession(on, { head: { 'stats.py': MEAN } })
+  session.reply({ resolved: [], notes: [{ file: 'stats.py', line: 2, kind: 'bug', topic: 'empty-input', note: 'An empty list divides by zero.' }] })
+  await $.session.start(SESSION)
+  await $.command.run(typed('backseat'))
+  await session.clock.settle()
+  session.write('stats.py', `${MEAN}\ndef total(xs):\n    return sum(xs)\n`)
+  await session.clock.advance(14_000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const before = session.submitted.length
+  await ui.press({ key: 'explain' })
+  await session.clock.settle()
+  await ui.press({ key: 'explain' })
+  await session.clock.settle()
+  expect(session.submitted.length - before).toBe(1)
+  expect(session.toasts).toContain(ALREADY_ASKED)
+  // Its answer's turn has ended: the same question may be asked again.
+  await $.turn.complete(session.turnEnded())
+  await session.clock.settle()
+  await ui.press({ key: 'explain' })
+  await session.clock.settle()
+  expect(session.submitted.length - before).toBe(2)
+  await ui.unmount()
 })

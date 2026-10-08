@@ -885,10 +885,28 @@ def check_keys_row(who: str, texts: list[str], rows: list[str]) -> list[tuple[st
 
 def squeezed_pieces(texts: list[str], rows: list[str], chars: int = HEAD_CHARS) -> list[str]:
     """The pieces missing from the screen while a later piece of the same drawing is on it: not below the fold, but
-    squeezed out of the middle. Only pieces long enough to be told apart count, on either side."""
-    where = flows(rows)
-    found = [len(squash(demark(t))) >= 3 and is_on_screen(t, where, chars) for t in texts]
-    last_found = max((i for i, ok in enumerate(found) if ok), default=-1)
+    squeezed out of the middle. Only pieces long enough to be told apart count. They are looked for in the pane's
+    side of a docked screen and in the order drawn, each after the one before it, and a piece drawn more than once
+    never says how far down the drawing reached: one issue's "security · audit" matched another's further up, and
+    the pane's "★ Insight" the conversation's, and a pane cut at the bottom was called squeezed (the eighteenth
+    ui-truth pass, 2026-10-07)."""
+    col = divider(rows)
+    flow = despin(demark(squash(" ".join(row[col + 1:] for row in rows) if col is not None else " ".join(rows))))
+    counts: dict[str, int] = {}
+    for t in texts:
+        counts[t] = counts.get(t, 0) + 1
+    found: list[bool] = []
+    cursor = 0
+    for t in texts:
+        want = despin(squash(demark(t)))
+        if len(want) < 3:
+            found.append(False)
+            continue
+        at = flow.find(want[:chars].rstrip(), cursor)
+        found.append(at != -1)
+        if at != -1:
+            cursor = at + 1
+    last_found = max((i for i, ok in enumerate(found) if ok and counts[texts[i]] == 1), default=-1)
     return [t for i, t in enumerate(texts) if i < last_found and not found[i] and len(squash(demark(t))) >= 3]
 
 
@@ -1114,6 +1132,12 @@ def check_homes(w: dict) -> list[tuple[str, str]]:
             said = now - (entry.get("at") or 0)
             if sid not in live and said <= ALIVE_MS:
                 out.append((BAD, f"session {short(sid)} said {ago(said)} ago that the tutor is on ({entry.get('mode')}), in {tilde(str(entry.get('cwd', '')))}: no such session is running, and it said no goodbye"))
+            elif sid in live and said > ALIVE_MS and live[sid].get("kind") == "background" and not live[sid].get("pid"):
+                # Listed in the background with no process: Claude Code's daemon let it go (it retires a background
+                # session idle for an hour) without a goodbye. Its lease runs out and another session takes the project
+                # (2026-10-07: the owner's php-hello driver, sent to the background at 18:27, its lease taken by their
+                # other session; the tool called it running with its timers stopped).
+                out.append((NOTE, f"session {short(sid)} is listed in the background with no process, and last said {ago(said)} ago that the tutor is on: Claude Code's daemon let it go without a goodbye, and its lease runs out for another session to take"))
             elif sid in live and said > ALIVE_MS:
                 out.append((BAD, f"session {short(sid)} is running and last said {ago(said)} ago that the tutor is on: it says so every five minutes, so its timers do not run"))
         for project in projects(home):
@@ -1396,6 +1420,7 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
         if not minimized and s["debug"] is not None:
             out += check_pick_kept_page(who, log_records(s["debug"])[-400:], now)
             out += check_no_look_yet(who, state, log_records(s["debug"]))
+            out += check_said_twice(who, state, log_records(s["debug"])[-600:])
         if not minimized:
             out += check_keys_row(who, texts, rows)
     elif mode != "off" and rows is not None:
@@ -1589,8 +1614,15 @@ def check_working_share(who: str, state: dict, project: dict | None, now: int) -
     window = int(m.group(3)) * 60_000
     path = where.split(",")[0].strip()
     entries = [e for e in (project.get("journal") or {}).get("entries") or [] if isinstance(e, dict)]
-    on_file = sum(e.get("ms") or 0 for e in entries if e.get("kind") == "focus" and e.get("path") == path and now - (e.get("at") or 0) <= window)
-    if said_ms > on_file + WORKING_SLACK_MS:
+    # A session that does not drive works it out from the journal on disk at each beat of the lease, with nothing of its
+    # own ahead of the file: the window ends when it wrote its state, a beat late at most, and no slack (the eighteenth
+    # ui-truth pass, 2026-10-07: "5 s" for half an hour while the journal held none in the window).
+    is_driver = dig(state, "lease.isDriver") is True
+    ref = now if is_driver else (state.get("at") or now)
+    reach = window if is_driver else window + FOLLOW_GRACE_MS
+    slack = WORKING_SLACK_MS if is_driver else 0
+    on_file = sum(e.get("ms") or 0 for e in entries if e.get("kind") == "focus" and e.get("path") == path and ref - (e.get("at") or 0) <= reach)
+    if said_ms > on_file + slack:
         return [(BAD, f"{who}'s “Working on” says {share} on {path}, and the journal holds {on_file // 1000} s of caret time there in that window")]
     return [(FINE, f"{who}'s “Working on” time agrees with the journal: {share}")]
 
@@ -2469,7 +2501,44 @@ def check_cache(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]]
         stored = read_json(file) or {}
         if isinstance(stored, dict) and stored and settled(mtime_ms(file), max(grace, SHARED_GRACE_MS)) and stored.get("level") != record.get("level"):
             out.append((BAD, f"{who}'s Growth tab places {language} at {record.get('level') or 'no level'}, and progress/{language}.json says {stored.get('level') or 'no level'}"))
+    out += check_following_words(who, state, project, s["home"])
     return out
+
+
+def check_following_words(who: str, state: dict, project: dict, home: pathlib.Path | None) -> list[tuple[str, str]]:
+    """What a session that does not drive says of the one that does, and of the looks: when the driving session
+    started, with its day when that is not the day of the state ("started 23:04" read as later today), and "No notes.
+    Keep going." while the driver has kept no notes, so that no look has run in the project (the driver's own tab
+    said "No look yet"; the eighteenth ui-truth pass, 2026-10-07)."""
+    out: list[tuple[str, str]] = []
+    if dig(state, "pane.watch.state") != "following":
+        return out
+    texts = [t for t in (dig(state, "shown.pane.texts") or []) if isinstance(t, str)]
+    written = state.get("at")
+    holder = (project.get("lease") or {}).get("session")
+    entry = next((e for e in (read_json(home / "sessions.json") or {}).get("sessions", []) if isinstance(e, dict) and e.get("session") == holder), None) if home is not None and holder else None
+    born = entry.get("born") if isinstance(entry, dict) else None
+    for text in texts:
+        m = re.match(r"^Looks and reviews run in your session started (.+)\.$", text)
+        if m is None or not isinstance(born, (int, float)) or not isinstance(written, (int, float)):
+            continue
+        if datetime.fromtimestamp(born / 1000).date() != datetime.fromtimestamp(written / 1000).date() and not re.search(r"yesterday|[A-Z][a-z]{2} \d", m.group(1)):
+            out.append((BAD, f"{who} says the session that drives started “{m.group(1)}”, and it started {day_clock(born, written)}: a time of another day, read as today's"))
+    if "No notes. Keep going." in texts and project.get("notes_at") is None:
+        out.append((BAD, f"{who}'s Play-by-play tab says “No notes. Keep going.” and the driver has kept no notes in {project['id']}: no look has run there yet"))
+    return out
+
+
+def check_said_twice(who: str, state: dict, records: list[dict]) -> list[tuple[str, str]]:
+    """The same prompt sent in the person's name twice with no end of a conversation's turn between: a key pressed
+    again while the answer to the first was being written (the eighteenth ui-truth pass, 2026-10-07: five presses of
+    `e`, and Claude asked whether one was sent by accident). The tutor sends it once now, until the answer's turn ends."""
+    prompts = sorted((item for item in state.get("said") or [] if isinstance(item, dict) and item.get("how") == "prompt" and isinstance(item.get("text"), str)), key=lambda item: item.get("at") or 0)
+    ends = [r.get("t") or 0 for r in records if r.get("k") == "hook" and r.get("n") == "turn.complete"]
+    for a, b in zip(prompts, prompts[1:]):
+        if a["text"] == b["text"] and not any((a.get("at") or 0) < t < (b.get("at") or 0) for t in ends):
+            return [(NOTE, f"{who} sent “{brief(a['text'], 60)}” in the person's name twice, at {clock(a.get('at'))} and {clock(b.get('at'))}, with no end of the conversation's turn between")]
+    return []
 
 
 def print_bundle(w: dict, s: dict) -> None:

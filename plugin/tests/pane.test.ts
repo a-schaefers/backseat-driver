@@ -418,8 +418,10 @@ test('the empty Play-by-play tab says that nothing has been looked at yet, where
   expect(emptyPlayLine({ mode: 'on', watch })).toBe(NO_LOOK_YET)
   expect(emptyPlayLine({ mode: 'on', watch: { ...watch, state: 'settling' } })).toBe(NO_LOOK_YET)
   expect(emptyPlayLine({ mode: 'on', watch: { ...watch, lastLookAt: 1000 } })).toBe(NO_NOTES)
-  // Another session looks, there is no repository, or the tutor is paused: nothing to wait for here.
-  expect(emptyPlayLine({ mode: 'on', watch: { ...watch, state: 'following' } })).toBe(NO_NOTES)
+  // Another session looks: before it has kept notes, nothing has been looked at either (the eighteenth ui-truth pass).
+  expect(emptyPlayLine({ mode: 'on', watch: { ...watch, state: 'following' } })).toBe(NO_LOOK_YET)
+  expect(emptyPlayLine({ mode: 'on', watch: { ...watch, state: 'following', lastLookAt: 1000 } })).toBe(NO_NOTES)
+  // There is no repository, or the tutor is paused: nothing to wait for here.
   expect(emptyPlayLine({ mode: 'on', watch: { ...watch, state: 'no-git' } })).toBe(NO_NOTES)
   expect(emptyPlayLine({ mode: 'paused', watch })).toBe(NO_NOTES)
 })

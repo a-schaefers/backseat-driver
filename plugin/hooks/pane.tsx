@@ -1194,6 +1194,9 @@ function playControls({ Text, Button }: Pick<Kit, 'Text' | 'Button'>, view: Pane
   ]
 }
 
+/** Said when a key asks the conversation the same question again before its answer has ended (the eighteenth ui-truth pass, 2026-10-07). */
+export const ALREADY_ASKED = 'Asked already: the answer is on its way in the conversation.'
+
 /** The Play-by-play tab with no note. */
 export const NO_NOTES = 'No notes. Keep going.'
 /** The same before any look: "No notes" read as an all-clear on code nothing had looked at (the owner, 2026-10-06: "does that mean our codebase is relatively healthy here"). */
@@ -1201,7 +1204,8 @@ export const NO_LOOK_YET = 'No look yet. Save a file, and the play-by-play looks
 
 /** What the Play-by-play tab says with no note: that nothing has been looked at yet, where a look can come, else that there is nothing to say. */
 export function emptyPlayLine(view: Pick<PaneView, 'watch' | 'mode'>): string {
-  const isBeforeLooks = view.watch.lastLookAt === null && view.mode === 'on' && !['following', 'no-git', 'starting'].includes(view.watch.state)
+  // A session that does not drive knows a look has run once the driver has kept its notes (the eighteenth ui-truth pass).
+  const isBeforeLooks = view.watch.lastLookAt === null && view.mode === 'on' && !['no-git', 'starting'].includes(view.watch.state)
 
   return isBeforeLooks ? NO_LOOK_YET : NO_NOTES
 }

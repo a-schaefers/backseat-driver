@@ -510,6 +510,19 @@ class Disagreements(unittest.TestCase):
         s = session(state=told)
         self.assertEqual(bad(jack.check_session(world([s], now=self.now), s, rows)), [])
 
+    def test_a_pane_cut_at_the_bottom_is_not_squeezed_by_a_piece_drawn_twice_or_one_the_conversation_has(self):
+        # One issue's "security · audit" matched another's further up, and the pane's "★ Insight" the conversation's:
+        # a pane cut at the bottom was called squeezed (the eighteenth ui-truth pass, 2026-10-07).
+        texts = ["1: Play-by-play", "high · index.php:9", "security · audit", "Unescaped output", "medium · index.php:56", "security · audit", "Array crashes", "★ Insight", "The menu is built once."]
+        pane = ["1: Play-by-play", "high · index.php:9", "security · audit", "Unescaped output"]
+        talk = ["★ Insight", "an answer in the conversation", "and more of it", "with words", "and words", "still", "more", "rows"]
+        rows = [f"{(talk[i] if i < len(talk) else ''):<40}│{(pane[i] if i < len(pane) else ''):<30}" for i in range(max(len(pane), len(talk)))]
+        self.assertEqual(jack.squeezed_pieces(texts, rows), [])
+        # A piece truly gone from the middle, with a later one that is drawn once on the screen, is still found.
+        pane_squeezed = ["1: Play-by-play", "high · index.php:9", "Unescaped output", "Array crashes"]
+        rows = [f"{(talk[i] if i < len(talk) else ''):<40}│{(pane_squeezed[i] if i < len(pane_squeezed) else ''):<30}" for i in range(max(len(pane_squeezed), len(talk)))]
+        self.assertIn("medium · index.php:56", jack.squeezed_pieces(texts, rows))
+
     def test_a_squeezed_middle_is_reported_under_a_cut_top(self):
         # At 23 columns the tab row was cut and the "Working on" value went missing under it (the eighth ui-truth pass, 2026-10-06).
         told = state(self.now)
@@ -782,6 +795,17 @@ class Disagreements(unittest.TestCase):
         self.project("/tmp/ride", {"session": s["id"], "at": self.now - 4000})
         found = bad(jack.check_homes(world([s], [self.home], self.now)))
         self.assertTrue(any("which draws nowhere" in text for text in found), found)
+
+    def test_a_session_that_stopped_saying_it_is_on(self):
+        entry = {"session": "aaaaaaaa-1111-4000-8000-000000000001", "born": 1, "cwd": "/tmp/ride", "mode": "on", "at": self.now - 24 * 60_000, "leftAt": 0}
+        (self.home / "sessions.json").write_text(json.dumps({"v": 1, "sessions": [entry]}))
+        # Running, and silent for longer than it ever is: its timers do not run.
+        found = bad(jack.check_homes(world([session(pid=4242)], [self.home], self.now)))
+        self.assertTrue(any("its timers do not run" in text for text in found), found)
+        # Listed in the background with no process: the daemon let it go (2026-10-07, the owner's php-hello driver).
+        found = jack.check_homes(world([session(kind="background", bg="aaaaaaaa")], [self.home], self.now))
+        self.assertEqual([text for text in bad(found) if "aaaaaaaa" in text], [])
+        self.assertTrue(any(level == jack.NOTE and "listed in the background with no process" in text for level, text in found), found)
 
     def test_a_session_that_said_it_was_on_and_is_gone_without_a_goodbye(self):
         entry = {"session": "dead0000-0000-4000-8000-000000000000", "born": 1, "cwd": "/tmp/ride", "mode": "on", "at": self.now - 30_000, "leftAt": 0}
@@ -1448,6 +1472,38 @@ class Cache(unittest.TestCase):
         found = bad(jack.check_working_share("aaaaaaaa", told, jack.projects(self.home)[0], self.now))
         self.assertEqual(len(found), 1, found)
         self.assertIn("the journal holds 7 s of caret time there", found[0])
+        # A session that does not drive works it out from the journal on disk at each beat: the window ends when it
+        # wrote its state, a beat late at most, with no slack ("5 s" for half an hour: the eighteenth ui-truth pass).
+        follower = self.told(False, working={"said": "", "inferred": "", "where": "index.php, line 27", "share": "5 s in the editor in the last 10 minutes"})
+        self.write(self.folder / "journal.json", {"entries": [{"kind": "focus", "at": self.now - 26 * 60_000, "ms": 5000, "path": "index.php", "lines": [[27, 27]], "where": ""}], "sittings": []}, 0)
+        found = bad(jack.check_working_share("aaaaaaaa", follower, jack.projects(self.home)[0], self.now))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("the journal holds 0 s of caret time there", found[0])
+        self.write(self.folder / "journal.json", {"entries": [{"kind": "focus", "at": self.now - 60_000, "ms": 5000, "path": "index.php", "lines": [[27, 27]], "where": ""}], "sittings": []}, 0)
+        self.assertEqual(bad(jack.check_working_share("aaaaaaaa", follower, jack.projects(self.home)[0], self.now)), [])
+
+    def test_what_a_session_that_does_not_drive_says_of_the_driver_and_of_the_looks(self):
+        # "started 23:04" read as later today, and "No notes. Keep going." where no look had run (the eighteenth ui-truth pass, 2026-10-07).
+        written = jack.now_ms()
+        born = written - 30 * 3_600_000
+        (self.home / "sessions.json").write_text(json.dumps({"v": 1, "sessions": [{"session": "other", "born": born, "cwd": self.root, "mode": "on", "at": written, "leftAt": 0}]}))
+        told = self.told(False, watch={"state": "following", "lastLookAt": None, "line": "On."})
+        told["at"] = written
+        told["shown"]["pane"]["texts"] = [f"Looks and reviews run in your session started {jack.clock(born)[:5]}.", "No notes. Keep going."]
+        found = " ".join(bad(jack.check_following_words("aaaaaaaa", told, jack.projects(self.home)[0], self.home)))
+        self.assertIn("a time of another day, read as today's", found)
+        self.assertIn("“No notes. Keep going.” and the driver has kept no notes", found)
+        told["shown"]["pane"]["texts"] = [f"Looks and reviews run in your session started yesterday {jack.clock(born)[:5]}.", "No look yet. Save a file, and the play-by-play looks at the change."]
+        self.assertEqual(bad(jack.check_following_words("aaaaaaaa", told, jack.projects(self.home)[0], self.home)), [])
+
+    def test_the_same_prompt_sent_twice_before_its_answer(self):
+        # `e` pressed five times while the first answer was being written (the eighteenth ui-truth pass, 2026-10-07).
+        said = [{"at": 1000, "how": "prompt", "text": "Explain issue 2."}, {"at": 5000, "how": "prompt", "text": "Explain issue 2."}]
+        found = jack.check_said_twice("aaaaaaaa", {"said": said}, [])
+        self.assertTrue(any(level == jack.NOTE and "twice" in text for level, text in found), found)
+        ended = [{"k": "hook", "n": "turn.complete", "t": 3000}]
+        self.assertEqual(jack.check_said_twice("aaaaaaaa", {"said": said}, ended), [])
+        self.assertEqual(jack.check_said_twice("aaaaaaaa", {"said": [said[0], {**said[1], "text": "Explain issue 3."}]}, []), [])
 
     def test_an_audits_insight_credited_to_a_review_that_does_not_hold_it(self):
         (pathlib.Path(self.root) / "stats.py").write_text("def mean(xs):\n    return sum(xs) / len(xs)\n")

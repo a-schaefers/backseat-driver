@@ -7,6 +7,7 @@ import type { Lease } from '../core/lease'
 import { clockTime } from '../core/clock'
 import { sourcePrint } from '../core/knowledge'
 import { emptyProfile, withHush } from '../core/profiles'
+import { NO_LOOK_YET, NO_NOTES, NOT_CLEAR } from '../hooks/pane'
 import type { Note } from '../types'
 import { COMPOSE, DATA_HOME, PANE, ROOT, SESSION, SESSION_ID, sessionTest, stubSession, typed } from './kit'
 
@@ -237,6 +238,41 @@ const review = (commit: string, title: string, text: string) => ({ commit, subje
 const noteOf = (id: number, topic: string, text: string): Note => ({ id, file: 'stats.py', line: 1, kind: 'tip', topic, text })
 const keptNotes = (notes: Note[]) => ({ v: 1, notes, dismissed: [], prints: { 'stats.py': sourcePrint(MEAN) } })
 const waiting = (digit: string, title: string, at: number) => ({ hash: digit.repeat(40), title, at, isReviewed: false, attempts: 0 })
+
+sessionTest('a session that does not drive says no look has run until the driver keeps notes', QUIET, async ($, on) => {
+  // "No notes. Keep going." there beside "No look yet" in the driver (the eighteenth ui-truth pass, 2026-10-07).
+  const session = stubSession(on, { head: { 'stats.py': MEAN }, data: { [LEASE]: { v: 1, session: OTHER, at: 0 } } })
+  await start($, session)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: NO_LOOK_YET })).toBeDefined()
+  session.disk.set(`${DATA_HOME}/${PROJECT}/notes.json`, JSON.stringify(keptNotes([])))
+  await session.clock.advance(LEASE_BEAT_MS + LEASE_SLACK_MS)
+  expect(await ui.find({ type: 'Text', text: NO_NOTES })).toBeDefined()
+  await ui.unmount()
+})
+
+sessionTest("a session that does not drive lets what they are working on age with the last ten minutes", QUIET, async ($, on) => {
+  // "5 s in the editor in the last 10 minutes" stood for half an hour there (the eighteenth ui-truth pass, 2026-10-07).
+  const session = stubSession(on, {
+    head: { 'stats.py': MEAN },
+    data: {
+      [LEASE]: { v: 1, session: OTHER, at: 0 },
+      [`${PROJECT}/journal.json`]: { said: null, inferred: null, entries: [{ at: 1000, kind: 'focus', path: 'stats.py', ms: 5000, lines: [[1, 1]], where: 'mean' }], sittings: [] },
+    },
+  })
+  await start($, session)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const texts = async (): Promise<string[]> => (await ui.findAll({ type: 'Text' })).map(found => String((found as { text?: string }).text ?? ''))
+  expect((await texts()).some(text => text.includes('5 s in the editor'))).toBe(true)
+  // The driver has kept the lease all along; nothing new is written, and the ten minutes move on.
+  for (let at = 0; at < 11; at += 1) {
+    session.disk.set(`${DATA_HOME}/${LEASE}`, JSON.stringify({ v: 1, session: OTHER, at: await session.clock.now() }))
+    await session.clock.advance(60_000)
+  }
+  expect((await texts()).some(text => text.includes('in the editor'))).toBe(false)
+  expect(await ui.find({ type: 'Text', text: NOT_CLEAR })).toBeDefined()
+  await ui.unmount()
+})
 
 sessionTest('a session that does not drive walks the review history too', QUIET, async ($, on) => {
   // "Review 1 of 2" with no `p: older` there (the eighteenth ui-truth pass, 2026-10-07).
