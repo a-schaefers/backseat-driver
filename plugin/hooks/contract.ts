@@ -3,7 +3,7 @@ import type { PromptComposeSection } from 'claude-code'
 /** The id of the section this plugin adds to the system prompt. */
 export const CONTRACT_ID = 'backseat-driver:contract'
 
-/** A SKILL.md or persona file without its YAML frontmatter. */
+/** A persona file without its YAML frontmatter. */
 /**
  * Instructions without their HTML comments. A prompt file credits where its
  * text comes from in a comment, which is for the people reading the file and
@@ -66,7 +66,7 @@ export function personaPrompt(halves: { engineering: string; voice: string }): s
 
 /** What the tutor is told, in the order it reads it. */
 export type TutorPrompt = {
-  /** The body of skills/tutor/SKILL.md. */
+  /** The body of prompts/contract.md. */
   contract: string
   /** Mechanisms this session offers and what is known about the person. */
   extras: readonly string[]

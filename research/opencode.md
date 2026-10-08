@@ -24,7 +24,7 @@ Pull the host-neutral half of the mod into `plugin/core/`, behind one `Host` int
 | Pure logic | `watcher`, `git`, `diff`, `noise`, `journal`, `attention`, `enclosing`, `glance`, `knowledge`, `explain-prompts`, `notes`, `prompts`, `review`, `reviewqueue`, `progress`, `authorship`, `profiles`, `project`, `languages`, `store`, `locks`, `lease`, `scheduler`, `sensor`, `play`, `gate`, `health`, `status`, `focus`, `working`, `questions`, `forget`, `mode`, `datahome`, `storage`, `hash`, `avatar`, `debuglog`, `update` | No |
 | Engines with ports | `explainer`, `recorder` | No |
 | Kernel | `kernel.js`, `core.ts` | No |
-| Text the models read | `prompts/*.md`, `personas/**`, `skills/tutor/SKILL.md` | No |
+| Text the models read | `prompts/*.md`, `personas/**` | No |
 | Domain types | `plugin/types/index.d.ts` (all but its `declare module 'claude-code'` block) | No |
 | Type imports only | `settings.ts` (`PluginOptions`), `contract.ts` (`PromptComposeSection`) | Yes, types only |
 | Drawing | `pane.tsx` (`Elements`) | Yes |
@@ -54,7 +54,7 @@ clients/opencode/               the OpenCode client (dev side of the repo; not i
   package.json                  name backseat-driver-opencode, exports ./server and ./tui
   src/server.ts                 server plugin: Host built from the SDK client and Bun
   src/tui.tsx                   TUI plugin: sidebar, Backseat route, dialogs, /backseat
-  build.ts                      bundles src + ../../plugin/core and copies prompts, personas, SKILL.md
+  build.ts                      bundles src + ../../plugin/core and copies prompts (the contract among them), personas
 editors/                        the editor plugins (on claude/editor-plugins), unchanged
 ```
 
@@ -90,7 +90,7 @@ What is not a port, because it is how a client is wired into its host and nothin
 | Settings | `userConfig` in `plugin.json`, `/config` | plugin options in `opencode.json`, defaults from `plugin.json` |
 | Update and uninstall | `claude plugin`, `update.ts` | OpenCode installs npm plugins by itself; `/backseat update` says so |
 
-What stays exactly one copy: the contract (`SKILL.md`), the prompts, the personas and their art, the kernel, every reply parser, the scan cadence, the play-by-play's pacing, the review queue, Explain's freshness rule, the journal, progress levels, profiles, hushes, the store and its locks, the lease, the debug log, and the status lines. The tool bodies are shared too: `tools.ts` turns an input into an answer, and each adapter only declares the tool.
+What stays exactly one copy: the contract (`prompts/contract.md`), the prompts, the personas and their art, the kernel, every reply parser, the scan cadence, the play-by-play's pacing, the review queue, Explain's freshness rule, the journal, progress levels, profiles, hushes, the store and its locks, the lease, the debug log, and the status lines. The tool bodies are shared too: `tools.ts` turns an input into an answer, and each adapter only declares the tool.
 
 ## The pane in OpenCode
 
@@ -135,7 +135,7 @@ Each one ends green on `npm run check` and, for Claude Code, a live check in `sc
 
 **O4. OpenCode TUI plugin.** The sidebar, the Backseat route with the four tabs and their keys, the first-run questions as `DialogSelect`, `/backseat` and its words, the OpenCode default character, toasts.
 
-**O5. Ship.** `build.ts` bundles to one file per entry, with prompts, personas and `SKILL.md` copied in. Publish `backseat-driver-opencode` to npm. Add a CI job that runs the OpenCode tests against a pinned OpenCode version (the `experimental.` hooks can move), plus a nightly on the newest, the way `check.yml` and `nightly.yml` do for Claude Code. Add one line and the install steps to the README, and CLAUDE.md sections for the core, the `Host` and the OpenCode client.
+**O5. Ship.** `build.ts` bundles to one file per entry, with prompts (the contract among them) and personas copied in. Publish `backseat-driver-opencode` to npm. Add a CI job that runs the OpenCode tests against a pinned OpenCode version (the `experimental.` hooks can move), plus a nightly on the newest, the way `check.yml` and `nightly.yml` do for Claude Code. Add one line and the install steps to the README, and CLAUDE.md sections for the core, the `Host` and the OpenCode client.
 
 ## Setup, once it ships
 

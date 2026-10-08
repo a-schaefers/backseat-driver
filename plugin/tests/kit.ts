@@ -62,8 +62,8 @@ export const DATA_HOME = `${HOME}/.local/share/backseat-driver`
 /** The fake repository's root. */
 export const ROOT = '/work'
 
-/** A stand-in for skills/tutor/SKILL.md, frontmatter included. */
-export const SKILL_FILE = '---\nname: tutor\n---\n\n# Contract\n\nThe user writes the code.\n'
+/** A stand-in for prompts/contract.md. */
+export const CONTRACT_FILE = '# Contract\n\nThe user writes the code.\n'
 
 /** The system prompt as Claude Code composes it, cut down to what the tests look at. */
 export const ENGINE_SECTIONS = [
@@ -510,7 +510,7 @@ export function stubSession(on: On, options: StubOptions = {}) {
   })
 
   on('fs.read', ($, e) => {
-    if (e.path.endsWith('/skills/tutor/SKILL.md')) return { value: SKILL_FILE }
+    if (e.path.endsWith('/prompts/contract.md')) return { value: CONTRACT_FILE }
     if (e.path.endsWith('/prompts/play-by-play.md')) return { value: 'PLAY-BY-PLAY INSTRUCTIONS\n' }
     if (e.path.endsWith('/prompts/deep-review.md')) return { value: 'DEEP REVIEW INSTRUCTIONS\n' }
     if (e.path.endsWith('/prompts/explain.md')) return { value: 'EXPLAIN INSTRUCTIONS\n' }

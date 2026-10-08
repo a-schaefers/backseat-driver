@@ -1214,8 +1214,8 @@ async function loadTutor($: EngineInterface, chosen: Persona): Promise<void> {
   const root = $.plugin.root
   const file = (path: string): Promise<string> => $.fs.read(`${root}/${path}`)
   // Read side by side: `/backseat` waits for these, and nothing else.
-  const [skill, lookText, reviewText, explainText, progressFile, bubbleText, engineering, voice] = await Promise.all([
-    file('skills/tutor/SKILL.md'),
+  const [contractText, lookText, reviewText, explainText, progressFile, bubbleText, engineering, voice] = await Promise.all([
+    file('prompts/contract.md'),
     file('prompts/play-by-play.md'),
     file('prompts/deep-review.md'),
     file('prompts/explain.md'),
@@ -1226,7 +1226,7 @@ async function loadTutor($: EngineInterface, chosen: Persona): Promise<void> {
     resolveHome($),
   ])
   // Credits in HTML comments stay in the files and never reach a model.
-  contract = stripComments(stripFrontmatter(skill))
+  contract = stripComments(contractText)
   lookInstructions = stripComments(lookText)
   reviewInstructions = stripComments(reviewText)
   explainInstructions = stripComments(explainText)

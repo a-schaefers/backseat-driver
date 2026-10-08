@@ -36,7 +36,7 @@ Stance: the project is against Claude writing the user's code, not neutral. Whil
 ### Decisions (do not re-propose rejected ones; do not design around the rest)
 
 - Learning happens through the user's own projects. The tutor never makes up exercises, quizzes or homework (the contract forbids them). Lessons are the exception the person chooses (below). The README calls nothing "not a linter" (the owner: it's quite similar to one). The tutor chimes in from the background; the user tunes how often, how deeply, in what voice.
-- One command, then hands off: `/backseat` (owner, 2026-10-06: one name everywhere; `/bsd`, `/backseat-driver` and `/backseat-driver-update` are gone, and `/backseat update` fetches a release). Every setting has a default, every question is skippable, setup never blocks work. A language first met mid-session gets defaults; its questions are offered in the pane, never interrupting.
+- One command, then hands off: `/backseat` (owner, 2026-10-06: one name everywhere; `/bsd`, `/backseat-driver` and `/backseat-driver-update` are gone, and `/backseat update` fetches a release). Nothing else the plugin ships shows in the slash menu (owner, 2026-10-07: `/backseat-driver:tutor` in the autocompletion "confuse the user. /backseat only"): the contract is `prompts/contract.md`, not a skill. Until that day it was `skills/tutor/SKILL.md`, a skill a person could type with mods off, a conversational tutor without the rest; it is gone, and the plugin ships no skill or command file. Every setting has a default, every question is skippable, setup never blocks work. A language first met mid-session gets defaults; its questions are offered in the pane, never interrupting.
 - One profile per language, never per project (`python`, not "python project 1"). It matters only once the user works in that language. The tutor may read other profiles (e.g. explain Rust via Python).
 - The user has the last word. Pushback is weighed. A contested point goes to the deep review model for a second opinion, and the user is told. "Do it my way" always stands. The play-by-play may keep flagging until the user hushes it; a hush saves to that language's profile at once.
 - The pane's default view is the play-by-play. Tabs: 1 Play-by-play, 2 Deep review, 3 Explain, 4 Growth, 5 Lessons, 6 Settings.
@@ -90,7 +90,7 @@ Stance: the project is against Claude writing the user's code, not neutral. Whil
 
 ## Status
 
-Every roadmap milestone is built and was seen working in short scripted real sessions on 2.1.289. Nobody has done real work with it yet, so the prompts (`plugin/prompts/`, `plugin/skills/tutor/SKILL.md`) are what will most likely need changing.
+Every roadmap milestone is built and was seen working in short scripted real sessions on 2.1.289. Nobody has done real work with it yet, so the prompts (`plugin/prompts/`, the contract `plugin/prompts/contract.md` above all) are what will most likely need changing.
 
 - Tests only:
   - the slow-down near plan limits (a session can't be put at 95% on demand)
@@ -141,9 +141,9 @@ The root is a plugin marketplace (`.claude-plugin/marketplace.json`, one entry w
 ```text
 .claude-plugin/marketplace.json
 plugin/.claude-plugin/plugin.json   manifest + userConfig (source of truth for settings and defaults)
-plugin/skills/tutor/SKILL.md        the contract
+plugin/prompts/contract.md          the contract (plain text the mod reads: no skill, so nothing of it is in the slash menu)
 plugin/personas/{voice,engineering}/*.md
-plugin/prompts/                     play-by-play.md, deep-review.md, explain.md, progress.md, speech-bubble.md
+plugin/prompts/                     play-by-play.md, deep-review.md, explain.md, progress.md, speech-bubble.md, contract.md
 plugin/lessons/*.md                 learning paths, one per file, found at switch-on (see "Lessons")
 LICENSE, plugin/LICENSE             PolyForm Noncommercial 1.0.0, identical
 COMMERCIAL-LICENSE.md (also plugin/) the commercial terms, identical
@@ -246,8 +246,8 @@ scripts/outage-proxy.py 18080    # a proxy for staging an outage in a live sessi
 
 ## Architecture
 
-- Contract: `SKILL.md`, the single source of tutor behavior. The mod injects it and never carries a copy.
-  - `SKILL.md` describes behavior only. Anything naming this plugin's commands, tools or agents goes in `SESSION_NOTES` in `contract.ts`, so the skill works alone (as `/backseat-driver:tutor`, named by the plugin, not a command of the mod) with mods off. That fallback is a conversational tutor without background reviews.
+- Contract: `prompts/contract.md`, the single source of tutor behavior. The mod injects it and never carries a copy. Never put it back under `skills/` or add a `commands/` file: either shows in the slash menu beside `/backseat` (see "Product").
+  - The contract describes behavior only. Anything naming this plugin's commands, tools or agents goes in `SESSION_NOTES` in `contract.ts`, which keeps it host-neutral for the OpenCode client (`research/opencode.md`).
 - Personas: the chosen engineering file, then the voice file, are injected after the contract and into both review prompts. Each persona file states which half it is and that it leaves the other alone; a new persona file needs that paragraph too.
   - `research/personas/` holds the research behind each persona (voice and engineering judgment, with sources, folklore marked) and where the prompts diverge from it (2026-10-05). Read it before changing a persona prompt; a new persona gets a research file first.
 - Mod: `plugin/hooks/` (the adapter) over `plugin/core/` (shared). One command via `$.command.register`, `/backseat`; tools via `$.tool.register` (`hush`, `unhush`, `record`, `lookup`, `progress`, `lesson`, `profile`, `working`, `activity`, `issue`); pane via `$.ui.open` plus a `ui.render` hook, contents in `$.state`. Why a mod, not a skill plus a monitor: a monitor would turn every save into a conversation turn on the main model. The mod reviews out of band.
