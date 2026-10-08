@@ -14,6 +14,7 @@ import {
   reviewDigest,
   splitReview,
   withReview,
+  withNamesBack,
   withReviewNotes,
 } from '../core/project'
 import type { KeptInsight } from '../core/project'
@@ -93,12 +94,27 @@ test('insightsFor shows an insight only beside the exact code it was written abo
   // The first look around keeps its insights under HEAD as it stood: credited to it, not to a review (the ninth ui-truth pass, 2026-10-07).
   expect(insightLine(onSymbol, 1)).toBe('Population variance. (from the first look around, at aaa1111)')
   expect(insightLine(onSymbol, 2)).toBe('Population variance. (deep review of aaa1111)')
+  // Under a symbol, one about the whole file says so (the sixteenth ui-truth pass, 2026-10-07).
+  expect(insightLine(onFile, undefined, true)).toBe('No tests cover this file. (deep review of aaa1111, about the whole file)')
+  expect(insightLine({ ...onFile, commit: '' }, undefined, true)).toBe('No tests cover this file. (about the whole file)')
   // An audit's insight is the audit's: no review of that commit holds it (the fourteenth ui-truth pass, 2026-10-07).
   expect(insightLine({ ...onSymbol, source: 'audit' })).toBe('Population variance. (from the audit, at aaa1111)')
   // Kept so, and read back so.
   const audited = withReviewNotes(emptyProject('/work'), { overview: '', files: [], insights: [{ file: 'stats.py', symbol: '', text: 'No tests.' }], decisions: [] }, 'aaa1111', 5, () => ({ print: 'file', of: 'file' }), 'audit')
   expect(parseProject(JSON.parse(JSON.stringify(audited)), '/work').insights[0]?.source).toBe('audit')
   expect(withReviewNotes(emptyProject('/work'), { overview: '', files: [], insights: [{ file: 'stats.py', symbol: '', text: 'No tests.' }], decisions: [] }, 'aaa1111', 5, () => ({ print: 'file', of: 'file' })).insights[0]?.source).toBe(undefined)
+})
+
+test('an insight kept with no name takes back the name its review gave it', async () => {
+  // Kept while its file had no outline, it had lost "$tableSuffix" and showed under every part of index.php (the sixteenth ui-truth pass).
+  const lost: KeptInsight = { file: 'index.php', symbol: '', text: 'Table names are built from a suffix: check it.', commit: 'abc1234', at: 1, print: 'p', of: 'file' }
+  const whole: KeptInsight = { ...lost, text: 'No tests cover this file.' }
+  const project = { ...emptyProject('/work'), insights: [lost, whole] }
+  const said = ['index.php, $tableSuffix: Table names are built from a suffix: check it.', 'index.php: No tests cover this file.']
+  const named = withNamesBack(project, said)
+  expect(named.insights.map(insight => insight.symbol)).toEqual(['$tableSuffix', ''])
+  // Nothing to name: the same object, so that nothing is written.
+  expect(withNamesBack(named, said)).toBe(named)
 })
 
 test('what the other two jobs are told: a brief for the play-by-play, a digest for the next review', async () => {

@@ -290,13 +290,38 @@ export function insightsFor(
  * credited them to "a deep review of 570e787" that the Deep review tab did
  * not have: the ninth ui-truth pass, 2026-10-07).
  */
-export function insightLine(insight: KeptInsight, surveyAt?: number): string {
-  if (insight.commit === '') return insight.text
+export function insightLine(insight: KeptInsight, surveyAt?: number, isWholeFile = false): string {
+  // Under a symbol, one about the whole file says so: it read as about the code in focus (the sixteenth ui-truth pass).
+  const about = isWholeFile ? ', about the whole file' : ''
+  if (insight.commit === '') return isWholeFile ? `${insight.text} (about the whole file)` : insight.text
   // An audit's, kept under HEAD: no review of that commit holds it (the fourteenth ui-truth pass, 2026-10-07).
-  if (insight.source === 'audit') return `${insight.text} (from the audit, at ${insight.commit})`
-  if (surveyAt !== undefined && insight.at === surveyAt) return `${insight.text} (from the first look around, at ${insight.commit})`
+  if (insight.source === 'audit') return `${insight.text} (from the audit, at ${insight.commit}${about})`
+  if (surveyAt !== undefined && insight.at === surveyAt) return `${insight.text} (from the first look around, at ${insight.commit}${about})`
 
-  return `${insight.text} (deep review of ${insight.commit})`
+  return `${insight.text} (deep review of ${insight.commit}${about})`
+}
+
+/**
+ * An insight kept for the whole file under no name, whose review or first
+ * look around named it ("index.php, $tableSuffix: …"), takes its name back:
+ * kept while the file had no outline, it had lost it, and nameless it showed
+ * under every part of the file (the sixteenth ui-truth pass, 2026-10-07).
+ * `said` are the reviews' and the look around's insights as they listed them.
+ */
+export function withNamesBack(project: ProjectKnowledge, said: readonly string[]): ProjectKnowledge {
+  let isChanged = false
+  const insights = project.insights.map(insight => {
+    if (insight.of !== 'file' || insight.symbol !== '') return insight
+    const before = `${insight.file}, `
+    const after = `: ${insight.text}`
+    const named = said.find(line => line.startsWith(before) && line.endsWith(after) && line.length > before.length + after.length)
+    if (named === undefined) return insight
+    isChanged = true
+
+    return { ...insight, symbol: named.slice(before.length, named.length - after.length) }
+  })
+
+  return isChanged ? { ...project, insights } : project
 }
 
 /** The overview with the commit it was written at, or '' when there is none. */

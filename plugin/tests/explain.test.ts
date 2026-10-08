@@ -788,6 +788,10 @@ test('a deep review insight under a name the outline does not know is tied to th
   expect(await w.explainer.printFor('stats.py', '$m')).toEqual({ print: variance?.print, of: 'symbol', symbol: 'variance' })
   // Not in the file at all: it keeps its name, and nothing shows it.
   expect((await w.explainer.printFor('stats.py', 'nothing_here'))?.symbol).toBe('nothing_here')
+  // In a file not mapped yet, it keeps its name too: dropped, it showed under every part of the file (the sixteenth
+  // ui-truth pass, 2026-10-07: a first look around ran before index.php was mapped).
+  const unmapped = world({ 'run.php': '<?php\n$tableSuffix = "_2024";\necho $tableSuffix;\n' })
+  expect(await unmapped.explainer.printFor('run.php', '$tableSuffix')).toMatchObject({ of: 'file', symbol: '$tableSuffix' })
   expect(mentionedAt(STATS.split('\n'), 'mean(xs)')).toBe(1)
   expect(mentionedAt(STATS.split('\n'), '')).toBe(-1)
   expect(mentionedAt(['x = cm + 1'], '$cm')).toBe(1)

@@ -1295,6 +1295,7 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
             out.append((BAD, f"{who} has {len(notes)} open note(s) in its pane, and notes.json, written {ago(now - (project['notes_at'] or 0))} ago, lacks {len(lost)} of them: a restart would lose them"))
     out += check_cache(w, s, project)
     out += check_issues(w, s, project)
+    out += check_lately(who, state, w)
     out += check_notes_lines(who, state, root)
     out += check_explain_fresh(who, state, root, project)
     out += check_explain_insights(who, state, root, project)
@@ -1380,6 +1381,7 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
                     out.append((BAD, f"{who}'s {where} stands scrolled {scroll.get('offset')} row(s) past its top since the {opened_tab.get('d')} tab was opened at {clock(opened_tab.get('t'))}, and nobody scrolled it: its controls and keys row are above the frame"))
         if not minimized and s["debug"] is not None:
             out += check_pick_kept_page(who, log_records(s["debug"])[-400:], now)
+            out += check_no_look_yet(who, state, log_records(s["debug"]))
         if not minimized:
             out += check_keys_row(who, texts, rows)
     elif mode != "off" and rows is not None:
@@ -1627,6 +1629,21 @@ def check_explain_voice(who: str, state: dict) -> list[tuple[str, str]]:
     return [(NOTE, f"{who}'s Explain tab says of “{target}”, in the first person: “{brief(found, 110)}”")]
 
 
+def check_no_look_yet(who: str, state: dict, records: list[dict]) -> list[tuple[str, str]]:
+    """The empty Play-by-play tab says "No look yet" only before the first look since switch-on: a reload (a sync, a
+    change in /config) kept the session on and lost the time of its last look (the sixteenth ui-truth pass, 2026-10-07)."""
+    texts = [str(x) for x in (dig(state, "shown.pane.texts") or [])]
+    if not any(x.startswith("No look yet.") for x in texts) and dig(state, "pane.watch.lastLookAt") is not None:
+        return []
+    fresh = [r.get("t") or 0 for r in records if r.get("k") == "start" and r.get("n") == "engaging" and isinstance(r.get("d"), dict) and r["d"].get("isFresh") is True]
+    since = max(fresh, default=0)
+    looked = [r for r in records if r.get("k") == "look" and r.get("n") == "done" and (r.get("t") or 0) > since]
+    if not looked:
+        return []
+    what = "says “No look yet”" if any(x.startswith("No look yet.") for x in texts) else "has no last look on record"
+    return [(BAD, f"{who} {what}, and it looked at {clock(looked[-1].get('t'))}, since it was switched on")]
+
+
 def check_pick_kept_page(who: str, records: list[dict], now: int) -> list[tuple[str, str]]:
     """A pick in the Explain outline moves the mark, never the page: the window as the last drawing before the latest
     pick had it, against the latest drawing since, with no scroll by anyone between. A shorter drawing while the
@@ -1670,6 +1687,38 @@ def check_explain_insights(who: str, state: dict, root: str, project: dict | Non
     file_print = source_print(text)
     unreachable = [i for i in (known.get("insights") or []) if isinstance(i, dict) and i.get("file") == path and i.get("of") == "file"
                    and i.get("symbol") and i["symbol"] not in names and i.get("print") == file_print and mentioned_at(lines, str(i["symbol"])) == -1]
+    # An insight kept for the file under no name, which its review or first look around named: it lost the name while
+    # the file had no outline, and shows under every part of it (the sixteenth ui-truth pass, 2026-10-07).
+    said = [str(x) for x in ((known.get("survey") or {}).get("insights") or [])] + [str(x) for r in (project.get("reviews") or []) if isinstance(r, dict) for x in (r.get("insights") or [])]
+    for i in (known.get("insights") or []):
+        if not isinstance(i, dict) or i.get("file") != path or i.get("of") != "file" or i.get("symbol"):
+            continue
+        named = next((x for x in said if x.startswith(f"{path}, ") and x.endswith(f": {i.get('text')}") and len(x) > len(path) + 4 + len(str(i.get("text")))), None)
+        if named is not None:
+            out.append((BAD, f"project.json keeps the insight “{brief(i.get('text'), 60)}” for all of {path} under no name, and its review named it {named[len(path) + 2:len(named) - len(str(i.get('text'))) - 2]}: it shows under every part of the file"))
+            break
+    # Shown under a symbol, an insight about the whole file says so: it read as about the code in focus.
+    target_name = dig(explain, "target.name")
+    whole = {str(i.get("text")) for i in (known.get("insights") or []) if isinstance(i, dict) and i.get("file") == path and i.get("of") == "file" and not i.get("symbol")}
+    if target_name:
+        unsaid = [x for x in (explain.get("insights") or []) if any(str(x).startswith(w) for w in whole) and "about the whole file" not in str(x)]
+        if unsaid:
+            out.append((BAD, f"{who}'s Explain tab shows “{brief(unsaid[0], 60)}” under “{target_name}” without saying it is about the whole file"))
+    # A cached explanation that doubts a name the file sets outside its lines: written before the prompt forbade it,
+    # it stands while the code reads the same (the fifteenth and sixteenth ui-truth passes, 2026-10-07).
+    doubt = re.compile(r"(without a (visible )?start(ing)? value|never set|not set|unset|set earlier)", re.I)
+    for s in symbols:
+        detail = s.get("detail") if isinstance(s.get("detail"), dict) else {}
+        for field in ("what", "how", "why", "watch"):
+            for sentence in re.split(r"(?<=[.!?])\s+", str(detail.get(field) or "")):
+                if not doubt.search(sentence):
+                    continue
+                for name in re.findall(r"\$\w+", sentence):
+                    setting = next((n for n, line in enumerate(lines, 1) if re.match(rf"\s*{re.escape(name)}\s*=[^=]", line)
+                                    and not ((s.get("startLine") or 0) <= n <= (s.get("endLine") or 0))), None)
+                    if setting is not None:
+                        out.append((NOTE, f"the cached explanation of “{s.get('name')}” in {path} doubts {name}, which line {setting} sets: “{brief(sentence, 90)}”"))
+                        break
     if unreachable:
         quoted = ", ".join(f"“{i['symbol']}”" for i in unreachable[:4])
         out.append((NOTE, f"{who}'s Explain tab can never show {len(unreachable)} insight(s) of the deep reviews on {path}: nothing in the file is named {quoted}"))
@@ -1980,6 +2029,25 @@ def check_issues(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]
                 out.append((BAD, f"the audit of {project['id']} says it read {len(unknown)} file(s) the repository does not have: {', '.join(unknown[:3])}"))
             if (coverage.get("files") or 0) > len(files):
                 out.append((BAD, f"the audit of {project['id']} counts {coverage.get('files')} source files, and git lists {len(files)} files in all"))
+    return out
+
+
+def check_lately(who: str, state: dict, w: dict) -> list[tuple[str, str]]:
+    """The commits the Growth tab cites under "Lately" (`lately` in core/progress.ts: the three latest observations),
+    against the repositories of the projects they name: one no repository here has is history the tab presents as
+    present (the sixteenth ui-truth pass, 2026-10-07: php-hello's commit from before the repository was made again)."""
+    out: list[tuple[str, str]] = []
+    folders = [p for home in w["homes"] for p in projects(home)]
+    for record in (dig(state, "pane.progress.records") or []):
+        if not isinstance(record, dict):
+            continue
+        for seen in list(reversed([o for o in (record.get("observations") or []) if isinstance(o, dict)]))[:3]:
+            named = [p for p in folders if p["id"].rsplit("-", 1)[0] == seen.get("project") and p.get("root")]
+            commit = str(seen.get("commit", ""))
+            if not commit or any(git_out(str(p["root"]), "cat-file", "-t", commit) for p in named if pathlib.Path(str(p["root"])).exists()):
+                continue
+            out.append((NOTE, f"{who}'s Growth tab cites commit {commit[:7]} in {seen.get('project')} under “Lately”, and no repository here has it: history from before that project was made again"))
+            return out
     return out
 
 

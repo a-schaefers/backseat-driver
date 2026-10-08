@@ -174,6 +174,27 @@ sessionTest('the conversation is told which notes are open', async ($, on) => {
   expect(session.contexts[1]?.[0]).toMatch('1. [bug] stats.py:2 (empty-input) What does this do for an empty list?')
 })
 
+sessionTest('a reload keeps the time of the last look: the empty tab does not go back to "No look yet"', async ($, on) => {
+  // After every sync the tab said "No look yet", and `l` blamed switch-on (the sixteenth ui-truth pass, 2026-10-07).
+  const session = stubSession(on)
+  session.reply({ resolved: [], notes: [], issues: [], working_on: '' })
+  await $.session.start(SESSION)
+  await $.command.run(typed('backseat'))
+  await session.clock.settle()
+  session.write('stats.py', MEAN)
+  await session.clock.advance(14_000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: NO_NOTES })).toBeDefined()
+  await ui.unmount()
+  // Loaded again, as a sync or a change in /config loads it: the tutor engages again, not afresh.
+  await $.session.start(SESSION)
+  await session.clock.settle()
+  const again = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await again.find({ type: 'Text', text: NO_NOTES })).toBeDefined()
+  expect(await again.find({ type: 'Text', text: NO_LOOK_YET })).toBeUndefined()
+  await again.unmount()
+})
+
 sessionTest('a paused tutor does not look, and catches up when resumed', async ($, on) => {
   const session = stubSession(on)
   await $.session.start(SESSION)

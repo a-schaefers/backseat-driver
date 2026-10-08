@@ -188,6 +188,7 @@ import {
   reviewDigest,
   splitReview,
   withAudited,
+  withNamesBack,
   withReview,
   withReviewNotes,
   withSurvey,
@@ -3108,6 +3109,7 @@ async function restorePaneFromDisk($: EngineInterface, isFresh: boolean): Promis
   if (path === '') return
   await loadIssues($)
   await mendCoverage($)
+  await mendInsightNames($)
   const kept = parseKeptNotes(await storeOf($).read(path))
   const now = await printsNow($, kept)
   for (const [file, print] of Object.entries(kept.prints)) {
@@ -3369,6 +3371,20 @@ async function mendAuditInsights($: EngineInterface, auditAt: number): Promise<v
     trace($, 'state', "audit's insights credited to the audit", () => ({ at: auditAt }))
   } catch (error) {
     fail($, "could not credit the audit's insights", error)
+  }
+}
+
+/** An insight that lost its name while its file had no outline takes it back from what its review said, once (`withNamesBack`). */
+async function mendInsightNames($: EngineInterface): Promise<void> {
+  if (project === null || repoRoot === '' || dataRoot === '' || !leaseState.isDriver) return
+  const said = [...(project.survey?.insights ?? []), ...reviews.flatMap(review => review.insights ?? [])]
+  if (withNamesBack(project, said) === project) return
+  const root = repoRoot
+  try {
+    project = await updateJson(storeOf($), `${projectDir(dataRoot, repoRoot)}/project.json`, stored => parseProject(stored, root), current => withNamesBack(current, said))
+    trace($, 'state', 'insights named again', () => ({ said: said.length }))
+  } catch (error) {
+    fail($, 'could not name the insights again', error)
   }
 }
 
@@ -3976,10 +3992,12 @@ function stopWatching(): void {
 }
 
 /** Starts the watcher from the working tree as it stands now. `run` is the switch-on this belongs to. */
-async function startWatching($: EngineInterface, settings: Settings, run: number): Promise<void> {
+async function startWatching($: EngineInterface, settings: Settings, run: number, isFresh: boolean): Promise<void> {
   stopWatching()
   lastChangeAt = null
-  lookState.lastLookAt = null
+  // A reload (a sync, a change in /config) keeps the time of the last look, which the pane holds: the empty tab went back
+  // to "No look yet" after every sync, and `l` blamed switch-on (the sixteenth ui-truth pass, 2026-10-07).
+  lookState.lastLookAt = isFresh ? null : ((await read($, watchAtom)).lastLookAt ?? null)
   lookState.failures = 0
   lookState.lookFailure = ''
   lastScanMs = 0
@@ -4161,7 +4179,11 @@ async function startExplaining($: EngineInterface, settings: Settings, run: numb
           now: () => $.clock.now(),
           project: () => ({ name: projectId(root).replace(/-[0-9a-f]{8}$/, ''), overview: project === null ? '' : overviewLine(project) }),
           insights: (path, name, symbolPrint, filePrint, isMentioned) =>
-            project === null ? [] : insightsFor(project, path, name, symbolPrint, filePrint, isMentioned).map(insight => insightLine(insight, project?.survey?.at)),
+            project === null
+              ? []
+              : insightsFor(project, path, name, symbolPrint, filePrint, isMentioned).map(insight =>
+                  insightLine(insight, project?.survey?.at, name !== '' && insight.of === 'file' && insight.symbol === ''),
+                ),
           // Paused, or with another session driving this project, nothing is fetched unless it is asked for.
           mode: () => (mode === 'off' ? 'off' : mode === 'paused' || !leaseState.isDriver ? 'on request' : settings.explain.mode),
           // While Claude is not answering, or refuses this job's model, only what the person asks for is tried.
@@ -4322,7 +4344,7 @@ async function engage(
     trace($, 'start', 'engaging', () => ({ run, isFresh, takesUp }))
     await startAnimating($, settings, isFresh)
     if (run !== engagement) return
-    await startWatching($, settings, run)
+    await startWatching($, settings, run, isFresh)
     if (run !== engagement) return
     tracer.inProject(repoRoot === '' ? '' : projectId(repoRoot))
     // The lease of the session this one carries on from is its own: nothing waits for it to run out.

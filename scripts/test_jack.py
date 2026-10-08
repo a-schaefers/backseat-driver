@@ -1368,6 +1368,40 @@ class Cache(unittest.TestCase):
         explain["insights"] = ["One function, no tests. (from the audit, at abc1234)", "The mean divides by the count. (deep review of abc1234)"]
         self.assertEqual(bad(jack.check_explain_insights("aaaaaaaa", self.told(True, explain=explain), self.root, jack.projects(self.home)[0])), [])
 
+    def test_insights_about_the_whole_file_and_one_that_lost_its_name(self):
+        index = pathlib.Path(self.root) / "index.php"
+        text = "<?php\n$tableSuffix = '_2024';\n$pairs = '';\nfunction show() {\n  echo $pairs;\n}\n"
+        index.write_text(text)
+        print_ = jack.source_print(text)
+        known = {"v": 1, "root": self.root, "survey": {"commit": "", "subject": jack.SURVEY_SUBJECT, "at": 5, "text": "A look.",
+                                                       "insights": ["index.php, $tableSuffix: Table names are built from a suffix.", "index.php: No tests cover this file."]},
+                 "insights": [{"file": "index.php", "symbol": "", "text": "Table names are built from a suffix.", "commit": "abc1234", "at": 5, "print": print_, "of": "file"},
+                              {"file": "index.php", "symbol": "", "text": "No tests cover this file.", "commit": "abc1234", "at": 5, "print": print_, "of": "file"}]}
+        self.write(self.folder / "project.json", known, 60_000)
+        explain = {"status": "fresh", "spot": {"path": "index.php", "line": 4}, "target": {"name": "show", "kind": "function", "startLine": 4, "endLine": 6},
+                   "detail": None, "insights": ["No tests cover this file. (from the first look around, at abc1234)"]}
+        found = " ".join(bad(jack.check_explain_insights("aaaaaaaa", self.told(True, explain=explain), self.root, jack.projects(self.home)[0])))
+        self.assertIn("keeps the insight “Table names are built from a suffix.” for all of index.php under no name, and its review named it $tableSuffix", found)
+        self.assertIn("shows “No tests cover this file. (from the first look around, at a…” under “show” without saying it is about the whole file", found)
+        # Named back, and said to be about the whole file: as it should be.
+        known["insights"][0]["symbol"] = "$tableSuffix"
+        self.write(self.folder / "project.json", known, 60_000)
+        explain["insights"] = ["No tests cover this file. (from the first look around, at abc1234, about the whole file)"]
+        self.assertEqual(bad(jack.check_explain_insights("aaaaaaaa", self.told(True, explain=explain), self.root, jack.projects(self.home)[0])), [])
+
+    def test_a_cached_explanation_that_doubts_a_name_set_elsewhere(self):
+        index = pathlib.Path(self.root) / "index.php"
+        text = "<?php\n$pairs = '';\n\nforeach ($rows as $row) {\n  $pairs .= $row;\n}\n"
+        index.write_text(text)
+        (self.folder / "files").mkdir(exist_ok=True)
+        entry = {"v": 1, "path": "index.php", "print": jack.source_print(text), "symbols": [
+            {"name": "Checkboxes", "kind": "section", "startLine": 4, "endLine": 6,
+             "detail": {"what": "Builds the pairs.", "watch": "Also, $pairs is appended to without a visible start value, so check it is set earlier.", "at": 1}}]}
+        (self.folder / "files" / f"{jack.fnv('index.php')}-index.php.json").write_text(json.dumps(entry))
+        explain = {"status": "fresh", "spot": {"path": "index.php", "line": 4}, "target": {"name": "Checkboxes", "kind": "section", "startLine": 4, "endLine": 6}, "detail": None}
+        found = jack.check_explain_insights("aaaaaaaa", self.told(True, explain=explain), self.root, jack.projects(self.home)[0])
+        self.assertTrue(any(level == jack.NOTE and "doubts $pairs, which line 2 sets" in text_ for level, text_ in found), found)
+
     def test_an_explanation_in_the_first_person(self):
         explain = {"status": "fresh", "spot": {"path": "index.php", "line": 2}, "target": {"name": "Page setup and includes", "kind": "section", "startLine": 2, "endLine": 42},
                    "detail": {"what": "Sets up the page.", "how": "", "why": "", "watch": "The includes are only protected by a constant, which only I can confirm is checked.", "uses": []}}
@@ -1730,6 +1764,50 @@ class PickKept(unittest.TestCase):
             caret["changed"] = now - 60_000
             (home / "editors" / "emacs-1.json").write_text(json.dumps(caret))
             self.assertEqual(undone(), [])
+
+
+class NoLookYet(unittest.TestCase):
+    """The empty Play-by-play tab says "No look yet" only before the first look since switch-on: a reload kept the
+    session on and lost the time of its last look (the sixteenth ui-truth pass, 2026-10-07)."""
+
+    def test_no_look_yet_after_a_look_since_switch_on(self):
+        told = {"shown": {"pane": {"texts": ["No look yet. Save a file, and the play-by-play looks at the change."]}}, "pane": {"watch": {"lastLookAt": None}}}
+        records = [{"t": 1000, "k": "start", "n": "engaging", "d": {"isFresh": True}}, {"t": 5000, "k": "look", "n": "done", "d": {}},
+                   {"t": 9000, "k": "start", "n": "engaging", "d": {"isFresh": False}}]
+        self.assertIn("says “No look yet”, and it looked at", " ".join(bad(jack.check_no_look_yet("aaaaaaaa", told, records))))
+        # Switched on afresh since that look: no look since switch-on, and the tab is right.
+        records.append({"t": 12000, "k": "start", "n": "engaging", "d": {"isFresh": True}})
+        self.assertEqual(jack.check_no_look_yet("aaaaaaaa", told, records), [])
+        # A last look on record, and the tab saying what it should.
+        told = {"shown": {"pane": {"texts": ["No notes. Keep going."]}}, "pane": {"watch": {"lastLookAt": 5000}}}
+        self.assertEqual(jack.check_no_look_yet("aaaaaaaa", told, records[:3]), [])
+
+
+class Lately(unittest.TestCase):
+    """The commits the Growth tab cites under "Lately", against the repositories of the projects they name (the
+    sixteenth ui-truth pass, 2026-10-07: php-hello's commit from before the repository was made again)."""
+
+    def test_a_commit_no_repository_here_has(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@x"}
+            home = pathlib.Path(tmp) / "home"
+            ride = pathlib.Path(tmp) / "php-hello"
+            ride.mkdir()
+            subprocess.run(["git", "init", "-q", str(ride)], check=True, env=env)
+            (ride / "index.php").write_text("<?php echo 1;\n")
+            subprocess.run(["git", "-C", str(ride), "add", "-A"], check=True, env=env)
+            subprocess.run(["git", "-C", str(ride), "commit", "-q", "-m", "Hello"], check=True, env=env)
+            head = subprocess.run(["git", "-C", str(ride), "rev-parse", "HEAD"], check=True, env=env, capture_output=True, text=True).stdout.strip()
+            folder = home / "projects" / jack.project_id(str(ride))
+            folder.mkdir(parents=True)
+            (folder / "project.json").write_text(json.dumps({"v": 1, "root": str(ride)}))
+            now = jack.now_ms()
+            seen = lambda commit: {"commit": commit, "project": "php-hello", "at": 1, "skill": "includes", "verdict": "shown", "level": "beginner", "weight": 0.5, "note": "Split the output."}
+            told = {"pane": {"progress": {"records": [{"language": "php", "observations": [seen(head)]}]}}}
+            self.assertEqual(jack.check_lately("aaaaaaaa", told, world([], [home], now)), [])
+            told["pane"]["progress"]["records"][0]["observations"] = [seen("937fd34" + "0" * 33)]
+            found = jack.check_lately("aaaaaaaa", told, world([], [home], now))
+            self.assertTrue(any(level == jack.NOTE and "cites commit 937fd34 in php-hello" in text for level, text in found), found)
 
 
 class StateWords(unittest.TestCase):

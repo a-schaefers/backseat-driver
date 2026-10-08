@@ -665,7 +665,9 @@ export function createExplainer(ports: ExplainPorts) {
       if (line === -1) return { print: read.print, of: 'file', symbol: name }
       const around = fresh.find(candidate => candidate.startLine <= line && line <= candidate.endLine)
 
-      return around === undefined ? { print: read.print, of: 'file', symbol: '' } : { print: around.print, of: 'symbol', symbol: around.name }
+      // Outside every symbol, or in a file with no outline yet, it keeps its name: dropped, it showed under every part
+      // of the file (the sixteenth ui-truth pass, 2026-10-07: a first look around ran before index.php was mapped).
+      return around === undefined ? { print: read.print, of: 'file', symbol: name } : { print: around.print, of: 'symbol', symbol: around.name }
     },
     /**
      * Lets waiting lookups start if they may. Called when the time `wakeAt`
