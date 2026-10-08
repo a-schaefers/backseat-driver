@@ -1586,7 +1586,7 @@ var alt2 = function(v) {
       return v1;
     }
     ;
-    throw new Error("Failed pattern match at Kernel.Growth (line 402, column 1 - line 402, column 47): " + [v.constructor.name, v1.constructor.name]);
+    throw new Error("Failed pattern match at Kernel.Growth (line 405, column 1 - line 405, column 47): " + [v.constructor.name, v1.constructor.name]);
   };
 };
 var above = function(v) {
@@ -1664,7 +1664,7 @@ var growthOf = function(facts) {
       return above(level.value0);
     }
     ;
-    throw new Error("Failed pattern match at Kernel.Growth (line 362, column 12 - line 364, column 28): " + [level.constructor.name]);
+    throw new Error("Failed pattern match at Kernel.Growth (line 365, column 12 - line 367, column 28): " + [level.constructor.name]);
   })();
   var nextSkills = (function() {
     if (target instanceof Nothing) {
@@ -1679,7 +1679,7 @@ var growthOf = function(facts) {
       })(states));
     }
     ;
-    throw new Error("Failed pattern match at Kernel.Growth (line 367, column 16 - line 369, column 147): " + [target.constructor.name]);
+    throw new Error("Failed pattern match at Kernel.Growth (line 370, column 16 - line 372, column 147): " + [target.constructor.name]);
   })();
   var ownItem = (function() {
     if (target instanceof Just && ownAt(facts)(target.value0) < ownAtLeast) {
@@ -1761,9 +1761,9 @@ var growthOf = function(facts) {
   var neededHelp = take(5)(byCount(append2(map3(function(topic) {
     return item("asked")(topic.topic)(topic.explained)(0);
   })(filter(function(topic) {
-    return topic.explained > 0;
+    return topic.explained > 0 && !isStillComing(topic);
   })(facts.topics)))(append2(map3(function(topic) {
-    return item("flagged")(topic.topic)(topic.flagged)(0);
+    return item("flagged")(topic.topic)(topic.flagged)(topic.explained);
   })(coming))(map3(function(lesson) {
     return item("lesson")(lesson.title)(lesson.helped)(0);
   })(filter(function(lesson) {
@@ -1791,7 +1791,7 @@ var growthOf = function(facts) {
       return greaterThanOrEq2(lesson.rank)(level.value0);
     }
     ;
-    throw new Error("Failed pattern match at Kernel.Growth (line 374, column 20 - line 376, column 37): " + [level.constructor.name]);
+    throw new Error("Failed pattern match at Kernel.Growth (line 377, column 20 - line 379, column 37): " + [level.constructor.name]);
   };
   var suggested = take(2)(nub$prime(append2(filter(fits)(open))(append2(filter(function(lesson) {
     return eq22(new Just(lesson.rank))(target);
@@ -1840,7 +1840,7 @@ var growthWire = function(wire) {
           return f(v.value0);
         }
         ;
-        throw new Error("Failed pattern match at Kernel.Growth (line 456, column 23 - line 458, column 18): " + [v.constructor.name]);
+        throw new Error("Failed pattern match at Kernel.Growth (line 459, column 23 - line 461, column 18): " + [v.constructor.name]);
       };
     };
   };

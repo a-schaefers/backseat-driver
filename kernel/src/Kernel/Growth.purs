@@ -342,9 +342,12 @@ growthOf facts =
         <> map (\lesson -> item "lesson" lesson.title lesson.done lesson.steps) (filter isUnderWay facts.lessons)
     )
 
+  -- One item a topic: a topic still coming back that they also asked about is one "flagged" item, with the times
+  -- they asked as its second count (the twentieth ui-truth pass, 2026-10-07: each such topic was listed twice, and
+  -- the five places went to two topics said twice).
   neededHelp = take 5 $ byCount
-    ( map (\topic -> item "asked" topic.topic topic.explained 0) (filter (\topic -> topic.explained > 0) facts.topics)
-        <> map (\topic -> item "flagged" topic.topic topic.flagged 0) coming
+    ( map (\topic -> item "asked" topic.topic topic.explained 0) (filter (\topic -> topic.explained > 0 && not (isStillComing topic)) facts.topics)
+        <> map (\topic -> item "flagged" topic.topic topic.flagged topic.explained) coming
         <> map (\lesson -> item "lesson" lesson.title lesson.helped 0) (filter (\lesson -> lesson.helped > 0) facts.lessons)
     )
 

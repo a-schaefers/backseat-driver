@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { encouragementLine, growthCounts, growthFacts, growthHeadline, growthLadder, growthMeterLabel, growthOf, growthText, improvedLine, raiseLine, rungWord, workOnLine } from '../core/growth'
+import { encouragementLine, growthCounts, growthFacts, growthHeadline, growthLadder, growthMeterLabel, growthOf, growthText, helpLine, improvedLine, raiseLine, rungWord, workOnLine } from '../core/growth'
 import { emptyLessonRecord, lessonView, parsePath, withDone, withHelp, withStarted } from '../core/lessons'
 import type { LessonPath } from '../core/lessons'
 import { emptyProfile, withFlagged, withLooked } from '../core/profiles'
@@ -167,6 +167,15 @@ test('asking for an explanation is listed as help needed, and costs nothing', ()
   const growth = growthOf(record(JUNIOR), asked, [])
   expect(growth.score).toBe(growthOf(record(JUNIOR), undefined, []).score)
   expect(growth.neededHelp).toEqual([{ kind: 'asked', what: 'off-by-one', count: 2, total: 0 }])
+})
+
+test('a topic still coming back that they also asked about is one item of help needed, not two', () => {
+  // The twentieth ui-truth pass (2026-10-07): "output escaping" and "path resolution" each listed twice.
+  const raised = [1, 2, 3].reduce<Profile>(current => withFlagged(withLooked(current), ['unclosed-file']), emptyProfile())
+  const asked: Profile = { ...raised, topics: { ...raised.topics, 'unclosed-file': { ...raised.topics['unclosed-file']!, explained: 1 } } }
+  const growth = growthOf(record(JUNIOR), asked, [])
+  expect(growth.neededHelp).toEqual([{ kind: 'flagged', what: 'unclosed-file', count: 3, total: 1 }])
+  expect(growth.neededHelp.map(helpLine)).toEqual(['unclosed file: the play-by-play raised it 3 times, and you asked for it to be explained once'])
 })
 
 test('a skill missed and then shown is improved; one shown and then missed is slipping', () => {

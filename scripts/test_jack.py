@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -516,6 +517,41 @@ class Disagreements(unittest.TestCase):
         self.assertIn("a line cut mid-sentence", found[0])
         told["pane"]["speech"]["text"] = "I've had a look around. The Deep review tab has the map."
         self.assertEqual(bad(jack.check_speech("aaaaaaaa", told)), [])
+
+    def test_a_line_gone_from_the_character_with_nothing_saying_so(self):
+        # The twentieth ui-truth pass (2026-10-07): a /clear left the character silent, and nothing had taken the line back.
+        told = state(self.now)
+        told["loaded"] = {"at": self.now - 60_000}
+        told["pane"]["speech"] = {"text": "", "tick": 0, "isBlinking": False}
+        given = lambda text, t: {"t": t, "k": "state", "n": "speech", "d": text}
+        found = bad(jack.check_speech_kept("aaaaaaaa", told, [given("Reap what you sow.", self.now - 50_000)]))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("the last line it was given", found[0])
+        # Taken back on the record, or given before this load of the module: nothing to say.
+        self.assertEqual(bad(jack.check_speech_kept("aaaaaaaa", told, [given("Reap what you sow.", self.now - 50_000), given("", self.now - 40_000)])), [])
+        self.assertEqual(bad(jack.check_speech_kept("aaaaaaaa", told, [given("Reap what you sow.", self.now - 90_000)])), [])
+        # A record from before the log, with no details, says nothing of the line.
+        self.assertEqual(bad(jack.check_speech_kept("aaaaaaaa", told, [{"t": self.now - 50_000, "k": "state", "n": "speech"}])), [])
+
+    def test_the_strip_carries_the_badges_the_state_calls_for(self):
+        # The twentieth ui-truth pass (2026-10-07): "Review (4)" in the pane, a bare "Review" on the strip.
+        told = state(self.now)
+        high = {"status": "open", "severity": "high"}
+        told["pane"] = {**told["pane"], "notes": [{"id": 1}], "review": {"state": "done"}, "issues": {"ledger": {"findings": [high, {**high, "severity": "low"}]}}}
+        told["shown"]["minimized"] = True
+        told["shown"]["band"] = {"texts": ["▸ Backseat", "Play (1)", "Review", "Explain"]}
+        found = bad(jack.check_strip_badges("aaaaaaaa", told))
+        self.assertEqual(found, ["aaaaaaaa's strip says “Review”, and the state calls for “Review (1)”"])
+        told["shown"]["band"]["texts"][2] = "Review (1)"
+        self.assertEqual(bad(jack.check_strip_badges("aaaaaaaa", told)), [])
+        told["pane"]["review"] = {"state": "done", "isUnseen": True}
+        self.assertIn("calls for “Review (new)”", " ".join(bad(jack.check_strip_badges("aaaaaaaa", told))))
+
+    def test_a_growth_list_names_a_subject_once(self):
+        texts = ["Needed help with", "- output escaping: the play-by-play raised it 3 times", "- output escaping: you asked for it to be explained once", "What improved", "- output escaping: x"]
+        found = jack.check_growth_twice("aaaaaaaa", texts)
+        self.assertEqual(found, [(jack.NOTE, "aaaaaaaa's Growth tab lists “output escaping” twice in one list")])
+        self.assertEqual(jack.check_growth_twice("aaaaaaaa", texts[2:]), [])
 
     def test_a_narrow_pane_cuts_its_rows_and_a_cut_row_is_the_piece(self):
         # The owner's 23-column dock: "I've had a look around. HTML…" drawn as "_|o_o|_ I've had a loo…" (the eighth ui-truth pass, 2026-10-06).
@@ -1088,6 +1124,22 @@ class Issues(unittest.TestCase):
         ledger = self.keep([], {"at": self.now - 600_000, "commit": "abc1234", "files": 1, "read": ["stats.py"], "skipped": [{"path": "stats.py", "why": "vendored"}]})
         self.assertIn("counts 1 file(s) as read that it also skipped: stats.py", " ".join(bad(self.found(ledger, "explain", []))))
 
+    def test_an_audit_that_names_only_its_commit_quotes_lines_of_that_commit(self):
+        # The twentieth ui-truth pass (2026-10-07): "Audited 13:24 at 570e787" over a line the commit has commented out.
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@x"}
+        subprocess.run(["git", "init", "-q", self.root], check=True, env=env)
+        (pathlib.Path(self.root) / "stats.py").write_text("# x = 1\n")
+        subprocess.run(["git", "-C", self.root, "add", "stats.py"], check=True, env=env)
+        subprocess.run(["git", "-C", self.root, "commit", "-q", "-m", "Add stats"], check=True, env=env)
+        (pathlib.Path(self.root) / "stats.py").write_text("x = 1\n")
+        at = self.now - 600_000
+        issue = {**self.issue(1, "high", "x is one"), "at": at, "lineText": "x = 1"}
+        coverage = {"at": at, "commit": "HEAD", "files": 1, "read": ["stats.py"], "skipped": []}
+        found = " ".join(bad(self.found(self.keep([issue], coverage), "explain", [])))
+        self.assertIn("issue 1 “x is one” quotes a line stats.py does not have there: it read uncommitted changes", found)
+        self.assertEqual(bad(self.found(self.keep([issue], {**coverage, "commit": "HEAD+"}), "explain", [])), [])
+        self.assertEqual(bad(self.found(self.keep([{**issue, "lineText": "# x = 1"}], coverage), "explain", [])), [])
+
     def test_where_the_pane_places_an_issue_reads_as_the_issue(self):
         code = pathlib.Path(self.root) / "a.php"
         code.write_text("<?php\n// run($sql);\nrun($sql);\n")
@@ -1326,6 +1378,10 @@ class Cache(unittest.TestCase):
         found = bad(self.found(self.told(True, progress={"records": [], "skipped": "", "busy": ""})))
         self.assertEqual(len(found), 1, found)
         self.assertIn(f"keeps 1 watched file(s) of commit {short}, which did not count: stats.py", found[0])
+        # Saved since that commit, it is watched for the next one.
+        later = time.time() + 120
+        os.utime(pathlib.Path(self.root) / "stats.py", (later, later))
+        self.assertEqual(bad(self.found(self.told(True, progress={"records": [], "skipped": "", "busy": ""}))), [])
         self.write(self.folder / "watched.json", {"v": 1, "paths": ["other.py"], "skipped": f"Commit {short} does not count toward your progress: it names a co-author."}, 60_000)
         self.assertEqual(bad(self.found(self.told(True, progress={"records": [], "skipped": "", "busy": ""}))), [])
 
@@ -1527,6 +1583,11 @@ class Cache(unittest.TestCase):
         self.assertIn("the journal holds 0 s of caret time there", found[0])
         self.write(self.folder / "journal.json", {"entries": [{"kind": "focus", "at": self.now - 60_000, "ms": 5000, "path": "index.php", "lines": [[27, 27]], "where": ""}], "sittings": []}, 0)
         self.assertEqual(bad(jack.check_working_share("aaaaaaaa", follower, jack.projects(self.home)[0], self.now)), [])
+        # A slice that began before the window and ended in it counts whole, as the tutor counts it ("4 min" against
+        # a journal read by its slices' starts: the twentieth ui-truth pass, 2026-10-07).
+        told["pane"]["working"]["share"] = "4 min in the editor in the last 10 minutes"
+        self.write(self.folder / "journal.json", {"entries": [{"kind": "focus", "at": self.now - 11 * 60_000, "ms": 120_000, "path": "index.php", "lines": [[27, 27]], "where": ""}], "sittings": []}, 0)
+        self.assertEqual(bad(jack.check_working_share("aaaaaaaa", told, jack.projects(self.home)[0], self.now)), [])
 
     def test_what_a_session_that_does_not_drive_says_of_the_driver_and_of_the_looks(self):
         # "started 23:04" read as later today, and "No notes. Keep going." where no look had run (the eighteenth ui-truth pass, 2026-10-07).
@@ -1787,6 +1848,7 @@ class ToldAndBelieved(unittest.TestCase):
         told["session"]["panes"] = []
         told["shown"]["minimized"] = True
         told["shown"]["pane"] = None
+        told["pane"]["notes"] = [{"id": 1}, {"id": 2}]
         strip = ["▸ Backseat", "Play (2)", "Review", "Explain", "Growth", "Lessons", "Settings"]
         told["shown"]["band"] = {"at": self.now - 3000, "placement": "", "columns": 120, "texts": strip}
         s = session(state=told)

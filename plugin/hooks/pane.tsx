@@ -1786,7 +1786,7 @@ export const STRIP_HINT = 'minimized · click a name, or Ctrl+X Tab then Enter, 
  */
 export function renderMinimized(
   { Box, Text, Button }: Pick<Kit, 'Box' | 'Text' | 'Button'>,
-  view: Partial<Pick<PaneView, 'notes' | 'review' | 'explain' | 'progress'>>,
+  view: Partial<Pick<PaneView, 'notes' | 'review' | 'explain' | 'progress' | 'spin' | 'issues'>>,
   actions: { onRestore: (tab: Tab | null) => void },
 ) {
   return (

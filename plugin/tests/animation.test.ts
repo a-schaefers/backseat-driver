@@ -251,3 +251,27 @@ sessionTest("the character never reads out the notes a deep review leaves for th
   expect(await ui.find({ type: 'Text', text: /backseat-notes|overview/ })).toBeUndefined()
   await ui.unmount()
 })
+
+sessionTest("/clear keeps the character's line, all said", { options: FAST }, async ($, on) => {
+  // The twentieth ui-truth pass (2026-10-07): after a /clear the character stood silent, its line gone with the state.
+  const session = stubSession(on)
+  session.reply({ resolved: [], notes: [{ file: 'stats.py', line: 2, kind: 'bug', topic: 'empty-input', note: 'An empty list divides by zero.' }], say: 'Count the fence posts.' })
+  await $.session.start(SESSION)
+  await $.command.run(typed('backseat'))
+  await session.clock.settle()
+  session.write('stats.py', MEAN)
+  await session.clock.advance(8000)
+  await session.clock.advance(SAY_ALL)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: 'Count the fence posts.' })).toBeDefined()
+
+  await $.session.end({ reason: 'clear', sessionId: session.sessionId, resume: { sessionId: session.sessionId } as never })
+  // The kit cannot empty the state: a dismissal takes the line out of it by hand, as the reset would.
+  await ui.press({ key: 'dismiss' })
+  expect(await ui.find({ type: 'Text', text: 'Count the fence posts.' })).toBeUndefined()
+
+  await $.classic.SessionStart({ source: 'clear' })
+  await session.clock.settle()
+  expect(await ui.find({ type: 'Text', text: 'Count the fence posts.' })).toBeDefined()
+  await ui.unmount()
+})

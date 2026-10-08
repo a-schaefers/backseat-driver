@@ -317,6 +317,7 @@ import {
   anchorIssue,
   askedIssues,
   auditLine,
+  auditQuotes,
   coverageLine,
   coveredLedger,
   dismissedForRequest,
@@ -326,6 +327,7 @@ import {
   issueQuestion,
   issuesBrief,
   issuesForRequest,
+  isQuoteMissing,
   ledgerViews,
   lookIssues,
   MAX_FROM_AUDIT,
@@ -445,6 +447,9 @@ let carried: {
   progress: ProgressView
   update: string
   working: Working
+  speech: Speech
+  openList: string
+  playOn: 'note' | 'issue'
 } | null = null
 
 /**
@@ -1457,7 +1462,7 @@ async function restoreFromStrip($: EngineInterface, tab: Tab | null): Promise<vo
   shown.minimized = false
   shown.band = null
   await update($, minimizedAtom, () => false)
-  if (tab !== null) await showTab($, tab)
+  if (tab !== null) await showTab($, tab, true)
   trace($, 'ui', 'pane restored', () => ({ tab }))
   await openPane($)
   $.ui.invalidate('ui.render')
@@ -1572,7 +1577,8 @@ async function themeBackdrop($: EngineInterface): Promise<Backdrop> {
 
 async function say($: EngineInterface, text: string): Promise<void> {
   const line = speech(text)
-  if (text !== '') trace($, 'state', 'speech', () => text)
+  // Every line, the empty one too: jack holds the last line given against the character's (`check_speech_kept`).
+  trace($, 'state', 'speech', () => text)
   await update($, speechAtom, () => line)
   stopTalking()
   // Switched off while the line was being written: nothing may keep running.
@@ -2603,7 +2609,7 @@ async function startReview($: EngineInterface, settings: Settings, scope: Review
  * starts.
  */
 async function carryPane($: EngineInterface): Promise<void> {
-  const [tab, issues, selectedIssue, notes, dismissed, selected, watch, review, shownProfiles, explain, progress, release, working] = await Promise.all([
+  const [tab, issues, selectedIssue, notes, dismissed, selected, watch, review, shownProfiles, explain, progress, release, working, speech, openList, playOn] = await Promise.all([
     read($, tabAtom),
     read($, issuesAtom),
     read($, selectedIssueAtom),
@@ -2617,8 +2623,11 @@ async function carryPane($: EngineInterface): Promise<void> {
     read($, progressAtom),
     read($, updateAtom),
     read($, workingAtom),
+    read($, speechAtom),
+    read($, openListAtom),
+    read($, playOnAtom),
   ])
-  carried = { tab, issues, selectedIssue, notes, dismissed, selected, watch, review, profiles: shownProfiles, explain, progress, update: release, working }
+  carried = { tab, issues, selectedIssue, notes, dismissed, selected, watch, review, profiles: shownProfiles, explain, progress, update: release, working, speech, openList, playOn }
 }
 
 /** Puts back what `carryPane` read out. Without it, as after `/branch`, what this module can work out again is shown again. */
@@ -2660,15 +2669,19 @@ async function restorePane($: EngineInterface, settings: Settings): Promise<void
     update($, progressAtom, (): ProgressView => kept.progress),
     update($, updateAtom, () => kept.update),
     update($, workingAtom, (): Working => kept.working),
+    // The character's line too, all said (a line half said goes on from where the state was emptied, word by word): it went with the state, and the twentieth ui-truth pass found the character silent after a /clear.
+    update($, speechAtom, (now: Speech): Speech => (now.text === '' ? finished(kept.speech) : now)),
+    update($, openListAtom, () => kept.openList),
+    update($, playOnAtom, () => kept.playOn),
   ])
 }
 
-/** Shows a tab. */
-async function showTab($: EngineInterface, tab: Tab): Promise<void> {
+/** Shows a tab. A pane being opened starts at its top, and is not scrolled (`isOpening`): there is no pane yet to scroll. */
+async function showTab($: EngineInterface, tab: Tab, isOpening = false): Promise<void> {
   await update($, tabAtom, () => tab)
   if (tab === 'review') await setReview($, { isUnseen: false })
   if (tab === 'explain') watchClosely($)
-  void scrollToTop($)
+  if (!isOpening) void scrollToTop($)
 }
 
 /**
@@ -3428,6 +3441,7 @@ async function mendCoverage($: EngineInterface): Promise<void> {
   const coverage = ledger.coverage
   if (coverage.at <= 0 || !leaseState.isDriver) return
   await mendAuditInsights($, coverage.at)
+  await mendDirtyAudit($)
   if (coverage.read.length === 0) return
   const passed = new Set(coverage.skipped.map(skip => skip.path))
   // Their own files as the rules count them now: less what the audit skipped as someone else's, and no file too large
@@ -3437,6 +3451,24 @@ async function mendCoverage($: EngineInterface): Promise<void> {
   if (read.length === coverage.read.length && own.length === coverage.files) return
   trace($, 'state', 'audit reading counted again', () => ({ was: coverage.read.length, now: read.length, files: coverage.files, own: own.length }))
   await changeIssues($, current => coveredLedger(current, { ...current.coverage, files: own.length, read: current.coverage.read.filter(path => read.includes(path)) }))
+}
+
+/**
+ * An audit kept before `+` marked the changes it read with its commit is
+ * given it, once, when a line one of its issues quotes is not in the commit
+ * (`auditQuotes`, `isQuoteMissing`): at most eight files are looked at, and
+ * a file the commit does not have proves nothing (git may have failed).
+ */
+async function mendDirtyAudit($: EngineInterface): Promise<void> {
+  const quotes = [...auditQuotes(ledger)].slice(0, 8)
+  for (const [file, quoted] of quotes) {
+    const shown = await git($, repoRoot, ['show', `${ledger.coverage.commit}:${file}`])
+    if (shown.exitCode !== 0 || !isQuoteMissing(shown.stdout.split('\n'), quoted)) continue
+    trace($, 'state', 'audit marked as reading uncommitted changes', () => ({ commit: ledger.coverage.commit, file }))
+    await changeIssues($, current => (current.coverage.commit.endsWith('+') ? current : coveredLedger(current, { ...current.coverage, commit: `${current.coverage.commit}+` })))
+
+    return
+  }
 }
 
 /**
@@ -4953,7 +4985,9 @@ async function drawTutor(
     onDismiss: (note: Note) => {
       touched($, settings, 'dismiss', () => note)
       // What the character was saying may have been about this note.
-      void update($, speechAtom, (said): Speech => (said.text === '' ? said : { ...said, text: '', tick: 0 }))
+      void update($, speechAtom, (said): Speech => (said.text === '' ? said : { ...said, text: '', tick: 0 })).then(said => {
+        if (said.text === '') trace($, 'state', 'speech', () => '')
+      })
       // The keys carry on with the next note in the order drawn, not the first.
       const after = steppedNote(view, 1)
       void update($, selectedAtom, () => (after === undefined || after.id === note.id ? null : after.id))
@@ -5550,10 +5584,18 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (mode === 'off' || e.props.hasSurvey) return next(e)
     if (!(await read($, minimizedAtom))) return next(e)
-    const [notes, review, explain, progress] = await Promise.all([read($, notesAtom), read($, reviewAtom), read($, explainAtom), read($, progressAtom)])
+    const [notes, review, explain, progress, issues, spin] = await Promise.all([
+      read($, notesAtom),
+      read($, reviewAtom),
+      read($, explainAtom),
+      read($, progressAtom),
+      read($, issuesAtom),
+      read($, spinAtom),
+    ])
+    // The strip's badges are the tab row's: the serious issues on Review too, which it lacked until the twentieth ui-truth pass.
     const tree = renderMinimized(
       $.ui.resolve(e),
-      { notes, review, explain, progress },
+      { notes, review, explain, progress, spin, issues: { state: issues, views: ledgerViews(issues.ledger, { savedFiles: [], cap: 0 }), selected: null } },
       {
         onRestore: (tab: Tab | null) => {
           touched($, settings, 'restore', () => tab)

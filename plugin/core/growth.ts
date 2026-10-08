@@ -203,7 +203,7 @@ export function helpLine(item: GrowthItem): string {
     case 'asked':
       return `${words(item.what)}: you asked for it to be explained ${times(item.count)}`
     case 'flagged':
-      return `${words(item.what)}: the play-by-play raised it ${times(item.count)}`
+      return `${words(item.what)}: the play-by-play raised it ${times(item.count)}${item.total > 0 ? `, and you asked for it to be explained ${times(item.total)}` : ''}`
     case 'lesson':
       return `"${item.what}": walked through ${times(item.count)}`
     default:

@@ -1,7 +1,8 @@
-import { expect } from 'claude-code/testing'
+import { expect, test } from 'claude-code/testing'
 
 import { projectId } from '../core/datahome'
-import { coverageLine, parseLedger } from '../core/findings'
+import { auditQuotes, coverageLine, DIRTY_MARKED_SINCE, isQuoteMissing, parseLedger } from '../core/findings'
+import type { Finding, Ledger } from '../core/findings'
 import { parseProject } from '../core/project'
 import { clockTime } from '../core/status'
 import { PANE, ROOT, SESSION, sessionTest, stubSession, typed } from './kit'
@@ -133,6 +134,29 @@ sessionTest('an audit whose reading was kept before it was counted as a reader c
   expect(mended.read).toEqual(['stats.py'])
   // Their own files are counted again too: less the one the audit skipped as vendored.
   expect(mended.files).toBe(1)
+})
+
+sessionTest('an audit kept before its commit was marked for the changes it read is marked once a line it quotes is not in the commit', async ($, on) => {
+  // The twentieth ui-truth pass (2026-10-07): "Audited 13:24 at 570e787" over a high issue quoting a line the commit had commented out.
+  const issue = { ...ON_RECORD.findings[0]!, at: 1000, origin: 'audit', line: 1, lineText: "ini_set('display_errors', 1);" }
+  const coverage = { at: 1000, commit: 'HEAD', files: 1, read: ['stats.py'], skipped: [] }
+  const session = stubSession(on, { head: { 'stats.py': "//ini_set('display_errors', 1);\n" }, data: { [`${FOLDER}/findings.json`]: { ...ON_RECORD, findings: [issue], coverage } } })
+  await $.session.start(SESSION)
+  await $.command.run(typed('backseat'))
+  await session.clock.settle()
+  const ledger = parseLedger(session.data(`${FOLDER}/findings.json`))
+  expect(ledger.coverage.commit).toBe('HEAD+')
+  expect(coverageLine(ledger.coverage, clockTime)).toMatch('at HEAD with uncommitted changes')
+})
+
+test('only an audit from before the mark, with an open issue quoting a line its commit lacks, needs one', () => {
+  const finding = { ...(ON_RECORD.findings[0] as unknown as Finding), at: 1000, origin: 'audit' as const }
+  const ledger = (commit: string, at = 1000): Ledger => ({ v: 1, nextId: 2, findings: [finding], coverage: { at, commit, files: 1, read: [], skipped: [] } })
+  expect([...auditQuotes(ledger('0000000'))]).toEqual([['stats.py', ['return sum(xs) / len(xs)']]])
+  expect(auditQuotes(ledger('0000000+')).size).toBe(0)
+  expect(auditQuotes(ledger('0000000', DIRTY_MARKED_SINCE)).size).toBe(0)
+  expect(isQuoteMissing(['def mean(xs):', '    return sum(xs) / len(xs)'], ['return sum(xs) / len(xs)'])).toBe(false)
+  expect(isQuoteMissing(['def mean(xs):', '    # return sum(xs) / len(xs)'], ['return sum(xs) / len(xs)'])).toBe(true)
 })
 
 sessionTest("an audit's insights are the audit's, kept so and mended so", async ($, on) => {

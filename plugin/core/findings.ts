@@ -248,6 +248,31 @@ function isQuoted(line: string, quote: string): boolean {
   return said === wanted || (wanted.length >= 12 && said.includes(wanted)) || (wanted.length >= 6 && said.startsWith(wanted))
 }
 
+/**
+ * When an audit was given `+` on its commit: one kept before then that read changes not yet committed names only
+ * the commit, and a high issue quoting a line the commit does not have looks made up (the twentieth ui-truth pass,
+ * 2026-10-07: php-hello's audit at 570e787 quoted `ini_set('display_errors', 1);`, which the commit has commented out).
+ */
+export const DIRTY_MARKED_SINCE = 1_791_407_225_000
+
+/** The open issues an audit kept before `DIRTY_MARKED_SINCE` that quote a line of a file, by file: what to look for at its commit. */
+export function auditQuotes(ledger: Ledger): Map<string, string[]> {
+  const coverage = ledger.coverage
+  const quotes = new Map<string, string[]>()
+  if (coverage.at <= 0 || coverage.at >= DIRTY_MARKED_SINCE || coverage.commit === '' || coverage.commit.endsWith('+')) return quotes
+  for (const finding of ledger.findings) {
+    if (finding.at !== coverage.at || finding.origin !== 'audit' || finding.file === '.' || finding.lineText.trim() === '') continue
+    quotes.set(finding.file, [...(quotes.get(finding.file) ?? []), finding.lineText])
+  }
+
+  return quotes
+}
+
+/** Whether a file at the audit's commit lacks a line one of its issues quotes: the audit read something else. */
+export function isQuoteMissing(atCommit: readonly string[], quotes: readonly string[]): boolean {
+  return quotes.some(quote => !atCommit.some(line => isQuoted(line, quote)))
+}
+
 /** Where a quoted line is in a file: the occurrence nearest the line named, or null when it is nowhere. */
 export function placeLine(lines: readonly string[], quote: string, line: number): number | null {
   if (quote.trim() === '') return null

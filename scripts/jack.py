@@ -1273,6 +1273,8 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
         if is_driver is False and offered:
             out.append((BAD, f"{who} does not drive {project['id']} and still offers {', '.join(offered)}, which could only refuse"))
     out += check_speech(who, state)
+    if s["debug"] is not None:
+        out += check_speech_kept(who, state, log_records(s["debug"])[-2000:])
     out += check_settings_tab(who, state, s)
 
     # Deadlines that came and went.
@@ -1309,6 +1311,7 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
             out.append((BAD, f"{who}'s Growth tab says “Not placed yet” and under it what the next level needs: the model's words for a level it was not given"))
     if dig(state, "pane.tab") == "profile" and isinstance(records, list):
         out += check_growth_counts(who, drawn_now, records)
+        out += check_growth_twice(who, drawn_now)
     out += check_keys_walk(who, state, rows)
 
     # The watchers it says it runs.
@@ -1364,6 +1367,7 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
     drawing = shown.get("band") if minimized or layout != "vertical" else shown.get("pane")
     if mode != "off" and minimized:
         out.append((NOTE, f"{who}'s pane is minimized: a strip above the prompt brings it back, and the tutor stays {mode}"))
+        out += check_strip_badges(who, state)
     elif mode != "off" and layout == "vertical":
         panes = dig(state, "session.panes")
         mine = next((p for p in panes if isinstance(p, dict) and p.get("id") == PANE_ID), None) if isinstance(panes, list) else None
@@ -1526,6 +1530,83 @@ def check_speech(who: str, state: dict) -> list[tuple[str, str]]:
     return [(FINE, f"{who}'s character says its own voice's hello")]
 
 
+def check_speech_kept(who: str, state: dict, records: list[dict]) -> list[tuple[str, str]]:
+    """The character's line against the last line the tutor says it gave it, in this load of the module: a line gone
+    with nothing saying so went with the state (the twentieth ui-truth pass, 2026-10-07: after a /clear the character
+    stood silent, the line it had been saying no longer in the state, and no record of it being taken back)."""
+    loaded = dig(state, "loaded.at")
+    said = dig(state, "pane.speech.text")
+    if dig(state, "pane.mode") != "on" or not isinstance(loaded, (int, float)) or not isinstance(said, str):
+        return []
+    given = [r for r in records if r.get("k") == "state" and r.get("n") == "speech" and "d" in r and (r.get("t") or 0) >= loaded]
+    if not given:
+        return []
+    last = given[-1].get("d")
+    last = last if isinstance(last, str) else ""
+    if last != said:
+        return [(BAD, f"{who}'s character says “{said[:60]}”, and the last line it was given, at {clock(given[-1].get('t'))}, was “{last[:60]}”: a line changed with nothing saying so")]
+    return [(FINE, f"{who}'s character says the last line it was given")]
+
+
+def check_growth_twice(who: str, texts: list[str]) -> list[tuple[str, str]]:
+    """One subject once in a Growth list: "output escaping" and "path resolution" each stood twice under "Needed help
+    with", once raised and once asked about (the twentieth ui-truth pass, 2026-10-07)."""
+    out: list[tuple[str, str]] = []
+    subjects: list[str] = []
+    for text in texts + [""]:
+        if text.startswith("- ") and ":" in text:
+            subjects.append(text[2:].split(":")[0])
+            continue
+        twice = sorted({x for x in subjects if subjects.count(x) > 1})
+        if twice:
+            out.append((NOTE, f"{who}'s Growth tab lists {', '.join(f'“{x}”' for x in twice)} twice in one list"))
+        subjects = []
+    return out
+
+
+def strip_badge(tab: str, state: dict) -> str | None:
+    """The badge a tab carries, as `tabBadge` in hooks/pane.tsx gives it, or None for one this cannot say (a spinner)."""
+    if tab == "play":
+        notes = dig(state, "pane.notes") or []
+        return f" ({len(notes)})" if notes else ""
+    review = dig(state, "pane.review")
+    if not isinstance(review, dict):
+        return ""
+    if review.get("isUnseen"):
+        return " (new)"
+    if review.get("state") == "running":
+        return None
+    if review.get("state") == "failed":
+        return " (!)"
+    serious = sum(1 for f in (dig(state, "pane.issues.ledger.findings") or []) if isinstance(f, dict) and f.get("status") in ("open", "partly") and f.get("severity") in ("critical", "high"))
+    return f" ({serious})" if serious else ""
+
+
+def check_strip_badges(who: str, state: dict) -> list[tuple[str, str]]:
+    """The minimized strip's Play and Review against the badges the state calls for: the strip said a bare "Review"
+    while the pane said "Review (4)" (the twentieth ui-truth pass, 2026-10-07; an unbadged tab reads as nothing to see)."""
+    out: list[tuple[str, str]] = []
+    texts = [t for t in (dig(state, "shown.band.texts") or []) if isinstance(t, str)]
+    for tab, name in (("play", "Play"), ("review", "Review")):
+        drawn = next((t for t in texts if t == name or t.startswith(name + " ")), None)
+        badge = strip_badge(tab, state)
+        if drawn is None or badge is None:
+            continue
+        if drawn != name + badge:
+            out.append((BAD, f"{who}'s strip says “{drawn}”, and the state calls for “{name + badge}”"))
+        else:
+            out.append((FINE, f"{who}'s strip says “{drawn}”, as the state calls for"))
+    return out
+
+
+def is_quoted(line: str, quote: str) -> bool:
+    """`isQuoted` in core/findings.ts: whether a line reads as the line an issue quotes, never as its comment."""
+    said, wanted = line.strip(), quote.strip()
+    if COMMENT_LINE.match(said) and not COMMENT_LINE.match(wanted):
+        return False
+    return said == wanted or (len(wanted) >= 12 and wanted in said) or (len(wanted) >= 6 and said.startswith(wanted))
+
+
 def despin(text: str) -> str:
     """A tab's spinner at any tick reads as its first frame, so that a drawing and a screen caught a tick apart agree."""
     return re.sub(rf"(?<=\s)[{SPINNER[1:]}](?=\s|$)", "·", text)
@@ -1635,7 +1716,10 @@ def check_working_share(who: str, state: dict, project: dict | None, now: int) -
     ref = now if is_driver else (state.get("at") or now)
     reach = window if is_driver else window + FOLLOW_GRACE_MS
     slack = WORKING_SLACK_MS if is_driver else 0
-    on_file = sum(e.get("ms") or 0 for e in entries if e.get("kind") == "focus" and e.get("path") == path and ref - (e.get("at") or 0) <= reach)
+    # An entry counts whole when it ended in the window, as the tutor counts it (`endOf` in core/journal.ts): counted by
+    # its start, a slice begun before the window and ended in it was left out, and "4 min" read as twice the journal (the
+    # twentieth ui-truth pass, 2026-10-07).
+    on_file = sum(e.get("ms") or 0 for e in entries if e.get("kind") == "focus" and e.get("path") == path and ref - ((e.get("at") or 0) + (e.get("ms") or 0)) <= reach)
     if said_ms > on_file + slack:
         return [(BAD, f"{who}'s “Working on” says {share} on {path}, and the journal holds {on_file // 1000} s of caret time there in that window")]
     return [(FINE, f"{who}'s “Working on” time agrees with the journal: {share}")]
@@ -2350,6 +2434,22 @@ def check_issues(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]
         own = mod_own_files(root, coverage.get("skipped") or [])
         if own is not None and len(own) != (coverage.get("files") or 0):
             out.append((BAD, f"the audit of {project['id']} counts {coverage.get('files')} of their own source files, and the mod's rules count {len(own)} at {head}"))
+    # An audit that names only its commit quotes lines of that commit, dismissed or not: one that quotes a line the commit lacks read changes
+    # not yet committed, and "at 570e787" over it makes the issue look made up (the twentieth ui-truth pass, 2026-10-07).
+    commit = str(coverage.get("commit", ""))
+    if root and commit and not commit.endswith("+") and (coverage.get("at") or 0) > 0:
+        by_file: dict[str, list[dict]] = {}
+        for f in on_disk:
+            if f.get("origin") == "audit" and f.get("at") == coverage.get("at") and str(f.get("file", "")) not in ("", ".") and str(f.get("lineText", "")).strip():
+                by_file.setdefault(str(f["file"]), []).append(f)
+        for file, found in list(by_file.items())[:8]:
+            text = git_out(root, "show", f"{commit}:{file}")
+            if text is None:
+                continue
+            lacking = [f for f in found if not any(is_quoted(line, str(f["lineText"])) for line in text.split("\n"))]
+            if lacking:
+                out.append((BAD, f"the audit of {project['id']} says it read the code at {commit[:7]}, and issue {lacking[0].get('id')} “{lacking[0].get('title')}” quotes a line {file} does not have there: it read uncommitted changes, and the line does not say so"))
+                break
     if isinstance(project.get("findings"), dict) and "v" not in project["findings"]:
         out.append((NOTE, f"findings.json of {project['id']} has no version: it gets one at its next change"))
     if (coverage.get("at") or 0) > 0 and root:
@@ -2508,6 +2608,11 @@ def check_cache(w: dict, s: dict, project: dict | None) -> list[tuple[str, str]]
     if m and watched and root:
         named = git_out(root, "show", "--name-only", "--format=", m.group(1))
         kept = sorted(set(watched) & set((named or "").split())) if named is not None else []
+        # A file saved since that commit is watched for the next one, whatever that commit held (the twentieth ui-truth
+        # pass, 2026-10-07: index.php, in the owner's import and saved an hour after it, called a leftover).
+        made = (git_out(root, "show", "-s", "--format=%ct", m.group(1)) or "").strip()
+        if made.isdigit():
+            kept = [path for path in kept if (mtime_ms(pathlib.Path(root) / path) or 0) < (int(made) + 1) * 1000]
         if kept and settled(mtime_ms(project["dir"] / "watched.json"), SHARED_GRACE_MS):
             out.append((BAD, f"{who} keeps {len(kept)} watched file(s) of commit {m.group(1)}, which did not count: {', '.join(kept[:3])}{' and more' if len(kept) > 3 else ''}: a later commit of theirs would weigh in full for saves never watched"))
 
