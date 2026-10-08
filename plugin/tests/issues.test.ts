@@ -168,7 +168,7 @@ sessionTest(
     await ui.press({ key: 'tab-review' })
     expect((await ui.find({ key: 'issue-2' }))?.props.label).toBe('❯ critical · the project')
     expect(await ui.find({ key: 'issue-open' })).toBeUndefined()
-    await ui.press({ key: 'issue-next' })
+    await ui.press({ key: 'row-next' })
     expect(await ui.find({ key: 'issue-open' })).toBeDefined()
     await ui.unmount()
   },

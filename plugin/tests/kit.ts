@@ -265,6 +265,8 @@ export function stubSession(on: On, options: StubOptions = {}) {
     cwd: ROOT as string,
     opened: [] as string[],
     closed: [] as string[],
+    /** Every pane the plugin opened asking for the keyboard (`focus`), in order. */
+    focusAsked: [] as string[],
     /** Why Claude Code opens a pane without drawing it, as it does unasked on a narrow terminal. '' for a pane that is drawn. */
     paneWaits: '',
     /** Every `$.ui.status` call, in order: the text, or undefined for a cleared line. */
@@ -489,6 +491,7 @@ export function stubSession(on: On, options: StubOptions = {}) {
   })
   on('ui.open', ($, e) => {
     session.opened.push(e.id)
+    if (e.focus === true) session.focusAsked.push(e.id)
     if (!panes.includes(e.id)) panes.push(e.id)
 
     return { value: session.paneWaits === '' ? { isPlaced: true } : { isPlaced: false, reason: session.paneWaits } }

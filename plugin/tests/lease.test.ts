@@ -238,6 +238,22 @@ const noteOf = (id: number, topic: string, text: string): Note => ({ id, file: '
 const keptNotes = (notes: Note[]) => ({ v: 1, notes, dismissed: [], prints: { 'stats.py': sourcePrint(MEAN) } })
 const waiting = (digit: string, title: string, at: number) => ({ hash: digit.repeat(40), title, at, isReviewed: false, attempts: 0 })
 
+sessionTest('a session that does not drive walks the review history too', QUIET, async ($, on) => {
+  // "Review 1 of 2" with no `p: older` there (the eighteenth ui-truth pass, 2026-10-07).
+  const session = stubSession(on, {
+    head: { 'stats.py': MEAN },
+    data: { [LEASE]: { v: 1, session: OTHER, at: 0 }, [`${PROJECT}/reviews.json`]: [review('abc1234', 'Add mean', 'The mean is fine.'), review('def5678', 'Add median', 'The median sorts a copy.')] },
+  })
+  await start($, session)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-review' })
+  expect(await ui.find({ key: 'review-now' })).toBeUndefined()
+  expect(await ui.find({ key: 'review-older' })).toBeDefined()
+  await ui.press({ key: 'review-older' })
+  expect(await ui.find({ key: 'review-newer' })).toBeDefined()
+  await ui.unmount()
+})
+
 sessionTest("a session that does not drive shows the driver's notes, reviews and journal, and takes up what it writes at each beat", QUIET, async ($, on) => {
   const session = stubSession(on, {
     head: { 'stats.py': MEAN },

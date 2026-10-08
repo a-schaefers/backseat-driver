@@ -532,6 +532,29 @@ class Disagreements(unittest.TestCase):
         told["pane"]["progress"]["records"][0]["level"] = "junior"
         self.assertEqual(bad(jack.check_session(world([s], now=self.now), s, DOCKED)), [])
 
+    def test_the_pane_keys_against_what_it_draws(self):
+        # Owner, 2026-10-07: 1-6 open a tab, j and k walk the rows, Enter presses the one the ring is on.
+        told = {"shown": {"pane": {"texts": ["1: Play-by-play", "j: next", "k: previous"], "rowKeys": [], "isFocused": True}}}
+        self.assertIn("“j: next” on a tab with no row to walk", " ".join(bad(jack.check_keys_walk("aaaaaaaa", told, None))))
+        told["shown"]["pane"]["rowKeys"] = ["setting-a", "setting-b"]
+        self.assertEqual(bad(jack.check_keys_walk("aaaaaaaa", told, None)), [])
+        told["shown"]["pane"]["ring"] = {"key": "setting-c", "at": 1}
+        self.assertTrue(any(level == jack.NOTE and "setting-c, which the tab no longer draws" in text for level, text in jack.check_keys_walk("aaaaaaaa", told, None)))
+        # The review history walks with p and n in every session (the eighteenth ui-truth pass, 2026-10-07).
+        review = {"shown": {"pane": {"texts": ["2: Deep review", "v: overview", "▸ Review 1 of 2 · 19:57"], "rowKeys": ["review-list"], "isFocused": True}}}
+        self.assertIn("“Review 1 of 2” and no “p: older”", " ".join(bad(jack.check_keys_walk("aaaaaaaa", review, None))))
+        review["shown"]["pane"]["texts"].insert(2, "p: older")
+        self.assertEqual(bad(jack.check_keys_walk("aaaaaaaa", review, None)), [])
+        review["shown"]["pane"]["texts"][3] = "▸ Review 2 of 2 · yesterday 23:05"
+        self.assertIn("“Review 2 of 2” and no “n: newer”", " ".join(bad(jack.check_keys_walk("aaaaaaaa", review, None))))
+        # Keys typed for a pane that did not have the keyboard, left in the prompt ("jj", the same pass).
+        away = {"shown": {"pane": {"texts": ["j: next", "k: previous", "w: change"], "rowKeys": ["note-1", "note-2"], "isFocused": False}}}
+        screen = ["conversation", "─" * 40, "❯ jj", "─" * 40, "  ⏵⏵ bypass permissions on"]
+        self.assertTrue(any(level == jack.NOTE and "prompt holds “jj”" in text for level, text in jack.check_keys_walk("aaaaaaaa", away, screen)))
+        self.assertEqual(jack.prompt_text(screen), "jj")
+        screen[2] = "❯ fix the parser"
+        self.assertEqual([text for level, text in jack.check_keys_walk("aaaaaaaa", away, screen) if level == jack.NOTE], [])
+
     def test_the_growth_tabs_counts_against_its_records(self):
         # "6.5 shown, 3.5 missed" were weights, and "8 of 8 observations" stood for fifteen (the seventeenth ui-truth pass, 2026-10-07).
         seen = lambda commit, verdict, n: [{"commit": commit, "verdict": verdict, "skill": f"s{i}", "level": "junior", "weight": 0.5} for i in range(n)]

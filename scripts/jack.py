@@ -1271,6 +1271,7 @@ def check_session_once(w: dict, s: dict, rows: list[str] | None) -> list[tuple[s
             out.append((BAD, f"{who}'s Growth tab says “Not placed yet” and under it what the next level needs: the model's words for a level it was not given"))
     if dig(state, "pane.tab") == "profile" and isinstance(records, list):
         out += check_growth_counts(who, drawn_now, records)
+    out += check_keys_walk(who, state, rows)
 
     # The watchers it says it runs.
     said = sorted(p.get("role", "?") for p in state.get("pushers", []) if isinstance(p, dict) and p.get("isLive"))
@@ -2011,6 +2012,54 @@ def check_audit_line(who: str, text: str, own: list[str] | None) -> list[tuple[s
         theirs_skipped = [path for path, _ in parts["skipped"] if is_own(path)]
         if parts["read"] + len(theirs_skipped) > parts["files"]:
             out.append((BAD, f"{who}'s Deep review tab says the audit read {parts['read']} of {parts['files']} of their own files and skipped {len(theirs_skipped)} more of them: more than there are"))
+    return out
+
+
+REVIEW_HEADING = re.compile(r"Review (\d+) of (\d+)")
+
+
+def prompt_text(rows: list[str]) -> str:
+    """What the prompt box holds as the screen shows it: the row under the last rule that starts with Claude Code's
+    "❯", less the mark. '' when no prompt row is seen."""
+    for i in range(len(rows) - 1, 0, -1):
+        if rows[i].startswith("❯") and rows[i - 1].lstrip().startswith("─"):
+            return rows[i][1:].strip()
+    return ""
+
+
+def check_keys_walk(who: str, state: dict, rows: list[str] | None) -> list[tuple[str, str]]:
+    """The pane's keys against what it draws (owner, 2026-10-07: 1-6 open a tab, j and k walk its rows, Enter presses
+    the one the ring is on, the arrows and the page keys scroll): j and k with no row to walk, the ring on a row no
+    longer drawn, the review history without its older and newer keys (the eighteenth ui-truth pass: none in a
+    session that does not drive), and keys meant for the pane left in the prompt while the pane did not have the
+    keyboard ("jj" after the pane's own dialog took it, the same pass)."""
+    out: list[tuple[str, str]] = []
+    pane = dig(state, "shown.pane")
+    if not isinstance(pane, dict):
+        return out
+    texts = [t for t in (pane.get("texts") or []) if isinstance(t, str)]
+    keys = pane.get("rowKeys")
+    if isinstance(keys, list):
+        if "j: next" in texts and not keys:
+            out.append((BAD, f"{who}'s pane offers “j: next” on a tab with no row to walk: a key that does nothing"))
+        ring = pane.get("ring") if isinstance(pane.get("ring"), dict) else None
+        if ring and ring.get("key") and ring["key"] not in keys:
+            out.append((NOTE, f"{who}'s focus ring was put on {ring['key']}, which the tab no longer draws: the next j starts from the row the keys act on"))
+    for text in texts:
+        m = REVIEW_HEADING.search(text)
+        if m is None or not text.lstrip("▸▾ ").startswith("Review "):
+            continue
+        shown, total = int(m.group(1)), int(m.group(2))
+        if shown < total and "p: older" not in texts:
+            out.append((BAD, f"{who}'s Deep review tab shows “Review {shown} of {total}” and no “p: older”: the history cannot be walked from the keys"))
+        if shown > 1 and "n: newer" not in texts:
+            out.append((BAD, f"{who}'s Deep review tab shows “Review {shown} of {total}” and no “n: newer”: the history cannot be walked from the keys"))
+        break
+    if rows is not None and pane.get("isFocused") is False:
+        hotkeys = {text.split(":")[0] for text in texts if re.match(r"^[a-z0-9]: ", text)}
+        typed = prompt_text(rows)
+        if typed and len(typed) <= 6 and all(ch in hotkeys for ch in typed):
+            out.append((NOTE, f"{who}'s prompt holds “{typed}”, keys of its pane, while the pane does not have the keyboard: they were typed for the pane"))
     return out
 
 

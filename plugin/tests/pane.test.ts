@@ -192,7 +192,9 @@ test('the tab row keeps what the tabs say for as long as there is room, and neve
   expect(keysRowFits({ isFocused: false, columns: 73 }, true)).toBe(true)
   expect(keysRowFits({ isFocused: false, columns: 46 }, true)).toBe(false)
   expect(keysRowFits({ isFocused: true, columns: 73 }, true)).toBe(false)
-  expect(keysRowFits({ isFocused: true, columns: 96 }, true)).toBe(true)
+  // The focused hint names the keys that move and scroll (2026-10-07): one line from 104 columns.
+  expect(keysRowFits({ isFocused: true, columns: 103 }, true)).toBe(false)
+  expect(keysRowFits({ isFocused: true, columns: 104 }, true)).toBe(true)
   expect(keysRowFits({ isFocused: false, columns: 56 }, false)).toBe(true)
   expect(tabRow({ ...busy, columns: 67 })).toEqual({ labels: ['Play', 'Review (new)', 'Explain', 'Growth', 'Lessons', 'Settings'], gap: 1 })
   // A docked pane: the longest names give way.

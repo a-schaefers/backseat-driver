@@ -153,12 +153,9 @@ import type { Play, PlayFacts } from '../core/play'
 import { isProblem, keepNotes, parseKeptNotes, stillOpen, withDismissed } from '../core/notes'
 import type { KeptNotes } from '../core/notes'
 import {
-  currentPlayItem,
   detailMarkdown,
-  drawnOrder,
   estimatedRows,
   PLAY_PICKS,
-  playPicks,
   renderMinimized,
   renderPane,
   reviewSchedule,
@@ -226,7 +223,7 @@ import { parseSessions, SELF_CHECK_MS } from '../core/sessions'
 import { isHello } from '../core/avatar'
 import { parseLease } from '../core/lease'
 import { clockTime, dayTime } from '../core/clock'
-import { isSameShown, textsOf } from './shown'
+import { isSameShown, rowKeysOf, textsOf } from './shown'
 import type { Shown } from './shown'
 import { healthLine, playLine, watchOf } from '../core/status'
 import type { Recorder } from '../core/recorder'
@@ -2666,6 +2663,51 @@ async function scrollToTop($: EngineInterface): Promise<void> {
   }
 }
 
+/** Where j and k last put the pane's focus ring: on which tab, the row's key, and when ('' for none). */
+let ring: { tab: Tab; key: string; at: number } = { tab: 'play', key: '', at: 0 }
+
+/**
+ * Puts the pane's focus ring on a row, for Enter to press, and keeps the window
+ * on it; a note or an issue there becomes the one e, d and t act on (owner,
+ * 2026-10-07: j and k walk the rows of every tab).
+ */
+async function putRing($: EngineInterface, tab: Tab, key: string): Promise<void> {
+  ring = { tab, key, at: Date.now() }
+  const note = /^note-(\d+)$/.exec(key)
+  if (note !== null) {
+    await update($, selectedAtom, () => Number(note[1]))
+    await update($, playOnAtom, (): 'note' | 'issue' => 'note')
+  }
+  const issue = /^issue-(\d+)$/.exec(key)
+  if (issue !== null) {
+    await update($, selectedIssueAtom, () => Number(issue[1]))
+    await update($, playOnAtom, (): 'note' | 'issue' => 'issue')
+  }
+  try {
+    const moved = await $.ui.focus({ requestId: PANE_ID, key })
+    const shown = await $.ui.scroll({ in: PANE_ID, to: { key }, block: 'nearest' })
+    trace($, 'ui', 'ring', () => ({ key, moved, shown }))
+  } catch (error) {
+    // A host that cannot move the ring or the window (the kit has neither) says so in the log; the pick above stands.
+    trace($, 'ui', 'ring', () => ({ key, refused: String(error) }))
+  }
+}
+
+/**
+ * Hands the keyboard back to the pane after a dialog one of its keys asked:
+ * the dialog took it, and the keys pressed after it went into the prompt (the
+ * eighteenth ui-truth pass, 2026-10-07: "jj"). Granted only while the prompt
+ * is empty.
+ */
+async function refocusPane($: EngineInterface): Promise<void> {
+  try {
+    const opened = await $.ui.open({ id: PANE_ID, title: 'Backseat', columns: PANE_COLUMNS, focus: true })
+    trace($, 'ui', 'pane refocused', () => opened)
+  } catch (error) {
+    trace($, 'ui', 'pane refocused', () => ({ refused: String(error) }))
+  }
+}
+
 /** Said once in a process that carries the tutor on from the one its conversation left. */
 const CARRIED_ON = 'Backseat Driver is still on. It came along with the conversation.'
 
@@ -4694,28 +4736,18 @@ async function drawTutor(
       touched($, settings, 'setting fold', () => key)
       void update($, openListAtom, (open: string): string => (open === `setting:${key}` ? '' : `setting:${key}`))
     },
-    onStep: (step: 1 | -1) => {
-      touched($, settings, 'step', () => step)
-      const next = steppedNote(view, step)
-      if (next !== undefined) void update($, selectedAtom, () => next.id)
+    // j and k put the ring on the next row the tab draws, or the previous one, from the row it is on, else from the
+    // row the keys act on; Enter presses it (owner, 2026-10-07). On a note or an issue, e, d and t act on it.
+    onRowStep: (step: 1 | -1, rows: readonly string[], current: string) => {
+      touched($, settings, 'row step', () => step)
+      const from = rows.indexOf(ring.tab === view.tab && rows.includes(ring.key) ? ring.key : current)
+      const next = rows[from === -1 ? (step === 1 ? 0 : rows.length - 1) : (from + step + rows.length) % rows.length]
+      if (next !== undefined) void putRing($, view.tab, next)
     },
     onSelect: (id: number) => {
       touched($, settings, 'select', () => id)
       void update($, selectedAtom, () => id)
       void update($, playOnAtom, (): 'note' | 'issue' => 'note')
-    },
-    // The Play-by-play tab's keys walk its notes, then the issues it shows from the deep review.
-    onPlayStep: (step: 1 | -1) => {
-      touched($, settings, 'play step', () => step)
-      const drawn = [...drawnOrder(view.notes).map(note => ({ kind: 'note' as const, id: note.id })), ...playPicks(view).map(finding => ({ kind: 'issue' as const, id: finding.id }))]
-      const item = currentPlayItem(view)
-      const at = item === undefined ? -1 : drawn.findIndex(entry => ('note' in item ? entry.kind === 'note' && entry.id === item.note.id : entry.kind === 'issue' && entry.id === item.issue.id))
-      const next = drawn[(Math.max(0, at) + (at === -1 ? 0 : step) + drawn.length) % drawn.length]
-      if (next === undefined) return
-      // Each atom by its own name: the module's state is listed from the calls as written.
-      if (next.kind === 'note') void update($, selectedAtom, () => next.id)
-      else void update($, selectedIssueAtom, () => next.id)
-      void update($, playOnAtom, (): 'note' | 'issue' => next.kind)
     },
     onIssuePin: (id: number, isPinned: boolean) => {
       touched($, settings, isPinned ? 'issue pin' : 'issue unpin', () => id)
@@ -4766,7 +4798,7 @@ async function drawTutor(
     },
     onQuestions: () => {
       touched($, settings, 'questions')
-      void ask($, settings, firstRunQuestions(profiles.languages, false))
+      void ask($, settings, firstRunQuestions(profiles.languages, false)).then(() => (where.isFocused ? refocusPane($) : undefined))
     },
     onExplainMove: (step: 1 | -1) => {
       touched($, settings, 'explain move', () => step)
@@ -4792,17 +4824,6 @@ async function drawTutor(
       touched($, settings, 'issue select', () => id)
       void update($, selectedIssueAtom, () => id)
       void update($, playOnAtom, (): 'note' | 'issue' => 'issue')
-    },
-    onIssueStep: (step: 1 | -1) => {
-      touched($, settings, 'issue step', () => step)
-      void (async () => {
-        const [state, chosen, open] = await Promise.all([read($, issuesAtom), read($, selectedIssueAtom), read($, openListAtom)])
-        const views = ledgerViews(state.ledger, { savedFiles: [], cap: 0 })
-        const drawn = [...views.ranked, ...(open === 'issues-low' ? views.folded : [])]
-        if (drawn.length === 0) return
-        const at = Math.max(0, chosen === null ? 0 : drawn.indexOf(chosen))
-        await update($, selectedIssueAtom, () => drawn[(at + step + drawn.length) % drawn.length] ?? null)
-      })()
     },
     onIssueDismiss: (id: number) => {
       touched($, settings, 'issue dismiss', () => id)
@@ -4908,7 +4929,7 @@ async function drawTutor(
     },
     onWorking: () => {
       touched($, settings, 'working')
-      void askWorking($)
+      void askWorking($).then(() => (where.isFocused ? refocusPane($) : undefined))
     },
     onSetting: (row: SettingRow, value: string) => {
       touched($, settings, 'setting', () => ({ key: row.key, value }))
@@ -4934,6 +4955,8 @@ async function drawTutor(
     isCompact: where.isCompact,
     texts: textsOf(tree),
     ...(where.scroll === undefined ? {} : { scroll: where.scroll }),
+    rowKeys: rowKeysOf(tree),
+    ...(ring.key !== '' && ring.tab === tab ? { ring: { key: ring.key, at: ring.at } } : {}),
   })
 
   return tree
@@ -5555,22 +5578,15 @@ export const register: Register = (on, options) => {
     }),
   )
 
-  // The focus ring says one thing nothing else does: which note the person is on.
-  on('ui.focus', async ($, e, next) => {
-    const result = await next(e)
-    if (result.deny !== undefined) return result
-    const note = /^note-(\d+)$/.exec(e.element ?? '')
-    if (note !== null) {
-      await update($, selectedAtom, () => Number(note[1]))
-      await update($, playOnAtom, (): 'note' | 'issue' => 'note')
-    }
-    const issue = /^issue-(\d+)$/.exec(e.element ?? '')
-    if (issue !== null) {
-      await update($, selectedIssueAtom, () => Number(issue[1]))
-      await update($, playOnAtom, (): 'note' | 'issue' => 'issue')
-    }
+  // The pane is driven by its keys (owner, 2026-10-07: "remove tab/shift+tab for navigation, and rely solely on 1-6 for
+  // the upper tabs, and j/k for up and down"): Tab, Shift+Tab and the person's other moves of the focus ring are refused
+  // there, so the ring stands where j and k put it (`putRing`). A click still presses what it is on, and the arrows and
+  // the page keys scroll (probed on 2.1.293); the mod's own `$.ui.focus` never comes through its own hook.
+  on('ui.focus', { requestId: 'backseat-driver' }, async ($, e, next) => {
+    if (e.origin.kind !== 'person') return next(e)
+    trace($, 'ui', 'ring kept', () => ({ element: e.element ?? null }))
 
-    return result
+    return {}
   })
 
   // Where the pane's window moves, and who moved it: for the debug log, so that a pane standing scrolled past its

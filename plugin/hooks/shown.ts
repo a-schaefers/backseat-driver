@@ -26,6 +26,10 @@ export type Shown = {
   texts: string[]
   /** The window over it where the surface says: the first row on the screen (0 at the top) and the rows it may show. */
   scroll?: { offset: number; bodyRows: number }
+  /** The rows j and k walk, by key, in the order drawn (`rowKeysOf`). */
+  rowKeys?: string[]
+  /** The row j and k last put the focus ring on, on the tab drawn, and when; absent when none. */
+  ring?: { key: string; at: number }
 }
 
 function inline(value: unknown): string {
@@ -74,6 +78,30 @@ export function textsOf(tree: unknown): string[] {
   walk(tree)
 
   return texts
+}
+
+/**
+ * The keys of the rows a drawing lists, in the order drawn: every Button
+ * without a hotkey. A keyed control is pressed by its key; everything else is
+ * a row j and k put the ring on, for Enter to press (2026-10-07).
+ */
+export function rowKeysOf(tree: unknown): string[] {
+  const keys: string[] = []
+  const walk = (node: unknown): void => {
+    if (node === null || node === undefined || typeof node !== 'object') return
+    if (Array.isArray(node)) return node.forEach(walk)
+    const { type, props, children } = node as { type?: unknown; props?: unknown; children?: unknown }
+    const given = (typeof props === 'object' && props !== null ? props : {}) as Record<string, unknown>
+    if (type === 'Button') {
+      if (typeof given.hotkey !== 'string' && typeof given.key === 'string' && given.key !== '') keys.push(given.key)
+
+      return
+    }
+    walk(children)
+  }
+  walk(tree)
+
+  return keys
 }
 
 /** Whether two drawings say the same. */

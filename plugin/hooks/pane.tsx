@@ -4,6 +4,7 @@ import type { ExplainView, IssuesState, LessonsView, LessonView, Mode, Note, Out
 import { bubbleColumn, bubbleWidth, isTalking, poseOf, saidSoFar, wordsSaid } from '../core/avatar'
 import type { Avatar } from '../core/avatar'
 import { artShape, characterArt } from './character'
+import { rowKeysOf } from './shown'
 import type { Backdrop } from '../core/sprite'
 import { languageName } from '../core/languages'
 import { isProblem, sortNotes } from '../core/notes'
@@ -97,8 +98,13 @@ export type PaneActions = {
   onExplainAsk: () => void
   /** Ask what they are working on, so that they can say it themselves or take it back. */
   onWorking: () => void
-  /** Select the next note in the order they are drawn, or the previous one. */
-  onStep: (step: 1 | -1) => void
+  /**
+   * j and k: put the ring on the next row the open tab draws, or the previous
+   * one, from the row it is on (else the one the keys act on): `rows` are the
+   * keys of the rows in the order drawn, `current` the row of the note, issue
+   * or symbol the keys act on now.
+   */
+  onRowStep?: (step: 1 | -1, rows: readonly string[], current: string) => void
   /** Change one of the plugin's `/config` rows to the value picked. */
   onSetting: (row: SettingRow, value: string) => void
   /** Open a path in the Lessons tab, or go back to the list with null. */
@@ -117,7 +123,6 @@ export type PaneActions = {
   onReviewOpen?: (index: number) => void
   /** The issue the Deep review tab's keys act on. */
   onIssueSelect?: (id: number) => void
-  onIssueStep?: (step: 1 | -1) => void
   onIssueDismiss?: (id: number) => void
   onIssueRestore?: (id: number) => void
   onIssueExplain?: (id: number) => void
@@ -126,8 +131,6 @@ export type PaneActions = {
   /** Audits the codebase now. Absent in a session that does not drive. */
   onAudit?: () => void
   onIssuesFold?: (which: 'low' | 'closed') => void
-  /** The Play-by-play tab's keys: through its notes, then the issues it shows from the deep review. */
-  onPlayStep?: (step: 1 | -1) => void
   /** Tracks an issue, shown in the play-by-play while it is open, or stops tracking it. */
   onIssuePin?: (id: number, isPinned: boolean) => void
   /** A note the play-by-play raised, pressed on the Deep review tab: opened on its own tab. */
@@ -267,13 +270,18 @@ export function tabRows(
 export const KEYBOARD_HINT = 'Click here or press Ctrl+X Tab to use the keys.'
 
 /** Shown while the pane has the keyboard: how it is driven. */
-export const FOCUSED_HINT = 'Tab moves · Enter presses · 1–6 open a tab · Esc goes back to the prompt.'
+export const FOCUSED_HINT = '1–6 tabs · j k move · Enter presses · ↑↓ PgUp PgDn scroll · Esc back to the prompt.'
 
 /**
  * One grammar for everything that can be pressed, so that a glance says what
  * is a control (owner, 2026-10-05: "what can i click on, what the keys are"):
  * a control with a key reads `k: label`, one without reads `[ label ]`, a row
- * of a list reads `▸ …` (`❯ …` the one the keys act on). Every tab's keyed
+ * of a list reads `▸ …` (`❯ …` the one the keys act on). Keys move through
+ * a tab, not Tab (owner, 2026-10-07: "rely solely on 1-6 for the upper tabs,
+ * and j/k for up and down of the menus below"): 1–6 open a tab, j and k put
+ * the focus ring on the next row or the previous one of whatever list the tab
+ * draws (`rowKeysOf`: every button without a key), Enter presses the row it is
+ * on, and the arrows and the page keys scroll. Every tab's keyed
  * controls stand at its top, under "Working on", with the keys row under them
  * and a rule under that (owner, 2026-10-06: "all of our keyboard shortcut
  * type of buttons are at the top of the tab"): the same place on every tab,
@@ -642,7 +650,13 @@ function outlineRow({ Box, Text, Button }: Pick<Kit, 'Box' | 'Text' | 'Button'>,
   return (
     <Box flexDirection="row" columnGap={2}>
       <Box width={width} flexShrink={0}>
-        {isCurrent ? (
+        {isCurrent && actions.onExplainPick !== undefined ? (
+          // A row of the walk too, so that j and k carry on from it (2026-10-07); its mark in the accent color.
+          <Box flexDirection="row" columnGap={1}>
+            <Text color="claude">❯</Text>
+            <Button key={`explain-row-${row.startLine}`} label={name} plain onPress={() => actions.onExplainPick?.(row.startLine)} />
+          </Box>
+        ) : isCurrent ? (
           <Box flexDirection="row" columnGap={1}>
             <Text color="claude">❯</Text>
             <Text bold>{name}</Text>
@@ -1094,7 +1108,6 @@ function reviewControls({ Text, Button }: Pick<Kit, 'Text' | 'Button'>, view: Pa
   const history = reviewHistory(view.review)
   const { index } = shownReview(view.review)
   const current = currentIssue(view)
-  const drawn = drawnIssues(view)
   // The map of the project, which the first look around wrote: one key away, not a tab of its own (2026-10-07).
   const overview = history.findIndex(entry => entry.subject === SURVEY_SUBJECT)
   // Any session acts on an issue: what it does is written to the project's ledger, which every session reads.
@@ -1104,20 +1117,23 @@ function reviewControls({ Text, Button }: Pick<Kit, 'Text' | 'Button'>, view: Pa
     current !== undefined && actions.onIssuePin !== undefined && (
       <Button key="issue-track" label={current.isPinned ? 'untrack' : 'track'} hotkey="t" plain onPress={() => actions.onIssuePin?.(current.id, !current.isPinned)} />
     ),
-    drawn.length > 1 && <Button key="issue-next" label="next issue" hotkey="j" plain onPress={() => actions.onIssueStep?.(1)} />,
-    drawn.length > 1 && <Button key="issue-previous" label="previous" hotkey="k" plain onPress={() => actions.onIssueStep?.(-1)} />,
     // An issue about the whole project has no file to open: no key that would do nothing (the fifteenth ui-truth pass).
     current !== undefined && current.file !== '.' && actions.onIssueOpen !== undefined && <Button key="issue-open" label="open in editor" hotkey="o" plain onPress={() => actions.onIssueOpen?.(current.id)} />,
     overview >= 0 && overview !== index && <Button key="overview" label="overview" hotkey="v" plain onPress={() => actions.onReviewOpen?.(overview)} />,
   ]
-  if (view.watch.state === 'following') return [...issueKeys, <Text dimColor>{followingLine(view.watch.driver)}</Text>]
+  // Older and newer walk the history in any session: a session that does not drive lost them with `r` (the
+  // eighteenth ui-truth pass, 2026-10-07: "Review 1 of 2" with no `p`).
+  const steps = [
+    index + 1 < history.length && <Button key="review-older" label="older" hotkey="p" plain onPress={() => actions.onReviewStep?.(1)} />,
+    index > 0 && <Button key="review-newer" label="newer" hotkey="n" plain onPress={() => actions.onReviewStep?.(-1)} />,
+  ]
+  if (view.watch.state === 'following') return [...issueKeys, ...steps, <Text dimColor>{followingLine(view.watch.driver)}</Text>]
 
   return [
     <Button key="review-now" label="review now" hotkey="r" plain onPress={() => actions.onReview()} />,
     actions.onAudit !== undefined && <Button key="audit" label="audit" hotkey="a" plain onPress={() => actions.onAudit?.()} />,
     ...issueKeys,
-    index + 1 < history.length && <Button key="review-older" label="older" hotkey="p" plain onPress={() => actions.onReviewStep?.(1)} />,
-    index > 0 && <Button key="review-newer" label="newer" hotkey="n" plain onPress={() => actions.onReviewStep?.(-1)} />,
+    ...steps,
   ]
 }
 
@@ -1158,9 +1174,6 @@ function playControls({ Text, Button }: Pick<Kit, 'Text' | 'Button'>, view: Pane
   // The keys act on the current note, or on the issue picked from the deep review: one record, whichever view it is in.
   const current = item !== undefined && 'note' in item ? item.note : undefined
   const issue = item !== undefined && 'issue' in item ? item.issue : undefined
-  const picks = playPicks(view)
-  const count = drawnOrder(view.notes).length + picks.length
-  const step = (by: 1 | -1) => (picks.length > 0 && actions.onPlayStep !== undefined ? actions.onPlayStep(by) : actions.onStep(by))
   const isFollowing = view.watch.state === 'following'
   const canLook = view.mode !== 'paused' && !isFollowing
 
@@ -1174,8 +1187,6 @@ function playControls({ Text, Button }: Pick<Kit, 'Text' | 'Button'>, view: Pane
     issue !== undefined && actions.onIssuePin !== undefined && (
       <Button key="track" label={issue.isPinned ? 'untrack' : 'track'} hotkey="t" plain onPress={() => actions.onIssuePin?.(issue.id, !issue.isPinned)} />
     ),
-    count > 1 && <Button key="next-note" label={picks.length > 0 ? 'next' : 'next note'} hotkey="j" plain onPress={() => step(1)} />,
-    count > 1 && <Button key="previous-note" label="previous" hotkey="k" plain onPress={() => step(-1)} />,
     canLook && <Button key="look" label="look now" hotkey="l" plain onPress={() => actions.onLook()} />,
     current !== undefined && actions.onOpen !== undefined && <Button key="open" label="open in editor" hotkey="o" plain onPress={() => actions.onOpen?.(current.file, current.line)} />,
     issue !== undefined && issue.file !== '.' && actions.onIssueOpen !== undefined && <Button key="open" label="open in editor" hotkey="o" plain onPress={() => actions.onIssueOpen?.(issue.id)} />,
@@ -1419,7 +1430,7 @@ function profileControls({ Button }: Pick<Kit, 'Button'>, view: PaneView, action
 }
 
 /** What the Lessons tab says above the list. */
-export const LESSONS_HINT = 'Learning paths, done in your own code. Click one, or Tab to it and press Enter; s then starts its next step in the conversation. Skipping them costs nothing.'
+export const LESSONS_HINT = 'Learning paths, done in your own code. Click one, or move to it with j and k and press Enter; s then starts its next step in the conversation. Skipping them costs nothing.'
 
 /** What it says when the plugin has none. */
 export const NO_LESSONS = 'No lessons are installed. A path is a markdown file in the plugin\'s lessons folder.'
@@ -1542,6 +1553,40 @@ function tabControls(kit: Kit, view: PaneView, actions: PaneActions): RenderChil
   return profileControls(kit, view, actions)
 }
 
+/** The row the keys act on now, where j and k start from when the ring is on no row of the tab: the note or the issue picked, or the symbol in focus. '' for none. */
+export function currentRowKey(view: PaneView): string {
+  if (view.tab === 'play') {
+    const item = currentPlayItem(view)
+
+    return item === undefined ? '' : 'note' in item ? `note-${item.note.id}` : `issue-${item.issue.id}`
+  }
+  if (view.tab === 'review') {
+    const issue = currentIssue(view)
+
+    return issue === undefined ? '' : `issue-${issue.id}`
+  }
+  if (view.tab === 'explain') return view.explain.target === null ? '' : `explain-row-${view.explain.target.startLine}`
+
+  return ''
+}
+
+/**
+ * j and k, on every tab with rows to walk (owner, 2026-10-07: "when there are
+ * bullet items below that, j/k should always nav those, across any page"):
+ * more than one row, or one the keys are not on yet. The rows are the body's
+ * buttons without a key, in the order drawn, so whatever a tab lists is walked.
+ */
+function rowControls({ Button }: Pick<Kit, 'Button'>, view: PaneView, rows: readonly string[], actions: PaneActions): RenderChildren[] {
+  const current = currentRowKey(view)
+  const canWalk = actions.onRowStep !== undefined && (rows.length > 1 || (rows.length === 1 && rows[0] !== current))
+  if (!canWalk) return []
+
+  return [
+    <Button key="row-next" label="next" hotkey="j" plain onPress={() => actions.onRowStep?.(1, rows, current)} />,
+    <Button key="row-previous" label="previous" hotkey="k" plain onPress={() => actions.onRowStep?.(-1, rows, current)} />,
+  ]
+}
+
 /** The tabs of one row as buttons, each with its digit. */
 function tabButtons({ Box, Button }: Kit, view: PaneView, actions: PaneActions, row: TabRowView) {
   return (
@@ -1554,7 +1599,7 @@ function tabButtons({ Box, Button }: Kit, view: PaneView, actions: PaneActions, 
 }
 
 /** What the Settings tab says above the rows. */
-export const SETTINGS_HINT = 'The same settings as in /config. Click a row to see its options, then click one; or Tab to it and press Enter. A change applies at once.'
+export const SETTINGS_HINT = 'The same settings as in /config. Click a row to see its options, then click one; or move to it with j and k and press Enter. A change applies at once.'
 
 /** What a row says when its value is typed rather than picked, which the pane does not offer. */
 export const SET_IN_CONFIG = 'set it in /config'
@@ -1665,7 +1710,9 @@ function characterOf(view: PaneView): PaneView['character'] {
 function renderStacked(kit: Kit, view: PaneView, actions: PaneActions) {
   const { Box, Text } = kit
   const character = characterOf(view)
-  const controls = tabControls(kit, view, actions)
+  // The body first, so that the controls above it know the rows j and k walk.
+  const body = tabBody(kit, view, actions)
+  const controls = [...rowControls(kit, view, rowKeysOf(body), actions), ...tabControls(kit, view, actions)]
 
   return (
     <Box flexDirection="column">
@@ -1683,7 +1730,7 @@ function renderStacked(kit: Kit, view: PaneView, actions: PaneActions) {
       {rule({ Text }, view.columns)}
       {character !== null && characterRow(kit, view, character)}
       {character !== null && <Text> </Text>}
-      {tabBody(kit, view, actions)}
+      {body}
     </Box>
   )
 }
