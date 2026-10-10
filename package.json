@@ -17,7 +17,7 @@
     "check": "npm run kernel && npm run validate && npm run licenses && npm run test && npm run typecheck && npm run core && npm run server && npm run tools"
   },
   "devDependencies": {
-    "@types/node": "24.19.1",
+    "@types/node": "26.6.4",
     "esbuild": "0.28.2",
     "spago": "1.0.4",
     "typescript": "^7.0.2"
