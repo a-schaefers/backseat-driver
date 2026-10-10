@@ -18,6 +18,7 @@ AI-only reference for this repository. Terse by design. `README.md` is the only 
   | `tests.md` | Tests (the kit) |
   | `kernel.md` | Kernel (PureScript): porting, membrane, gotchas |
   | `distribution.md` | License, Updates and uninstall |
+  | `cicd.md` | CI/CD: the road to main (ruleset, owner-merge, shipping), repository settings, workflows |
 
 - `.claude/history.md`: dated history (ui-truth passes, live sessions, parity runs, what changed when and why). Never loaded automatically: grep it when you need why something is the way it is.
 
@@ -25,7 +26,7 @@ AI-only reference for this repository. Terse by design. `README.md` is the only 
 
 - Keep these files current: any change to what they describe (commands, layout, behavior, invariants, API gotchas, verification status) updates the right file (this one, a rule file) in the same commit. Record mod-API discoveries the next session would otherwise rediscover. Rule files state current truth; what happened and when goes in `.claude/history.md` as a dated bullet. Keep this file under 100k characters (Claude Code warns at 150k and may not read past it): new subsystem detail goes in a rule file, and a new subsystem gets its own rule file with `paths:` and a row in the table above.
 - Record product decisions in "Product" below the session the owner states them.
-- Commit and push to `origin main` when work is complete, unasked. Never force-push or rewrite pushed history without asking. Other sessions push to `main` too: fetch and rebase before pushing, stage by path, never `git add -A`. To push without publishing another session's unpushed local commit, commit from a worktree based on `origin/main` and `git push origin HEAD:main`.
+- Ship when work is complete, unasked. `main` takes no direct push (owner, 2026-10-10): every change is a pull request that merges once `check` is green. Locally `scripts/ship.sh` from a branch or a worktree based on `origin/main` (pushes, opens the pull request, arms auto-merge, waits); a cloud session pushes its branch, opens the pull request and arms auto-merge. The owner's pull requests, this session's included, are approved by `owner-merge.yml`; anyone else's wait for the owner (`cicd.md`). Never force-push or rewrite pushed history without asking. Other sessions ship too: merge `origin/main` into your branch when it conflicts, stage by path, never `git add -A`.
 - README rules:
   - Sections only: why, what it is, who it's for (and not for), how to use it. Nothing said twice. Short.
   - Owner's voice, as in their Enchant Games Journal (https://enchant.games/?slug=journal, feed `/rss.xml`, articles are YAML under `/news/`, listed in `/news.json`): first person, short punchy lines, blunt, a little irreverent, quotes as punctuation.
@@ -100,6 +101,7 @@ Dated history of each is in `.claude/history.md`.
 - A verbose debug mode, switched on and off: everything the tutor does goes to one log for all projects in the data folder, so a developer can have Claude monitor it.
 - Jack in ("give yourself eyes to see what I see … when what you see differs from what it SAYS you are able to dive in and fix"): `scripts/jack.py` and the `jack-in` skill, modeled on `../topstep-claudebot`'s `tools/jack.py` (`jack.md`).
 - Functional where possible: decision logic in a PureScript kernel modeled on `../merecatholicity.com`, one `core.ts` membrane (`kernel.md`).
+- Pull requests only, after merecatholicity.com's pipeline (owner, 2026-10-10: "no more pushing main but PR required and no auto merge unless it's me and you everyone else including other clauses I have to manually approve it"): auto-merge only for the owner and the Claude sessions the owner drives; everyone else, other Claudes and Dependabot included, waits for the owner's approval (`cicd.md`).
 
 ## Status
 
@@ -144,12 +146,13 @@ plugin/types/index.d.ts             state keys, tool inputs
 plugin/types/runtime.d.ts           globals shared modules may assume (tsconfig.core.json only)
 plugin/tsconfig.core.json           shared modules checked without Claude Code's types
 plugin/tests/                       claude plugin test; kit.ts is the fake world
-scripts/                            dev-session.sh, outage-proxy.py, jack.py (+ test_jack.py), toolchain.py, build-kernel.sh, release.sh, persona-preview.ts, debug-tail.sh
+scripts/                            dev-session.sh, outage-proxy.py, jack.py (+ test_jack.py), toolchain.py, build-kernel.sh, release.sh, ship.sh, github-settings.sh (+ test_workflows.py), persona-preview.ts, debug-tail.sh
 .claude/skills/jack-in/, ui-truth/  dev skills (not shipped)
 .claude/rules/, .claude/history.md  this file's subsystem detail and history
 editors/                            neovim/, emacs/, vscode/ (dev side, not shipped with the mod)
 license-server/                     reference license server (not shipped, not deployed)
-.github/workflows/                  check.yml (pinned Claude Code), nightly.yml (newest)
+.github/workflows/                  check.yml (pinned Claude Code; the required check), nightly.yml (newest), owner-merge.yml (approves the owner's pull requests)
+.github/rulesets/main.json          main's ruleset; .github/dependabot.yml bumps the action pins and the dev toolchain
 research/                           opencode.md (the OpenCode client plan); personas/ (research behind each persona prompt)
 ```
 
@@ -168,9 +171,11 @@ npm test                         # claude plugin test ./plugin
 npm run typecheck                # tsc -p plugin/tsconfig.json
 npm run core                     # shared modules typecheck without Claude Code's types
 npm run server                   # license server typecheck and tests
-npm run tools                    # python3 scripts/test_jack.py
+npm run tools                    # python3 scripts/test_jack.py, test_workflows.py
 scripts/dev-session.sh           # live session in tmux (default session name bsd)
-scripts/release.sh minor --push  # patch|minor|major|X.Y.Z: bump, check, commit, tag, push
+scripts/ship.sh                  # the road to main: push a branch, open the PR, arm auto-merge, wait
+scripts/release.sh minor --push  # patch|minor|major|X.Y.Z: bump, check, ship as a PR, tag the merge, push the tag
+scripts/github-settings.sh check # repository settings and ruleset vs GitHub (apply writes them)
 npm run persona -- [dir] [voice] # persona art in truecolor, and PNGs of every pose
 scripts/debug-tail.sh            # follow the tutor's debug log
 scripts/jack.py [in|bundle|sync|truth|watch|tour|…]  # see jack.md
@@ -180,7 +185,7 @@ scripts/outage-proxy.py 18080    # stage an outage in a live session
 - `claude plugin test` takes only the plugin root; it can't run one test (see `tests.md` for running a subset).
 - `npm run validate` prints the mod's `hooks:`, `calls:` and `env reads:`. Read them after every change to `register.tsx`: they are what a user audits.
 - Typecheck needs `plugin/.claude-plugin/types/` (self-gitignored). Claude Code writes it whenever it loads the plugin from this folder: a dev session, or `CLAUDE_CODE_PLUGIN_DIR_WATCH=1 claude -p hi --plugin-dir ./plugin` (writes the types even without a login, then fails at the model call). Since 2.1.295 the types are written only for a folder under hot reload, which `-p` leaves off without that variable. Rerun after a Claude Code update.
-- CI: `check.yml` pins `CLAUDE_CODE_VERSION` to the last-verified version; bump it with "last verified" below, and whenever the code relies on a newer version's types (`kit.ts`'s `promptText` needs 2.1.292's `ModelTextBlock`). `nightly.yml` runs `latest`: red there means Claude Code changed the mod API, not that `main` is broken. Validate and test need no login. `gh run list`, `gh run view --log-failed`.
+- CI: `check.yml` pins `CLAUDE_CODE_VERSION` to the last-verified version; bump it with "last verified" below, and whenever the code relies on a newer version's types (`kit.ts`'s `promptText` needs 2.1.292's `ModelTextBlock`). `nightly.yml` runs `latest`: red there means Claude Code changed the mod API, not that `main` is broken. `check` is main's required check: never path-filter or rename it (`cicd.md`). Every `uses:` names a commit. Validate and test need no login. `gh run list`, `gh run view --log-failed`.
 - A `--plugin-dir` session reloads the mod on every save under `plugin/` (an idle one looks every 30 s). A hook that throws or times out is skipped, and an invalid render tree is replaced by Claude Code's own drawing; each shows one dim transcript line. `claude --debug` logs reasons.
 - Live checks (tmux, env, the owner's live copy, `sync`): `jack.md`. A milestone is done only when seen live; tests stub everything.
 

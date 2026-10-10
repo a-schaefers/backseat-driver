@@ -1,15 +1,20 @@
 #!/bin/bash
 # Cut a release: bump the version in plugin/.claude-plugin/plugin.json, check
-# everything, commit, and tag it the way Claude Code expects
-# (`backseat-driver--v0.3.0`, made by `claude plugin tag`).
+# everything, commit it on a release branch, and tag it the way Claude Code
+# expects (`backseat-driver--v0.3.0`, made by `claude plugin tag`).
 #
-#   scripts/release.sh patch|minor|major    bump and release
-#   scripts/release.sh 0.3.0                release an exact version
-#   scripts/release.sh ... --push           also push the commit and the tag
+#   scripts/release.sh patch|minor|major    bump, check, commit on release/vX.Y.Z
+#   scripts/release.sh 0.3.0                the same for an exact version
+#   scripts/release.sh ... --push           also ship it (scripts/ship.sh: a pull
+#                                           request, merged once `check` is
+#                                           green), then tag the merge and push
+#                                           the tag
 #
-# A running tutor notices the new tag within six hours and offers
-# /backseat update. Installed copies are pinned to the version in plugin.json, so
-# nothing reaches them until a release changes it.
+# main takes no direct push (.github/rulesets/main.json), so the release commit
+# reaches it through a pull request and the tag goes on that pull request's
+# merge commit. A running tutor notices the new tag within six hours and offers
+# /backseat update. Installed copies are pinned to the version in plugin.json,
+# so nothing reaches them until a release changes it.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -55,14 +60,23 @@ node -e '
 ' "$manifest" "$next"
 
 npm run --silent check
+git switch --quiet -c "release/v$next"
 git add "$manifest"
 git commit --quiet -m "Release $next"
-claude plugin tag plugin -m "Backseat Driver %s"
 
-if [ "$push" = "--push" ]; then
-  git push --quiet origin main
-  git push --quiet origin "backseat-driver--v$next"
-  echo "Pushed main and backseat-driver--v$next."
-else
-  echo "Tagged backseat-driver--v$next. Push with: git push origin main backseat-driver--v$next"
+if [ "$push" != "--push" ]; then
+  echo "Committed on release/v$next. Ship it: scripts/ship.sh --title 'Release $next'"
+  echo "then tag its merge commit: git checkout <merge> && claude plugin tag plugin -m 'Backseat Driver %s' --push"
+  exit 0
 fi
+
+scripts/ship.sh --title "Release $next"
+merged="$(gh pr view "release/v$next" --json mergeCommit --jq .mergeCommit.oid)"
+git fetch --quiet origin main
+git switch --quiet main
+git merge --quiet --ff-only origin/main
+git -c advice.detachedHead=false checkout --quiet "$merged"
+claude plugin tag plugin -m "Backseat Driver %s"
+git switch --quiet main
+git push --quiet origin "backseat-driver--v$next"
+echo "Released $next: backseat-driver--v$next on ${merged:0:7}."

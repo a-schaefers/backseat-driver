@@ -40,6 +40,7 @@ Dated history of Backseat Driver: decisions, live sessions, ui-truth passes, par
   - The Deep review is the critique: a real user's PHP codebase got a silent pane, which the owner read as "wow, he wrote a perfect codebase", while the chat found a critical issue in it.
   - Keys: "lets remove tab/shift+tab for navigation, and rely solely on 1-6 for the upper tabs, and j/k for up and down of the menus below …".
   - The commercial terms say nothing about earlier versions or the prior license.
+- 2026-10-10: pull requests only. The owner found merecatholicity.com's pipeline superior and asked for it here: "no more pushing main but PR required and no auto merge unless it's me and you everyone else including other clauses I have to manually approve it". Taken: the ruleset on main (no bypass), the ship script, SHA-pinned actions with Dependabot, fork runs approved every time, secret scanning, settings kept in the repository. Added for the second half: one required approval, given by `owner-merge.yml` to the owner's own pull requests only. Left out: the pipeline report, Terraform, deploy gates. Until then every session pushed to `main` directly.
 - 2026-10-09: CLAUDE.md (310k characters, twice Claude Code's 150k limit, with a warning at every start since 2026-10-06) was split. Current truth stayed in CLAUDE.md and path-scoped `.claude/rules/*.md`; history moved to this file.
 
 ## Status records

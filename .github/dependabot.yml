@@ -1,0 +1,27 @@
+# Keeps the SHA-pinned actions current: the repository requires every `uses:`
+# to name a commit, so a bump is a pull request that changes a hash and its
+# version comment. Dependabot's pull requests are not the owner's: each waits
+# for the owner's approval (owner-merge.yml approves only the owner's).
+# Pull requests carry no secrets, so a Dependabot branch reaches nothing.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+  # The dev toolchain (TypeScript, esbuild, spago, @types/node): nothing here
+  # ships to users. Minor and patch bumps come as one weekly pull request; a
+  # major comes alone. `npm run kernel` fails a bump that changes what the
+  # kernel bundle builds to, so esbuild and spago move only with a rebuilt
+  # plugin/core/kernel.js.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      toolchain:
+        dependency-type: development
+        update-types: ["minor", "patch"]
