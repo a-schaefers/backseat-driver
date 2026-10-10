@@ -51,9 +51,11 @@ jobs:
       # The type check reads the mod API types, which Claude Code writes beside
       # the plugin whenever it loads it. Loading it in print mode is enough:
       # with no login the model call fails, after the types are written.
+      # Since 2.1.295 they are written only for a folder under hot reload,
+      # which print mode leaves off unless CLAUDE_CODE_PLUGIN_DIR_WATCH is set.
       - name: Write the mod API types
         run: |
-          claude -p hi --plugin-dir ./plugin || true
+          CLAUDE_CODE_PLUGIN_DIR_WATCH=1 claude -p hi --plugin-dir ./plugin || true
           test -f plugin/.claude-plugin/types/claude-code/index.d.ts
           head -1 plugin/.claude-plugin/types/claude-code/index.d.ts
       - run: npm run check
