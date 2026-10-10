@@ -1,3 +1,5 @@
+> **Alpha.** Brand new, updated often. OpenCode, OpenAI, local models and more are coming: not just Claude. Stay tuned.
+
 <div align="center">
 
 # Backseat Driver
