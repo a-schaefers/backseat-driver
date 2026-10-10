@@ -1,6 +1,12 @@
 # Runs `npm run check` (kernel, validate, test, typecheck) on every push to main and
 # every pull request, against the Claude Code version the mod was last
 # verified with. nightly.yml runs the same check on the newest Claude Code.
+#
+# The `check` job is the required check on main (.github/rulesets/main.json,
+# pinned to GitHub Actions): a pull request merges only once it is green. A
+# required check that never reports holds a pull request at "Expected" for
+# ever, so this workflow takes no path filter. Every `uses:` names a commit
+# (the repository requires it); Dependabot moves the pins.
 
 name: check
 
@@ -27,8 +33,10 @@ jobs:
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
       DISABLE_TELEMETRY: '1'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: npm
@@ -36,7 +44,7 @@ jobs:
       # The kernel is PureScript. `npm run check` builds it and fails when the committed bundle,
       # plugin/core/kernel.js, is not what kernel/src builds. The compiler (fetched by pinned hash)
       # and spago's packages are kept between runs.
-      - uses: actions/cache@v4
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             local/bin

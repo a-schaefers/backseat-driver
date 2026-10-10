@@ -37,7 +37,7 @@ paths:
   - An installed copy is pinned to `plugin.json` `version`; `claude plugin update` does nothing until it changes. A path marketplace copies too, so only `--plugin-dir` tracks the working copy. `marketplace remove` uninstalls its plugins and deletes their `pluginConfigs`; a reinstall at the same path keeps a stale `.orphaned_at`.
   - New installs copy `main` (entry `./plugin`); a release ref (`git-subdir` with `ref`) is the owner's open decision.
   - Tags: `backseat-driver--vX.Y.Z` (`claude plugin tag`); `newestRelease` also accepts `vX.Y.Z`.
-  - `scripts/release.sh` refuses a dirty tree, a branch other than main, or being behind origin. After a release, `scripts/jack.py sync`, or the live copy announces it to the owner.
+  - `scripts/release.sh` refuses a dirty tree, a branch other than main, or being behind origin. It commits the bump on `release/vX.Y.Z`; with `--push` it ships that as a pull request (`scripts/ship.sh`), tags the merge commit and pushes the tag (`main` takes no direct push: `cicd.md`). After a release, `scripts/jack.py sync`, or the live copy announces it to the owner.
 - Check: fresh switch-on, when `update.json` is missing or 6 h old.
   - `git ls-remote --tags --refs` against the clone's `origin`, Claude Code's marketplace clone, or the manifest `repository`, via `git(…, isNetwork = true)`: `GIT_TERMINAL_PROMPT=0`, `GIT_SSH_COMMAND=ssh -o BatchMode=yes`. Never prompts.
   - Failure writes nothing, retried next switch-on. A release known from the last check shows before the network is asked.
