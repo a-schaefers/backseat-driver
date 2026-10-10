@@ -138,7 +138,7 @@ PLACE_LINES = 80
 SPINNER = "·✢✳✶✻✽"
 # The first pieces of a drawing are the six tabs: the top of the pane, which is never below the fold.
 HEAD_PIECES = 6
-# Claude Code docks a pane at the side from this many columns (CLAUDE.md, "Handoff"); under it the pane goes above the prompt.
+# Claude Code docks a pane at the side from this many columns (CLAUDE.md, "Mod API"); under it the pane goes above the prompt.
 DOCK_COLUMNS = 110
 # The owner's sessions load this copy of `plugin/` (their `claude` adds `--plugin-dir` for it), which `sync` brings up
 # to the working copy when a change is ready: a save in `plugin/` alone reloads nothing of theirs. Git-ignored (local/).

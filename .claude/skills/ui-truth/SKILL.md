@@ -43,9 +43,10 @@ instruction) with this brief, and read its report:
 
 ```text
 You are the ui-truth pass for Backseat Driver, a Claude Code mod whose pane is
-described in /home/grok/repos/backseat-driver/CLAUDE.md under "Pane", "Pane
-placement", "Several sessions", "Explain", "Growth" and "Lessons". Read those
-sections first: they say what each tab is supposed to show.
+described in /home/grok/repos/backseat-driver/.claude/rules/: pane.md ("Pane",
+"Pane placement"), sessions.md ("Several sessions"), explain.md, growth.md
+("Growth", "Lessons") and deep-review.md. Read those first: they say what each
+tab is supposed to show.
 
 Run `cd /home/grok/repos/backseat-driver && python3 scripts/jack.py bundle`
 (add a session id to look at one). For each session in the output, read it as
@@ -72,7 +73,8 @@ not checked: say so, and judge the state against the cache. End with
 
 Then, for each finding: explain it or fix it (the mod, or the check), add the
 check to `scripts/jack.py` and its test to `scripts/test_jack.py`, and record it
-in `CLAUDE.md`, in the same commit (the jack-in rules). A finding that is the
+in the rule file of its subsystem (`.claude/rules/`) with the pass in
+`.claude/history.md`, in the same commit (the jack-in rules). A finding that is the
 check's own mistake is fixed in the check, never silenced.
 
 ## What the agent sees, and does not

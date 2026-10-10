@@ -1,0 +1,95 @@
+---
+paths:
+  - "plugin/core/look.ts"
+  - "plugin/core/play.ts"
+  - "plugin/core/status.ts"
+  - "plugin/core/sensor.ts"
+  - "plugin/core/scheduler.ts"
+  - "plugin/core/filewatch.ts"
+  - "plugin/core/health.ts"
+  - "plugin/core/gate.ts"
+  - "plugin/core/watcher.ts"
+  - "plugin/core/notes.ts"
+  - "plugin/core/noise.ts"
+  - "plugin/core/diff.ts"
+  - "plugin/core/git.ts"
+  - "plugin/core/profiles.ts"
+  - "plugin/core/languages.ts"
+  - "plugin/core/questions.ts"
+  - "plugin/prompts/play-by-play.md"
+  - "kernel/src/Kernel/Play.purs"
+  - "kernel/src/Kernel/Health.purs"
+  - "kernel/src/Kernel/Pace.purs"
+  - "kernel/src/Kernel/Sensor.purs"
+  - "kernel/src/Kernel/Schedule.purs"
+  - "kernel/src/Kernel/Status.purs"
+  - "plugin/tests/look.test.ts"
+  - "plugin/tests/playbyplay.test.ts"
+  - "plugin/tests/watching.test.ts"
+  - "plugin/tests/filewatch.test.ts"
+  - "plugin/tests/resilience.test.ts"
+  - "plugin/tests/notes.test.ts"
+  - "plugin/tests/diff.test.ts"
+  - "plugin/tests/profiles.test.ts"
+---
+
+# Play-by-play, watcher and profiles
+
+## Play-by-play and watcher
+
+- Events and deadlines, never a tick (owner, 2026-10-04):
+  - `scheduler.ts`: named deadlines, one `$.clock.after` for the earliest; setting a name again moves it; due work is started, not awaited. Names: `scan`, `focus`, `look`, `health`, `review`, `assess`, `review-timer`, `review-watchdog`, `review-verdict`, `explain`, `journal`, `lease`.
+  - Engines with ports keep no time: a `wakeAt(at | null)` port (`explainer.ts`, `recorder.ts`), and the shell sets or cancels that deadline.
+  - `look` is set by `planLook` whenever a fact it rests on changes (save, look's end, failure, plan limit); it fires when the quiet time ends.
+  - `playOf` (`play.ts`, `Kernel.Play`) works the state out from the facts each time: `starting`, `no-git`, `paused`, `watching`, `on-request`, `settling(dueAt)`, `looking`, `waiting(until, why)`. `wakeAt`: when to come back; `isLookDue`: may a look start.
+  - `showPlay` writes `watch` (`{ state, lastLookAt, line }`) only when changed; `status.ts` makes `line`. Waits name a clock time (`Next try 12:07`), so nothing redraws every second.
+- The one poll is the working tree (nothing pushes saves, outside commits or the caret: no watch in `$.fs`, `FileChanged` only for paths named at session start). `scan` in `register.tsx`, one at a time, the next planned when it ends:
+  - `sensor.ts`/`Kernel.Sensor`: 1 s for a minute after activity (`activeAt`: save, caret move, prompt, pane key, switch-on), else 2 s, 5 s after ten idle minutes; each quarter second a scan took adds 2 s, up to 32 s.
+  - `kick` scans at once: `prompt.submit`, a conversation turn's end, a pane key, resume.
+  - Fast lane (`fastPoll`, deadline `focus`): while the Explain view is watched, stat the focused file and list the editors' folder; next check `focusGapMs` later (100 ms, or 4× the check's time, max 2 s); none once nobody watches. The scan leaves the editors' folder to it meanwhile.
+  - Paused: no scan, no look. A scan never calls a model: it feeds the journal and Explain, checks HEAD, calls `planLook`.
+- Pushed changes (owner, 2026-10-05: inotifywait when on PATH, "don't break without it"). `filewatch.ts` pure; `startPushing`, `runPusher`, `nudged` in `register.tsx`.
+  - First scan of a watching run (driver, on) tries `$.process.spawn` of `inotifywait`; missing, it rejects at the first pull, trace `push / no watcher`, scanning as before. Retried only at the next switch-on or takeover.
+  - `tree` child: `inotifywait -m -r --format %w%f` over the root, `close_write create delete moved_to moved_from`. Git-ignored folders (`git ls-files --others --ignored --exclude-standard --directory`, max 200) and every `.git` folder but `logs` are excluded with `@` (`--exclude` still watches, 3.22; it covers later folders only). `.git/logs/HEAD` catches commits and HEAD moves; a worktree's outside git folder gets its `logs` watched. `focus` child: data folder `editors/`, not recursive (`*.json`; `.tmp` ignored, its rename is `moved_to`), `editors/.keep` made first. Started only once `tree` is live.
+  - Live at `Watches established.` on stderr: kicks a scan; then `Kernel.Sensor` gives `PUSHED_SCAN_MS` (30 s) when `isPushed`, `PUSHED_FOCUS_MS` (2 s) for the fast lane with both live.
+  - Output → lines (`lineSplitter`; pieces end mid-line) → at most one nudge per kind (`nudgesOf`): `tree`, `head`, `focus`. `nudged` is the single entry for any pushed change (editor plugins too): tree/head kick a scan; a nudge on the watched spot runs the fast lane's check now; a focus-file nudge otherwise runs `pollFocus` and never scans (a scan per editor write was a `git status` a second). The scan still decides what changed.
+  - A child that ends: dropped, trace `push / stopped` with its complaint, scan back to its own pace. Nothing in the pane.
+  - `stopPushing` from `stopWatching` and `stopDriving`; leaving the loop, `return()` or a reload kills the child.
+  - Not built: `fswatch` (macOS) would be a second argv and line format in `filewatch.ts`.
+- Failures (`health.ts`, `Kernel.Health`; owner: told apart, backoff, nothing pending lost):
+  - `outcomeOf` (a `$.model.complete` result), `outcomeOfError` (an error word). Troubles: `rate-limit`, `overloaded`, `server`, `offline` (no HTTP status), `timeout`, `account` (login, billing, hold, cloud credentials), `job` (`model_not_found`, `invalid_request`), `reply` (empty).
+  - `noteOutcome` hears `callModel`, `classic.StopFailure`, and a conversation turn that answered.
+  - Shared wait (`rate-limit`, `overloaded`, `server`, `offline`, `timeout`): every background job waits (`waiting(until)`), 30 s doubling to 10 min (15 s first for `offline`/`timeout`), jittered in the upper half. Then `recovering`: the next job to ask is the probe (`probing`), others wait. Any answer ends it (`ok`).
+  - Never a deep reviewer as probe (reports minutes later). A probe that rejects, was cut short, never started, or got `job`/`reply` is `abandoned` → `recovering` (`probeEnded`); else every job waited for the conversation.
+  - `rate-limit` with a window at 99%: wait until its `resetsAt` plus up to 30 s.
+  - `account` blocks all jobs until something answers. `job` blocks that job (`jobBlocks`) until asked by hand and answered, or reloaded with other settings. `reply` is the look's business.
+  - Failed look adds its own pacing: minimum gap plus 30 s doubling (`backoffMs`), never under the shared wait. The watcher keeps the change; the same diff is resent.
+  - `l`, `r`, `f` always try; an answer ends the wait.
+- Plan limits (`Pressure`, `gate.ts`, `Kernel.Pace`): pushed by `session.measure` (around turns), read free by `readPressure` on a seen save and before a look. A window past its `resetsAt` is ignored (stale).
+  - 80% of the tightest window: gap ×4, min 4 min.
+  - 95%: no automatic look, lookup or review, no request spent to check. "Holding back until 13:40"; the look goes at reopening. Look now and review now still work.
+- Git: always `git --no-optional-locks …` (plain `git status` takes the index lock, breaking the user's git); one literal `$.process.run` in `register.tsx` so readers and the validator see it. Run in `sessionCwd` (`$.session.cwd()`, for `git rev-parse --show-toplevel` at switch-on and `/backseat forget`), never with no `cwd` (that is where the process started).
+- A look needs: the tree still for `quiet_time` (default 5 s) from the scan that saw the save; `minimum_gap` since the last (default none); a real change (not whitespace-only, not only ignored/binary/generated/lock files); no look in flight; Claude answering, plan not at limit, the job's model accepted.
+- A reload keeps the last look's time (`startWatching` reads it from the pane's state unless fresh), so a sync keeps "No notes. Keep going.".
+- `noticeRepository` (in `checkSelf`, every `SELF_CHECK_MS`; one `git rev-parse` while `repoRoot` is ''): a folder that becomes a repository is engaged as at a fresh switch-on, toast `REPOSITORY_APPEARED`.
+- A look sends the net change since the last; uncommitted work at switch-on is the baseline.
+- `watcher.ts`: (size, mtime) fingerprints at last poll and last look; differences are pending. Text at the last look is the next diff base; never-dirty files diff against `git show HEAD:path`. A file clean again with other text than the last look saw (`returned`) stays pending; `poll()` reads it once (else notes about code fixed and committed between polls stayed). `collect()` returns real changes; `settle()` uses collection-time prints, so a file changed mid-call stays pending.
+- A failed look settles nothing. An unparseable reply is settled and dropped, never retried or shown. Files past the prompt size limit stay for the next look. After a reload the watcher restarts from the tree; notes survive in state.
+- The look is one `$.model.complete`, no tools, no history, given the open and dismissed notes of the files shown; `applyReply` drops a note matching either by file and topic. Dismissed notes: state until switch-off, and `notes.json`. Lesson memory counts only notes that reached the pane.
+- Prompt: one idea per note, under 40 words. `topic` names the skill, not the incident (`quoting`, not `roll-used-before-set`); `topicsRaised` (max 24, most raised first) is sent for reuse, since habits need a topic raised three times.
+- Kinds, sort order: `bug`, `risk`, `decision`, `idiom`, `tip`, `insight`. `decision`: a choice made or ahead in a stub/TODO (the one exception to "no notes on unfinished code"), theirs, with trade-offs. `insight`: an implementation choice or codebase pattern. Prompt priority: bug/risk, then decision, then the rest; at most one insight (no cap on decisions: rejected, two real open choices both earn one). Pane: `◆ Your call` (magenta, `DECISION_HEADING`) first, problems by file, `★ Insight` (cyan, `INSIGHT_HEADING`). `isProblem` false for both: never in lesson memory. `e` on a decision: lay out options, leave the choice; on an insight: where else it shows.
+- A note never outlives its code (owner, 2026-10-05). Each keeps `lineText` (trimmed line as raised). After every look, notes about files shown are placed again (`placeNote`): kept while the line reads the same, moved if found once elsewhere, removed if gone, unless the reply resolved or re-raised it. Without `lineText`: removed when this look's hunks touched nearby lines (`changedOldLines`). The prompt asks the same: resolve what a fix fixes, raise a still-true point at its new line.
+- Issues on record (see `deep-review.md`): the request lists open issues of the files shown, placed as now (`lookIssues`), never to be raised as notes. Reply `issues` (`[{id, status, note}]`): only `resolved`/`partly`, only for files shown (`parseReply`), applied as actor `look` (`ruledIssues`; the kernel allows only those two); resolved → a `fixed` journal entry. A note on an open issue's file and topic, or its line, is dropped (`onRecord`). Issues re-placed after every look.
+- Keys: `d` dismiss (not again for that file until switch-off); `m` hush; `e` concept, then example on request, never a patch; `l` look now: `NOTHING_NEW` ("Nothing has changed since the last look."), or before any look `NO_SAVE_YET` ("No save to look at yet. What was already changed at switch-on is the baseline.").
+- Empty tab (`emptyPlayLine`): `NO_LOOK_YET` ("No look yet. Save a file, …") until a first look can have come; `NO_NOTES` ("No notes. Keep going.") after one, outside a repository, or paused ("No notes" before any look read as an all-clear). A non-driver says "No look yet" until the driver kept notes (`followProject` takes the look's time from `notes.json`).
+- Verified: live (note 14 s after a save, nothing in the conversation; outage via proxy retried 30/60/120 s and answered on return; decisions under `◆ Your call`, resolved by a clarifying comment). Pushed changes: live (per Status, once `inotify-tools` was installed). Not seen live: a play-by-play `insight`, wrong model, refused account, `session.measure` plan limit (tests: `resilience.test.ts`).
+
+## Profiles
+
+- `profiles/<language>.json`, `profiles/general.json`: first-run answers, hushes, lesson memory (`flagged` when raised, `explained` on explain; 3+ flags = recurring). `looks` counts looks that saw the language (each look writes its languages' profiles); each topic keeps `lastLook`, from which `Kernel.Growth` tells a habit improved. A profile without `looks` takes its topics as raised at the latest look. `saveSubject` re-registers the reviewer only when `aboutPerson()` changed.
+- In play: main languages (`git ls-files` + extension table; ≥15% of source files, the largest always) plus any language a file is changed in.
+- `aboutPerson()` (profiles + progress) goes to the conversation's system prompt, both reviewers and Explain.
+- Questions via `$.ui.ask` at the end of switch-on, after pane and watcher, so dismissing loses nothing. Each subject asked is `isAsked`, answered or not, never asked again unprompted. Re-ask: `q` on Growth or `/backseat questions`; new answers replace old. All single choice (a multi-select costs toggle, Submit, Enter and a review screen).
+- Tools: `record` (`level|goals|focus|knows` for a language, user's words; no `isAsked`); `hush` (on a stated preference) or `m`, using the open note's number, topic and language when there is one (the model once invented a slug and claimed success), answering how many notes left the pane, which the contract says to report only; `unhush`; `profile` (read a language not in play).
+- A hush works twice: reviewers get "Do not bring up", and a note with a matching slug is dropped regardless.
+- Verified: live (questions with Python detected, Esc skipped all; `hush`, `record` without a permission prompt; hushed topic silent beside real bugs; a dismissed note stayed away while a new bug in its file got a note).

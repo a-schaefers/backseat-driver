@@ -136,7 +136,7 @@ scripts/jack.py keys jack /backseat Enter
   what the owner reported, and you have read its `screen`. `tour` is the quick
   way through the rest.
 - In a cloud container, the thread's own session id is in the environment and a
-  `claude` started under it takes it: unset it first (CLAUDE.md, "Live checks").
+  `claude` started under it takes it: unset it first (`.claude/rules/jack.md`, "Live checks").
 
 ## Ground rules
 
@@ -146,4 +146,4 @@ scripts/jack.py keys jack /backseat Enter
   check in `scripts/jack.py` and its test in `scripts/test_jack.py`, in the same commit.
 - When the mod gains something it believes about the screen or the world, it
   gains a line in its state (`fullState` in `register.tsx`) and a check here.
-- What you learn goes into `CLAUDE.md` in the same commit as the fix.
+- What you learn goes into `CLAUDE.md` or the subsystem's `.claude/rules/` file in the same commit as the fix, and what happened (the pass, its date) into `.claude/history.md`.

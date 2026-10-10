@@ -1,0 +1,94 @@
+---
+paths:
+  - "plugin/core/review.ts"
+  - "plugin/core/reviewing.ts"
+  - "plugin/core/reviewqueue.ts"
+  - "plugin/core/findings.ts"
+  - "plugin/core/project.ts"
+  - "plugin/prompts/deep-review.md"
+  - "kernel/src/Kernel/Queue.purs"
+  - "kernel/src/Kernel/Ledger.purs"
+  - "plugin/tests/deepreview.test.ts"
+  - "plugin/tests/reviewing.test.ts"
+  - "plugin/tests/reviewqueue.test.ts"
+  - "plugin/tests/findings.test.ts"
+  - "plugin/tests/issues.test.ts"
+  - "plugin/tests/project.test.ts"
+  - "plugin/tests/reach.test.ts"
+---
+
+# Deep review and project cache
+
+## Deep review
+
+- A read-only subagent (`Read`, `Grep`, `Glob`) registered with `$.agent.register({ model, effort, tools })`, not a file in `plugin/agents/`: a spawned subagent skips the mod's own `turn.step` hooks, so registration is the only way to give it the user's effort level.
+- Instructions in `prompts/deep-review.md`. Registered at switch-on; `agent.offer` withholds it from the model while off. Re-registered whenever the person text changes (a spawn can't take parameters).
+- Triggers, independent: after each commit (default on), every N minutes (default off). Both off: only on request (`r`).
+- Commit detection: each scan compares `.git/logs/HEAD` size and mtime; only on change `git reflog -1`. `commit`, `commit (amend)`, `commit (merge)`, `commit (initial)` → review that commit. Any other HEAD move resets the "since last review" base. No git hooks (they would write into the user's repo).
+- A timed review covers `git diff <base>` against the working tree, plus untracked files by name. A scope fingerprint skips the same uncommitted work again.
+- `$.agent.spawn` resolves at start with `agentId`. The answer arrives as a `turn.complete` carrying that id and goes to state, never the conversation. One review at a time. Done → short notice, tab marked new.
+- The queue (`reviewqueue.ts`, `projects/<id>/queue.json`; rules in `Kernel.Queue`): a commit goes in when `checkHead` sees it, out when its review and the look at progress are both done. So a commit made while Claude is down, at the plan limit, behind a running review, or just before the session closed is still reviewed later.
+  - At most `MAX_WAITING` (3), newest pushes oldest out, at most 24 h. An amend replaces the commit it amended. A commit `git show` no longer finds is let go. Git that did not answer (exit code -1) is one try, never a commit let go. A progress look under way at switch-off leaves its commit waiting.
+  - `planReview` starts what is next when nothing stands in the way; called on a commit, end of a review or progress look, `wake` (Claude back, pressure changed), resume, switch-on. The oldest commit without a review and the oldest past its review (progress look) run side by side, one of each. Deadlines `review` and `assess` are a retry's time or the window's `resetsAt`.
+  - While held back, the tab says what and until when (`heldText`): Claude not answering, plan limit, refused account, model the plan lacks.
+  - The review slot is `reviewAgentId`, `isReviewBusy` and `endedReview` together (`isReviewFree`). `withReviewSlot` holds it while a review starts or its end is recorded, and calls `planReview` when it lets go with nothing running. Without it two events arriving together start the same review twice.
+  - A review that ends without a review (`reviewFailed`), for a waiting commit:
+    - `service`: `classic.StopFailure` named an API error. No try; waits for shared health, then starts again. An outage costs no tries.
+    - `own`: nothing says why. One try of `MAX_ATTEMPTS` (3), 60 s doubling. Then given up: tab says "Press r to run it again", commit still goes on to the progress look.
+    - `final`: stopped by the person or refused by the model. Not retried.
+    - A review by hand, a timed one, the look around and an audit are not retried: the tab says why.
+  - `turn.complete` says only `error`; `classic.StopFailure` says which, about the same moment, either order. An `error` with no reason yet shows "error" and waits `VERDICT_MS` (2 s) (`endedReview`, deadline `review-verdict`).
+  - A `classic.StopFailure` for any other subagent counts as the conversation's (else the user's own subagent's bad model would block the deep review).
+  - Watchdog (deadline `review-watchdog`): 15 min after start, look up the reviewer in `$.agent.list()`. Still running: until 45 min. Gone, or at 45 min: one failed try, slot freed.
+  - After a reload, `adoptReview` finds the running reviewer of the first waiting commit (and a running audit) in `$.agent.list()` by description and collects its answer, so no second review is paid for. Other running reviews (timed, by hand, the look around) cannot be collected; the tab says so.
+- The timed review is the deadline `review-timer`, set again after each run; held at the plan limit and while Claude is down.
+- `r` with a commit waiting reviews that commit, whatever holds it back.
+- The notes block also carries `decisions` (file, line, choice, tradeoff; at most `MAX_DECISIONS` = 3). `decisions` and `insights` go into the `Review` state; the tab draws decisions before the text and insights after it, so the text should not repeat them. `insights` describe choices and patterns, never defects ("an insight is never a problem" is the prompt's wording that works).
+- A contested point is the one review that lands in chat: the tutor delegates it to the same reviewer and reports the verdict.
+- Issues (the ledger; see CLAUDE.md "Product"): every answer ends with a `backseat-findings` fence, one JSON object a line: an issue (`file`, `line`, `quote`, `severity` critical|high|medium|low, `category`, `topic`, `title`, `text`, `condition`), a ruling on an issue on record (`{id, status, note, severity}`), or an audit's coverage (`{read, skipped}`). `parseFindingsFence` reads it (a bad line costs one issue); `splitReview` strips it with the notes block.
+  - `keepIssues` (from `keepReview`) places each issue at the line it quotes in the file as it is, else as the reviewed commit left it (`anchorIssue`). A line's start of six characters or more anchors (`isQuoted`), so a secret's line is quoted only up to its value; only the quote is kept, never the rest of the line. A quote found in neither text keeps the issue for its file (trace `issues kept`, `forTheFile`), never dropped.
+  - Then the kernel adds and rules (`foundIssues`, `ruledIssues`, `coveredLedger`): at most `MAX_FROM_REVIEW` (12) from a review, `MAX_FROM_AUDIT` (20) from an audit; the prompt's caps agree.
+  - Placement: an issue stays at its line, moves only to the one other line that reads as its did, never onto its line commented out (`standsAt`; `isQuoted` refuses a line `isCommentLine` when the quote is not); otherwise it reads "changed since" until a look or a review rules on it.
+  - Ranking (`rankOrder`, `Kernel.Ledger`): worst first, then the reviewer's own order within a severity (not security first: that put an audit's last, conditional issue on top).
+  - The request lists the issues on record in the files a review looks at (all of them for an audit) with ids, and the dismissed ones, never to be raised again (`issuesContext`). The prose names at most the top issue; the progress look gets the commit's issues after the review's text (`withIssues`).
+  - The request also lists the play-by-play's open bugs and risks in its files (all for an audit), without ids (`notesForReview`). After its issues are kept, every bug or risk note an open issue covers (same file, and same topic or a line within one) leaves the pane (`adoptNotes`).
+  - `findings.json` carries `v: 1`.
+- The `issue` tool: no id → open issues with ids and what the last audit read; with an id → the deep reviewer's verdict on an issue the person contested (status, severity, note), applied as a review's ruling, never a dismissal; a dismissed one stays dismissed. `SESSION_NOTES` says to record the reviewer's verdict only.
+- The audit: `ReviewScope` kind `audit`, with their source files (`git ls-files -z`, known language, not noise) and what looks vendored or generated: the vendored folder itself, never the folder above it (`noiseRoot`), a file that is noise by its name, a committed source file over `VENDORED_BYTES` (200 KB, sizes from `git ls-tree -r -l -z HEAD`).
+  - `maybeAudit` runs from the planner and after every reviewer's end: once per project (`isAudited` in `project.json`, set when it starts, so a failed one is not retried every switch-on), after the first look around, behind any commit waiting for review, held back as a review is. `a` (driver only) audits now whatever holds it back.
+  - Its text goes to `reviews.json` naming no commit (a record naming HEAD was taken by `latestReviewed` for a review of HEAD); its issues and coverage to the ledger. The files are counted again when `adoptReview` takes it up.
+  - Coverage as a reader counts it: their source files read and not also skipped (`read` filtered in `keepIssues`); their own files are less what it skipped as someone else's (`ownFiles`, `VENDORED_WHY`). A record kept before is counted again once at switch-on by the driver (`mendCoverage`, `files` too). An audit with no coverage line still finished ("it did not say which of the N source files it read"), never "The audit did not finish".
+  - A `+` on the coverage's commit marks uncommitted changes read with it ("at 570e787 with uncommitted changes"). An audit kept before `DIRTY_MARKED_SINCE` is given the `+` once, at switch-on in the driver, when a line one of its issues quotes is not in the commit (`auditQuotes`, `isQuoteMissing`, `mendDirtyAudit`: at most eight `git show`s).
+  - The audit's time carries its day once not today's (`dayTime`).
+  - Its insights carry `source: 'audit'`, credited "(from the audit, at a83b842)", not to a review that does not hold them (`withReviewNotes`, `insightLine`; an old record is marked by the audit's time, `mendAuditInsights`).
+- Tab 2 wording: "Open in the deep review: 5 low." (no "lesser"; no line ending like a key, `: 2: Deep review.`). "From the deep review" is drawn only over an issue. `o: open in editor` only on an issue about a file, not the whole project. The tab's layout, `coverageLine` and the issue rows: see `pane.md`, Pane.
+- A cut patch's file count is a floor ("in at least 16 files"); see `growth.md`, Progress. A file's text read through `git show <ref>:<path>` is logged by its size.
+- Elsewhere: `prompts/explain.md` never speaks in the first person, never calls a name "unset" that is set outside the lines shown (`explain.md`). A reload keeps the last look's time (`startWatching`, `play-by-play.md`).
+- Open (owner's): the badge's `(new)` ahead of the count of serious issues.
+- jack checks recorded only here (`jack.md` has the rest); `!!` unless marked `··`:
+  - ledger: the audit's day; a path both read and skipped; a placed issue's line not reading as the issue's once its file is a minute still; own files against the mod's tables read from its source (`mod_tables`, `mod_own_files`); a ledger with no version; the reviewer's order within a severity on tab 2; `o` on a project-wide issue; an audit naming only its commit whose issues quote a line the commit lacks; `check_audit_line`: the audit line's figures
+  - insights: credited to a review that does not hold them; a nameless one its review named; a whole-file one under a symbol unsaid; a nameless one quoting one part shown under another
+  - Explain: `check_explain_voice` (`··`, first person); a cached doubt of a name the file sets elsewhere (`··`, names the nearest name before the doubt); an explanation older than an issue shown under it (`··`)
+  - Growth: `lines_recount`, `added_nonblank` (lines against git; `··` for an older recount); `check_growth_counts`; `check_growth_twice` (`··`); `check_lately` (`··`, a commit no repository here has)
+  - pane: `check_no_look_yet`; `check_strip_badges`; a strip wider than its row (`··`); `check_press_keyboard` (a press that did not take the keyboard, a strip press that drew nothing); `check_speech_kept` (every `state / speech` is logged); `squeezed_pieces` looks in the pane's side in drawing order
+  - sessions: `check_following_words` (the follower's working time against the journal, its words for the driver's start and the looks); `check_said_twice` (`··`); a background session listed with no process is a `··`
+  - jack's own counting: a caret slice ending in the window counts whole (`endOf`); a skipped commit's watched file saved since is watched for the next
+- Verified: live (commit noticed within one scan, review in tab 12 s later, nothing in the conversation; contested verdict in chat 32 s; timed review of uncommitted work; queued commit during an outage kept its tries and was reviewed after; `adoptReview` collected after a mid-review reload; ledger stages 1–3 in a dev session and the owner's sessions, 2026-10-07). Tests only: the watchdog, a review given up after three tries, the progress look's retries (`reviewqueue.test.ts`), a review adopting a play-by-play note, a dismissal from the Play-by-play tab.
+
+## Project cache
+
+- `projects/<name>-<hash>/`: `project.json` (overview, file roles, insights, `survey`, `isSurveyed`, `isAudited`), `reviews.json` (last 12 reviews: text, decisions, insights), `notes.json` (open and dismissed notes, with each noted file's fingerprint), `files/<hash>-<name>.json` (Explain), `journal.json`, `findings.json` (the ledger, `{ v, nextId, findings, coverage }`: ids never reused, every write `updateJson` on top of the file, by the driver for a review and by any session for a dismissal).
+- A commit review's insight is kept only for a file that still reads as the commit left it (`isAsCommitted`): a queued review would otherwise tie it to code edited since.
+- An insight under a name the outline does not know (a variable, the reviewer's word for a stretch) is tied to the symbol whose lines first mention it (`printFor` in `explainer.ts`, `mentionedAt` in `knowledge.ts`: as written, else the bare word without sigil or parentheses), to the file when mentioned outside every symbol, and keeps its name when not in the file at all (then nothing shows it). `printFor` keeps the name when the file has no outline; `withNamesBack` gives a lost one its name back at switch-on, from its review's own words.
+  - Shown, a file-level insight under such a name goes beside the symbol in focus that mentions it, and at the file level (`insightsFor`'s `isMentioned`).
+  - One kept under no name that quotes the name of one part of the file (`quotesName`: 'old game', `mean`, “x”) is shown with that part only (the outline's `names` port).
+  - A nameless insight about the whole file, shown under a symbol, has a credit ending ", about the whole file" (`insightLine`).
+- Each deep review ends with a fenced `backseat-notes` JSON block (`deep-review.md`). `splitReview` strips it before the pane, parsed or not. `keepReview` re-reads `project.json`, merges (`withReviewNotes`), appends to `reviews.json`.
+- Each insight is kept with the fingerprint of its symbol (when mapped) or its file, and which; one that can't be fingerprinted isn't kept. `insightsFor` (Explain) and `currentInsights` (play-by-play) pass it only while the fingerprint matches (for the play-by-play the file just changed, so file-level insights drop and unedited symbols' survive).
+- The overview is project-wide and unfingerprintable. It carries its commit, and the reviewer is told to correct it.
+- The first look around keeps its insights under HEAD as it stood, credited to it (`insightLine(insight, project.survey?.at)`: "from the first look around, at 570e787"), not to a deep review.
+- Survey: `ReviewScope` kind `survey`, by `maybeSurvey` once per project (`isSurveyed`), from `engage` on a fresh switch-on. Not run when both deep review triggers are off or usage ≥80%. Its text goes to the tab and to `project.json` (`survey`, a `ReviewRecord` under no commit; `withSurvey`), never to `reviews.json` (the next reviewer must not take it for an earlier review), so a new project's tab has it back after a restart. Restore and a follower show it when there is no review; the history lists it after the reviews. A project surveyed before `survey` was kept (`survey: null`, `isSurveyed` true) is not surveyed again (a rule to do so spawned a survey in every kit test); `/backseat forget project` is the way to one.
+- `reviewRequest(scope, { overview, earlier })` adds the overview and `reviewDigest` of the last 3 reviews.
+- The overview goes into every Explain request as "What is known about it"; `prompts/explain.md` says it may predate a change: explain the file as it reads, never say it does not match the notes, never send the reader to check they have the right file.
+- Open (owner's, see CLAUDE.md "Status"): whether an explanation written under an overview since rewritten is redone (doing so would redo most explanations after any review that corrects the overview); whether a project folder carries across a re-initialized repository.
+- Verified: live (survey in the tab ~10 s after switch-on with overview and roles in `project.json`; a commit review's 3 insights, no visible notes block; an insight beside a function in Explain, gone 200 ms after an edit).
