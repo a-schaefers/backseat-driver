@@ -23,7 +23,7 @@ How a change reaches `main`. Adapted from the owner's merecatholicity.com pipeli
 
 - Local: commit on a branch (or a detached worktree), `scripts/ship.sh`: pushes `HEAD` to the branch (a detached `HEAD` ships as `agent/<worktree>`), opens the pull request or finds the open one, arms auto-merge as you with `--match-head-commit`, waits for the merge or names the failing check. It refuses to ship from `main` and acts only on this repository's own pull request at the commit it pushed. `--draft` opens one that waits. A red check leaves auto-merge armed: fix, commit, run it again.
 - Cloud sessions: push the session branch, open the pull request, arm auto-merge (merge commit). Fix a red `check` on the same branch.
-- Releases: `scripts/release.sh minor --push` commits the bump on `release/vX.Y.Z`, ships it, then tags the pull request's merge commit with `claude plugin tag` and pushes the tag. Tags are not under the ruleset.
+- Releases: `scripts/release.sh minor --push` commits the bump on `release/vX.Y.Z`, ships it, then tags the pull request's merge commit with `claude plugin tag` and pushes the tag. It runs no tests locally: the pull request's required `check` does (owner, 2026-10-11). Tags are not under the ruleset.
 
 ## Settings
 
@@ -41,4 +41,4 @@ How a change reaches `main`. Adapted from the owner's merecatholicity.com pipeli
 
 ## Verified
 
-Tests only (`scripts/test_workflows.py`). Not yet seen on GitHub: `owner-merge.yml` approving and arming, the ruleset holding a push, `github-settings.sh` against the API, `ship.sh` and `release.sh --push` end to end.
+`github-settings.sh apply` and `check` ran against the API (2026-10-11): before it, the live ruleset only blocked deletion and force pushes, so #35 merged with `check` still running. `ship.sh` opened and merged #35. Not yet seen: `owner-merge.yml` approving and arming under the ruleset, and `release.sh --push` end to end (0.3.0 was cut by hand the same way).

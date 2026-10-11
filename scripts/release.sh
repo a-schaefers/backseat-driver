@@ -1,9 +1,11 @@
 #!/bin/bash
-# Cut a release: bump the version in plugin/.claude-plugin/plugin.json, check
-# everything, commit it on a release branch, and tag it the way Claude Code
-# expects (`backseat-driver--v0.3.0`, made by `claude plugin tag`).
+# Cut a release: bump the version in plugin/.claude-plugin/plugin.json, commit
+# it on a release branch, and tag it the way Claude Code expects
+# (`backseat-driver--v0.3.0`, made by `claude plugin tag`). The test suite runs
+# in CI: the release's pull request merges only once `check` is green, so it is
+# not run here too (owner, 2026-10-11).
 #
-#   scripts/release.sh patch|minor|major    bump, check, commit on release/vX.Y.Z
+#   scripts/release.sh patch|minor|major    bump, commit on release/vX.Y.Z
 #   scripts/release.sh 0.3.0                the same for an exact version
 #   scripts/release.sh ... --push           also ship it (scripts/ship.sh: a pull
 #                                           request, merged once `check` is
@@ -81,7 +83,6 @@ if [ -n "$server" ]; then
   ' "$server" "$PWD"
 fi
 
-npm run --silent check
 git switch --quiet -c "release/v$next"
 git add "$manifest"
 git commit --quiet -m "Release $next"

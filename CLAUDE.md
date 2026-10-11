@@ -172,7 +172,7 @@ npm run core                     # shared modules typecheck without Claude Code'
 npm run tools                    # python3 scripts/test_jack.py, test_workflows.py
 scripts/dev-session.sh           # live session in tmux (default session name bsd)
 scripts/ship.sh                  # the road to main: push a branch, open the PR, arm auto-merge, wait
-scripts/release.sh minor --push  # patch|minor|major|X.Y.Z: bump, check, ship as a PR, tag the merge, push the tag
+scripts/release.sh minor --push  # patch|minor|major|X.Y.Z: bump, ship as a PR (CI's check runs the suite), tag the merge, push the tag
 scripts/github-settings.sh check # repository settings and ruleset vs GitHub (apply writes them)
 npm run persona -- [dir] [voice] # persona art in truecolor, and PNGs of every pose
 scripts/debug-tail.sh            # follow the tutor's debug log
@@ -180,6 +180,7 @@ scripts/jack.py [in|bundle|sync|truth|watch|tour|…]  # see jack.md
 scripts/outage-proxy.py 18080    # stage an outage in a live session
 ```
 
+- Don't run the whole suite locally (`npm run check`, `npm test`; owner, 2026-10-11): CI's required `check` runs it on every pull request, nothing reaches `main` without it, and on the owner's machine it takes about 9 minutes and its timing tests time out under load. Run locally only what is quick and tells you something now: the tests of the module you changed (a subset, `tests.md`), `npm run kernel` after touching `kernel/src`, `npm run core`, `npm run licenses`, `npm run validate`. The exceptions, where the full local run earns its time: GitHub Actions is down or out of minutes; reproducing a CI failure you can't read from `gh run view --log-failed`; changing the test kit (`tests/kit.ts`) or the runner itself; or the owner asks.
 - `claude plugin test` takes only the plugin root; it can't run one test (see `tests.md` for running a subset).
 - `npm run validate` prints the mod's `hooks:`, `calls:` and `env reads:`. Read them after every change to `register.tsx`: they are what a user audits.
 - Typecheck needs `plugin/.claude-plugin/types/` (self-gitignored). Claude Code writes it whenever it loads the plugin from this folder: a dev session, or `CLAUDE_CODE_PLUGIN_DIR_WATCH=1 claude -p hi --plugin-dir ./plugin` (writes the types even without a login, then fails at the model call). Since 2.1.295 the types are written only for a folder under hot reload, which `-p` leaves off without that variable. Rerun after a Claude Code update.
