@@ -11,6 +11,7 @@
 [![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fa-schaefers%2Fbackseat-driver%2Fmain%2Fplugin%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&color=blue)](plugin/.claude-plugin/plugin.json)
 [![needs Claude Code 2.1.287+](https://img.shields.io/badge/Claude%20Code-2.1.287%2B-d97757)](https://code.claude.com/docs/en/plugins/mods/overview)
 [![last commit](https://img.shields.io/github/last-commit/a-schaefers/backseat-driver)](https://github.com/a-schaefers/backseat-driver/commits/main)
+[![commercial license: buy seats](https://img.shields.io/badge/commercial%20license-buy%20seats-46d3c3)](https://adamschaefers.com/store/backseat-driver/)
 
 <img src="docs/screenshot.webp" width="820" alt="Backseat Driver beside Claude Code: its play-by-play pane, with a note on a bug in the code just saved">
 
@@ -64,7 +65,7 @@ Anyone who writes their own code and means to keep getting better at it. Beginne
 - **Beginners.** Your own project is the lesson.
 - **Juniors.** Find out where you stand and what gets you to the next level, from your own commits.
 - **Seniors.** A sparring partner, not a robot-babysitting job. Iron sharpens iron.
-- **Teams.** Juniors get a reviewer on every save and every commit, without pulling a senior off their own work. Everyone keeps the skills you hired them for. Your code goes only to the Claude your company already uses, and everything the tutor remembers stays on each developer's machine. Models and thinking levels are set per job, so you decide what each review costs. Commercial use needs a license, below.
+- **Teams.** Juniors get a reviewer on every save and every commit, without pulling a senior off their own work. Everyone keeps the skills you hired them for. Your code goes only to the Claude your company already uses, and everything the tutor remembers stays on each developer's machine. Models and thinking levels are set per job, so you decide what each review costs. Commercial use needs a license: [buy seats for the team](https://adamschaefers.com/store/backseat-driver/).
 
 Want the LLM to write it for you? That's fine. Be you. `/backseat off` gives you Claude Code back.
 
@@ -86,7 +87,7 @@ Type `/backseat` in Claude Code. The first time you work in a language, it asks 
 | `/backseat working on the parser` | Tell it what you're working on |
 | `/backseat settings` | Open the Settings tab |
 | `/backseat forget` | Erase what it remembers: one project, one language, or everything |
-| `/backseat license` | Switch between personal and commercial use, or add a key |
+| `/backseat license` | Switch between personal and commercial use, or add a key ([buy one](https://adamschaefers.com/store/backseat-driver/)) |
 | `/backseat update`, `/backseat uninstall` | Fetch a newer release when it announces one, or remove the plugin |
 | `/backseat help` | Every command and key |
 
@@ -107,6 +108,6 @@ Plugins for Emacs, Neovim and VS Code live in [`editors/`](editors). They tell t
 Source-available. Read it, change it, share it.
 
 - **Personal use is free.** Your own learning on your own time, hobby projects, unpaid open source. Schools and charities too.
-- **Commercial use is paid.** A business using it, or having its people use it, needs a [commercial license](COMMERCIAL-LICENSE.md), and that includes training: a team lead who has the team practice with it every Friday needs a seat for each person. You pick personal or commercial the first time you switch it on, and `/backseat license` changes it. No lockouts. A missing key gets a note in the tutor, nothing more.
+- **Commercial use is paid.** A business using it, or having its people use it, needs a [commercial license](COMMERCIAL-LICENSE.md), and that includes training: a team lead who has the team practice with it every Friday needs a seat for each person. **[Buy seats here](https://adamschaefers.com/store/backseat-driver/)**: paid once, yours for life. You pick personal or commercial the first time you switch it on, and `/backseat license` changes it. No lockouts. A missing key gets a note in the tutor, nothing more.
 
 The terms are the [PolyForm Noncommercial License 1.0.0](LICENSE).
