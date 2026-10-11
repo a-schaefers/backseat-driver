@@ -176,7 +176,7 @@ function day(at: number): string {
 
 const BUY = BUY_URL === '' ? '' : ` ${BUY_URL}`
 
-const SUPPORT = 'https://adamschaefers.com/#inquiries'
+const SUPPORT = 'https://adamschaefers.com/inquiries/'
 
 /** The license's seats: the server's when it said (they grow when seats are added), else the key's; 0 for no key. */
 function seatsOf(check: KeyCheck | null, record: LicenseRecord): number {

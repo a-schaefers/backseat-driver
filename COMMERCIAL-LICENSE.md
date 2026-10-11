@@ -31,6 +31,6 @@ A seat is one person, and one key covers all the seats bought with it. The licen
 
 ## How to buy one
 
-Buy one at https://adamschaefers.com/#backseat-driver: $99 a seat, paid once, for life, and 25% off every seat from 10 seats. One key covers every seat bought. It is shown as soon as you have paid and emailed to you. Questions, or an invoice instead of a card: https://adamschaefers.com/#inquiries.
+Buy one at https://adamschaefers.com/backseat-driver/: $99 a seat, paid once, for life, and 25% off every seat from 10 seats. One key covers every seat bought. It is shown as soon as you have paid and emailed to you. Questions, or an invoice instead of a card: https://adamschaefers.com/inquiries/.
 
 Copyright (c) 2026 Adam Schaefers
