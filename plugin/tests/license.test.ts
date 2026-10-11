@@ -277,7 +277,7 @@ test('the pane says nothing unless something needs saying', async () => {
   expect(licenseLine('needs-key', null, NO_LICENSE)).toMatch('/backseat license <key>')
   expect(licenseLine('expired', check, NO_LICENSE)).toMatch('2027-01-01')
   expect(licenseStatus('unchecked', check, { ...NO_LICENSE, keySince: Date.UTC(2026, 9, 5) })).toMatch("Thank you. (The license server hasn't been reached since 2026-10-05; that changes nothing.)")
-  expect(licenseLine('withdrawn', check, NO_LICENSE)).toBe("This license was withdrawn (refunded, for one). If that's a mistake: https://adamschaefers.com/#inquiries")
+  expect(licenseLine('withdrawn', check, NO_LICENSE)).toBe("This license was withdrawn (refunded, for one). If that's a mistake: https://adamschaefers.com/inquiries/")
   expect(licenseFacts(NO_LICENSE, null, 5, false)).toEqual({ use: '', key: 'none', expiresAt: 0, keySince: 0, hasServer: false, answer: '', isOutgrown: false, answeredAt: 0, triedAt: 0, now: 5 })
 })
 
