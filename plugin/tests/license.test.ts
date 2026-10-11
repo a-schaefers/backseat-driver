@@ -7,11 +7,14 @@ import {
   licenseFacts,
   licenseLine,
   licenseStanding,
+  licenseStatus,
+  newInstall,
   nextLicenseCheck,
   NO_LICENSE,
   parseAnswer,
   parseLicense,
   parseLicenseRequest,
+  parseSeats,
   PERSONAL_CHOICE,
   withKey,
 } from '../core/license'
@@ -25,7 +28,7 @@ import { PANE, SESSION, sessionTest, stubSession, typed } from './kit'
 const DAY = 86_400_000
 
 // --- Keys. The plugin's environment can check a signature but not make one, so
-// these were signed once with Node's crypto, the way license-server/ signs
+// these were signed once with Node's crypto, the way the license server signs
 // them, by a test key whose private half was thrown away.
 
 const TEST_KEY: PublicKey = {kid: 'test-1', x: 'ljY0ZN4daI87A4qNNvcqKkoagZO4mzWTnLUM1SNj0sU', y: '_HZ2JQ9G-_fU-5zx7RvD_X-Wy-CEVlHi751zofjASXY'}
@@ -128,9 +131,11 @@ test('where the person stands', async () => {
   expect(licenseStanding(facts({ answeredAt: 10 * DAY, now: 39 * DAY }))).toBe('licensed')
 })
 
-test('the server is asked about once a week, a day after a try that got no answer, and never without a key or a server', async () => {
+test('the server is asked about once a week, a day after a try that got no answer or an answer of withdrawn, and never without a key or a server', async () => {
   expect(nextLicenseCheck(facts({ triedAt: 0 }))).toBe(DAY)
   expect(nextLicenseCheck(facts({ triedAt: 5 * DAY, answeredAt: 5 * DAY }))).toBe(12 * DAY)
+  // Withdrawn is asked about again the next day, so one that is undone clears quickly.
+  expect(nextLicenseCheck(facts({ answer: 'revoked', triedAt: 5 * DAY, answeredAt: 5 * DAY }))).toBe(6 * DAY)
   expect(nextLicenseCheck(facts({ triedAt: 5 * DAY, answeredAt: 2 * DAY }))).toBe(6 * DAY)
   expect(nextLicenseCheck(facts({ use: 'personal' }))).toBe(null)
   expect(nextLicenseCheck(facts({ key: 'none' }))).toBe(null)
@@ -178,10 +183,10 @@ test('over random histories, nothing but a commercial choice ever shows a line, 
 test('license.json reads back, and anything else is nothing chosen', async () => {
   expect(parseLicense(null)).toEqual(NO_LICENSE)
   expect(parseLicense({ use: 'enterprise', key: 3, answer: 'maybe' })).toEqual(NO_LICENSE)
-  const record: LicenseRecord = { v: 1, use: 'commercial', isAsked: true, key: 'BSD1.a.b', keySince: 5, answer: 'active', answeredAt: 6, triedAt: 6 }
+  const record: LicenseRecord = { v: 1, use: 'commercial', isAsked: true, key: 'BSD1.a.b', keySince: 5, answer: 'active', answeredAt: 6, triedAt: 6, install: '0123456789abcdef', seats: 5 }
   expect(parseLicense(JSON.parse(JSON.stringify(record)))).toEqual(record)
   // A new key starts over with the server.
-  expect(withKey(record, 'BSD1.c.d', 9)).toEqual({ ...record, key: 'BSD1.c.d', keySince: 9, answer: null, answeredAt: 0, triedAt: 0 })
+  expect(withKey(record, 'BSD1.c.d', 9)).toEqual({ ...record, key: 'BSD1.c.d', keySince: 9, answer: null, answeredAt: 0, triedAt: 0, seats: 0 })
 })
 
 test('/backseat license words', async () => {
@@ -201,12 +206,33 @@ test('what the server says, and what counts as no answer', async () => {
   expect(parseAnswer(200, '<html>')).toBe(null)
 })
 
+test("seats: the install id goes with the check, the license's seats come back, and the pane never mentions them", async () => {
+  expect(checkUrl('https://licenses.example', 'lic_1', 'a1b2c3d4e5f6')).toBe('https://licenses.example/v1/keys/lic_1?install=a1b2c3d4e5f6')
+  expect(newInstall(new Uint8Array([0, 15, 255, 16]))).toBe('000fff10')
+  expect(parseSeats(200, '{"status":"active","seats":12,"installs":40}')).toBe(12)
+  expect(parseSeats(200, '{"status":"active"}')).toBe(0)
+  expect(parseSeats(200, '{"seats":2.5}')).toBe(0)
+  expect(parseSeats(500, '{"seats":12}')).toBe(0)
+  expect(parseLicense({ install: 'x' }).install).toBe('')
+  expect(parseLicense({ install: '0123456789abcdef', seats: 3, installs: 2 })).toEqual({ ...NO_LICENSE, install: '0123456789abcdef', seats: 3 })
+  // The key says 5 seats (Acme Ltd); seats were added since, and the server says 12.
+  const check = await checkKey(KEYS.ending, [TEST_KEY])
+  const grown = { ...NO_LICENSE, seats: 12 }
+  expect(licenseLine('licensed', check, grown)).toBe('')
+  expect(licenseStatus('licensed', check, grown)).toBe('Commercial use, licensed for Acme Ltd, 12 seats. Thank you.')
+  expect(licenseStatus('licensed', check, NO_LICENSE)).toBe('Commercial use, licensed for Acme Ltd, 5 seats. Thank you.')
+  // A new key starts with no seats from the server, and keeps the install id.
+  expect(withKey({ ...grown, install: '0123456789abcdef' }, 'BSD1.x.y', 9)).toMatchObject({ seats: 0, install: '0123456789abcdef' })
+})
+
 test('the pane says nothing unless something needs saying', async () => {
   const check = await checkKey(KEYS.ending, [TEST_KEY])
-  for (const quiet of ['unchosen', 'personal', 'licensed'] as const) expect(licenseLine(quiet, check, NO_LICENSE)).toBe('')
+  // A server that can't be reached is nobody's problem: no line for it either.
+  for (const quiet of ['unchosen', 'personal', 'licensed', 'unchecked'] as const) expect(licenseLine(quiet, check, NO_LICENSE)).toBe('')
   expect(licenseLine('needs-key', null, NO_LICENSE)).toMatch('/backseat license <key>')
   expect(licenseLine('expired', check, NO_LICENSE)).toMatch('2027-01-01')
-  expect(licenseLine('unchecked', check, { ...NO_LICENSE, keySince: Date.UTC(2026, 9, 5) })).toMatch('since 2026-10-05')
+  expect(licenseStatus('unchecked', check, { ...NO_LICENSE, keySince: Date.UTC(2026, 9, 5) })).toMatch("Thank you. (The license server hasn't been reached since 2026-10-05; that changes nothing.)")
+  expect(licenseLine('withdrawn', check, NO_LICENSE)).toBe("This license was withdrawn (refunded, for one). If that's a mistake: https://adamschaefers.com/#inquiries")
   expect(licenseFacts(NO_LICENSE, null, 5, false)).toEqual({ use: '', key: 'none', expiresAt: 0, keySince: 0, hasServer: false, answer: '', answeredAt: 0, triedAt: 0, now: 5 })
 })
 
@@ -244,7 +270,7 @@ sessionTest('dismissing the question chooses nothing, asks nothing again, and th
   expect(session.asked.length).toBe(1)
 })
 
-sessionTest('commercial asks for the key; without one the pane says how to add it, and a pasted key quiets it', async ($, on) => {
+sessionTest('commercial asks for the key; without one the pane says how to add it, and a key the shipped key did not sign says so', async ($, on) => {
   const session = stubSession(on, { data: KNOWN })
   session.answers.push(COMMERCIAL_CHOICE, LATER_CHOICE)
   await $.session.start(SESSION)
@@ -255,11 +281,13 @@ sessionTest('commercial asks for the key; without one the pane says how to add i
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Commercial use: add your license key/ })).toBeDefined()
 
-  // The shipped plugin carries no public key yet, so a well-formed key is taken on trust.
+  // The plugin ships the live server's public key, so a key signed by this file's test key does
+  // not check out: kept, and said so, never blocking. (The licensed wording is tested above, with
+  // the test key passed in; no key signed by the live key belongs in the repository.)
   const answer = await $.command.run(typed('backseat', `license ${KEYS.valid}`))
-  expect(answer.text).toBe('Commercial use, licensed for Acme Ltd, 5 seats. Thank you.')
+  expect(answer.text).toBe('Commercial use, and the key does not check out. /backseat license <key> tries another.')
   expect(String((session.data('license.json') as { key: string }).key).startsWith('BSD1.')).toBe(true)
-  expect(await ui.find({ type: 'Text', text: /license key/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /does not check out/ })).toBeDefined()
   await ui.unmount()
 
   expect((await $.command.run(typed('backseat', 'license not-a-key'))).text).toMatch('That is not a license key')

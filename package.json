@@ -2,7 +2,7 @@
   "name": "backseat-driver-dev",
   "license": "PolyForm-Noncommercial-1.0.0",
   "private": true,
-  "description": "Development tooling for the Backseat Driver plugin. Nothing here ships to users: the plugin is the plugin/ folder. TypeScript checks the types. license-server/ is a reference license server, also never shipped. spago and esbuild build the PureScript kernel into plugin/core/kernel.js, and the compiler itself comes by pinned hash (scripts/toolchain.py).",
+  "description": "Development tooling for the Backseat Driver plugin. Nothing here ships to users: the plugin is the plugin/ folder. TypeScript checks the types. The license server is license-worker/ in the adamschaefers.com repository. spago and esbuild build the PureScript kernel into plugin/core/kernel.js, and the compiler itself comes by pinned hash (scripts/toolchain.py).",
   "scripts": {
     "build:kernel": "scripts/build-kernel.sh",
     "kernel": "scripts/build-kernel.sh --check",
@@ -11,10 +11,9 @@
     "typecheck": "tsc -p plugin/tsconfig.json",
     "core": "tsc -p plugin/tsconfig.core.json",
     "persona": "node --experimental-strip-types --no-warnings scripts/persona-preview.ts",
-    "server": "tsc -p license-server/tsconfig.json && node --test license-server/test/*.test.ts",
     "licenses": "cmp LICENSE plugin/LICENSE && cmp COMMERCIAL-LICENSE.md plugin/COMMERCIAL-LICENSE.md",
     "tools": "python3 scripts/test_jack.py && python3 scripts/test_workflows.py",
-    "check": "npm run kernel && npm run validate && npm run licenses && npm run test && npm run typecheck && npm run core && npm run server && npm run tools"
+    "check": "npm run kernel && npm run validate && npm run licenses && npm run test && npm run typecheck && npm run core && npm run tools"
   },
   "devDependencies": {
     "@types/node": "24.19.1",

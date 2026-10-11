@@ -298,9 +298,11 @@ import {
   licenseLine,
   licenseStanding,
   licenseStatus,
+  newInstall,
   nextLicenseCheck,
   parseAnswer,
   parseLicense,
+  parseSeats,
   parseLicenseRequest,
   USE_CHOICES,
   USE_HEADER,
@@ -1823,6 +1825,16 @@ async function marketplaceClone($: EngineInterface, name: string): Promise<strin
 
 // --- The license: personal or commercial use, and the commercial key. Nothing here ever stops the tutor.
 
+/** Random bytes for the install id: WebCrypto's where the mod's environment has it, Math.random otherwise (an id, not a secret). */
+function randomBytes(n: number): Uint8Array {
+  const bytes = new Uint8Array(n)
+  const crypto = (globalThis as { crypto?: { getRandomValues?: (array: Uint8Array) => Uint8Array } }).crypto
+  if (crypto?.getRandomValues !== undefined) return crypto.getRandomValues(bytes)
+  for (let i = 0; i < n; i++) bytes[i] = Math.floor(Math.random() * 256)
+
+  return bytes
+}
+
 /** `license.json` as it stands. */
 async function readLicense($: EngineInterface): Promise<LicenseRecord> {
   await resolveHome($)
@@ -1912,7 +1924,9 @@ async function addKey($: EngineInterface, pasted: string): Promise<LicenseRecord
 /**
  * Asks the license server whether the key still stands, when that is due:
  * about once a week, a day after a try that got no answer. No answer is no
- * news: the key keeps counting as good. Only the key's id is sent.
+ * news: the key keeps counting as good, and the pane says nothing. Sent: the
+ * key's id, and this install's anonymous id (random, made once) so the server
+ * can count a license's installs; the pane never shows seats or installs.
  */
 async function checkLicense($: EngineInterface, record: LicenseRecord): Promise<void> {
   try {
@@ -1921,17 +1935,21 @@ async function checkLicense($: EngineInterface, record: LicenseRecord): Promise<
     const now = await $.clock.now()
     const due = nextLicenseCheck(licenseFacts(record, check, now, true))
     if (due === null || due > now || check.state === 'malformed') return
-    await changeLicense($, stored => (stored.key === record.key ? { ...stored, triedAt: now } : stored))
+    const tried = await changeLicense($, stored =>
+      stored.key === record.key ? { ...stored, triedAt: now, install: stored.install === '' ? newInstall(randomBytes(16)) : stored.install } : stored,
+    )
     let answer: ReturnType<typeof parseAnswer> = null
+    let seats = 0
     try {
-      const response = await $.http.fetch(checkUrl(LICENSE_SERVER, check.payload.id), { headers: { accept: 'application/json' } })
+      const response = await $.http.fetch(checkUrl(LICENSE_SERVER, check.payload.id, tried.install), { headers: { accept: 'application/json' } })
       answer = parseAnswer(response.status, response.text)
+      seats = parseSeats(response.status, response.text)
       trace($, 'license', 'checked', () => ({ status: response.status, answer }))
     } catch (error) {
       trace($, 'license', 'not reached', () => ({ error: String(error) }))
     }
     if (answer === null) return
-    const kept = await changeLicense($, stored => (stored.key === record.key ? { ...stored, answer, answeredAt: now } : stored))
+    const kept = await changeLicense($, stored => (stored.key === record.key ? { ...stored, answer, answeredAt: now, seats } : stored))
     await showLicense($, kept)
   } catch (error) {
     fail($, 'could not check the license key', error)
@@ -1952,7 +1970,7 @@ async function licenseCommand($: EngineInterface, asked: LicenseRequest): Promis
         record = await changeLicense($, stored => ({ ...stored, isAsked: true, use: asked.use }))
         break
       case 'clear-key':
-        record = await changeLicense($, stored => ({ ...stored, key: '', keySince: 0, answer: null, answeredAt: 0, triedAt: 0 }))
+        record = await changeLicense($, stored => ({ ...stored, key: '', keySince: 0, answer: null, answeredAt: 0, triedAt: 0, seats: 0 }))
         break
       case 'key':
         if (!looksLikeKey(asked.key)) return 'That is not a license key: one starts with BSD1. /backseat license personal, commercial or clear change the rest.'
@@ -1962,7 +1980,7 @@ async function licenseCommand($: EngineInterface, asked: LicenseRequest): Promis
     await showLicense($, record)
     const { standing, check } = await standingOf($, record)
 
-    return licenseStatus(standing, check)
+    return licenseStatus(standing, check, record)
   } catch (error) {
     fail($, 'could not change the license', error)
 
