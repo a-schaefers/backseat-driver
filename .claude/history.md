@@ -263,6 +263,7 @@ Dated history of Backseat Driver: decisions, live sessions, ui-truth passes, par
 ## Debug log
 
 - Until 2026-10-06 (fifth ui-truth pass): only a fill emptied an old chunk, so a session reloaded often kept old chunks for good; now a reload's new chunk counts too.
+- 2026-10-11, security audit (adamschaefers.com session): the `cmd` record of `/backseat license <key>` and the key dialog's `ui / answered` wrote the whole license key into the log; `toLine` now leaves it out. Not done: making the data folder owner-only (0755 and `license.json` 0644 under a usual umask), since `$.fs.write` takes no mode and a `chmod` would be a program the README says the tutor never runs.
 - 2026-10-06, third ui-truth pass: the spinner's frames made forty-five `shown` records in half a minute of a review; `isSameShown` now reads them as one.
 - 2026-10-06: a wheel at the pane's edge (asking for the offset it already had) made eighty `scroll` records in two seconds; no longer logged (eighth ui-truth pass notes).
 - 2026-10-07: after a `/clear`, jack took the owner's php-hello session for one that writes no state, since its log folder is named after its id from before the `/clear`; jack now finds the folder by the id in `state.json` (`debug_dir`).

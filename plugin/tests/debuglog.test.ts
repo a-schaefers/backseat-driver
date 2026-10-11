@@ -7,6 +7,7 @@ import {
   createDebugLog,
   createRing,
   createTracer,
+  KEY_LEFT_OUT,
   MAX_CHUNKS,
   MAX_STRING_CHARS,
   parseDebugRequest,
@@ -93,6 +94,14 @@ test('a record is one line of JSON, whatever it holds', async () => {
   const looped = JSON.parse(toLine(record(5, loop))) as { seq: number; d: string }
   expect(looped.seq).toBe(5)
   expect(looped.d.includes('could not be written')).toBe(true)
+})
+
+test('a license key never reaches the log: /backseat license and the key dialog log it left out', async () => {
+  const key = 'BSD1.eyJ2IjoxLCJpZCI6ImxpY19hYmMxMjMiLCJ0byI6IkFjbWUgTHRkIn0.c2lnbmF0dXJlLXNpZ25hdHVyZS1zaWduYXR1cmUtc2lnbmF0dXJl'
+  const line = toLine(record(6, { args: `license ${key}`, mode: 'on', asked: [{ question: 'Paste your license key', answer: key }] }))
+  expect(line.includes(key)).toBe(false)
+  expect(line.includes('eyJ2IjoxLCJpZCI6ImxpY19hYmMxMjMiLCJ0byI6IkFjbWUgTHRkIn0')).toBe(false)
+  expect(JSON.parse(line).d).toEqual({ args: `license ${KEY_LEFT_OUT}`, mode: 'on', asked: [{ question: 'Paste your license key', answer: KEY_LEFT_OUT }] })
 })
 
 test('the ring keeps the latest records and lets the oldest go', async () => {
