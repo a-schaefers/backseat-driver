@@ -256,12 +256,12 @@ test('outgrown: on the server\'s word, one gentle line asks for more seats, allo
   // The key says 5 seats (Acme Ltd); the server says 3 after a partial refund, or 12 after seats were added.
   const check = await checkKey(KEYS.ending, [TEST_KEY])
   expect(licenseLine('outgrown', check, { ...NO_LICENSE, seats: 3, isOutgrown: true })).toBe(
-    'This license has 3 seats and far more installs. If more than 3 people use it, please add seats. https://adamschaefers.com/backseat-driver/',
+    'This license has 3 seats and far more installs. If more than 3 people use it, please add seats. https://adamschaefers.com/store/backseat-driver/',
   )
   expect(licenseLine('outgrown', check, NO_LICENSE)).toMatch('This license has 5 seats and far more installs. If more than 5 people use it,')
   expect(licenseLine('outgrown', check, { ...NO_LICENSE, seats: 1 })).toMatch('This license has 1 seat and far more installs. If more than one person uses it,')
   expect(licenseStatus('outgrown', check, { ...NO_LICENSE, seats: 12 })).toBe(
-    'Commercial use, licensed for Acme Ltd, 12 seats. Thank you. Far more installs than that check in with it, though: if more than 12 people use it, please add seats. https://adamschaefers.com/backseat-driver/',
+    'Commercial use, licensed for Acme Ltd, 12 seats. Thank you. Far more installs than that check in with it, though: if more than 12 people use it, please add seats. https://adamschaefers.com/store/backseat-driver/',
   )
   // The words follow the record the kernel decided from.
   const record = { ...NO_LICENSE, use: 'commercial' as const, key: KEYS.ending, keySince: DAY, answer: 'active' as const, answeredAt: 2 * DAY, triedAt: 2 * DAY, seats: 3, isOutgrown: true }
