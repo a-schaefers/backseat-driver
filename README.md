@@ -12,6 +12,8 @@
 [![needs Claude Code 2.1.287+](https://img.shields.io/badge/Claude%20Code-2.1.287%2B-d97757)](https://code.claude.com/docs/en/plugins/mods/overview)
 [![last commit](https://img.shields.io/github/last-commit/a-schaefers/backseat-driver)](https://github.com/a-schaefers/backseat-driver/commits/main)
 
+<img src="docs/screenshot.webp" width="820" alt="Backseat Driver beside Claude Code: its play-by-play pane, with a note on a bug in the code just saved">
+
 </div>
 
 **A coding tutor that lives inside [Claude Code](https://claude.com/claude-code) and never writes your code.**
