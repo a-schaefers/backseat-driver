@@ -594,7 +594,7 @@ export function dueNow(deadlines: { name: string; at: number }[], now: number): 
 
 // --- The license (Kernel.License)
 
-const STANDINGS: readonly Standing[] = ['unchosen', 'personal', 'licensed', 'needs-key', 'bad-key', 'expired', 'withdrawn', 'unchecked']
+const STANDINGS: readonly Standing[] = ['unchosen', 'personal', 'licensed', 'needs-key', 'bad-key', 'expired', 'withdrawn', 'outgrown', 'unchecked']
 
 /** Where the person stands with the license. A standing the kernel names that this file does not know is `licensed`, which shows nothing. */
 export function licenseStanding(facts: LicenseFacts): Standing {

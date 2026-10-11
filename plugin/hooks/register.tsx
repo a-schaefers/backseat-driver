@@ -303,6 +303,7 @@ import {
   parseAnswer,
   parseLicense,
   parseSeats,
+  parseOutgrown,
   parseLicenseRequest,
   USE_CHOICES,
   USE_HEADER,
@@ -1926,7 +1927,8 @@ async function addKey($: EngineInterface, pasted: string): Promise<LicenseRecord
  * about once a week, a day after a try that got no answer. No answer is no
  * news: the key keeps counting as good, and the pane says nothing. Sent: the
  * key's id, and this install's anonymous id (random, made once) so the server
- * can count a license's installs; the pane never shows seats or installs.
+ * can count a license's installs. The pane never shows the installs; it asks
+ * for more seats only when the server says the license has outgrown them.
  */
 async function checkLicense($: EngineInterface, record: LicenseRecord): Promise<void> {
   try {
@@ -1940,16 +1942,18 @@ async function checkLicense($: EngineInterface, record: LicenseRecord): Promise<
     )
     let answer: ReturnType<typeof parseAnswer> = null
     let seats = 0
+    let isOutgrown = false
     try {
       const response = await $.http.fetch(checkUrl(LICENSE_SERVER, check.payload.id, tried.install), { headers: { accept: 'application/json' } })
       answer = parseAnswer(response.status, response.text)
       seats = parseSeats(response.status, response.text)
-      trace($, 'license', 'checked', () => ({ status: response.status, answer }))
+      isOutgrown = parseOutgrown(response.status, response.text)
+      trace($, 'license', 'checked', () => ({ status: response.status, answer, isOutgrown }))
     } catch (error) {
       trace($, 'license', 'not reached', () => ({ error: String(error) }))
     }
     if (answer === null) return
-    const kept = await changeLicense($, stored => (stored.key === record.key ? { ...stored, answer, answeredAt: now, seats } : stored))
+    const kept = await changeLicense($, stored => (stored.key === record.key ? { ...stored, answer, answeredAt: now, seats, isOutgrown } : stored))
     await showLicense($, kept)
   } catch (error) {
     fail($, 'could not check the license key', error)
@@ -1970,7 +1974,7 @@ async function licenseCommand($: EngineInterface, asked: LicenseRequest): Promis
         record = await changeLicense($, stored => ({ ...stored, isAsked: true, use: asked.use }))
         break
       case 'clear-key':
-        record = await changeLicense($, stored => ({ ...stored, key: '', keySince: 0, answer: null, answeredAt: 0, triedAt: 0, seats: 0 }))
+        record = await changeLicense($, stored => ({ ...stored, key: '', keySince: 0, answer: null, answeredAt: 0, triedAt: 0, seats: 0, isOutgrown: false }))
         break
       case 'key':
         if (!looksLikeKey(asked.key)) return 'That is not a license key: one starts with BSD1. /backseat license personal, commercial or clear change the rest.'
