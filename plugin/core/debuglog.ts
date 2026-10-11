@@ -13,6 +13,8 @@
  * ones exist that it is emptied to keep the log's size bounded.
  */
 
+import { KEY_PREFIX } from './licensekey'
+
 /** One line of the log. */
 export type DebugRecord = {
   /** When, in milliseconds since the epoch. */
@@ -91,9 +93,17 @@ export function parseSwitch(stored: unknown): boolean {
   return typeof stored === 'object' && stored !== null && (stored as Record<string, unknown>).on === true
 }
 
+/** A license key anywhere in a string: `/backseat license <key>`'s arguments, the key dialog's answer. */
+const LICENSE_KEY = new RegExp(`${KEY_PREFIX}\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+`, 'g')
+
+/** What a record says in place of a license key: a log gets pasted into issues, and a key is the license. */
+export const KEY_LEFT_OUT = `${KEY_PREFIX}.(key left out)`
+
 function cut(_key: string, value: unknown): unknown {
-  if (typeof value === 'string' && value.length > MAX_STRING_CHARS) {
-    return `${value.slice(0, MAX_STRING_CHARS)}… (cut, ${value.length} characters in all)`
+  if (typeof value === 'string') {
+    const text = value.replace(LICENSE_KEY, KEY_LEFT_OUT)
+
+    return text.length > MAX_STRING_CHARS ? `${text.slice(0, MAX_STRING_CHARS)}… (cut, ${text.length} characters in all)` : text
   }
   if (typeof value === 'bigint') return String(value)
   if (value instanceof Error) return { name: value.name, message: value.message, stack: value.stack }
