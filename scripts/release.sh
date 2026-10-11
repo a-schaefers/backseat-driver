@@ -59,6 +59,28 @@ node -e '
   fs.writeFileSync(path, text.replace(/"version": "[^"]*"/, `"version": "${process.argv[2]}"`))
 ' "$manifest" "$next"
 
+# Every key the live license server signs with must be in PUBLIC_KEYS, or every
+# paying customer's key would stop checking out. PUBLIC_KEYS only ever grows.
+server="$(sed -n "s/^export const LICENSE_SERVER: string = '\(.*\)'$/\1/p" plugin/core/license.ts)"
+if [ -n "$server" ]; then
+  NODE_NO_WARNINGS=1 node --input-type=module -e '
+    const [server, root] = process.argv.slice(1)
+    const { PUBLIC_KEYS } = await import(root + "/plugin/core/licensekey.ts")
+    let live
+    try {
+      live = await (await fetch(server.replace(/\/+$/, "") + "/v1/public-keys")).json()
+    } catch (error) {
+      console.error(`Release stopped: could not ask ${server} for its public keys (${error.message}).`)
+      process.exit(1)
+    }
+    const missing = live.filter(k => !PUBLIC_KEYS.some(p => p.kid === k.kid && p.x === k.x && p.y === k.y))
+    if (missing.length) {
+      console.error(`Release stopped: PUBLIC_KEYS lacks ${missing.map(k => k.kid).join(", ")}, which the license server signs with. Customers\x27 keys would not check out.`)
+      process.exit(1)
+    }
+  ' "$server" "$PWD"
+fi
+
 npm run --silent check
 git switch --quiet -c "release/v$next"
 git add "$manifest"

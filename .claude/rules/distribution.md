@@ -4,7 +4,6 @@ paths:
   - "plugin/core/licensekey.ts"
   - "plugin/core/update.ts"
   - "kernel/src/Kernel/License.purs"
-  - "license-server/**"
   - "scripts/release.sh"
   - ".claude-plugin/**"
   - "plugin/.claude-plugin/plugin.json"
@@ -16,14 +15,14 @@ paths:
 
 ## License
 
-- `license.json` (data folder): `use` (`personal | commercial | null`), `isAsked`, `key`, `keySince`, `answer` (`active | revoked | unknown | null`), `answeredAt`, `triedAt`. Forgetting everything removes it.
+- `license.json` (data folder): `use` (`personal | commercial | null`), `isAsked`, `key`, `keySince`, `answer` (`active | revoked | unknown | null`), `answeredAt`, `triedAt`, `install` (this install's anonymous id: 32 hex digits, made at the first check, kept across keys), `seats` (the license's seats from the last answer, which grow when seats are added; 0 unknown, reset with a new key). Forgetting everything removes it.
 - Asked once ever, fresh switch-on, after the language questions (`startLicense` in `engage`, `askLicense`): personal or commercial; commercial asks for the key (free text; "add it later" the option). A key typed into the first question counts as commercial. Dismissing is an answer (`isAsked`). Kit tests that count questions seed `LICENSE_ANSWERED`.
 - Not `userConfig`: it outlives reinstalls and install methods, and a change does not reload the mod. `/backseat license [personal | commercial | <key> | clear]`, works while off.
-- Key: `BSD1.<payload>.<signature>`; payload JSON in base64url (`v, kid, id, to, seats, iat, exp`); ECDSA P-256 SHA-256 over the payload's base64url text, r‖s, checked in BigInt (`crypto.subtle` is `digest` only). `licensekey.ts` imports nothing, so the server's tests import it. `checkKey`: `malformed`, `forged` (bad signature or unknown `kid`), `unverified` (no public key or no SHA-256), `valid`. `PUBLIC_KEYS` is empty until the owner runs `keygen`, so a well-formed key is taken on trust.
+- Key: `BSD1.<payload>.<signature>`; payload JSON in base64url (`v, kid, id, to, seats, iat, exp`); ECDSA P-256 SHA-256 over the payload's base64url text, r‖s, checked in BigInt (`crypto.subtle` is `digest` only). `licensekey.ts` imports nothing, so the server's tests import it. `checkKey`: `malformed`, `forged` (bad signature or unknown `kid`), `unverified` (no public key or no SHA-256), `valid`. `PUBLIC_KEYS` holds `live-1`, the live server's signing key; a key from any other `kid` is forged (an empty list would take a well-formed key on trust).
 - Standing (`Kernel.License`): `unchosen`, `personal`, `licensed`, `needs-key`, `bad-key`, `expired`, `withdrawn`, `unchecked` (no server answer for 30 days). A server's `unknown` is no news. Nothing ever stops working: `licenseLine`, one dim line under the update notice, commercial problems only (`license` state key; recomputed after `/clear`).
-- `checkLicense` at a fresh switch-on and on a paste, when `nextLicenseCheck` says due (new key at once, 7 days after an answer, 1 day after none): `GET <server>/v1/keys/<id>`; 404 is `unknown`, unreadable is no answer. `LICENSE_SERVER` is '' until deployed. Off with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`.
-- `license-server/` (dev only, not shipped or deployed; Node 22.18+ runs the TypeScript): `keys.ts` (keys, signing), `store.ts` (licenses in memory or one JSON file written by rename), `server.ts` (`GET /v1/keys/<id>`, `GET /v1/public-keys`; with the owner's bearer token `POST /v1/licenses`, `POST /v1/licenses/<id>/revoke|restore`, `GET /v1/licenses`), `cli.ts` (`keygen`, `issue`, `revoke`, `serve`). No payment, no secrets committed (`license-server/*.pem`, `licenses.json` ignored). `npm run server` checks its keys with the plugin's `checkKey`.
-- Verified: tests only (question, `/backseat license`, key check). No server deployed.
+- `checkLicense` at a fresh switch-on and on a paste, when `nextLicenseCheck` says due (new key at once, 7 days after an answer, 1 day after none): `GET <server>/v1/keys/<id>?install=<install>`; 404 is `unknown`, unreadable is no answer. The answer's `seats` (`parseSeats`; an older server sends none) is the license's: `/backseat license` says it rather than the key's own. The pane never mentions seats or installs: the server counts installs and, when a license's installs are more than twice its seats and 5 over for two weeks, emails its latest buyer, at most every 90 days. A withdrawn answer is asked about again daily (`nextCheckAt`). `unchecked` shows no line; `/backseat license` mentions it.
+- The server is `license-worker/` in the adamschaefers.com repository (there is no copy here), a Cloudflare Worker: `GET /v1/keys/<id>` (status of the whole license, which stands while any key of it does; its seats), `GET /v1/public-keys`, `POST /v1/verify`; it sells through Stripe Checkout, keeps licenses in D1, emails keys through Resend, and revokes a key when its payment is fully refunded or a chargeback is lost. Its tests check its keys with this plugin's `checkKey`. `scripts/release.sh` stops a release whose `PUBLIC_KEYS` lacks any key `/v1/public-keys` lists.
+- Verified: plugin side tests only (question, `/backseat license`, key check). The live server: a sandbox purchase end to end (2026-10-10), its key `valid` by `checkKey`, a full refund turned it `revoked`.
 
 ## Updates and uninstall
 

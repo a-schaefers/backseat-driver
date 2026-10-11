@@ -53,7 +53,7 @@ It knows what you're working on without being asked: which files, which function
 
 Pick who's riding along. A voice sets how it talks: `default`, `torvalds`, `knuth`, `primeagen`, or `eli5-tldr-kiss-terse`. An engineering persona sets what it cares about in code, chosen separately. A little pixel-art character speaks for the voice. Linus, Knuth, Prime, a penguin in a top hat. Hard on the code, never on you.
 
-While it's on, a hook blocks Claude's editing tools, so your code stays yours no matter what the model decides. It installs no git hooks and never writes to your working tree. Set an editor command and every place a review or a note points at opens in your editor when you click it; that command is the one other program it ever runs, and only on your click. Got `inotifywait` on your PATH? It hears your saves and commits the moment they land. No `inotifywait`, it checks every few seconds instead. What it remembers stays in `~/.local/share/backseat-driver/`. Its only network requests of its own: a check for a newer release, at most every six hours, and, with a commercial key, a check of that key about once a week. Nothing stops working if either can't get through.
+While it's on, a hook blocks Claude's editing tools, so your code stays yours no matter what the model decides. It installs no git hooks and never writes to your working tree. Set an editor command and every place a review or a note points at opens in your editor when you click it; that command is the one other program it ever runs, and only on your click. Got `inotifywait` on your PATH? It hears your saves and commits the moment they land. No `inotifywait`, it checks every few seconds instead. What it remembers stays in `~/.local/share/backseat-driver/`. Its only network requests of its own: a check for a newer release, at most every six hours, and, with a commercial key, a check of that key about once a week. That check sends the key's id and a random install number, nothing else. Nobody using it is ever shown anything about seats, and nothing stops working if either check can't get through.
 
 ## Who it's for
 
@@ -104,7 +104,7 @@ Plugins for Emacs, Neovim and VS Code live in [`editors/`](editors). They tell t
 
 Source-available. Read it, change it, share it.
 
-- **Personal use is free.** Learning, hobby projects, unpaid open source. Schools and charities too.
-- **Commercial use is paid.** Using it for a business needs a [commercial license](COMMERCIAL-LICENSE.md). You pick personal or commercial the first time you switch it on, and `/backseat license` changes it. No lockouts. A missing key gets a note in the tutor, nothing more.
+- **Personal use is free.** Your own learning on your own time, hobby projects, unpaid open source. Schools and charities too.
+- **Commercial use is paid.** A business using it, or having its people use it, needs a [commercial license](COMMERCIAL-LICENSE.md), and that includes training: a team lead who has the team practice with it every Friday needs a seat for each person. You pick personal or commercial the first time you switch it on, and `/backseat license` changes it. No lockouts. A missing key gets a note in the tutor, nothing more.
 
 The terms are the [PolyForm Noncommercial License 1.0.0](LICENSE).

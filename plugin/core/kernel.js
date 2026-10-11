@@ -3779,7 +3779,7 @@ var standingText = function(v) {
     return "unchecked";
   }
   ;
-  throw new Error("Failed pattern match at Kernel.License (line 161, column 16 - line 169, column 27): " + [v.constructor.name]);
+  throw new Error("Failed pattern match at Kernel.License (line 166, column 16 - line 174, column 27): " + [v.constructor.name]);
 };
 var fromWire2 = function(w) {
   var useOf = function(v) {
@@ -3935,10 +3935,10 @@ var standingOf = function(facts) {
     ;
   }
   ;
-  throw new Error("Failed pattern match at Kernel.License (line 94, column 20 - line 103, column 28): " + [facts.use.constructor.name]);
+  throw new Error("Failed pattern match at Kernel.License (line 97, column 20 - line 106, column 28): " + [facts.use.constructor.name]);
 };
-var licenseStandingWire = function($34) {
-  return standingText(standingOf(fromWire2($34)));
+var licenseStandingWire = function($35) {
+  return standingText(standingOf(fromWire2($35)));
 };
 var retryMs = dayMs;
 var nextCheckAt = function(facts) {
@@ -3953,13 +3953,18 @@ var nextCheckAt = function(facts) {
       return facts.triedAt + retryMs;
     }
     ;
+    var $34 = eq24(facts.answer)(Revoked.value);
+    if ($34) {
+      return facts.answeredAt + retryMs;
+    }
+    ;
     return facts.answeredAt + everyMs;
   }
   ;
   return 0;
 };
-var licenseNextCheckWire = function($35) {
-  return nextCheckAt(fromWire2($35));
+var licenseNextCheckWire = function($36) {
+  return nextCheckAt(fromWire2($36));
 };
 
 // output/Kernel.Pace/index.js

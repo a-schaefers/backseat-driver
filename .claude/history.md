@@ -342,7 +342,8 @@ Dated history of Backseat Driver: decisions, live sessions, ui-truth passes, par
 
 ## License
 
-- Nothing dated in the section; status: tests only, no server deployed, `PUBLIC_KEYS` empty.
+- 2026-10-10: on sale. The server went live at licenses.adamschaefers.com (adamschaefers.com's `license-worker/`): Stripe Checkout, $99 a seat or $74.25 from 10, lifetime keys signed with `live-1`. A sandbox purchase of 12 seats issued a key that `checkKey` called `valid`; a full refund made the server answer `revoked`. `PUBLIC_KEYS`, `LICENSE_SERVER`, `BUY_URL` and "How to buy one" were filled in. Seats (owner: one key per purchase, a soft nudge, adding seats easy): the check sends an anonymous install id, the server counts installs per license over 30 days, more installs than seats shows one line; the store takes a pasted key and sells more seats as one new key for the total. The session test that pasted a test-signed key now expects "does not check out", since the shipped `live-1` didn't sign it.
+- 2026-10-11: no false alarms for paying customers (owner). The seats line in the pane went (installs can't tell people from machines, and a lead's team would see it); the server emails the latest buyer instead, only when installs are more than twice the seats and 5 over for two weeks, at most every 90 days. `unchecked` shows no line. Withdrawn means the whole license (refunding only an add-on no longer withdraws the key) and is rechecked daily. `/backseat license` says the license's seats from the server. Releases check `PUBLIC_KEYS` against the live server's keys. `license-server/` was removed: the live server is adamschaefers.com's `license-worker/`.
 
 ## Updates and uninstall
 

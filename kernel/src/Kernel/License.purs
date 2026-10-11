@@ -8,8 +8,10 @@
 -- | standing only picks the line the pane shows, and most standings show none.
 -- |
 -- | A server that cannot be reached is not held against anyone: the key keeps
--- | counting as good, and only after `quietMs` without an answer does the pane
--- | say, once, that it could not check.
+-- | counting as good, and the pane says nothing about it. After `quietMs`
+-- | without an answer the standing is `Unchecked`, which only
+-- | `/backseat license` mentions. A withdrawn key is asked about again daily,
+-- | so a withdrawal that is undone stops showing within a day.
 module Kernel.License
   ( Use(..)
   , KeyState(..)
@@ -56,6 +58,7 @@ data Standing
   | Expired
   | Withdrawn
   -- | Commercial, with a key that is fine, and no answer from the server for `quietMs`.
+  -- | Said only by `/backseat license`: the pane shows nothing for it.
   | Unchecked
 
 type Facts =
@@ -75,15 +78,15 @@ type Facts =
   , now :: Number
   }
 
--- | How long a server's answer is good for.
+-- | How long a server's answer is good for, unless it said withdrawn.
 everyMs :: Number
 everyMs = 7.0 * dayMs
 
--- | How long after a try that got no answer to try again.
+-- | How long after a try that got no answer, or an answer of withdrawn, to try again.
 retryMs :: Number
 retryMs = dayMs
 
--- | How long without an answer before the pane mentions it.
+-- | How long without an answer before the standing is `Unchecked`.
 quietMs :: Number
 quietMs = 30.0 * dayMs
 
@@ -103,13 +106,15 @@ standingOf facts = case facts.use of
     | otherwise -> Licensed
 
 -- | When to ask the server about the key, or 0 for not at all: personal use,
--- | no key, a key that is not one, or no server.
+-- | no key, a key that is not one, or no server. Withdrawn is asked about
+-- | again daily rather than weekly: a mistake undone, a refund reversed.
 nextCheckAt :: Facts -> Number
 nextCheckAt facts = case facts.use of
   Commercial
     | facts.hasServer && facts.key /= NoKey && facts.key /= Malformed && facts.key /= Forged ->
         if facts.triedAt == 0.0 then facts.now
         else if facts.answeredAt < facts.triedAt then facts.triedAt + retryMs
+        else if facts.answer == Revoked then facts.answeredAt + retryMs
         else facts.answeredAt + everyMs
   _ -> 0.0
 

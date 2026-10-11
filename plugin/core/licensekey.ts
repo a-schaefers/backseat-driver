@@ -9,7 +9,8 @@
  *
  * The plugin carries only public keys, so a key is checked offline (the
  * arithmetic is below: the mod's environment has SHA-256 and no ECDSA), and the
- * license server (license-server/ in the repository) is asked now and then
+ * license server (licenses.adamschaefers.com, license-worker/ in the adamschaefers.com
+ * repository) is asked now and then
  * only whether a key was withdrawn. This file imports nothing, so that the
  * server's tests can check that what it signs is what the plugin accepts.
  */
@@ -44,12 +45,14 @@ export type KeyCheck =
   | { state: 'valid'; payload: KeyPayload }
 
 /**
- * The public keys that sign commercial license keys. Empty until the owner
- * makes the first signing key (`node license-server/src/cli.ts keygen`) and
- * pastes its public half here. While it is empty, a well-formed key counts as
- * good without its signature being checked.
+ * The public keys that sign commercial license keys. `live-1` is the license
+ * server's key (licenses.adamschaefers.com, whose code is license-worker/ in
+ * the adamschaefers.com repository); a key signed by anything else is forged.
+ * Were this empty, a well-formed key would count as good unchecked.
  */
-export const PUBLIC_KEYS: readonly PublicKey[] = []
+export const PUBLIC_KEYS: readonly PublicKey[] = [
+  { kid: 'live-1', x: 'hWy4ZILsl3sWehBZqgO306REfeOpa9CPRclJCmlhnPg', y: 'hMFPXHIIlTDVeOO2UltlMLMi3R11TJmsZNEA56PyHqw' },
+]
 
 /** SHA-256, which the mod's environment promises through `crypto.subtle.digest`. Null where it is missing. */
 async function sha256(bytes: Uint8Array): Promise<Uint8Array | null> {
