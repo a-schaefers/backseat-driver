@@ -16,11 +16,16 @@ updates:
   # ships to users. Minor and patch bumps come as one weekly pull request; a
   # major comes alone. `npm run kernel` fails a bump that changes what the
   # kernel bundle builds to, so esbuild and spago move only with a rebuilt
-  # plugin/core/kernel.js.
+  # plugin/core/kernel.js. @types/node follows the Node major CI runs
+  # (`node-version` in check.yml and nightly.yml), so its majors move by hand
+  # with that.
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       toolchain:
         dependency-type: development

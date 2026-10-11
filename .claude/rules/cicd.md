@@ -36,7 +36,7 @@ How a change reaches `main`. Adapted from the owner's merecatholicity.com pipeli
 - `check.yml`: `npm run check` on every pull request and push to `main`, Claude Code pinned. Its `check` job is the required check: never path-filter it (a required check that never reports holds a pull request at "Expected" for ever), never rename the job without the ruleset.
 - `nightly.yml`: the same on the newest Claude Code, daily; red means Claude Code changed, not that `main` broke.
 - `owner-merge.yml`: above.
-- Every `uses:` names a commit with a `# vX.Y.Z` comment (GitHub enforces it once the setting is on; the test before that). `.github/dependabot.yml` bumps the action pins weekly as one pull request, and the dev toolchain's minor and patch bumps as another; a major comes alone. Each waits for the owner's approval.
+- Every `uses:` names a commit with a `# vX.Y.Z` comment (GitHub enforces it once the setting is on; the test before that). `.github/dependabot.yml` bumps the action pins weekly as one pull request, and the dev toolchain's minor and patch bumps as another; a major comes alone, except `@types/node`'s, which are ignored: it follows the Node major in `check.yml` and `nightly.yml` and moves by hand with it. Each waits for the owner's approval.
 - Not taken from merecatholicity.com: the pipeline report comment, Terraform, deploy gates and environments (nothing deploys on a merge here).
 
 ## Verified
