@@ -14,6 +14,7 @@ import {
   parseAnswer,
   parseLicense,
   parseLicenseRequest,
+  parseOutgrown,
   parseSeats,
   PERSONAL_CHOICE,
   withKey,
@@ -108,7 +109,7 @@ test('with no public key to check against, a well-formed key is taken on trust',
 // --- The standing and the checks, decided by the kernel.
 
 function facts(change: Partial<LicenseFacts> = {}): LicenseFacts {
-  return { use: 'commercial', key: 'valid', expiresAt: 0, keySince: 0, hasServer: true, answer: 'active', answeredAt: 0, triedAt: 0, now: DAY, ...change }
+  return { use: 'commercial', key: 'valid', expiresAt: 0, keySince: 0, hasServer: true, answer: 'active', isOutgrown: false, answeredAt: 0, triedAt: 0, now: DAY, ...change }
 }
 
 test('where the person stands', async () => {
@@ -129,13 +130,27 @@ test('where the person stands', async () => {
   expect(licenseStanding(facts({ answer: '', now: 30 * DAY }))).toBe('unchecked')
   expect(licenseStanding(facts({ answer: '', now: 30 * DAY, hasServer: false }))).toBe('licensed')
   expect(licenseStanding(facts({ answeredAt: 10 * DAY, now: 39 * DAY }))).toBe('licensed')
+  // Outgrown: the server says the license's installs have far outnumbered its seats.
+  expect(licenseStanding(facts({ isOutgrown: true }))).toBe('outgrown')
+  expect(licenseStanding(facts({ isOutgrown: true, key: 'unverified' }))).toBe('outgrown')
+  // Only while that answer is fresh: a week old, it no longer counts.
+  expect(licenseStanding(facts({ isOutgrown: true, answeredAt: 2 * DAY, now: 9 * DAY - 1 }))).toBe('outgrown')
+  expect(licenseStanding(facts({ isOutgrown: true, answeredAt: 2 * DAY, now: 9 * DAY }))).toBe('licensed')
+  // Never over a bigger problem, a server's doubt, or a server no longer asked.
+  expect(licenseStanding(facts({ isOutgrown: true, answer: 'revoked' }))).toBe('withdrawn')
+  expect(licenseStanding(facts({ isOutgrown: true, expiresAt: DAY }))).toBe('expired')
+  expect(licenseStanding(facts({ isOutgrown: true, answer: 'unknown' }))).toBe('licensed')
+  expect(licenseStanding(facts({ isOutgrown: true, hasServer: false }))).toBe('licensed')
+  expect(licenseStanding(facts({ isOutgrown: true, use: 'personal' }))).toBe('personal')
 })
 
-test('the server is asked about once a week, a day after a try that got no answer or an answer of withdrawn, and never without a key or a server', async () => {
+test('the server is asked about once a week, a day after a try that got no answer or an answer of withdrawn or outgrown, and never without a key or a server', async () => {
   expect(nextLicenseCheck(facts({ triedAt: 0 }))).toBe(DAY)
   expect(nextLicenseCheck(facts({ triedAt: 5 * DAY, answeredAt: 5 * DAY }))).toBe(12 * DAY)
   // Withdrawn is asked about again the next day, so one that is undone clears quickly.
   expect(nextLicenseCheck(facts({ answer: 'revoked', triedAt: 5 * DAY, answeredAt: 5 * DAY }))).toBe(6 * DAY)
+  // So is outgrown, so the note goes soon after seats are added.
+  expect(nextLicenseCheck(facts({ isOutgrown: true, triedAt: 5 * DAY, answeredAt: 5 * DAY }))).toBe(6 * DAY)
   expect(nextLicenseCheck(facts({ triedAt: 5 * DAY, answeredAt: 2 * DAY }))).toBe(6 * DAY)
   expect(nextLicenseCheck(facts({ use: 'personal' }))).toBe(null)
   expect(nextLicenseCheck(facts({ key: 'none' }))).toBe(null)
@@ -164,12 +179,15 @@ test('over random histories, nothing but a commercial choice ever shows a line, 
       keySince: Math.floor(random() * now),
       hasServer: random() < 0.5,
       answer: pick(answers),
+      isOutgrown: random() < 0.5,
       answeredAt: random() < 0.5 ? 0 : Math.floor(random() * (triedAt + 1)),
       triedAt,
       now,
     })
     const standing = licenseStanding(f)
     if (f.use !== 'commercial') expect([standing, turn]).toEqual([f.use === 'personal' ? 'personal' : 'unchosen', turn])
+    // More seats are asked for only on the server's fresh word that the license, active, has outgrown them.
+    if (standing === 'outgrown') expect([f.isOutgrown && f.answer === 'active' && f.hasServer && f.now - f.answeredAt < 7 * DAY, turn]).toEqual([true, turn])
     const due = nextLicenseCheck(f)
     if (due !== null) {
       expect(f.hasServer).toBe(true)
@@ -183,10 +201,11 @@ test('over random histories, nothing but a commercial choice ever shows a line, 
 test('license.json reads back, and anything else is nothing chosen', async () => {
   expect(parseLicense(null)).toEqual(NO_LICENSE)
   expect(parseLicense({ use: 'enterprise', key: 3, answer: 'maybe' })).toEqual(NO_LICENSE)
-  const record: LicenseRecord = { v: 1, use: 'commercial', isAsked: true, key: 'BSD1.a.b', keySince: 5, answer: 'active', answeredAt: 6, triedAt: 6, install: '0123456789abcdef', seats: 5 }
+  const record: LicenseRecord = { v: 1, use: 'commercial', isAsked: true, key: 'BSD1.a.b', keySince: 5, answer: 'active', answeredAt: 6, triedAt: 6, install: '0123456789abcdef', seats: 5, isOutgrown: true }
   expect(parseLicense(JSON.parse(JSON.stringify(record)))).toEqual(record)
+  expect(parseLicense({ isOutgrown: 'yes' }).isOutgrown).toBe(false)
   // A new key starts over with the server.
-  expect(withKey(record, 'BSD1.c.d', 9)).toEqual({ ...record, key: 'BSD1.c.d', keySince: 9, answer: null, answeredAt: 0, triedAt: 0, seats: 0 })
+  expect(withKey(record, 'BSD1.c.d', 9)).toEqual({ ...record, key: 'BSD1.c.d', keySince: 9, answer: null, answeredAt: 0, triedAt: 0, seats: 0, isOutgrown: false })
 })
 
 test('/backseat license words', async () => {
@@ -206,7 +225,7 @@ test('what the server says, and what counts as no answer', async () => {
   expect(parseAnswer(200, '<html>')).toBe(null)
 })
 
-test("seats: the install id goes with the check, the license's seats come back, and the pane never mentions them", async () => {
+test("seats: the install id goes with the check, the license's seats come back, and the pane says nothing of them while there are enough", async () => {
   expect(checkUrl('https://licenses.example', 'lic_1', 'a1b2c3d4e5f6')).toBe('https://licenses.example/v1/keys/lic_1?install=a1b2c3d4e5f6')
   expect(newInstall(new Uint8Array([0, 15, 255, 16]))).toBe('000fff10')
   expect(parseSeats(200, '{"status":"active","seats":12,"installs":40}')).toBe(12)
@@ -225,6 +244,32 @@ test("seats: the install id goes with the check, the license's seats come back, 
   expect(withKey({ ...grown, install: '0123456789abcdef' }, 'BSD1.x.y', 9)).toMatchObject({ seats: 0, install: '0123456789abcdef' })
 })
 
+test('outgrown: on the server\'s word, one gentle line asks for more seats, allowing that installs are not people', async () => {
+  expect(parseOutgrown(200, '{"status":"active","seats":3,"installs":12,"outgrown":true}')).toBe(true)
+  expect(parseOutgrown(200, '{"status":"active","seats":3,"installs":12,"outgrown":false}')).toBe(false)
+  // An older server says nothing of it; anything but true, and anything but an answer, is not outgrown.
+  expect(parseOutgrown(200, '{"status":"active","seats":3}')).toBe(false)
+  expect(parseOutgrown(200, '{"outgrown":"true"}')).toBe(false)
+  expect(parseOutgrown(500, '{"outgrown":true}')).toBe(false)
+  expect(parseOutgrown(200, '<html>')).toBe(false)
+
+  // The key says 5 seats (Acme Ltd); the server says 3 after a partial refund, or 12 after seats were added.
+  const check = await checkKey(KEYS.ending, [TEST_KEY])
+  expect(licenseLine('outgrown', check, { ...NO_LICENSE, seats: 3, isOutgrown: true })).toBe(
+    'This license has 3 seats and far more installs. If more than 3 people use it, please add seats. https://adamschaefers.com/backseat-driver/',
+  )
+  expect(licenseLine('outgrown', check, NO_LICENSE)).toMatch('This license has 5 seats and far more installs. If more than 5 people use it,')
+  expect(licenseLine('outgrown', check, { ...NO_LICENSE, seats: 1 })).toMatch('This license has 1 seat and far more installs. If more than one person uses it,')
+  expect(licenseStatus('outgrown', check, { ...NO_LICENSE, seats: 12 })).toBe(
+    'Commercial use, licensed for Acme Ltd, 12 seats. Thank you. Far more installs than that check in with it, though: if more than 12 people use it, please add seats. https://adamschaefers.com/backseat-driver/',
+  )
+  // The words follow the record the kernel decided from.
+  const record = { ...NO_LICENSE, use: 'commercial' as const, key: KEYS.ending, keySince: DAY, answer: 'active' as const, answeredAt: 2 * DAY, triedAt: 2 * DAY, seats: 3, isOutgrown: true }
+  expect(licenseStanding(licenseFacts(record, check, 3 * DAY, true))).toBe('outgrown')
+  expect(licenseStanding(licenseFacts({ ...record, isOutgrown: false }, check, 3 * DAY, true))).toBe('licensed')
+  expect(withKey(record, 'BSD1.x.y', 4 * DAY).isOutgrown).toBe(false)
+})
+
 test('the pane says nothing unless something needs saying', async () => {
   const check = await checkKey(KEYS.ending, [TEST_KEY])
   // A server that can't be reached is nobody's problem: no line for it either.
@@ -233,7 +278,7 @@ test('the pane says nothing unless something needs saying', async () => {
   expect(licenseLine('expired', check, NO_LICENSE)).toMatch('2027-01-01')
   expect(licenseStatus('unchecked', check, { ...NO_LICENSE, keySince: Date.UTC(2026, 9, 5) })).toMatch("Thank you. (The license server hasn't been reached since 2026-10-05; that changes nothing.)")
   expect(licenseLine('withdrawn', check, NO_LICENSE)).toBe("This license was withdrawn (refunded, for one). If that's a mistake: https://adamschaefers.com/#inquiries")
-  expect(licenseFacts(NO_LICENSE, null, 5, false)).toEqual({ use: '', key: 'none', expiresAt: 0, keySince: 0, hasServer: false, answer: '', answeredAt: 0, triedAt: 0, now: 5 })
+  expect(licenseFacts(NO_LICENSE, null, 5, false)).toEqual({ use: '', key: 'none', expiresAt: 0, keySince: 0, hasServer: false, answer: '', isOutgrown: false, answeredAt: 0, triedAt: 0, now: 5 })
 })
 
 // --- In a session. The background question was answered long ago, so the license question is the only one.

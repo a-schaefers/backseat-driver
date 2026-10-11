@@ -4,11 +4,12 @@
  * and nothing ever stops working. Where they stand only picks a line for the
  * pane (`licenseLine`), and most of the time that line is empty.
  *
- * Never a false alarm for someone whose company paid: the pane says nothing
- * about seats (installs can't tell people from machines; the license server
- * writes to the buyer instead, rarely and politely), nothing when the server
- * can't be reached, and "withdrawn" only when the server says the whole
- * license is.
+ * Never a false alarm for someone whose company paid: seats are on the honor
+ * system, and installs can't tell people from machines, so the pane asks for
+ * more seats only when the license server says the license has outgrown them
+ * (installs far beyond its seats for two weeks; the server writes to the buyer
+ * too), nothing when the server can't be reached, and "withdrawn" only when
+ * the server says the whole license is.
  *
  * Kept in `license.json` in the data folder, beside the profiles: it is about
  * the person, not a project, and it outlives a reinstall. The decisions (the
@@ -43,9 +44,11 @@ export type LicenseRecord = {
   install: string
   /** The license's seats from the server's last answer, which can be more than this key's after seats were added; 0 when unknown. */
   seats: number
+  /** Whether the server's last answer said the license has outgrown its seats. */
+  isOutgrown: boolean
 }
 
-export const NO_LICENSE: LicenseRecord = { v: 1, use: null, isAsked: false, key: '', keySince: 0, answer: null, answeredAt: 0, triedAt: 0, install: '', seats: 0 }
+export const NO_LICENSE: LicenseRecord = { v: 1, use: null, isAsked: false, key: '', keySince: 0, answer: null, answeredAt: 0, triedAt: 0, install: '', seats: 0, isOutgrown: false }
 
 const INSTALL_ID = /^[A-Za-z0-9_-]{8,64}$/
 
@@ -54,7 +57,7 @@ export function newInstall(bytes: Uint8Array): string {
   return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-export type Standing = 'unchosen' | 'personal' | 'licensed' | 'needs-key' | 'bad-key' | 'expired' | 'withdrawn' | 'unchecked'
+export type Standing = 'unchosen' | 'personal' | 'licensed' | 'needs-key' | 'bad-key' | 'expired' | 'withdrawn' | 'outgrown' | 'unchecked'
 
 /** What the kernel decides from. */
 export type LicenseFacts = {
@@ -64,6 +67,7 @@ export type LicenseFacts = {
   keySince: number
   hasServer: boolean
   answer: string
+  isOutgrown: boolean
   answeredAt: number
   triedAt: number
   now: number
@@ -72,12 +76,12 @@ export type LicenseFacts = {
 /**
  * Where the license server answers, or '' for none (then nothing is ever sent
  * anywhere about a key). It answers `GET <server>/v1/keys/<id>` with
- * `{ "status": "active" | "revoked" | "unknown" }`.
+ * `{ "status": "active" | "revoked" | "unknown", "seats", "outgrown" }`.
  */
 export const LICENSE_SERVER: string = 'https://licenses.adamschaefers.com'
 
-/** Where commercial licenses are sold. */
-export const BUY_URL: string = 'https://adamschaefers.com/#backseat-driver'
+/** Where commercial licenses are sold, and seats added. */
+export const BUY_URL: string = 'https://adamschaefers.com/backseat-driver/'
 
 function isUse(value: unknown): value is Use {
   return value === 'personal' || value === 'commercial'
@@ -107,12 +111,13 @@ export function parseLicense(data: unknown): LicenseRecord {
     triedAt: numberOr(record.triedAt),
     install: typeof record.install === 'string' && INSTALL_ID.test(record.install) ? record.install : '',
     seats: numberOr(record.seats),
+    isOutgrown: record.isOutgrown === true,
   }
 }
 
 /** The record with a new key: what the server said about the old one no longer applies. */
 export function withKey(record: LicenseRecord, key: string, now: number): LicenseRecord {
-  return { ...record, use: 'commercial', isAsked: true, key, keySince: now, answer: null, answeredAt: 0, triedAt: 0, seats: 0 }
+  return { ...record, use: 'commercial', isAsked: true, key, keySince: now, answer: null, answeredAt: 0, triedAt: 0, seats: 0, isOutgrown: false }
 }
 
 /** The facts for the kernel. `check` is what the plugin made of the key, null when there is none. */
@@ -124,6 +129,7 @@ export function licenseFacts(record: LicenseRecord, check: KeyCheck | null, now:
     keySince: record.keySince,
     hasServer,
     answer: record.answer ?? '',
+    isOutgrown: record.isOutgrown,
     answeredAt: record.answeredAt,
     triedAt: record.triedAt,
     now,
@@ -172,12 +178,36 @@ const BUY = BUY_URL === '' ? '' : ` ${BUY_URL}`
 
 const SUPPORT = 'https://adamschaefers.com/#inquiries'
 
-/** "for Acme Ltd, 12 seats": the licensee from the key, the seats from the server when it said (they grow when seats are added), else from the key. */
+/** The license's seats: the server's when it said (they grow when seats are added), else the key's; 0 for no key. */
+function seatsOf(check: KeyCheck | null, record: LicenseRecord): number {
+  if (check === null || check.state === 'malformed') return 0
+
+  return record.seats > 0 ? record.seats : check.payload.seats
+}
+
+function seatsText(seats: number): string {
+  return `${seats} seat${seats === 1 ? '' : 's'}`
+}
+
+/** "for Acme Ltd, 12 seats": the licensee from the key, and the license's seats. */
 function holderOf(check: KeyCheck | null, record: LicenseRecord): string {
   if (check === null || check.state === 'malformed') return ''
-  const seats = record.seats > 0 ? record.seats : check.payload.seats
 
-  return ` for ${check.payload.to}, ${seats} seat${seats === 1 ? '' : 's'}`
+  return ` for ${check.payload.to}, ${seatsText(seatsOf(check, record))}`
+}
+
+/** "more than 3 people use it", "more than one person uses it". */
+function moreThan(seats: number): string {
+  return seats === 1 ? 'more than one person uses it' : `more than ${seats} people use it`
+}
+
+/** The pane's ask when a license has outgrown its seats. Seats are on the honor system, so it asks, and allows that installs aren't people. */
+function moreSeats(check: KeyCheck | null, record: LicenseRecord): string {
+  const seats = seatsOf(check, record)
+
+  return seats > 0
+    ? `This license has ${seatsText(seats)} and far more installs. If ${moreThan(seats)}, please add seats.${BUY}`
+    : `This license has far more installs than seats. If more people use it than it has seats, please add seats.${BUY}`
 }
 
 /** The pane's line for a standing, or '' for none. It never asks twice for the same thing in different words. */
@@ -191,6 +221,8 @@ export function licenseLine(standing: Standing, check: KeyCheck | null, record: 
       return check !== null && check.state !== 'malformed' ? `Your commercial license ended on ${day(check.payload.exp)}. Renewing it keeps the lights on.${BUY}` : ''
     case 'withdrawn':
       return `This license was withdrawn (refunded, for one). If that's a mistake: ${SUPPORT}`
+    case 'outgrown':
+      return moreSeats(check, record)
     // A server that can't be reached, a firewall in the way: nothing the person can or should do.
     case 'unchecked':
     case 'licensed':
@@ -218,6 +250,13 @@ export function licenseStatus(standing: Standing, check: KeyCheck | null, record
       return `Commercial use, and the key${holder} has run out.${BUY}`
     case 'withdrawn':
       return `Commercial use, and the license${holder} was withdrawn. If that's a mistake: ${SUPPORT}`
+    case 'outgrown': {
+      const seats = seatsOf(check, record)
+
+      return seats > 0
+        ? `Commercial use, licensed${holder}. Thank you. Far more installs than that check in with it, though: if ${moreThan(seats)}, please add seats.${BUY}`
+        : `Commercial use, licensed. ${moreSeats(check, record)}`
+    }
     case 'unchecked':
       return `Commercial use, licensed${holder}. Thank you. (The license server hasn't been reached since ${day(Math.max(record.answeredAt, record.keySince))}; that changes nothing.)`
   }
@@ -239,6 +278,16 @@ export function parseSeats(status: number, text: string): number {
     return Number.isInteger(seats) && seats > 0 ? seats : 0
   } catch {
     return 0
+  }
+}
+
+/** Whether the server's answer says the license has outgrown its seats; false when it doesn't say (an older server). */
+export function parseOutgrown(status: number, text: string): boolean {
+  if (status < 200 || status >= 300) return false
+  try {
+    return (JSON.parse(text) as { outgrown?: unknown }).outgrown === true
+  } catch {
+    return false
   }
 }
 

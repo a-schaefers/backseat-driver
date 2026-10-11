@@ -3676,6 +3676,13 @@ var Withdrawn = /* @__PURE__ */ (function() {
   Withdrawn2.value = new Withdrawn2();
   return Withdrawn2;
 })();
+var Outgrown = /* @__PURE__ */ (function() {
+  function Outgrown2() {
+  }
+  ;
+  Outgrown2.value = new Outgrown2();
+  return Outgrown2;
+})();
 var Unchecked = /* @__PURE__ */ (function() {
   function Unchecked2() {
   }
@@ -3775,11 +3782,15 @@ var standingText = function(v) {
     return "withdrawn";
   }
   ;
+  if (v instanceof Outgrown) {
+    return "outgrown";
+  }
+  ;
   if (v instanceof Unchecked) {
     return "unchecked";
   }
   ;
-  throw new Error("Failed pattern match at Kernel.License (line 166, column 16 - line 174, column 27): " + [v.constructor.name]);
+  throw new Error("Failed pattern match at Kernel.License (line 187, column 16 - line 196, column 27): " + [v.constructor.name]);
 };
 var fromWire2 = function(w) {
   var useOf = function(v) {
@@ -3834,6 +3845,7 @@ var fromWire2 = function(w) {
     keySince: w.keySince,
     hasServer: w.hasServer,
     answer: answerOf(w.answer),
+    isOutgrown: w.isOutgrown,
     answeredAt: w.answeredAt,
     triedAt: w.triedAt,
     now: w.now
@@ -3896,6 +3908,9 @@ var dayMs = 864e5;
 var everyMs = /* @__PURE__ */ (function() {
   return 7 * dayMs;
 })();
+var isOutgrownNow = function(facts) {
+  return facts.isOutgrown && (eq24(facts.answer)(Active.value) && (facts.hasServer && facts.now - facts.answeredAt < everyMs));
+};
 var quietMs = /* @__PURE__ */ (function() {
   return 30 * dayMs;
 })();
@@ -3929,13 +3944,17 @@ var standingOf = function(facts) {
       return Unchecked.value;
     }
     ;
+    if (isOutgrownNow(facts)) {
+      return Outgrown.value;
+    }
+    ;
     if (otherwise) {
       return Licensed.value;
     }
     ;
   }
   ;
-  throw new Error("Failed pattern match at Kernel.License (line 97, column 20 - line 106, column 28): " + [facts.use.constructor.name]);
+  throw new Error("Failed pattern match at Kernel.License (line 108, column 20 - line 118, column 28): " + [facts.use.constructor.name]);
 };
 var licenseStandingWire = function($35) {
   return standingText(standingOf(fromWire2($35)));
@@ -3953,7 +3972,7 @@ var nextCheckAt = function(facts) {
       return facts.triedAt + retryMs;
     }
     ;
-    var $34 = eq24(facts.answer)(Revoked.value);
+    var $34 = eq24(facts.answer)(Revoked.value) || facts.isOutgrown;
     if ($34) {
       return facts.answeredAt + retryMs;
     }

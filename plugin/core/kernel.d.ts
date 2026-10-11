@@ -181,6 +181,7 @@ export type LicenseFactsWire = {
   keySince: number
   hasServer: boolean
   answer: string
+  isOutgrown: boolean
   answeredAt: number
   triedAt: number
   now: number

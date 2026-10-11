@@ -27,7 +27,7 @@ The license key is a receipt, not a lock. Backseat Driver keeps working when a k
 
 ## Seats
 
-A seat is one person, and one key covers all the seats bought with it. The license server counts the installs that check in with a key, each by a random number it picks for itself and nothing else. Installs are not people (one person may use several machines), so nobody using Backseat Driver is ever shown anything about seats. If, for weeks, far more installs use a license than it has seats, the person who bought it may get a short email suggesting more, at most every few months. Nothing ever stops working.
+A seat is one person, and one key covers all the seats bought with it. The license server counts the installs that check in with a key, each by a random number it picks for itself and nothing else. Installs are not people (one person may use several machines), so seats are on the honor system. If, for two weeks, far more installs use a license than it has seats, Backseat Driver shows the people using it a short note asking for more seats until there are enough, and the person who bought it may get a short email suggesting more, at most every few months. Nothing ever stops working.
 
 ## How to buy one
 
