@@ -81,7 +81,7 @@ export type LicenseFacts = {
 export const LICENSE_SERVER: string = 'https://licenses.adamschaefers.com'
 
 /** Where commercial licenses are sold, and seats added. */
-export const BUY_URL: string = 'https://adamschaefers.com/backseat-driver/'
+export const BUY_URL: string = 'https://adamschaefers.com/store/backseat-driver/'
 
 function isUse(value: unknown): value is Use {
   return value === 'personal' || value === 'commercial'
