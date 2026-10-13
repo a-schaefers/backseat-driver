@@ -23,6 +23,17 @@ You write every line. It reads over your shoulder, comments on what you just sav
 
 Inspired by the ideas discussed in the [Enchant Games Journal](https://enchant.games/?slug=journal).
 
+## Quickstart
+
+Claude Code 2.1.287 or newer, git, and a Claude plan. The background reviews count against your plan.
+
+```bash
+claude plugin marketplace add a-schaefers/backseat-driver
+claude plugin install backseat-driver@backseat-driver
+```
+
+Type `/backseat` in Claude Code. That's it.
+
 ## Why
 
 Hand your work to an agent and the skill fades. You think you're driving. The LLM is.
@@ -71,14 +82,7 @@ Want the LLM to write it for you? That's fine. Be you. `/backseat off` gives you
 
 ## How to use it
 
-You need Claude Code 2.1.287 or newer, git, and a Claude plan. The background reviews count against your plan.
-
-```bash
-claude plugin marketplace add a-schaefers/backseat-driver
-claude plugin install backseat-driver@backseat-driver
-```
-
-Type `/backseat` in Claude Code. The first time you work in a language, it asks a few one-keypress questions: your level, your goals, what to focus on. Esc skips them. Every setting has a default.
+Install it with the [quickstart](#quickstart) commands. The first time you work in a language, it asks a few one-keypress questions: your level, your goals, what to focus on. Esc skips them. Every setting has a default.
 
 | Command | |
 | --- | --- |
