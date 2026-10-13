@@ -25,14 +25,12 @@ Inspired by the ideas discussed in the [Enchant Games Journal](https://enchant.g
 
 ## Quickstart
 
-Claude Code 2.1.287 or newer, git, and a Claude plan. The background reviews count against your plan.
-
 ```bash
 claude plugin marketplace add a-schaefers/backseat-driver
 claude plugin install backseat-driver@backseat-driver
 ```
 
-Type `/backseat` in Claude Code. That's it.
+Then type `/backseat` in Claude Code.
 
 ## Why
 
@@ -82,7 +80,9 @@ Want the LLM to write it for you? That's fine. Be you. `/backseat off` gives you
 
 ## How to use it
 
-Install it with the [quickstart](#quickstart) commands. The first time you work in a language, it asks a few one-keypress questions: your level, your goals, what to focus on. Esc skips them. Every setting has a default.
+You need Claude Code 2.1.287 or newer, git, and a Claude plan. The background reviews count against your plan. Install it with the [quickstart](#quickstart) commands.
+
+The first time you work in a language, it asks a few one-keypress questions: your level, your goals, what to focus on. Esc skips them. Every setting has a default.
 
 | Command | |
 | --- | --- |
