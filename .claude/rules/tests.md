@@ -50,7 +50,7 @@ History (the flaky-test hunt, timings under load): `.claude/history.md`, "Tests"
 
 ### UI in the kit
 
-- Mount `BAND` and `HINT` (kit.ts) for the band above the prompt (the minimized strip) and the hint line. The kit draws `ENGINE_BAND` in the band and the hint plus any `tail` beneath the plugin. The pane opens with the tutor; no option needed.
+- Mount `BAND` and `HINT` (kit.ts) for the band above the prompt (the minimized strip) and the hint line. `BAND`'s props carry every prop the newest Claude Code requires (2.1.322's `isCollapsed`); an extra prop is harmless on an older pin, a missing one fails `validate --strict`. The kit draws `ENGINE_BAND` in the band and the hint plus any `tail` beneath the plugin. The pane opens with the tutor; no option needed.
 - A test's `$` cannot raise the person's close (`ui.close` is not among its events): `minimize.test.ts` goes through the pane's `x`, which ends in the same `minimizePane`; the `ui.close` hook is checked live only.
 - `session.config` is `/config`'s rows (`$.config.list`), `session.configured` what `$.config.set` changed, `session.configDeny` refuses the next one.
 - The kit auto-answers `$.ui.invalidate('ui.render')` but not prompt-event invalidations: stub `ui.invalidate`.
