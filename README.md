@@ -13,6 +13,8 @@
 [![last commit](https://img.shields.io/github/last-commit/a-schaefers/backseat-driver)](https://github.com/a-schaefers/backseat-driver/commits/main)
 [![commercial license: buy seats](https://img.shields.io/badge/commercial%20license-buy%20seats-46d3c3)](https://adamschaefers.com/store/backseat-driver/)
 
+<img src="docs/poster.jpg" width="820" alt="Backseat Driver, an action movie poster: a muscle car tears through a neon city of code while a robot leans out and yells OFF-BY-ONE, TURN LEFT! You write the code. It won't shut up.">
+
 <img src="docs/screenshot.webp" width="820" alt="Backseat Driver beside Claude Code: its play-by-play pane, with a note on a bug in the code just saved">
 
 </div>
@@ -115,3 +117,7 @@ Source-available. Read it, change it, share it.
 - **Commercial use is paid.** A business using it, or having its people use it, needs a [commercial license](COMMERCIAL-LICENSE.md), and that includes training: a team lead who has the team practice with it every Friday needs a seat for each person. **[Buy seats here](https://adamschaefers.com/store/backseat-driver/)**: paid once, yours for life. You pick personal or commercial the first time you switch it on, and `/backseat license` changes it. No lockouts. A missing key gets a note in the tutor, nothing more.
 
 The terms are the [PolyForm Noncommercial License 1.0.0](LICENSE).
+
+## Shameless plug
+
+[Claude's Workbench](https://github.com/a-schaefers/claudes-workbench/tree/main)
