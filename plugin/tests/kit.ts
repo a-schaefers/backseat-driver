@@ -110,6 +110,8 @@ export const BAND = {
   viewport: { columns: 160, rows: 48 },
   props: {
     hasSurvey: false,
+    // 2.1.322: the person can collapse the band (ctrl+x ctrl+a). Older versions have no such prop.
+    isCollapsed: false,
     isWorking: false,
     maxRows: 24,
     bodyColumns: 155,
