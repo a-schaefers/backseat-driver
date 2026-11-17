@@ -323,6 +323,7 @@ Dated history of Backseat Driver: decisions, live sessions, ui-truth passes, par
 - The watchdog test advances forty-five minutes and timed out on the spinner's fast ticks until the spinner slowed after `SPIN_FOR_MS`.
 - 2026-10-06 to 2026-10-07: `check` stayed red on the 2.1.290 CI pin (`Property 'map' does not exist on type 'never'`) because `kit.ts`'s `promptText` reads 2.1.292's `ModelTextBlock`; 2.1.292's type rewrite broke six test files' typecheck until the kit joined the prompt.
 - 2026-11-10 to 2026-11-16: nightly red on 2.1.322 and 2.1.325: `AbovePrompt`'s props gained a required `isCollapsed` (the person can collapse the band, ctrl+x ctrl+a), and `minimize.test.ts`'s eight mounts of the kit's `BAND` lacked it (typecheck on 2.1.322, `validate --strict` from 2.1.325). Fixed in the kit; validate, typecheck and `minimize.test.ts` pass on 2.1.325. The strip draws as before while collapsed, so nothing of it is on screen.
+- 2026-11-17: nightly red on 2.1.326: `AgentInfo` (`$.agent.list()` rows) gained required `kind`, `taskStatus`, `label`, `startTime`, `cwd`, `tokenCount`, `tokenSamples`, `hasRow`, which the kit's `agent.list` stub lacked. The kit fills them; the plugin reads only `id`, `description`, `type`, `status`. Validate, typecheck, `deepreview.test.ts` and `reviewqueue.test.ts` pass on 2.1.326.
 - Until 2026-10-05 the kit defaults matched the product's pace; the product moved to 5 s quiet time and no gap, the tests kept 10 s and 1 min via `KIT_PACE`.
 
 # kernel

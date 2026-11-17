@@ -895,12 +895,24 @@ export function stubSession(on: On, options: StubOptions = {}) {
   // mod answers its spawn.
   on('agent.list', () => ({
     value: session.spawned
-      .map((input, index) => ({
-        id: session.agentId(index + 1),
-        description: input.description,
-        type: 'backseat-driver:deep-reviewer',
-        status: session.finishedAgents.includes(session.agentId(index + 1)) ? ('completed' as const) : ('running' as const),
-      }))
+      .map((input, index) => {
+        const status = session.finishedAgents.includes(session.agentId(index + 1)) ? ('completed' as const) : ('running' as const)
+        // 2.1.326 requires the fields after `status`; the plugin reads none of them, and older versions have none.
+        return {
+          id: session.agentId(index + 1),
+          description: input.description,
+          type: 'backseat-driver:deep-reviewer',
+          status,
+          kind: 'local_agent' as const,
+          taskStatus: status,
+          label: input.description,
+          startTime: 0,
+          cwd: ROOT,
+          tokenCount: 0,
+          tokenSamples: [],
+          hasRow: true,
+        }
+      })
       .filter(agent => !session.lostAgents.includes(agent.id)),
   }))
   on('agent.offer', () => ({ isOffered: true }))
